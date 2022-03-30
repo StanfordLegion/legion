@@ -306,7 +306,6 @@ namespace Legion {
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
                       RegionTreeID tree_id, bool register_now,
-                      bool shadow_instance = false,
                       bool output_instance = false,
                       CollectiveMapping *mapping = NULL);
       virtual ~PhysicalManager(void); 
@@ -436,7 +435,6 @@ namespace Legion {
       const ReductionOpID redop; 
       const void *const piece_list;
       const size_t piece_list_size;
-      const bool shadow_instance;
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
@@ -500,7 +498,7 @@ namespace Legion {
             const PendingRemoteExpression &pending, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use,
             InstanceKind kind, ReductionOpID redop, const void *piece_list,
-            size_t piece_list_size, bool shadow_instance);
+            size_t piece_list_size);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -517,7 +515,6 @@ namespace Legion {
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
-        const bool shadow_instance;
       };
     public:
       struct DeferDeleteIndividualManager :
@@ -549,7 +546,6 @@ namespace Legion {
                         bool register_now, size_t footprint,
                         ApEvent use_event, InstanceKind kind,
                         const ReductionOp *op = NULL,
-                        bool shadow_instance = false,
                         CollectiveMapping *collective_mapping = NULL);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
@@ -656,7 +652,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          InstanceKind kind, ReductionOpID redop, bool shadow_instance);
+          InstanceKind kind, ReductionOpID redop);
       static void handle_collective_user_registration(Runtime *runtime,
                                                       Deserializer &derez);
     public:
@@ -1311,13 +1307,12 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), shadow_instance(false), valid(false) { }
+          piece_list_size(0), valid(false) { }
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       IndexSpaceExpression *expr, FieldSpaceNode *node,
                       RegionTreeID tree_id, const LayoutConstraintSet &cons, 
                       Runtime *rt, MemoryManager *memory, UniqueID cid,
-                      const void *piece_list, size_t piece_list_size, 
-                      bool shadow_instance);
+                      const void *piece_list, size_t piece_list_size); 
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -1356,7 +1351,6 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *realm_layout;
       void *piece_list;
       size_t piece_list_size;
-      bool shadow_instance;
     public:
       bool valid;
     };

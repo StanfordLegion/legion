@@ -960,8 +960,8 @@ namespace Legion {
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id,
-                                     bool register_now, bool shadow,
-                                     bool output, CollectiveMapping *mapping)
+                                     bool register_now, bool output, 
+                                     CollectiveMapping *mapping)
       : InstanceManager(ctx, owner_space, did, layout, node,
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
@@ -970,7 +970,7 @@ namespace Legion {
              index_domain->create_layout_expression(pl, pl_size) : index_domain,
           tree_id, register_now, mapping), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
-        piece_list(pl), piece_list_size(pl_size), shadow_instance(shadow)
+        piece_list(pl), piece_list_size(pl_size)
     //--------------------------------------------------------------------------
     {
     }
@@ -1637,13 +1637,13 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
                         ApEvent u_event, InstanceKind k,
-                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/,
+                        const ReductionOp *op /*= NULL*/,
                         CollectiveMapping *mapping)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
-          instance_domain, pl, pl_size, tree_id, register_now, shadow,
+          instance_domain, pl, pl_size, tree_id, register_now,
           (k == UNBOUND_INSTANCE_KIND), mapping), memory_manager(memory),
         unique_event(u_event), instance(inst),
         use_event(Runtime::create_ap_user_event(NULL)),
@@ -1666,7 +1666,7 @@ namespace Legion {
       else // add a resource reference to remove once this manager is set
         add_base_resource_ref(PENDING_UNBOUND_REF);
 
-      if (!is_owner() && !shadow_instance)
+      if (!is_owner())
       {
         // Register it with the memory manager, the memory manager
         // on the owner node will handle this
@@ -1691,7 +1691,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndividualManager::IndividualManager(const IndividualManager &rhs)
       : PhysicalManager(NULL, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, 0, 0, 
-                        false, false),
+                        false),
         memory_manager(NULL), instance(PhysicalInstance::NO_INST)
     //--------------------------------------------------------------------------
     {
@@ -1704,7 +1704,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remote references removed by DistributedCollectable destructor
-      if (!is_owner() && !shadow_instance)
+      if (!is_owner())
         memory_manager->unregister_remote_instance(this);
       if (is_owner())
       {
@@ -1734,9 +1734,6 @@ namespace Legion {
       if (is_owner())
         assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
-      // Shadow instances do not participate here
-      if (shadow_instance)
-        return;
       // Will be null for virtual managers
       if (memory_manager != NULL)
         memory_manager->activate_instance(this);
@@ -1753,9 +1750,6 @@ namespace Legion {
       if (is_owner())
         assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
-      // Shadow instances do not participate here
-      if (shadow_instance)
-        return;
       // Will be null for virtual managers
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
@@ -1772,9 +1766,6 @@ namespace Legion {
       if (is_owner())
         assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif
-      // Shadow instances do not participate here
-      if (shadow_instance)
-        return;
       // Will be null for virtual managers
       if (memory_manager != NULL)
         memory_manager->validate_instance(this);
@@ -1792,9 +1783,6 @@ namespace Legion {
         assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
 #endif 
       prune_gc_events(); 
-      // Shadow instances do not participate here
-      if (shadow_instance)
-        return;
       // Will be null for virtual managers
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
@@ -2814,7 +2802,6 @@ namespace Legion {
           rez.serialize(producer_event);
         layout->pack_layout_description(rez, target);
         rez.serialize(redop);
-        rez.serialize<bool>(shadow_instance);
         rez.serialize(kind);
       }
       context->runtime->send_instance_manager(target, rez);
@@ -2866,8 +2853,6 @@ namespace Legion {
                     false/*can fail*/, &layout_ready);
       ReductionOpID redop;
       derez.deserialize(redop);
-      bool shadow_inst;
-      derez.deserialize<bool>(shadow_inst);
       InstanceKind kind;
       derez.deserialize(kind);
       if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
@@ -2880,7 +2865,7 @@ namespace Legion {
           DeferIndividualManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, inst_domain, pending, 
               handle, tree_id, layout_id, unique_event, kind,
-              redop, piece_list, piece_list_size, shadow_inst);
+              redop, piece_list, piece_list_size);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -2898,7 +2883,7 @@ namespace Legion {
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, piece_list, piece_list_size, 
                             space_node, tree_id, constraints, unique_event, 
-                            kind, redop, shadow_inst);
+                            kind, redop);
     }
 
     //--------------------------------------------------------------------------
@@ -2907,12 +2892,12 @@ namespace Legion {
             size_t f, IndexSpaceExpression *lx, 
             const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent u, InstanceKind k, ReductionOpID r,
-            const void *pl, size_t pl_size, bool shadow)
+            const void *pl, size_t pl_size)
       : LgTaskArgs<DeferIndividualManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), pending(p),
             local_expr(lx), handle(h), tree_id(tid), layout_id(l), 
             use_event(u), kind(k), redop(r), piece_list(pl),
-            piece_list_size(pl_size), shadow_instance(shadow)
+            piece_list_size(pl_size)
     //--------------------------------------------------------------------------
     {
       if (local_expr != NULL)
@@ -2945,7 +2930,7 @@ namespace Legion {
       create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
           dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->kind, dargs->redop, dargs->shadow_instance);
+          dargs->use_event, dargs->kind, dargs->redop);
       // Remove the local expression reference if necessary
       if ((dargs->local_expr != NULL) &&
           dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
@@ -2969,8 +2954,7 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, InstanceKind kind, ReductionOpID redop,
-          bool shadow_instance)
+          ApEvent use_event, InstanceKind kind, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -2988,14 +2972,13 @@ namespace Legion {
                                               space_node, tree_id, layout, 
                                               redop, false/*reg now*/, 
                                               inst_footprint, use_event, 
-                                              kind, op,
-                                              shadow_instance);
+                                              kind, op);
       else
         man = new IndividualManager(runtime->forest, did, owner_space, memory, 
                               inst, inst_domain, piece_list, piece_list_size,
                               space_node, tree_id, layout, redop, 
                               false/*reg now*/, inst_footprint, use_event, 
-                              kind, op, shadow_instance);
+                              kind, op);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -3311,7 +3294,7 @@ namespace Legion {
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
           node, instance_domain, pl, pl_size, tree_id, register_now,
-          false/*shadow*/, false/*output*/, mapping),  total_points(total),
+          false/*output*/, mapping),  total_points(total),
         point_space(points),
         unique_allreduce_tag(mapping->find_index(local_space)), 
         finalize_messages(0), deleted_or_detached(false), multi_instance(multi)
@@ -8924,12 +8907,12 @@ namespace Legion {
                       IndexSpaceExpression *expr, FieldSpaceNode *node, 
                       RegionTreeID tid, const LayoutConstraintSet &cons, 
                       Runtime *rt, MemoryManager *memory, UniqueID cid,
-                      const void *pl, size_t pl_size, bool shadow)
+                      const void *pl, size_t pl_size)
       : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
         creator_id(cid), instance(PhysicalInstance::NO_INST), 
         field_space_node(node), instance_domain(expr), tree_id(tid), 
         redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-        piece_list_size(0), shadow_instance(shadow), valid(true)
+        piece_list_size(0), valid(true)
     //--------------------------------------------------------------------------
     {
       if (pl != NULL)
@@ -9192,9 +9175,6 @@ namespace Legion {
           case LEGION_AFFINE_SPECIALIZE:
           case LEGION_COMPACT_SPECIALIZE:
             {
-#ifdef DEBUG_LEGION
-              assert(!shadow_instance);
-#endif
               // Now we can make the manager
               result = new IndividualManager(forest, did, local_space,
                                              memory_manager,
@@ -9218,7 +9198,7 @@ namespace Legion {
                                              true/*register now*/,
                                              instance_footprint, ready,
                                         PhysicalManager::INTERNAL_INSTANCE_KIND,
-                                             reduction_op, shadow_instance);
+                                             reduction_op);
               break;
             }
           default:

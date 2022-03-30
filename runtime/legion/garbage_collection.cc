@@ -189,6 +189,7 @@ namespace Legion {
 #endif
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_gc_reference(
                                              ReferenceMutator *mutator, int cnt)
@@ -496,6 +497,7 @@ namespace Legion {
       }
       return do_deletion;
     }
+#endif // not defined DEBUG_LEGION_GC
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
@@ -567,7 +569,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_valid_references.find(source);
@@ -629,7 +631,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -692,7 +694,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_gc_references.find(source);
@@ -755,7 +757,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -775,6 +777,7 @@ namespace Legion {
       return false;
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_resource_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -807,6 +810,7 @@ namespace Legion {
       else
         return false;
     }
+#endif
 
 #ifdef USE_REMOTE_REFERENCES
     //--------------------------------------------------------------------------

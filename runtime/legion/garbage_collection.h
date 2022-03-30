@@ -361,6 +361,7 @@ namespace Legion {
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
       bool check_active_and_increment(ReferenceSource source, int cnt = 1);
       bool check_active_and_increment(DistributedID source, int cnt = 1);
+#ifndef DEBUG_LEGION_GC
     private:
       void add_gc_reference(ReferenceMutator *mutator, int cnt);
       bool remove_gc_reference(ReferenceMutator *mutator, int cnt);
@@ -370,6 +371,7 @@ namespace Legion {
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
+#endif
 #ifdef USE_REMOTE_REFERENCES
     private:
       bool add_create_reference(AddressSpaceID source, 
