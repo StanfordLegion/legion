@@ -3552,7 +3552,8 @@ namespace Legion {
       void merge_new_field_states(LogicalState &state, 
                                   LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
+      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask, 
+                                   const bool tracing);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,

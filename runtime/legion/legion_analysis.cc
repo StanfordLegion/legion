@@ -3305,14 +3305,14 @@ namespace Legion {
     // be found in region_tree.cc to make sure that templates are instantiated
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(LogicalState &state)
+    void LogicalCloser::update_state(LogicalState &state, const bool tracing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(state.owner == root_node);
 #endif
       root_node->filter_prev_epoch_users(state, close_mask);
-      root_node->filter_curr_epoch_users(state, close_mask);
+      root_node->filter_curr_epoch_users(state, close_mask, tracing);
     }
 
     //--------------------------------------------------------------------------

@@ -845,7 +845,7 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers);
-      void update_state(LogicalState &state);
+      void update_state(LogicalState &state, const bool tracing);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &users);
     protected:
