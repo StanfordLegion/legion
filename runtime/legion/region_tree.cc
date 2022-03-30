@@ -16722,7 +16722,7 @@ namespace Legion {
           // This is the "up" case of equivalence set refinement
           // where we coarsen the refinement to a higher level
           // in the region tree
-          closer.update_state(state);
+          closer.update_state(state, user.op->is_tracing());
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
@@ -16774,7 +16774,7 @@ namespace Legion {
         // Mask off all dominated fields from current epoch users and move
         // them to prev epoch users.  If all fields masked off, then remove
         // them from the list of current epoch users.
-        filter_curr_epoch_users(state, dominator_mask);
+        filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
       }
       if (arrived)
       { 
@@ -18843,7 +18843,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::filter_curr_epoch_users(LogicalState &state,
-                                                 const FieldMask &field_mask)
+                                const FieldMask &field_mask, const bool tracing)
     //--------------------------------------------------------------------------
     {
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::iterator 
@@ -18863,7 +18863,8 @@ namespace Legion {
           state.prev_epoch_users.back().field_mask = local_dom;
 #else
           // Without Legion Spy we can filter early if the op is done
-          if (it->op->add_mapping_reference(it->gen))
+          // Assuming of course that we are not tracing
+          if (it->op->add_mapping_reference(it->gen) || tracing)
           {
             state.prev_epoch_users.push_back(*it);
             state.prev_epoch_users.back().field_mask = local_dom;
@@ -19174,7 +19175,7 @@ namespace Legion {
         if (!!dominator_mask)
         {
           filter_prev_epoch_users(state, dominator_mask);
-          filter_curr_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
         }
       }
       else
@@ -19193,7 +19194,7 @@ namespace Legion {
         if (!!dominator_mask)
         {
           filter_prev_epoch_users(state, dominator_mask);
-          filter_curr_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
         }
       }
       // Now figure out which open sub-trees need to be traversed
@@ -19303,7 +19304,7 @@ namespace Legion {
 
             // Update the dirty_below and partial close fields
             // and filter the current and previous epochs
-            closer.update_state(state);
+            closer.update_state(state, user.op->is_tracing());
             // Now we can add the close operations to the current epoch
             closer.register_close_operations(state.curr_epoch_users);
           }
