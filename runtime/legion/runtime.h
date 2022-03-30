@@ -994,8 +994,6 @@ namespace Legion {
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
-    public:
-      PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
