@@ -16900,7 +16900,7 @@ namespace Legion {
         // Mask off all dominated fields from current epoch users and move
         // them to prev epoch users.  If all fields masked off, then remove
         // them from the list of current epoch users.
-        filter_curr_epoch_users(state, dominator_mask);
+        filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
       }
       if (arrived)
       { 
@@ -17908,7 +17908,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing() &&
+                if (closer.tracing &&
                     ((next_child == NULL) || !are_all_children_disjoint()))
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
@@ -18006,7 +18006,7 @@ namespace Legion {
                   // If we're tracing we need to record nodep dependences
                   // here in any aliased sub-trees in case we need to make
                   // internal operations later when replaying the trace
-                  const bool tracing = closer.user.op->is_tracing();
+                  const bool tracing = closer.tracing;
                   // Go through all the children and see if there is any overlap
                   for (FieldMaskSet<RegionTreeNode>::iterator cit = 
                         it->open_children.begin(); cit !=
@@ -18097,7 +18097,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing())
+                if (closer.tracing)
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
                         it->open_children.begin(); cit != 
@@ -18154,7 +18154,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing() &&
+                if (closer.tracing &&
                     ((next_child == NULL) || !are_all_children_disjoint()))
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
@@ -18969,7 +18969,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::filter_curr_epoch_users(LogicalState &state,
-                                                 const FieldMask &field_mask)
+                                const FieldMask &field_mask, const bool tracing)
     //--------------------------------------------------------------------------
     {
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::iterator 
@@ -18989,7 +18989,8 @@ namespace Legion {
           state.prev_epoch_users.back().field_mask = local_dom;
 #else
           // Without Legion Spy we can filter early if the op is done
-          if (it->op->add_mapping_reference(it->gen))
+          // Assuming of course that we are not tracing
+          if (it->op->add_mapping_reference(it->gen) || tracing)
           {
             state.prev_epoch_users.push_back(*it);
             state.prev_epoch_users.back().field_mask = local_dom;
@@ -19300,7 +19301,7 @@ namespace Legion {
         if (!!dominator_mask)
         {
           filter_prev_epoch_users(state, dominator_mask);
-          filter_curr_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
         }
       }
       else
@@ -19319,7 +19320,7 @@ namespace Legion {
         if (!!dominator_mask)
         {
           filter_prev_epoch_users(state, dominator_mask);
-          filter_curr_epoch_users(state, dominator_mask);
+          filter_curr_epoch_users(state, dominator_mask, user.op->is_tracing());
         }
       }
       // Now figure out which open sub-trees need to be traversed
@@ -20354,7 +20355,8 @@ namespace Legion {
           it++;
 #else
           // If not Legion Spy we can prune the user if it's done
-          if (!it->op->add_mapping_reference(it->gen))
+          // Assuming of course that we are not tracing
+          if (!it->op->add_mapping_reference(it->gen) && !closer.tracing)
           {
             closer.pop_closed_user();
             it = users.erase(it);

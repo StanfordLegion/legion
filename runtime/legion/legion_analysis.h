@@ -998,10 +998,10 @@ namespace Legion {
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u, 
                     RegionTreeNode *root, bool validates);
-      LogicalCloser(const LogicalCloser &rhs);
+      LogicalCloser(const LogicalCloser &rhs) = delete;
       ~LogicalCloser(void);
     public:
-      LogicalCloser& operator=(const LogicalCloser &rhs);
+      LogicalCloser& operator=(const LogicalCloser &rhs) = delete;
     public:
       inline bool has_close_operations(FieldMask &already_closed_mask)
         {
@@ -1052,6 +1052,7 @@ namespace Legion {
       const LogicalUser &user;
       RegionTreeNode *const root_node;
       const bool validates;
+      const bool tracing;
       LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC> closed_users;
     protected:
       FieldMask close_mask;

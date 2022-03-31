@@ -10160,23 +10160,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* MemoryManager::create_shadow_instance(
-                                                       InstanceBuilder &builder)
-    //--------------------------------------------------------------------------
-    {
-      // Acquire allocation privilege before doing anything
-      const RtEvent wait_on = acquire_allocation_privilege();
-      if (wait_on.exists())
-        wait_on.wait();
-      // Try to make the result
-      PhysicalManager *manager = allocate_physical_instance(builder, 
-          NULL/*footprint*/, NULL/*unsat kind*/, NULL/*unsat index*/);
-      // Release our allocation privilege after doing the record
-      release_allocation_privilege();
-      return manager;
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::create_unbound_instance(
                                                LogicalRegion region,
                                                LayoutConstraintSet &constraints,

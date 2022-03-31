@@ -3805,34 +3805,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
                                  RegionTreeNode *r, bool val)
-      : ctx(c), user(u), root_node(r), validates(val), close_op(NULL)
+      : ctx(c), user(u), root_node(r), validates(val),
+        tracing(user.op->is_tracing()), close_op(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
-      : ctx(rhs.ctx), user(rhs.user), root_node(rhs.root_node), 
-        validates(rhs.validates)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     LogicalCloser::~LogicalCloser(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalCloser& LogicalCloser::operator=(const LogicalCloser &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -3978,7 +3960,7 @@ namespace Legion {
       assert(state.owner == root_node);
 #endif
       root_node->filter_prev_epoch_users(state, close_mask);
-      root_node->filter_curr_epoch_users(state, close_mask);
+      root_node->filter_curr_epoch_users(state, close_mask, tracing);
       root_node->filter_disjoint_complete_accesses(state, close_mask); 
     }
 
