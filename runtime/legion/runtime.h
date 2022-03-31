@@ -895,9 +895,36 @@ namespace Legion {
                              public LegionHeapify<OutputRegionImpl> {
     public:
       static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
+    private:
+      struct LayoutCreator {
+      public:
+        LayoutCreator(Realm::InstanceLayoutGeneric* &l,
+                      const Domain & d,
+                      const Realm::InstanceLayoutConstraints &c,
+                      const std::vector<int32_t> &d_order)
+          : layout(l), domain(d), constraints(c), dim_order(d_order)
+        { }
+        template<typename DIM, typename COLOR_T>
+        static inline void demux(LayoutCreator *creator)
+        {
+#ifdef DEBUG_LEGION
+          assert(creator->dim_order.size() == DIM::N);
+#endif
+          const DomainT<DIM::N, COLOR_T> bounds =
+            Rect<DIM::N, COLOR_T>(creator->domain);
+          creator->layout =
+            Realm::InstanceLayoutGeneric::choose_instance_layout(
+                bounds, creator->constraints, creator->dim_order.data());
+        }
+      private:
+        Realm::InstanceLayoutGeneric* &layout;
+        const Domain &domain;
+        const Realm::InstanceLayoutConstraints &constraints;
+        const std::vector<int32_t> &dim_order;
+      };
     public:
       OutputRegionImpl(unsigned index,
-                       const RegionRequirement &req,
+                       const OutputRequirement &req,
                        InstanceSet instance_set,
                        TaskContext *ctx,
                        Runtime *rt,
@@ -913,18 +940,26 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      void return_data(size_t num_elements,
+      void check_type_tag(TypeTag type_tag) const;
+      void check_field_size(FieldID field_id, size_t field_size) const;
+      void get_layout(FieldID field_id,
+                      std::vector<DimensionKind> &ordering,
+                      size_t &alignment) const;
+      size_t get_field_size(FieldID field_id) const;
+    public:
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        uintptr_t ptr,
                        size_t alignment,
                        bool eager_pool = false);
-      void return_data(size_t num_elements,
+      void return_data(const DomainPoint &extents,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments);
-      void return_data(FieldID field_id,
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
                        PhysicalInstance instance,
-                       size_t field_size,
-                       const size_t *num_elements);
+                       const LayoutConstraintSet *constraints,
+                       bool check_constraints);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -942,10 +977,10 @@ namespace Legion {
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
-      const RegionRequirement &get_requirement(void) const { return req; }
-      size_t size(void) const { return num_elements; }
+      const OutputRequirement &get_requirement(void) const { return req; }
+      DomainPoint get_extents(void) const { return extents; }
     protected:
-      IndividualManager *get_manager(FieldID field_id);
+      IndividualManager *get_manager(FieldID field_id) const;
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -956,12 +991,12 @@ namespace Legion {
         size_t alignment;
       };
     private:
-      RegionRequirement req;
+      OutputRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
-      size_t num_elements;
+      DomainPoint extents;
       const unsigned index;
       const bool created_region;
       const bool global_indexing;

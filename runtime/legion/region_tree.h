@@ -2205,7 +2205,8 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL) = 0;
-      virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
+      virtual bool set_output_union(
+                const std::map<DomainPoint,DomainPoint> &sizes,
                 AddressSpaceID space, ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
@@ -2467,7 +2468,8 @@ namespace Legion {
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
                               ShardMapping *shard_mapping = NULL);
-      virtual bool set_output_union(const std::map<DomainPoint,size_t> &sizes,
+      virtual bool set_output_union(
+                    const std::map<DomainPoint,DomainPoint> &sizes,
                     AddressSpaceID space, ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);

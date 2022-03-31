@@ -2280,6 +2280,7 @@ extern "C" {
   legion_output_requirement_create(legion_field_space_t field_space,
                                    legion_field_id_t *fields,
                                    size_t fields_size,
+                                   int dim,
                                    bool global_indexing);
 
   /**
