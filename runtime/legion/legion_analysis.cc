@@ -3690,34 +3690,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
                                  RegionTreeNode *r, bool val)
-      : ctx(c), user(u), root_node(r), validates(val), close_op(NULL)
+      : ctx(c), user(u), root_node(r), validates(val),
+        tracing(user.op->is_tracing()), close_op(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalCloser::LogicalCloser(const LogicalCloser &rhs)
-      : ctx(rhs.ctx), user(rhs.user), root_node(rhs.root_node), 
-        validates(rhs.validates)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     LogicalCloser::~LogicalCloser(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalCloser& LogicalCloser::operator=(const LogicalCloser &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -3856,7 +3838,7 @@ namespace Legion {
     // be found in region_tree.cc to make sure that templates are instantiated
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(LogicalState &state, const bool tracing)
+    void LogicalCloser::update_state(LogicalState &state)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

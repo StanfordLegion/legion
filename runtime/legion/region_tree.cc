@@ -16722,7 +16722,7 @@ namespace Legion {
           // This is the "up" case of equivalence set refinement
           // where we coarsen the refinement to a higher level
           // in the region tree
-          closer.update_state(state, user.op->is_tracing());
+          closer.update_state(state);
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
@@ -17782,7 +17782,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing() &&
+                if (closer.tracing &&
                     ((next_child == NULL) || !are_all_children_disjoint()))
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
@@ -17880,7 +17880,7 @@ namespace Legion {
                   // If we're tracing we need to record nodep dependences
                   // here in any aliased sub-trees in case we need to make
                   // internal operations later when replaying the trace
-                  const bool tracing = closer.user.op->is_tracing();
+                  const bool tracing = closer.tracing;
                   // Go through all the children and see if there is any overlap
                   for (FieldMaskSet<RegionTreeNode>::iterator cit = 
                         it->open_children.begin(); cit !=
@@ -17971,7 +17971,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing())
+                if (closer.tracing)
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
                         it->open_children.begin(); cit != 
@@ -18028,7 +18028,7 @@ namespace Legion {
                 // mode and record "no-dependences" on any users we find
                 // down there in case we need to inject an internal operation
                 // later when we go to replay the trace
-                if (closer.user.op->is_tracing() &&
+                if (closer.tracing &&
                     ((next_child == NULL) || !are_all_children_disjoint()))
                 {
                   for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
@@ -19304,7 +19304,7 @@ namespace Legion {
 
             // Update the dirty_below and partial close fields
             // and filter the current and previous epochs
-            closer.update_state(state, user.op->is_tracing());
+            closer.update_state(state);
             // Now we can add the close operations to the current epoch
             closer.register_close_operations(state.curr_epoch_users);
           }
@@ -20229,7 +20229,8 @@ namespace Legion {
           it++;
 #else
           // If not Legion Spy we can prune the user if it's done
-          if (!it->op->add_mapping_reference(it->gen))
+          // Assuming of course that we are not tracing
+          if (!it->op->add_mapping_reference(it->gen) && !closer.tracing)
           {
             closer.pop_closed_user();
             it = users.erase(it);

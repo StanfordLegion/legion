@@ -1556,7 +1556,6 @@ namespace Legion {
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
     public:
-      PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
       PhysicalManager* create_unbound_instance(LogicalRegion region,
                                                LayoutConstraintSet &constraints,
                                                ApEvent ready_event,
