@@ -523,6 +523,8 @@ namespace Realm {
     GASNetEXEvent& set_put(PendingPutHeader *_put);
     GASNetEXEvent& set_leaf(GASNetEXEvent *_leaf);
 
+    void propagate_to_leaves();
+
     void trigger(GASNetEXInternal *internal);
 
     IntrusiveListLink<GASNetEXEvent> event_list_link;
@@ -586,6 +588,23 @@ namespace Realm {
     Mutex::CondVar pollwait_cond;
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
+  };
+
+  class GASNetEXCompleter : public BackgroundWorkItem {
+  public:
+    GASNetEXCompleter(GASNetEXInternal *_internal);
+
+    void add_ready_events(GASNetEXEvent::EventList& newly_ready);
+
+    bool has_work_remaining();
+
+    virtual bool do_work(TimeLimit work_until);
+
+  protected:
+    GASNetEXInternal *internal;
+    Mutex mutex;
+    atomic<bool> has_work;  // can be read without mutex
+    GASNetEXEvent::EventList ready_events;
   };
 
   struct PendingPutHeader {
@@ -743,6 +762,7 @@ namespace Realm {
     friend class XmitSrcDestPair;
     friend class GASNetEXEvent;
     friend class GASNetEXPoller;
+    friend class GASNetEXCompleter;
 
     // callbacks from IncomingMessageManager
     static void short_message_complete(NodeID sender, uintptr_t objptr,
@@ -781,6 +801,7 @@ namespace Realm {
 
     GASNetEXPoller poller;
     GASNetEXInjector injector;
+    GASNetEXCompleter completer;
     ReverseGetter rgetter;
     PendingCompletionManager compmgr;
     OutbufManager obmgr;

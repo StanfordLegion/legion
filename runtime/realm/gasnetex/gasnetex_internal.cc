@@ -2628,6 +2628,12 @@ namespace Realm {
     return *this;
   }
 
+  void GASNetEXEvent::propagate_to_leaves()
+  {
+    if(leaf)
+      leaf->event = GEX_EVENT_NO_OP;
+  }
+
   void GASNetEXEvent::trigger(GASNetEXInternal *internal)
   {
     event = GEX_EVENT_INVALID;
@@ -2642,8 +2648,6 @@ namespace Realm {
       rget->rgetter->reverse_get_complete(rget);
     if(put)
       put->xpair->enqueue_put_header(put);
-    if(leaf)
-      leaf->event = GEX_EVENT_NO_OP;
   }
 
 
@@ -2774,7 +2778,7 @@ namespace Realm {
     // first go through all(?) the pending events to see if any have
     //  finished
     {
-      GASNetEXEvent::EventList to_check, still_pending;
+      GASNetEXEvent::EventList to_check, still_pending, to_complete;
 
       // atomically grab all the known ones so that we don't have to hold the
       //  mutex while we're testing the events
@@ -2796,8 +2800,11 @@ namespace Realm {
 	switch(ret) {
 	case GASNET_OK:
 	  {
-	    ev->trigger(internal);
-	    internal->event_alloc.free_obj(ev);
+            // even if we don't handle callbacks right away, we have to deal
+            //  with root/leaf event relationships before we can safely test
+            //  any more events
+            ev->propagate_to_leaves();
+            to_complete.push_back(ev);
 	    break;
 	  }
 	case GASNET_ERR_NOT_READY:
@@ -2819,6 +2826,10 @@ namespace Realm {
 	still_pending.absorb_append(pending_events);
 	still_pending.swap(pending_events);
       }
+
+      // if we have any completed events, give them to the completer
+      if(!to_complete.empty())
+        internal->completer.add_ready_events(to_complete);
     }
 
     // try to push packets for any xmit pairs that are critical (i.e. cannot
@@ -2886,6 +2897,79 @@ namespace Realm {
     AutoLock<> al(mutex);
     pollwait_flag.store(true);
     pollwait_cond.wait();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNetEXCompleter
+  //
+
+  GASNetEXCompleter::GASNetEXCompleter(GASNetEXInternal *_internal)
+    : BackgroundWorkItem("gex-complete")
+    , internal(_internal)
+    , has_work(false)
+  {}
+
+  void GASNetEXCompleter::add_ready_events(GASNetEXEvent::EventList& newly_ready)
+  {
+    bool enqueue = false;
+
+    if(!newly_ready.empty()) {
+      AutoLock<> al(mutex);
+      // use has_work rather than list emptiness to decide whether to enqueue
+      enqueue = !has_work.load();
+      has_work.store(true);
+      ready_events.absorb_append(newly_ready);
+    }
+
+    if(enqueue)
+      make_active();
+  }
+
+  bool GASNetEXCompleter::has_work_remaining()
+  {
+    return has_work.load();
+  }
+
+  bool GASNetEXCompleter::do_work(TimeLimit work_until)
+  {
+    // grab all the events but don't clear 'has_work' since we don't want
+    //  to be reactivated yet
+    GASNetEXEvent::EventList todo;
+    {
+      AutoLock<> al(mutex);
+      todo.swap(ready_events);
+    }
+
+    while(!todo.empty()) {
+      GASNetEXEvent *ev = todo.pop_front();
+      ev->trigger(internal);
+      internal->event_alloc.free_obj(ev);
+
+      if(work_until.is_expired())
+        break;
+    }
+
+    // retake lock to either put back events we didn't get to or clear
+    //  'has_work' flag
+    bool requeue = false;
+    {
+      AutoLock<> al(mutex);
+      if(todo.empty()) {
+        if(ready_events.empty())
+          has_work.store(false);
+        else
+          requeue = true;  // new events showed up
+      } else {
+        // the events we didn't get to should be at the front of the list
+        todo.absorb_append(ready_events);
+        ready_events.swap(todo);
+        requeue = true;
+      }
+    }
+
+    return requeue;
   }
 
 
@@ -3043,6 +3127,7 @@ namespace Realm {
     , runtime(_runtime)
     , poller(this)
     , injector(this)
+    , completer(this)
     , rgetter(this)
     , total_packets_received(0)
     , databuf_md(nullptr)
@@ -3088,6 +3173,8 @@ namespace Realm {
     poller.begin_polling();
 
     injector.add_to_manager(&runtime->bgwork);
+
+    completer.add_to_manager(&runtime->bgwork);
 
     rgetter.add_to_manager(&runtime->bgwork);
 
@@ -3287,6 +3374,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
     poller.shutdown_work_item();
     injector.shutdown_work_item();
+    completer.shutdown_work_item();
     rgetter.shutdown_work_item();
     obmgr.shutdown_work_item();
 #endif
@@ -3365,6 +3453,10 @@ namespace Realm {
     }
     if(injector.has_work_remaining()) {
       log_gex_quiesce.debug() << "injector busy";
+      local_counts[0]++;
+    }
+    if(completer.has_work_remaining()) {
+      log_gex_quiesce.debug() << "completer busy";
       local_counts[0]++;
     }
     if(rgetter.has_work_remaining()) {
