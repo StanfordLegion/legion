@@ -5591,15 +5591,15 @@ namespace Legion {
         case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
           break;
         case SEND_REMOTE_CONTEXT_REQUEST:
-          return CONTEXT_VIRTUAL_CHANNEL;
+          break;
         case SEND_REMOTE_CONTEXT_RESPONSE:
-          return CONTEXT_VIRTUAL_CHANNEL;
+          break;
         case SEND_REMOTE_CONTEXT_FREE:
-          return CONTEXT_VIRTUAL_CHANNEL;
+          break;
         case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
-          return CONTEXT_VIRTUAL_CHANNEL;
+          break;
         case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
-          return CONTEXT_VIRTUAL_CHANNEL;
+          break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
