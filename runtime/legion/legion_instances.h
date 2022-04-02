@@ -218,6 +218,13 @@ namespace Legion {
         // Events added since the last collection of view events
         unsigned events_added;
       };
+      enum GarbageCollectionState {
+        VALID_GC_STATE,
+        ACQUIRED_GC_STATE,
+        COLLECTABLE_GC_STATE,
+        PENDING_COLLECTED_GC_STATE,
+        COLLECTED_GC_STATE,
+      };
     public:
       PhysicalManager(RegionTreeForest *ctx, LayoutDescription *layout, 
                       DistributedID did, AddressSpaceID owner_space, 
@@ -259,10 +266,18 @@ namespace Legion {
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
     public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator) = 0;
-      virtual void perform_deletion(RtEvent deferred_event) = 0;
-      virtual void force_deletion(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
+      
+      bool try_collection(AddressSpaceID source, RtEvent &ready);
+      bool verify_collection(void);
+      void release_collection(AddressSpaceID source);
+      virtual void perform_deletion(void) = 0;
+      virtual void force_collection(void) = 0;
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                 Processor p, GCPriority priority) = 0; 
       virtual RtEvent attach_external_instance(void) = 0;
@@ -291,6 +306,19 @@ namespace Legion {
       void prune_gc_events(void);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
+      static void handle_acquire_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_acquire_response(Deserializer &derez);
+      static void handle_garbage_collection_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_response(Deserializer &derez);
+      static void handle_garbage_collection_acquire(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_acquired(Deserializer &derez);
+      static void handle_garbage_collection_release(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_released(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
     public:
       const size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -302,6 +330,16 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
+    protected:
+      // Stuff for garbage collection
+      GarbageCollectionState gc_state; 
+      unsigned pending_changes;
+      std::atomic<unsigned> collection_guards;
+      RtEvent collection_ready;
+      RtUserEvent collection_done;
+
+      GCPriority min_gc_priority;
+      std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
     private:
       // Events that have to trigger before we can remove our GC reference
       std::map<CollectableView*,CollectableInfo> gc_events;
@@ -384,15 +422,10 @@ namespace Legion {
                         bool register_now, size_t footprint,
                         ApEvent use_event, bool external_instance,
                         const ReductionOp *op = NULL);
-      IndividualManager(const IndividualManager &rhs);
+      IndividualManager(const IndividualManager &rhs) = delete;
       virtual ~IndividualManager(void);
     public:
-      IndividualManager& operator=(const IndividualManager &rhs);
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      IndividualManager& operator=(const IndividualManager &rhs) = delete;
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -446,10 +479,8 @@ namespace Legion {
           LayoutConstraints *constraints, ApEvent use_event,
           ReductionOpID redop);
     public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
-      virtual void perform_deletion(RtEvent deferred_event);
-      virtual void force_deletion(void);
+      virtual void perform_deletion(void);
+      virtual void force_collection(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                 Processor p, GCPriority priority); 
       virtual RtEvent attach_external_instance(void);
@@ -524,22 +555,17 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
                         ApEvent unique_event, bool external_instance);
-      CollectiveManager(const CollectiveManager &rhs);
+      CollectiveManager(const CollectiveManager &rhs) = delete;
       virtual ~CollectiveManager(void);
     public:
-      CollectiveManager& operator=(const CollectiveManager &rh);
+      CollectiveManager& operator=(const CollectiveManager &rh) = delete;
     public:
       void finalize_collective_instance(ApUserEvent instance_event);
     public:
       virtual ApEvent get_use_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+                     get_pointer_constraint(const DomainPoint &key) const; 
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -553,10 +579,8 @@ namespace Legion {
       void validate_collective(ReferenceMutator *mutator);
       void invalidate_collective(ReferenceMutator *mutator);
     public:
-      virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
-      virtual void perform_deletion(RtEvent deferred_event);
-      virtual void force_deletion(void);
+      virtual void perform_deletion(void);
+      virtual void force_collection(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                     Processor p, GCPriority priority); 
       virtual RtEvent attach_external_instance(void);

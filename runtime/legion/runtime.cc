@@ -4183,7 +4183,8 @@ namespace Legion {
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
-        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
+        gc_precondition(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -4207,28 +4208,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager::MemoryManager(const MemoryManager &rhs)
-      : memory(Memory::NO_MEMORY), owner_space(0), 
-        is_owner(false), capacity(0), runtime(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);   
-    }
-
-    //--------------------------------------------------------------------------
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    MemoryManager& MemoryManager::operator=(const MemoryManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -4236,6 +4218,12 @@ namespace Legion {
                                                std::set<ApEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+      // We only need to check this on the owner node instances and 
+      // in fact it's only safe for us to do it on the owner node
+      // instance because we only are guaranteed to have references
+      // to the owner node objects
+      if (!is_owner)
+        return;
       std::vector<PhysicalManager*> to_check;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
@@ -4244,12 +4232,6 @@ namespace Legion {
           for (TreeInstances::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
           {
-            // We only need to check this on the owner node instances and 
-            // in fact it's only safe for us to do it on the owner node
-            // instance because we only are guaranteed to have references
-            // to the owner node objects
-            if (!it->first->is_owner())
-              continue;
             it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
             to_check.push_back(it->first);
           }
@@ -4270,61 +4252,77 @@ namespace Legion {
       // Only need to do things if we are the owner memory
       if (!is_owner)
         return;
-      std::map<PhysicalManager*,RtEvent> to_delete;
+      // This is a kind of deletion so make sure it is ordered
+      const RtUserEvent gc_event = Runtime::create_rt_user_event();
+      RtEvent precondition = gc_precondition.exchange(gc_event);
+      if (!precondition.has_triggered())
+        precondition.wait();
+      // This a collection so make sure we're ordered with other collections
+      std::vector<RtEvent> ready_events;
+      std::vector<PhysicalManager*> to_delete;
       {
-        AutoLock m_lock(manager_lock);
-        std::vector<PhysicalManager*> to_remove;
-        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
               current_instances.begin(); cit != current_instances.end(); cit++)
-          for (TreeInstances::iterator it = 
+        {
+          for (TreeInstances::const_iterator it =
                 cit->second.begin(); it != cit->second.end(); it++)
           {
-            if (it->second.current_state == PENDING_COLLECTED_STATE)
-              continue;
-#ifdef DEBUG_LEGION
-            assert(it->second.current_state != PENDING_COLLECTED_STATE);
-            assert(it->second.current_state != PENDING_ACQUIRE_STATE);
-#endif
-            if (it->second.current_state != COLLECTABLE_STATE)
+            RtEvent ready;
+            if (it->first->try_collection(runtime->address_space, ready))
             {
-              RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-              it->second.current_state = PENDING_COLLECTED_STATE;
-              it->second.deferred_collect = deferred_collect;
-              to_delete[it->first] = deferred_collect;
-              it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
-#ifdef LEGION_MALLOC_INSTANCES
-              pending_collectables[deferred_collect] = 0; 
-#endif
+              to_delete.push_back(it->first);
+              if (ready.exists())
+                ready_events.push_back(ready);
             }
-            else // reference flows out since we're deleting this
-            {
-              to_delete[it->first] = RtEvent::NO_RT_EVENT;
-              to_remove.push_back(it->first);
-            }
-          }
-        if (!to_remove.empty())
-        {
-          for (std::vector<PhysicalManager*>::const_iterator it = 
-                to_remove.begin(); it != to_remove.end(); it++)
-          {
-            std::map<RegionTreeID,TreeInstances>::iterator finder = 
-              current_instances.find((*it)->tree_id);
-#ifdef DEBUG_LEGION
-            assert(finder != current_instances.end());
-#endif
-            finder->second.erase(*it);
-            if (finder->second.empty())
-              current_instances.erase(finder);
           }
         }
       }
-      for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
-            to_delete.begin(); it != to_delete.end(); it++)
+      if (!to_delete.empty())
+        check_instance_deletions(to_delete, ready_events);
+      // We can trigger as soon as we're done with our pass
+      Runtime::trigger_event(gc_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::check_instance_deletions(
+                                      std::vector<PhysicalManager*> &to_delete,
+                                      std::vector<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PhysicalManager*> deleted;
+      // Wait for any ready events
+      if (!ready_events.empty())
       {
-        it->first->perform_deletion(it->second);
-        // Remove our base resource reference
-        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (it->first);
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+        if ((*it)->verify_collection())
+          deleted.push_back(*it);
+      if (!deleted.empty())
+      {
+        AutoLock m_lock(manager_lock);
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              deleted.begin(); it != deleted.end(); it++)
+        {
+          std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
+            current_instances.find((*it)->tree_id);
+#ifdef DEBUG_LEGION
+          assert(tree_finder != current_instances.end());
+#endif
+          TreeInstances::iterator finder = tree_finder->second.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != tree_finder->second.end());
+#endif
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
+          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            delete (*it);
+        }
       }
     }
 
@@ -4337,14 +4335,10 @@ namespace Legion {
       // No need for the lock, no one should be doing anything at this point
       for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
             current_instances.begin(); cit != current_instances.end(); cit++)
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+        for (TreeInstances::const_iterator it = 
               cit->second.begin(); it != cit->second.end(); it++)
-        {
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            Runtime::trigger_event(it->second.deferred_collect);
-          else
-            it->first->force_deletion();
-        }
+          it->first->force_collection();
+      current_instances.clear();
 #ifdef LEGION_MALLOC_INSTANCES
       for (std::map<RtEvent,uintptr_t>::const_iterator it = 
             pending_collectables.begin(); it != 
@@ -4359,22 +4353,24 @@ namespace Legion {
     void MemoryManager::register_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      const size_t inst_size = manager->get_instance_size();
+#ifdef DEBUG_LEGION
+      assert(!is_owner);
+#endif
       AutoLock m_lock(manager_lock);
       TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
       assert(insts.find(manager) == insts.end());
 #endif
-      // Make it valid to start since we know when we were created
-      // that we were made valid to begin with
-      InstanceInfo &info = insts[manager];
-      info.instance_size = inst_size;
+      insts[manager] = LEGION_GC_NEVER_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
     void MemoryManager::unregister_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!is_owner);
+#endif
       AutoLock m_lock(manager_lock);
       std::map<RegionTreeID,TreeInstances>::iterator finder = 
         current_instances.find(manager->tree_id);
@@ -4385,207 +4381,6 @@ namespace Legion {
       finder->second.erase(manager);
       if (finder->second.empty())
         current_instances.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::activate_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert(current_instances.find(manager->tree_id) != 
-              current_instances.end());
-#endif
-      TreeInstances::iterator finder = 
-        current_instances[manager->tree_id].find(manager);
-#ifdef DEBUG_LEGION
-      assert(finder != current_instances[manager->tree_id].end());
-      // This can be a valid state too if we just made the instance
-      // and we marked it valid to prevent GC from claiming it before
-      // it can be used for the first time
-      assert((finder->second.current_state == COLLECTABLE_STATE) ||
-             (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
-             (finder->second.current_state == VALID_STATE));
-#endif
-      if (finder->second.current_state == COLLECTABLE_STATE)
-        finder->second.current_state = ACTIVE_STATE;
-      // Otherwise stay in our current state
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else if (finder->second.current_state != VALID_STATE)
-        assert(finder->second.pending_acquires > 0);
-#endif
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::deactivate_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_reference = false;
-#ifdef LEGION_MALLOC_INSTANCES
-      std::pair<RtEvent,uintptr_t> to_free(RtEvent::NO_RT_EVENT, 0);
-#endif
-      {
-        AutoLock m_lock(manager_lock);
-        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-          current_instances.find(manager->tree_id);
-#ifdef DEBUG_LEGION
-        assert(tree_finder != current_instances.end());
-#endif
-        TreeInstances::iterator finder = tree_finder->second.find(manager);
-#ifdef DEBUG_LEGION
-        assert(finder != tree_finder->second.end());
-        assert((finder->second.current_state == ACTIVE_STATE) ||
-               (finder->second.current_state == PENDING_COLLECTED_STATE) ||
-               (finder->second.current_state == PENDING_ACQUIRE_STATE));
-#endif
-        InstanceInfo &info = finder->second;
-        // See if we deleted this yet
-        if (finder->second.current_state == PENDING_COLLECTED_STATE)
-        {
-          // already deferred collected this, so we can trigger 
-          // the deletion now this should only happen on the owner node
-#ifdef DEBUG_LEGION
-          assert(is_owner);
-          assert(info.deferred_collect.exists());
-#endif
-          Runtime::trigger_event(info.deferred_collect);
-#ifdef LEGION_MALLOC_INSTANCES
-          std::map<RtEvent,uintptr_t>::iterator free_finder = 
-            pending_collectables.find(info.deferred_collect);
-          if (free_finder != pending_collectables.end())
-          {
-            to_free = *free_finder;
-            pending_collectables.erase(free_finder); 
-          }
-#endif
-          // Now we can delete our entry because it has been deleted
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-          remove_reference = true;
-        }
-        else if (finder->second.current_state == PENDING_ACQUIRE_STATE)
-        {
-          // We'll stay in this state until our pending acquires are done
-#ifdef DEBUG_LEGION
-          assert(finder->second.pending_acquires > 0);
-#endif
-        }
-        else // didn't collect it yet
-          info.current_state = COLLECTABLE_STATE;
-      }
-      if (remove_reference)
-      {
-        if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete manager;
-      }
-#ifdef LEGION_MALLOC_INSTANCES
-      if (to_free.second > 0)
-        free_legion_instance(to_free.first, to_free.second);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::validate_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-      TreeInstances::iterator finder = 
-        current_instances[manager->tree_id].find(manager);
-#ifdef DEBUG_LEGION
-      assert(finder != current_instances[manager->tree_id].end());
-      assert((finder->second.current_state == ACTIVE_STATE) ||
-             (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
-             (finder->second.current_state == VALID_STATE));
-#endif
-      if (finder->second.current_state == ACTIVE_STATE)
-        finder->second.current_state = VALID_STATE;
-      // Otherwise we stay in the state we are currently in
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else if (finder->second.current_state == PENDING_ACQUIRE_STATE)
-        assert(finder->second.pending_acquires > 0);
-#endif
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::invalidate_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock);
-      TreeInstances::iterator finder = 
-        current_instances[manager->tree_id].find(manager);
-#ifdef DEBUG_LEGION
-      assert(finder != current_instances[manager->tree_id].end());
-      assert((finder->second.current_state == VALID_STATE) ||
-             (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
-             (finder->second.current_state == PENDING_COLLECTED_STATE));
-#endif
-      if (finder->second.current_state == VALID_STATE)
-        finder->second.current_state = ACTIVE_STATE;
-      // Otherwise we stay in whatever state we should be in
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      else if (finder->second.current_state == PENDING_ACQUIRE_STATE)
-        assert(finder->second.pending_acquires > 0);
-#endif
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    bool MemoryManager::attempt_acquire(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      AutoLock m_lock(manager_lock);
-      std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-        current_instances.find(manager->tree_id);
-      if (tree_finder == current_instances.end())
-        return false;
-      TreeInstances::iterator finder = tree_finder->second.find(manager);
-      // If we can't even find it then it was deleted
-      if (finder == tree_finder->second.end())
-        return false;
-      // If it's going to be deleted that is not going to work
-      if (finder->second.current_state == PENDING_COLLECTED_STATE)
-        return false;
-#ifdef DEBUG_LEGION
-      if (finder->second.current_state != PENDING_ACQUIRE_STATE)
-        assert(finder->second.pending_acquires == 0);
-#endif
-      finder->second.current_state = PENDING_ACQUIRE_STATE;
-      finder->second.pending_acquires++;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::complete_acquire(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      assert(current_instances.find(manager->tree_id) != 
-              current_instances.end());
-#endif
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances[manager->tree_id].find(manager);
-#ifdef DEBUG_LEGION
-      assert(finder != current_instances[manager->tree_id].end());
-      assert(finder->second.current_state == PENDING_ACQUIRE_STATE);
-      assert(finder->second.pending_acquires > 0);
-#endif
-      finder->second.pending_acquires--;
-      // If all our pending acquires are done then we are in the valid state
-      if (finder->second.pending_acquires == 0)
-        finder->second.current_state = VALID_STATE;
     }
 
     //--------------------------------------------------------------------------
@@ -4601,11 +4396,11 @@ namespace Legion {
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
         Serializer rez;
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -4632,12 +4427,27 @@ namespace Legion {
           rez.serialize(unsat_index);
           rez.serialize(footprint);
           rez.serialize(creator_id);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled in
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          result = MappingInstance(manager);
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -4652,19 +4462,21 @@ namespace Legion {
         // Try to make the result
         PhysicalManager *manager = allocate_physical_instance(builder, 
             footprint, unsat_kind, unsat_index, target, point);
+        bool success = false;
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
             manager->log_instance_creation(creator_id, processor, regions);
+          // Do this first to add a resource reference
+          result = MappingInstance(manager);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
-          result = MappingInstance(manager);
-          success.store(true);
+          success = true;
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success.load();
     }
     
     //--------------------------------------------------------------------------
@@ -4679,11 +4491,11 @@ namespace Legion {
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
         Serializer rez;
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -4710,12 +4522,27 @@ namespace Legion {
           rez.serialize(unsat_index);
           rez.serialize(footprint);
           rez.serialize(creator_id);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled in
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          result = MappingInstance(manager);
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -4730,19 +4557,21 @@ namespace Legion {
         // Try to make the instance
         PhysicalManager *manager = allocate_physical_instance(builder, 
             footprint, unsat_kind, unsat_index, target, p);
+        bool success = false;
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
             manager->log_instance_creation(creator_id, processor, regions);
+          // Do this first to add a resource reference
+          result = MappingInstance(manager);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
-          result = MappingInstance(manager);
-          success.store(true);
+          success = true;
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4758,7 +4587,6 @@ namespace Legion {
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      std::atomic<bool> success(false);
       // Set created to default to false
       created = false;
       if (!is_owner)
@@ -4768,8 +4596,9 @@ namespace Legion {
                                 acquire, tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to request creation
-        std::atomic<bool> remote_created(created);
         Serializer rez;
+        std::atomic<bool> remote_created(created);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -4789,14 +4618,29 @@ namespace Legion {
           rez.serialize(unsat_index);
           rez.serialize(footprint);
           rez.serialize(creator_id);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled in
-        created = remote_created.load();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          result = MappingInstance(manager);
+          created = remote_created.load();
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -4812,21 +4656,22 @@ namespace Legion {
         // Since this is find or acquire, first see if we can find
         // an instance that has already been makde that satisfies 
         // our layout constraints
-        success.store(find_satisfying_instance(constraints, regions, 
-                       result, acquire, tight_region_bounds, remote));
-        if (!success.load())
+        bool success = find_satisfying_instance(constraints, regions, 
+                         result, acquire, tight_region_bounds, remote);
+        if (!success)
         {
           // If we couldn't find it, we have to make it
           PhysicalManager *manager = allocate_physical_instance(builder, 
               footprint, unsat_kind, unsat_index);
           if (manager != NULL)
           {
-            success.store(true);
+            success = true;
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
+            // Do this first to add a resource reference
+            result = MappingInstance(manager);
             record_created_instance(manager, acquire, mapper_id, processor,
                                     priority, remote);
-            result = MappingInstance(manager);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -4835,8 +4680,8 @@ namespace Legion {
           *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4852,7 +4697,6 @@ namespace Legion {
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      std::atomic<bool> success(false);
       // Set created to false in case we fail
       created = false;
       if (!is_owner)
@@ -4861,9 +4705,10 @@ namespace Legion {
         if (find_valid_instance(constraints, regions, result, 
                                 acquire, tight_region_bounds, remote))
           return true;
-        std::atomic<bool> remote_created(created);
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
+        std::atomic<bool> remote_created(created);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -4883,14 +4728,29 @@ namespace Legion {
           rez.serialize(unsat_index);
           rez.serialize(footprint);
           rez.serialize(creator_id);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled
-        created = remote_created.load();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          result = MappingInstance(manager);
+          created = remote_created.load();
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -4907,21 +4767,22 @@ namespace Legion {
         // an instance that has already been makde that satisfies 
         // our layout constraints
         // Try to find an instance first and then make one
-        success.store(find_satisfying_instance(constraints, regions, 
-                        result, acquire, tight_region_bounds, remote));
-        if (!success.load())
+        bool success = find_satisfying_instance(constraints, regions, 
+                        result, acquire, tight_region_bounds, remote);
+        if (!success)
         {
           // If we couldn't find it, we have to make it
           PhysicalManager *manager = allocate_physical_instance(builder, 
               footprint, unsat_kind, unsat_index);
           if (manager != NULL)
           {
-            success.store(true);
+            success = true;
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
+            // Do this first to add a resource reference
+            result = MappingInstance(manager);
             record_created_instance(manager, acquire, mapper_id, processor,
                                     priority, remote);
-            result = MappingInstance(manager);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -4930,8 +4791,8 @@ namespace Legion {
           *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4948,9 +4809,9 @@ namespace Legion {
         if (find_valid_instance(constraints, regions, result, 
                                   acquire, tight_region_bounds, remote))
           return true;
-        std::atomic<bool> success(false);
         // Not the owner, send a message to the owner to try and find it
         Serializer rez;
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -4963,13 +4824,26 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled
-        return success.load();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -4992,8 +4866,8 @@ namespace Legion {
         if (find_valid_instance(constraints, regions, result, 
                                   acquire, tight_region_bounds, remote))
           return true;
-        std::atomic<bool> success(false);
         Serializer rez;
+        std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -5006,13 +4880,26 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&success);
-          rez.serialize(&result);
+          rez.serialize(&remote_manager);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled
-        return success.load();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          if (acquire)
+          {
+            LocalReferenceMutator local_mutator;
+            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                             local_mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(owner_space);
+          return true;
+        }
+        else
+          return false;
       }
       else
       {
@@ -5034,6 +4921,7 @@ namespace Legion {
       {
         // Not the owner, send a message to the owner to try and find it
         Serializer rez;
+        std::atomic<std::vector<PhysicalManager*>*> remote_managers(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -5046,11 +4934,33 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&results);
+          rez.serialize(&remote_managers);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled
+        std::vector<PhysicalManager*> *managers = remote_managers.load();
+        if (managers != NULL)
+        {
+          results.resize(managers->size());
+          for (unsigned idx = 0; idx < results.size(); idx++)
+          {
+            PhysicalManager *manager = managers->at(idx);
+#ifdef DEBUG_LEGION
+            assert(manager != NULL);
+#endif
+            results[idx] = MappingInstance(manager);
+            if (acquire)
+            {
+              LocalReferenceMutator local_mutator;
+              manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+              manager->send_remote_valid_decrement(owner_space, NULL,
+                                               local_mutator.get_done_event());
+            }
+            else
+              manager->send_remote_resource_decrement(owner_space);
+          }
+          delete managers;
+        }
       }
       else
         find_satisfying_instances(constraints, regions, results,
@@ -5067,6 +4977,7 @@ namespace Legion {
       if (!is_owner)
       {
         Serializer rez;
+        std::atomic<std::vector<PhysicalManager*>*> remote_managers(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -5079,11 +4990,33 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&results);
+          rez.serialize(&remote_managers);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
-        // When the event is triggered, everything will be filled
+        std::vector<PhysicalManager*> *managers = remote_managers.load();
+        if (managers != NULL)
+        {
+          results.resize(managers->size());
+          for (unsigned idx = 0; idx < results.size(); idx++)
+          {
+            PhysicalManager *manager = managers->at(idx);
+#ifdef DEBUG_LEGION
+            assert(manager != NULL);
+#endif
+            results[idx] = MappingInstance(manager);
+            if (acquire)
+            {
+              LocalReferenceMutator local_mutator;
+              manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+              manager->send_remote_valid_decrement(owner_space, NULL,
+                                               local_mutator.get_done_event());
+            }
+            else
+              manager->send_remote_resource_decrement(owner_space);
+          }
+          delete managers;
+        }
       }
       else
         find_satisfying_instances(constraints, regions, results,
@@ -5097,83 +5030,42 @@ namespace Legion {
       // If we're not the owner, then there is nothing to do
       if (!is_owner)
         return;
-      // Take the manager lock and see if there are any managers
-      // we can release now
-      std::map<PhysicalManager*,std::pair<RtEvent,bool> > to_release;
-      do 
+      // Try to delete all the instances in the region tree
+      // If any of them cannot be deleted yet, they'll have to 
+      // wait until we do a garbage collection
+      // This is a collection so we need to order it with respect to
+      // to other collections
+      const RtUserEvent gc_event = Runtime::create_rt_user_event();
+      const RtEvent wait_on = gc_precondition.exchange(gc_event);
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      std::vector<RtEvent> ready_events;
+      std::vector<PhysicalManager*> to_delete, deleted;
       {
-        std::vector<PhysicalManager*> to_remove;
-        AutoLock m_lock(manager_lock);
-        std::map<RegionTreeID,TreeInstances>::iterator finder = 
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
-        if (finder == current_instances.end())
-          break;
-        for (TreeInstances::iterator it = 
-              finder->second.begin(); it != finder->second.end(); it++)
+        if (finder != current_instances.end())
         {
-          // If the region for the instance is not for the tree then
-          // we get to skip it
-          if (it->first->tree_id != tree_id)
-            continue;
-          // If it's already been deleted, then there is nothing to do
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->second.current_state != PENDING_ACQUIRE_STATE);
-#endif
-          if (it->second.current_state != COLLECTABLE_STATE)
+          for (TreeInstances::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
           {
-#ifdef DEBUG_LEGION
-            // We might have lost a race with adding LEGION_NEVER_GC_REF
-            // after release the manager lock if we hit this assertion
-            if (it->second.min_priority == LEGION_GC_NEVER_PRIORITY)
-              assert(it->second.current_state == VALID_STATE);
-#endif
-            bool remove_valid_ref = false;
-            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-            // Remove any NEVER GC references if necessary
-            if (it->second.min_priority == LEGION_GC_NEVER_PRIORITY)
-              remove_valid_ref = true;
-            it->second.mapper_priorities.clear();
-            it->second.min_priority = LEGION_GC_MAX_PRIORITY;
-            // Go to the pending collectable state
-            RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-            it->second.current_state = PENDING_COLLECTED_STATE;
-            it->second.deferred_collect = deferred_collect;
-            to_release[it->first] = std::pair<RtEvent,bool>(
-                                      deferred_collect, remove_valid_ref);
-#ifdef LEGION_MALLOC_INSTANCES
-            pending_collectables[deferred_collect] = 0; 
-#endif
-          }
-          else
-          {
-            to_release[it->first] = std::pair<RtEvent,bool>(
-                   RtEvent::NO_RT_EVENT, false/*remove valid ref*/);
-            to_remove.push_back(it->first);
+            RtEvent ready;
+            if (it->first->try_collection(runtime->address_space, ready))
+            {
+              to_delete.push_back(it->first);
+              if (ready.exists())
+                ready_events.push_back(ready);
+            }
           }
         }
-        if (!to_remove.empty())
-        {
-          for (std::vector<PhysicalManager*>::const_iterator it = 
-                to_remove.begin(); it != to_remove.end(); it++)
-            finder->second.erase(*it);
-          if (finder->second.empty())
-            current_instances.erase(finder);
-        }
-      } while (false);
-      for (std::map<PhysicalManager*,std::pair<RtEvent,bool> >::
-            const_iterator it = to_release.begin(); it != to_release.end();it++)
-      {
-        it->first->perform_deletion(it->second.first);
-        if (it->second.second)
-          it->first->remove_base_valid_ref(NEVER_GC_REF);
-        // Now we can release our resource reference
-        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (it->first);
       }
+      if (!to_delete.empty())
+        check_instance_deletions(to_delete, ready_events);
+      Runtime::trigger_event(gc_event);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MemoryManager::set_garbage_collection_priority(
                                 PhysicalManager *manager, MapperID mapper_id, 
@@ -5370,37 +5262,7 @@ namespace Legion {
       if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
         delete manager;
     }
-
-    //--------------------------------------------------------------------------
-    RtEvent MemoryManager::acquire_instances(
-                                     const std::set<PhysicalManager*> &managers,
-                                     std::vector<bool> &results)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner); // should never be called on the owner
-      assert(results.empty());
 #endif
-      results.resize(managers.size(), false/*assume everything fails*/);
-      // Package everything up and send the request 
-      RtUserEvent done = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(memory);
-        rez.serialize<size_t>(managers.size());
-        for (std::set<PhysicalManager*>::const_iterator it = 
-              managers.begin(); it != managers.end(); it++)
-        {
-          rez.serialize((*it)->did);
-          rez.serialize(*it);
-        }
-        rez.serialize(&results);
-        rez.serialize(done);
-      }
-      runtime->send_acquire_request(owner_space, rez);
-      return done;
-    }
 
     //--------------------------------------------------------------------------
     void MemoryManager::process_instance_request(Deserializer &derez,
@@ -5455,9 +5317,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<bool> *remote_success;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
             MappingInstance result;
             size_t local_footprint;
@@ -5484,20 +5344,9 @@ namespace Legion {
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
-                  rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
-                  rez.serialize(remote_success);
-                  rez.serialize(kind);
-                  bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
-                  rez.serialize<bool>(min_priority);
-                  if (min_priority)
-                  {
-                    rez.serialize(mapper_id);
-                    rez.serialize(processor);
-                  }
                 }
-                else
-                  rez.serialize(kind);
+                rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -5543,9 +5392,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<bool> *remote_success;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
@@ -5573,20 +5420,9 @@ namespace Legion {
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
-                  rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
-                  rez.serialize(remote_success);
-                  rez.serialize(kind);
-                  bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
-                  rez.serialize<bool>(min_priority);
-                  if (min_priority)
-                  {
-                    rez.serialize(mapper_id);
-                    rez.serialize(processor);
-                  }
                 }
-                else
-                  rez.serialize(kind);
+                rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -5620,10 +5456,9 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<bool> *remote_success, *remote_created;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
+            std::atomic<bool> *remote_created;
             derez.deserialize(remote_created);
             MappingInstance result;
             size_t local_footprint;
@@ -5648,22 +5483,10 @@ namespace Legion {
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
-                  rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
-                  rez.serialize(remote_success);
                   rez.serialize(kind);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
-                  if (created)
-                  {
-                    bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
-                    rez.serialize<bool>(min_priority);
-                    if (min_priority)
-                    {
-                      rez.serialize(mapper_id);
-                      rez.serialize(processor);
-                    }
-                  }
                 }
                 else
                   rez.serialize(kind);
@@ -5700,10 +5523,9 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<bool> *remote_success, *remote_created;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
+            std::atomic<bool> *remote_created;
             derez.deserialize(remote_created);
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
@@ -5730,22 +5552,10 @@ namespace Legion {
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
-                  rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
-                  rez.serialize(remote_success);
                   rez.serialize(kind);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
-                  if (created)
-                  {
-                    bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
-                    rez.serialize<bool>(min_priority);
-                    if (min_priority)
-                    {
-                      rez.serialize(mapper_id);
-                      rez.serialize(processor);
-                    }
-                  }
                 }
                 else
                   rez.serialize(kind);
@@ -5768,9 +5578,7 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<bool> *remote_success;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
             MappingInstance result;
             bool success = find_physical_instance(constraints, regions,
@@ -5785,9 +5593,7 @@ namespace Legion {
                 rez.serialize(to_trigger);
                 rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
-                rez.serialize(remote_success);
                 rez.serialize(kind);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
@@ -5809,9 +5615,7 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<bool> *remote_success;
-            derez.deserialize(remote_success);
-            MappingInstance *remote_target;
+            std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
@@ -5828,9 +5632,7 @@ namespace Legion {
                 rez.serialize(to_trigger);
                 rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
-                rez.serialize(remote_success);
                 rez.serialize(kind);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
@@ -5852,7 +5654,7 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::vector<MappingInstance> *remote_target;
+            std::atomic<std::vector<PhysicalManager*>*> *remote_target;
             derez.deserialize(remote_target);
             std::vector<MappingInstance> results;
             find_physical_instances(constraints, regions, results, acquire, 
@@ -5867,7 +5669,6 @@ namespace Legion {
                 rez.serialize<bool>(false); // success
                 rez.serialize(kind);
                 rez.serialize(remote_target);
-                rez.serialize<bool>(acquire);
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
@@ -5894,7 +5695,7 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::vector<MappingInstance> *remote_target;
+            std::atomic<std::vector<PhysicalManager*>*> *remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
@@ -5911,7 +5712,6 @@ namespace Legion {
                 rez.serialize<bool>(false); // success
                 rez.serialize(kind);
                 rez.serialize(remote_target);
-                rez.serialize<bool>(acquire);
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
@@ -5946,17 +5746,15 @@ namespace Legion {
       derez.deserialize(to_trigger);
       bool success;
       derez.deserialize<bool>(success);
-      std::set<RtEvent> preconditions;
+      std::vector<RtEvent> preconditions;
       if (success)
       {
         DistributedID did;
         derez.deserialize(did);
         bool acquire;
         derez.deserialize(acquire);
-        MappingInstance *target;
+        std::atomic<PhysicalManager*> *target;
         derez.deserialize(target);
-        std::atomic<bool> *success_ptr;
-        derez.deserialize(success_ptr);
         RequestKind kind;
         derez.deserialize(kind);
 #ifdef DEBUG_LEGION
@@ -5966,119 +5764,18 @@ namespace Legion {
         RtEvent manager_ready = RtEvent::NO_RT_EVENT;
         PhysicalManager *manager = 
           runtime->find_or_request_instance_manager(did, manager_ready);
-        WrapperReferenceMutator mutator(preconditions);
         // If the manager isn't ready yet, then we need to wait for it
         if (manager_ready.exists())
-          manager_ready.wait();
-        // If we acquired on the owner node, add our own local reference
-        // and then remove the remote DID
-        if (acquire)
-        {
-          LocalReferenceMutator local_mutator;
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-          const RtEvent reference_effects = local_mutator.get_done_event();
-          manager->send_remote_valid_decrement(source, NULL,
-                                               reference_effects);
-          if (reference_effects.exists())
-            mutator.record_reference_mutation_effect(reference_effects);
-        }
-        *target = MappingInstance(manager);
-        success_ptr->store(true);
+          preconditions.push_back(manager_ready);
+        target->store(manager);
         if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
             (kind == FIND_OR_CREATE_LAYOUT))
         {
-          bool *created_ptr;
+          std::atomic<bool> *created_ptr;
           derez.deserialize(created_ptr);
           bool created;
           derez.deserialize(created);
-          *created_ptr = created;
-          bool min_priority = false;
-          MapperID mapper_id = 0;
-          Processor processor = Processor::NO_PROC;
-          if (created)
-          {
-            derez.deserialize(min_priority);
-            if (min_priority)
-            {
-              derez.deserialize(mapper_id);
-              derez.deserialize(processor);
-            }
-          }
-          // Record the instance as a max priority instance
-          bool remove_duplicate_valid = false;
-          // No need to be safe here, we have a valid reference
-          if (created && min_priority)
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-          {
-            AutoLock m_lock(manager_lock);
-            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-              current_instances.find(manager->tree_id);
-            if (tree_finder != current_instances.end())
-            {
-              TreeInstances::const_iterator finder = 
-                tree_finder->second.find(manager);
-            if (finder == tree_finder->second.end())
-              tree_finder->second[manager] = InstanceInfo();  
-            }
-            else
-              current_instances[manager->tree_id][manager] = InstanceInfo();
-            if (created && min_priority)
-            {
-              std::pair<MapperID,Processor> key(mapper_id,processor);
-              InstanceInfo &info = current_instances[manager->tree_id][manager];
-              if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
-                remove_duplicate_valid = true;
-              else
-                info.min_priority = LEGION_GC_NEVER_PRIORITY;
-              info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
-            }
-          }
-          if (remove_duplicate_valid && 
-              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-            delete manager;
-        }
-        else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
-                 (kind == CREATE_INSTANCE_LAYOUT))
-        {
-          bool min_priority;
-          derez.deserialize(min_priority);
-          MapperID mapper_id = 0;
-          Processor processor = Processor::NO_PROC;
-          if (min_priority)
-          {
-            derez.deserialize(mapper_id);
-            derez.deserialize(processor);
-          }
-          bool remove_duplicate_valid = false;
-          if (min_priority)
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-          {
-            std::pair<MapperID,Processor> key(mapper_id,processor);
-            AutoLock m_lock(manager_lock);
-            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-              current_instances.find(manager->tree_id);
-            if (tree_finder != current_instances.end())
-            {
-              TreeInstances::const_iterator finder = 
-                tree_finder->second.find(manager);
-            if (finder == tree_finder->second.end())
-              tree_finder->second[manager] = InstanceInfo();  
-            }
-            else
-              current_instances[manager->tree_id][manager] = InstanceInfo();
-            if (min_priority)
-            {
-              InstanceInfo &info = current_instances[manager->tree_id][manager];
-              if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
-                remove_duplicate_valid = true;
-              else
-                info.min_priority = LEGION_GC_NEVER_PRIORITY;
-              info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
-            }
-          }
-          if (remove_duplicate_valid && 
-              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-            delete manager;
+          created_ptr->store(created);
         }
       }
       else
@@ -6087,13 +5784,13 @@ namespace Legion {
         derez.deserialize(kind);
         if ((kind == FIND_MANY_CONSTRAINTS) || (kind == FIND_MANY_LAYOUT))
         {
-          std::vector<MappingInstance> *target;
+          std::atomic<std::vector<PhysicalManager*>*> *target;
           derez.deserialize(target);
-          bool acquire;
-          derez.deserialize<bool>(acquire);
           size_t num_insts;
           derez.deserialize(num_insts);
-          WrapperReferenceMutator mutator(preconditions);
+          std::vector<PhysicalManager*> *results = 
+            new std::vector<PhysicalManager*>();
+          results->reserve(num_insts);
           for (unsigned idx = 0; idx < num_insts; idx++)
           {
             DistributedID did;
@@ -6103,21 +5800,10 @@ namespace Legion {
               runtime->find_or_request_instance_manager(did, manager_ready);
             // If the manager isn't ready yet, then we need to wait for it
             if (manager_ready.exists())
-              manager_ready.wait();
-            // If we acquired on the owner node, add our own local reference
-            // and then remove the remote DID
-            if (acquire)
-            {
-              LocalReferenceMutator local_mutator;
-              manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-              const RtEvent reference_effects = local_mutator.get_done_event();
-              manager->send_remote_valid_decrement(source, NULL,
-                                                   reference_effects);
-              if (reference_effects.exists())
-                mutator.record_reference_mutation_effect(reference_effects);
-            }
-            target->push_back(MappingInstance(manager));
+              preconditions.push_back(manager_ready);
+            results->push_back(manager);
           }
+          target->store(results);
         }
       }
       // Unpack the constraint responses
@@ -6237,113 +5923,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::process_acquire_request(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<std::pair<unsigned,PhysicalManager*> > successes;
-      size_t num_managers;
-      derez.deserialize(num_managers);
-      for (unsigned idx = 0; idx < num_managers; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        PhysicalManager *remote_manager; // remote pointer, never use!
-        derez.deserialize(remote_manager);
-        PhysicalManager *manager = NULL;
-        // Prevent changes until we can get a resource reference
-        {
-          AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-          DistributedCollectable *dc = 
-            runtime->weak_find_distributed_collectable(did);
-          if (dc != NULL)
-          {
-#ifdef DEBUG_LEGION
-            manager = dynamic_cast<PhysicalManager*>(dc);
-#else
-            manager = static_cast<PhysicalManager*>(dc);
-#endif
-            manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-          }
-        }
-        if (manager == NULL)
-          continue;
-        // Otherwise try to acquire it locally
-        if (!manager->acquire_instance(REMOTE_DID_REF, NULL))
-        {
-          // Failed to acquire so this is not helpful
-          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            delete manager;
-        }
-        else // just remove our reference since we succeeded
-        {
-          successes.push_back(
-              std::pair<unsigned,PhysicalManager*>(idx, remote_manager));
-          manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
-        }
-      }
-      std::vector<bool> *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      // See if we had any failures
-      if (!successes.empty())
-      {
-        // Send back the failures
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(memory);
-          rez.serialize(target);
-          rez.serialize<size_t>(successes.size());
-          for (std::vector<std::pair<unsigned,PhysicalManager*> >::
-                const_iterator it = successes.begin(); 
-                it != successes.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          rez.serialize(to_trigger);
-        }
-        runtime->send_acquire_response(source, rez);
-      }
-      else // if everything failed, this easy, just trigger
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::process_acquire_response(Deserializer &derez,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<bool> *target;
-      derez.deserialize(target);
-      size_t num_successes;
-      derez.deserialize(num_successes);
-      std::set<RtEvent> preconditions;
-      for (unsigned idx = 0; idx < num_successes; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        (*target)[index] = true;
-        PhysicalManager *manager;
-        derez.deserialize(manager);
-        LocalReferenceMutator local_mutator;
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-        const RtEvent reference_effects = local_mutator.get_done_event();
-        manager->send_remote_valid_decrement(source, NULL, reference_effects);
-        if (reference_effects.exists())
-          preconditions.insert(reference_effects);
-      }
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      if (!preconditions.empty())
-        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
-      else
-        Runtime::trigger_event(to_trigger);
-    }
-    
-    //--------------------------------------------------------------------------
     bool MemoryManager::find_satisfying_instance(
                                 const LayoutConstraintSet &constraints,
                                 const std::vector<LogicalRegion> &regions,
@@ -6355,24 +5934,20 @@ namespace Legion {
         return false;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id(); 
-      do 
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
+          return false;
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
@@ -6424,24 +5999,20 @@ namespace Legion {
         return false;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
-      do
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
+          return false;
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
@@ -6494,24 +6065,20 @@ namespace Legion {
         return;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id(); 
-      do 
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
+          return;
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       if (!candidates.empty())
       {
@@ -6560,24 +6127,20 @@ namespace Legion {
         return;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
-      do
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
+          return;
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          // Skip it if has already been collected
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       if (!candidates.empty())
       {
@@ -6626,25 +6189,20 @@ namespace Legion {
         return false;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
-      do
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
+          return false;
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
-
-          // Only consider ones that are currently valid
-          if (it->second.current_state != VALID_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
@@ -6697,24 +6255,20 @@ namespace Legion {
         return false;
       std::deque<PhysicalManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
-      do
       {
-        // Hold the lock while iterating here
+        // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
         std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
           current_instances.find(tree_id);
         if (finder == current_instances.end())
-          break;
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+          return false;
+        for (TreeInstances::const_iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
         {
-          // Only consider ones that are currently valid
-          if (it->second.current_state != VALID_STATE)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      } while (false);
+      }
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
@@ -6815,61 +6369,207 @@ namespace Legion {
 #endif
       // First, just try to make the instance as is, if it works we are done 
       size_t needed_size;
-      PhysicalManager *manager = builder.create_physical_instance(
+      PhysicalManager *result = builder.create_physical_instance(
           runtime->forest,collective,point,unsat_kind,unsat_index,&needed_size);
       if (footprint != NULL)
         *footprint = needed_size;
-      if ((manager != NULL) || (needed_size == 0))
-        return manager;
-      // If that didn't work then we're going to try to delete some instances
-      // from this memory to make space. We do this in four separate passes:
-      // 1. Delete immediately collectable objects larger than what we need
-      // 2. Delete immediately collectable objects smaller than what we need
-      // 3. Delete deferred collectable objects larger than what we need
-      // 4. Delete deferred collectable objects smaller than what we need
-      // If we get through all these and still can't collect then we're screwed
-      // Keep trying to delete large collectable instances first
-      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
-                                       true/*large only*/))
+      if ((result != NULL) || (needed_size == 0))
+        return result;
+      // Make sure that garbage collection is atomic and only allocator
+      // is attempting to delete instances at a time
+      const RtUserEvent gc_event = Runtime::create_rt_user_event();
+      const RtEvent wait_on = gc_precondition.exchange(gc_event);
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      // If that didn't work then we need to try to delete instances in order
+      // to make space for performing the allocation. We sort instances on
+      // three dimensions: GC Priority, collectable state, and size. The 
+      // mapper controls GC priority to determine which order we attempt
+      // to delete instances. After that we prefer to delete instances which
+      // are collectable first over ones that still have outstanding users.
+      // Finally, we prefer to delete instances that are closest in size to 
+      // the target instance size, but bigger ones over smaller ones. After
+      // we've succeeded in deleting enough instances with the same total size
+      // as the footprint we'll try to do another allocation. If that doesn't
+      // succeed then we'll continue deleting until we succeed or we exhaust
+      // the set of instances eligible for deletion.
+      struct GCEntry {
+      public:
+        inline GCEntry(void)
+          : manager(NULL), diff(0), abs_diff(0) { }
+        inline GCEntry(PhysicalManager *man, size_t needed, RtEvent r)
+          : manager(man), ready(r)
+        {
+          if (needed <= manager->instance_footprint)
+          {
+            diff = manager->instance_footprint - needed;
+            abs_diff = diff;
+          }
+          else
+          {
+            abs_diff = needed - manager->instance_footprint;
+            diff = -long(abs_diff);
+          }
+        }
+        inline bool operator<(const GCEntry &rhs) const
+        {
+          // Prefer instances that are closest in size to the needed size
+          if (abs_diff < rhs.abs_diff)
+            return false;
+          if (abs_diff > rhs.abs_diff)
+            return true;
+          // If they're the same relative distance, then prefer larger ones
+          if (diff < rhs.diff)
+            return false;
+          if (diff > rhs.diff)
+            return true;
+          // Prefer instances for which we don't have to wait for ready
+          if (!ready.exists() && rhs.ready.exists())
+            return false;
+          if (ready.exists() && !rhs.ready.exists())
+            return true;
+          // Make sure they're not the same manager
+          return std::less<PhysicalManager*>()(manager, rhs.manager); 
+        }
+      public:
+        PhysicalManager *manager;
+        RtEvent ready;
+        long diff;
+        size_t abs_diff;
+      };
+      std::map<GCPriority,std::vector<GCEntry> > eligible;
       {
-        // See if we can make the instance
-        PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, collective, point, unsat_kind, unsat_index);
-        if (result != NULL)
-          return result;
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator cit =
+              current_instances.begin(); cit != current_instances.end(); cit++)
+        {
+          for (TreeInstances::const_iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            // Don't even both checking ones that have never-collect priority
+            if (it->second == LEGION_GC_NEVER_PRIORITY)
+              continue;
+            RtEvent ready;
+            if (it->first->try_collection(runtime->address_space, ready))
+            {
+              eligible[it->second].emplace_back(
+                  GCEntry(it->first, needed_size, ready));
+            }
+          }
+        }
       }
-      // Then try deleting as many small collectable instances next
-      while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE,
-                                       false/*large only*/))
+      std::vector<PhysicalManager*> deleted;
+      while (!eligible.empty())
       {
-        // See if we can make the instance
-        PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, collective, point, unsat_kind, unsat_index);
-        if (result != NULL)
-          return result;
+        // Collect from the highest priority to the lowest
+        std::map<GCPriority,std::vector<GCEntry> >::iterator eit = 
+          --eligible.end();
+        if (result == NULL)
+        {
+          // Sort the managers here so the ones we most want to start with 
+          // are at the end of the vector and we can pop them off the back
+          std::sort(eit->second.begin(), eit->second.end(), 
+                    std::less<GCEntry>());
+          // Then go through and try to delete them, once we've deleted enough
+          // then we can try to do an allocation until we've exhausted everything
+          while (!eit->second.empty())
+          {
+            // Pop the next one off the back
+            const GCEntry first = eit->second.back();
+            eit->second.pop_back();
+            if (first.ready.exists() && !first.ready.has_triggered())
+              first.ready.wait();
+            if (!first.manager->verify_collection())
+              continue;
+            deleted.push_back(first.manager);
+            size_t hole_size = first.manager->instance_footprint; 
+            while ((hole_size < needed_size) && !eit->second.empty())
+            {
+              // Greedily find as few instances as we can to get the needed size
+              // Find either the smallest one that exceeds the hole size or the
+              // biggest one that doesn't. 
+              int best = eit->second.size() - 1;
+              size_t best_size = hole_size + 
+                eit->second[best].manager->instance_footprint;
+              bool under = (best_size < needed_size);
+              for (int idx = best-1; idx >= 0; idx--)
+              {
+                size_t next_size = hole_size + 
+                  eit->second[idx].manager->instance_footprint;
+                if (next_size < needed_size)
+                {
+                  if (under && (best_size <= next_size))
+                  {
+                    best = idx;
+                    best_size = next_size;
+                  }
+                }
+                else
+                {
+                  if (under || (next_size <= best_size))
+                  {
+                    best = idx;
+                    best_size = next_size;
+                  }
+                }
+              }
+              const GCEntry next = eit->second[best];
+              eit->second.erase(eit->second.begin() + best);
+              if (next.ready.exists() && !next.ready.has_triggered())
+                next.ready.wait();
+              if (next.manager->verify_collection())
+              {
+                deleted.push_back(next.manager);
+                hole_size = best_size;
+              }
+            }
+            // Try to perform the allocation now
+            result = builder.create_physical_instance(
+                runtime->forest, collective, point, unsat_kind, unsat_index);
+            if (result == NULL)
+              continue;
+            // If we succeed then unlock the deletions for the remainder 
+            for (std::vector<GCEntry>::const_iterator it =
+                  eit->second.begin(); it != eit->second.end(); it++)
+              it->manager->release_collection(runtime->address_space);
+            break;
+          }
+        }
+        else
+        {
+          // We already found our manager so we're just releasing here
+          for (std::vector<GCEntry>::const_iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->manager->release_collection(runtime->address_space);
+        }
+        eligible.erase(eit);
       }
-      // Now switch to large objects still in the active state
-      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                       true/*large only*/))
+      // Remove the deleted instances from the current instances
+      if (!deleted.empty())
       {
-        // See if we can make the instance
-        PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, collective, point, unsat_kind, unsat_index);
-        if (result != NULL)
-          return result;
+        AutoLock m_lock(manager_lock);
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              deleted.begin(); it != deleted.end(); it++)
+        {
+          std::map<RegionTreeID,TreeInstances>::iterator current_finder =
+            current_instances.find((*it)->tree_id);
+#ifdef DEBUG_LEGION
+          assert(current_finder != current_instances.end());
+#endif
+          TreeInstances::iterator finder = current_finder->second.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != current_finder->second.end());
+#endif
+          current_finder->second.erase(finder);
+          if (current_finder->second.empty())
+            current_instances.erase(current_finder);
+          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            delete (*it);
+        }
       }
-      // Finally switch to doing small objects in the active state
-      while (!delete_by_size_and_state(needed_size, ACTIVE_STATE,
-                                       false/*large only*/))
-      {
-        // See if we can make the instance
-        PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, collective, point, unsat_kind, unsat_index);
-        if (result != NULL)
-          return result;
-      }
-      // If we made it here well then we failed 
-      return NULL;
+      // Trigger the event showing we're done with the collection
+      Runtime::trigger_event(gc_event);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -6881,28 +6581,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
-      // First do the insertion
-      // If we're going to add a valid reference, mark this valid early
-      // to avoid races with deletions
-      bool early_valid = acquire || (priority == LEGION_GC_NEVER_PRIORITY);
-      size_t instance_size = manager->get_instance_size();
-      // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      {
-        AutoLock m_lock(manager_lock);
-        TreeInstances &insts = current_instances[manager->tree_id];
-#ifdef DEBUG_LEGION
-        assert(insts.find(manager) == insts.end());
-#endif
-        InstanceInfo &info = insts[manager];
-        if (early_valid)
-          info.current_state = VALID_STATE;
-        info.min_priority = priority;
-        info.instance_size = instance_size;
-        info.mapper_priorities[
-          std::pair<MapperID,Processor>(mapper_id,p)] = priority;
-      }
-      // Now we can add any references that we need to
+      // Add references first to prevent races with collection
       if (acquire)
       {
         if (remote)
@@ -6910,8 +6589,22 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
+      else if (remote)
+        manager->add_base_resource_ref(REMOTE_DID_REF);
+      // Since we're going to put this in the table add a reference
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      // If we're a never GC priority then we can add that reference too
       if (priority == LEGION_GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
+      // Record the manager here as being eligible for collection
+      {
+        AutoLock m_lock(manager_lock);
+        TreeInstances &insts = current_instances[manager->tree_id];
+#ifdef DEBUG_LEGION
+        assert(insts.find(manager) == insts.end());
+#endif
+        insts[manager] = priority;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6938,10 +6631,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
-      // First do the insertion
-      // If we're going to add a valid reference, mark this valid early
-      // to avoid races with deletions
-      size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
@@ -6950,118 +6639,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(insts.find(manager) == insts.end());
 #endif
-        InstanceInfo &info = insts[manager];
-        info.instance_size = instance_size;
+        insts[manager] = LEGION_GC_NEVER_PRIORITY;
       }
       return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MemoryManager::delete_by_size_and_state(const size_t needed_size,
-                                          InstanceState state, bool larger_only)
-    //--------------------------------------------------------------------------
-    {
-      bool pass_complete = true;
-      size_t total_deleted = 0;
-      std::map<PhysicalManager*,RtEvent> to_delete;
-      {
-        AutoLock m_lock(manager_lock);
-        if (state == COLLECTABLE_STATE)
-        {
-          for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
-               current_instances.begin(); cit != current_instances.end(); cit++)
-          {
-            for (TreeInstances::const_iterator it = 
-                  cit->second.begin(); it != cit->second.end(); it++)
-            {
-              if (it->second.current_state != COLLECTABLE_STATE)
-                continue;
-              const size_t inst_size = it->first->get_instance_size();
-              if ((inst_size >= needed_size) || !larger_only)
-              {
-                // Resource references will flow out
-                to_delete[it->first] = RtEvent::NO_RT_EVENT;
-                total_deleted += inst_size;
-                if (total_deleted >= needed_size)
-                {
-                  // If we exit early we are not done with this pass
-                  pass_complete = false;
-                  break;
-                }
-              }
-            }
-            if (!pass_complete)
-              break;
-          }
-          if (!to_delete.empty())
-          {
-            for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              std::map<RegionTreeID,TreeInstances>::iterator finder = 
-                current_instances.find(it->first->tree_id);
-#ifdef DEBUG_LEGION
-              assert(finder != current_instances.end());
-#endif
-              finder->second.erase(it->first);
-              if (finder->second.empty())
-                current_instances.erase(finder);
-            }
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(state == ACTIVE_STATE);
-#endif
-          for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
-               current_instances.begin(); cit != current_instances.end(); cit++)
-          {
-            for (TreeInstances::iterator it = 
-                  cit->second.begin(); it != cit->second.end(); it++)
-            {
-              if (it->second.current_state != ACTIVE_STATE)
-                continue;
-              const size_t inst_size = it->first->get_instance_size();
-              if ((inst_size >= needed_size) || !larger_only)
-              {
-                RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-                to_delete[it->first] = deferred_collect;
-                // Add our own reference here as this flows out
-                it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-                // Update the state information
-                it->second.current_state = PENDING_COLLECTED_STATE;
-                it->second.deferred_collect = deferred_collect;
-#ifdef LEGION_MALLOC_INSTANCES
-                pending_collectables[deferred_collect] = 0; 
-#endif
-                total_deleted += inst_size;
-                if (total_deleted >= needed_size)
-                {
-                  // If we exit early we are not done with this pass
-                  pass_complete = false;
-                  break;
-                }
-              }
-            }
-            if (!pass_complete)
-              break;
-          }
-        }
-      }
-      // Now that we've release the lock we can do the deletions
-      // and remove any references that we are holding
-      if (!to_delete.empty())
-      {
-        for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          it->first->perform_deletion(it->second);
-          if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            delete it->first;
-        }
-      }
-      return pass_complete;
     }
 
     //--------------------------------------------------------------------------
@@ -7091,7 +6671,6 @@ namespace Legion {
       // Either delete the instance now or do a deferred deltion
       // that will delete the instance once all operations are
       // done using it
-      RtEvent deferred_collect = RtEvent::NO_RT_EVENT;
       {
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
@@ -7099,32 +6678,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(tree_finder != current_instances.end());
 #endif
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-          tree_finder->second.find(manager);
+        TreeInstances::iterator finder = tree_finder->second.find(manager);
 #ifdef DEBUG_LEGION
         assert(finder != tree_finder->second.end());
-        assert(finder->second.current_state != PENDING_COLLECTED_STATE);
-        assert(finder->second.current_state != PENDING_ACQUIRE_STATE);
 #endif
-        if (finder->second.current_state != COLLECTABLE_STATE)
-        {
-          finder->second.current_state = PENDING_COLLECTED_STATE;
-          finder->second.deferred_collect = Runtime::create_rt_user_event();
-          deferred_collect = finder->second.deferred_collect;
-          manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-#ifdef LEGION_MALLOC_INSTANCES
-          pending_collectables[deferred_collect] = 0; 
-#endif
-        }
-        else // Reference will flow out
-        {
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-        }
+        // Reference will flow out
+        tree_finder->second.erase(finder);
+        if (tree_finder->second.empty())
+          current_instances.erase(tree_finder);
       }
       // Perform the deletion contingent on references being removed
-      manager->perform_deletion(deferred_collect);
+      manager->perform_deletion();
       if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
         delete manager;
       // No conditions on being done with this now
@@ -8369,6 +7933,11 @@ namespace Legion {
           case DISTRIBUTED_GC_UPDATE:
             {
               runtime->handle_did_remote_gc_update(derez); 
+              break;
+            }
+          case DISTRIBUTED_RESOURCE_UPDATE:
+            {
+              runtime->handle_did_remote_resource_update(derez);
               break;
             }
           case DISTRIBUTED_CREATE_ADD:
@@ -16538,6 +16107,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_RESOURCE_UPDATE>(rez,
+                                                        true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_add_create_reference(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -18183,6 +17761,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_did_create_add(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -18904,11 +18489,7 @@ namespace Legion {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      Memory target_memory;
-      derez.deserialize(target_memory);
-      MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_acquire_request(derez, source);
+      PhysicalManager::handle_acquire_request(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -18916,11 +18497,7 @@ namespace Legion {
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      Memory target_memory;
-      derez.deserialize(target_memory);
-      MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_acquire_response(derez, source);
+      PhysicalManager::handle_acquire_response(derez);
     }
 
     //--------------------------------------------------------------------------

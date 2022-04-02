@@ -2453,24 +2453,11 @@ namespace Legion {
         resume_mapper_call(ctx);
         return true;
       }
-      else if (manager->is_collective_manager() || manager->is_owner())
+      else
       {
         resume_mapper_call(ctx);
         return false;
       }
-      std::set<PhysicalManager*> instances; 
-      instances.insert(manager);
-      std::vector<bool> results;
-      IndividualManager *individual = manager->as_individual_manager();
-      RtEvent wait_on = 
-        individual->memory_manager->acquire_instances(instances, results);
-      if (wait_on.exists())
-        wait_on.wait(); // wait for the results to be ready
-      bool success = results[0];
-      if (success)
-        record_acquired_instance(ctx, manager, false/*created*/);
-      resume_mapper_call(ctx);
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -2490,18 +2477,9 @@ namespace Legion {
       if (instances.size() == 1)
         return acquire_instance(ctx, instances[0]);
       pause_mapper_call(ctx);
-      // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      bool local_acquired = perform_local_acquires(ctx, instances,
-                                                   acquire_requests, NULL);
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
+      const bool all_acquired = perform_acquires(ctx, instances);
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
@@ -2536,10 +2514,9 @@ namespace Legion {
       }
       pause_mapper_call(ctx); 
       // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
       std::vector<unsigned> to_erase;
-      bool local_acquired = perform_local_acquires(ctx, instances,
-          acquire_requests, &to_erase, filter_acquired_instances);
+      const bool all_acquired =
+        perform_acquires(ctx, instances, &to_erase, filter_acquired_instances);
       // Filter any invalid local instances
       if (!to_erase.empty())
       {
@@ -2549,44 +2526,8 @@ namespace Legion {
           instances.erase(instances.begin()+(*it)); 
         to_erase.clear();
       }
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
-      if (!remote_acquired)
-      {
-        std::map<PhysicalManager*,unsigned> &already_acquired =
-          *(ctx->acquired_instances);
-        // Figure out which instances weren't deleted yet
-        for (unsigned idx = 0; idx < instances.size(); idx++)
-        {
-          InstanceManager *manager = instances[idx].impl;
-          if (manager->is_virtual_manager())
-            continue;
-          if (already_acquired.find(manager->as_physical_manager()) ==
-              already_acquired.end())
-          {
-            if (!filter_acquired_instances)
-              to_erase.push_back(idx);
-          }
-          else
-          {
-            if (filter_acquired_instances)
-              to_erase.push_back(idx);
-          }
-        }
-        if (!to_erase.empty())
-        {
-          // Erase from the back
-          for (std::vector<unsigned>::const_reverse_iterator it = 
-                to_erase.rbegin(); it != to_erase.rend(); it++)
-            instances.erase(instances.begin()+(*it));
-        }
-      }
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
@@ -2604,22 +2545,15 @@ namespace Legion {
       }
       pause_mapper_call(ctx); 
       // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      bool local_acquired = true;
+      bool all_acquired = true;
       for (std::vector<std::vector<MappingInstance> >::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, NULL))
-          local_acquired = false;
+        if (!perform_acquires(ctx, *it))
+          all_acquired = false;
       }
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
@@ -2638,16 +2572,14 @@ namespace Legion {
       }
       pause_mapper_call(ctx);
       // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
+      bool all_acquired = true;
       std::vector<unsigned> to_erase;
-      bool local_acquired = true;
       for (std::vector<std::vector<MappingInstance> >::iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, 
-                          &to_erase, filter_acquired_instances))
+        if (!perform_acquires(ctx, *it, &to_erase, filter_acquired_instances))
         {
-          local_acquired = false;
+          all_acquired = false;
           // Erase from the back
           for (std::vector<unsigned>::const_reverse_iterator rit = 
                 to_erase.rbegin(); rit != to_erase.rend(); rit++)
@@ -2655,58 +2587,15 @@ namespace Legion {
           to_erase.clear();
         }
       }
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
-      if (!remote_acquired)
-      {
-        std::map<PhysicalManager*,unsigned> &already_acquired =
-          *(ctx->acquired_instances); 
-        std::vector<unsigned> to_erase;
-        for (std::vector<std::vector<MappingInstance> >::iterator it = 
-              instances.begin(); it != instances.end(); it++)
-        {
-          std::vector<MappingInstance> &current = *it;
-          for (unsigned idx = 0; idx < current.size(); idx++)
-          {
-            InstanceManager *manager = current[idx].impl;
-            if (manager->is_virtual_manager())
-              continue;
-            if (already_acquired.find(manager->as_physical_manager()) ==
-                already_acquired.end())
-            {
-              if (!filter_acquired_instances)
-                to_erase.push_back(idx);
-            }
-            else
-            {
-              if (filter_acquired_instances)
-                to_erase.push_back(idx);
-            }
-          }
-          if (!to_erase.empty())
-          {
-            // Erase from the back
-            for (std::vector<unsigned>::const_reverse_iterator rit = 
-                  to_erase.rbegin(); rit != to_erase.rend(); rit++)
-              current.erase(current.begin()+(*rit));
-            to_erase.clear();
-          }
-        }
-      }
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::perform_local_acquires(MappingCallInfo *info,
-                      const std::vector<MappingInstance> &instances,
-                      std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                      std::vector<unsigned> *to_erase,
-                      const bool filter_acquired_instances)
+    bool MapperManager::perform_acquires(MappingCallInfo *info,
+                                  const std::vector<MappingInstance> &instances,
+                                  std::vector<unsigned> *to_erase,
+                                  const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalManager*,unsigned> &already_acquired = 
@@ -2736,61 +2625,15 @@ namespace Legion {
           already_acquired[manager] = 1;
           if ((to_erase != NULL) && filter_acquired_instances)
             to_erase->push_back(idx);
-          continue;
         }
-        // if we failed on the owner node, it will never work
-        else if (manager->is_collective_manager() || manager->is_owner()) 
+        else
         {
           if ((to_erase != NULL) && !filter_acquired_instances)
             to_erase->push_back(idx);
           local_acquired = false;
-          continue; 
         }
-        IndividualManager *individual = manager->as_individual_manager();
-        acquire_requests[individual->memory_manager].instances.insert(manager);
       }
       return local_acquired;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MapperManager::perform_remote_acquires(MappingCallInfo *info,
-                       std::map<MemoryManager*,AcquireStatus> &acquire_requests)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> done_events;
-      // Issue the requests and see what we need to wait on
-      for (std::map<MemoryManager*,AcquireStatus>::iterator it = 
-            acquire_requests.begin(); it != acquire_requests.end(); it++)
-      {
-        RtEvent wait_on = it->first->acquire_instances(it->second.instances,
-                                                       it->second.results);
-        if (wait_on.exists())
-          done_events.insert(wait_on);          
-      }
-      // See if we have to wait for our results to be done
-      if (!done_events.empty())
-      {
-        RtEvent ready = Runtime::merge_events(done_events);
-        ready.wait();
-      }
-      // Now find out which ones we acquired and which ones didn't
-      bool all_acquired = true;
-      for (std::map<MemoryManager*,AcquireStatus>::const_iterator req_it = 
-            acquire_requests.begin(); req_it != acquire_requests.end();req_it++)
-      {
-        unsigned idx = 0;
-        for (std::set<PhysicalManager*>::const_iterator it =  
-              req_it->second.instances.begin(); it != 
-              req_it->second.instances.end(); it++, idx++)
-        {
-          if (req_it->second.results[idx])
-            // record that we acquired it
-            record_acquired_instance(info, *it, false/*created*/); 
-          else
-            all_acquired = false;
-        }
-      }
-      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
