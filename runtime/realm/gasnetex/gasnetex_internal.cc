@@ -1863,6 +1863,7 @@ namespace Realm {
       int ready_packets = head->pktbuf_ready_packets.load_acquire();
       while(head->pktbuf_sent_packets < ready_packets) {
 	bool pkt_sent = false;
+        bool force_critical = false;
 	OutbufMetadata::PktType pkttype = head->pktbuf_pkt_types[head->pktbuf_sent_packets].load();
 
 	// see if we can batch multiple messages into a single packet
@@ -2372,13 +2373,25 @@ namespace Realm {
 
               gex_TM_t pair = gex_TM_Pair(internal->eps[src_ep_index],
                                           tgt_ep_index);
-              gex_Event_t rc_event = gex_RMA_PutNB(pair,
-                                                   tgt_rank,
-                                                   reinterpret_cast<void *>(meta->dest_addr),
-                                                   const_cast<void *>(meta->src_addr),
-                                                   meta->payload_bytes,
-                                                   lc_opt,
-                                                   flags);
+
+              gex_Event_t rc_event = GEX_EVENT_NO_OP;
+#ifndef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
+              // conduit isn't promising to return right away in the face of
+              //  back-pressure, so don't even try in immediate mode
+              if(immediate_mode) {
+                // further retries in immediate mode won't help either...
+                force_critical = true;
+              } else
+#endif
+              {
+                rc_event = gex_RMA_PutNB(pair,
+                                         tgt_rank,
+                                         reinterpret_cast<void *>(meta->dest_addr),
+                                         const_cast<void *>(meta->src_addr),
+                                         meta->payload_bytes,
+                                         lc_opt,
+                                         flags);
+              }
 
               if(rc_event != GEX_EVENT_NO_OP) {
                 // successful injection
@@ -2428,8 +2441,12 @@ namespace Realm {
 	    immediate_mode = true;
 	} else {
 	  // if we failed to send a packet, stop trying and reenqueue ourselves
-	  if(first_fail_time < 0)
-	    first_fail_time = Clock::current_time_in_nanoseconds();
+          if(force_critical) {
+            first_fail_time = 0; // so long ago we're guaranteed to be critical
+          } else {
+            if(first_fail_time < 0)
+              first_fail_time = Clock::current_time_in_nanoseconds();
+          }
 	  // always go to the poller after hitting backpressure
 	  log_gex_xpair.debug() << "re-enqueue (send failed) " << this;
           push_mutex_check.unlock();
@@ -3860,6 +3877,12 @@ namespace Realm {
         // TODO: will we never need to make a put vs. get decision on a
         //  per-endpoint basis?
         bool use_rmaput = (!use_long && module->cfg_use_rma_put);
+#ifndef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
+        // if we're using RMA put and the conduit doesn't actually honor
+        //  GEX_FLAG_IMMEDIATE, disable immediate mode
+        if(use_rmaput)
+          imm_ok = false;
+#endif
 
 	XmitSrcDestPair *xpair;
 	if(use_long || use_rmaput) {
@@ -4620,6 +4643,7 @@ namespace Realm {
 
     case PreparedMessage::STRAT_PUT_IMMEDIATE:
       {
+#ifdef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
 	// rma put, header already in a PendingPutHeader, attempt to inject
         //  without using a pbuf
 
@@ -4709,6 +4733,11 @@ namespace Realm {
                                  payload_base, payload_size,
                                  msg->dest_payload_addr);
         }
+#else
+        // should not have chosen this in prepare_message...
+        log_gex.fatal() << "STRAT_PUT_IMMEDIATE used without immediate support!";
+        abort();
+#endif
         break;
       }
 

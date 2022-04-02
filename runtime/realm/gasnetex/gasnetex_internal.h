@@ -73,6 +73,17 @@
   #endif
 #endif
 
+// the GASNet-EX API defines the GEX_FLAG_IMMEDIATE flag to be a best-effort
+//  thing, with calls that accept the flag still being allowed to block -
+//  as of 2022.3.0, for any conduit other than aries "best effort" is actually
+//  "no effort" for RMA operations and we want to avoid using them in
+//  immediate-mode situations
+// NOTE: as with the NPAM stuff above, we'll pretend that MPI honors it as
+//  well so that we get code coverage in CI tests
+#if defined(GASNET_CONDUIT_ARIES) || defined(GASNET_CONDUIT_MPI)
+  #define REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
+#endif
+
 // eliminate GASNet warnings for unused static functions
 #include <gasnet_tools.h>
 REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
