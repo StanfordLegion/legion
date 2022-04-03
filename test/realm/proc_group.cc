@@ -199,7 +199,7 @@ void top_level_task(const void *args, size_t arglen,
 	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
-    usleep(10000);
+    usleep(100000);
   }
   log_app.info() << count << " tasks launched";
 

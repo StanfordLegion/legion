@@ -157,6 +157,19 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class ModuleSpecificInfo
+  //
+
+  ModuleSpecificInfo::ModuleSpecificInfo()
+    : next(0)
+  {}
+
+  ModuleSpecificInfo::~ModuleSpecificInfo()
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ModuleRegistrar
   //
 

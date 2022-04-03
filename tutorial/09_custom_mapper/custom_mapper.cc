@@ -359,7 +359,10 @@ AdversarialMapper::AdversarialMapper(Machine m,
             break;
           }
         default:
-          assert(false);
+	  {
+	    printf("  Memory " IDFMT " is unknown (kind=%d)\n", it->id, it->kind());
+	    break;
+	  }
       }
     }
 

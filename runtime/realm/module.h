@@ -88,6 +88,18 @@ namespace Realm {
     std::string name;
   };
 
+  // module-specific information can be attached to processors/memories/etc.
+  //  as a sort of "mix-in", providing module-specific data and/or methods
+  // finding module-specific info is based on knowing the type and finding it
+  //  via dynamic casts
+  class ModuleSpecificInfo {
+  public:
+    ModuleSpecificInfo();
+    virtual ~ModuleSpecificInfo();
+
+    ModuleSpecificInfo *next;
+  };
+
   // helper class for module registration - supports modules compiled in statically
   //  and the other for dynamically-loaded modules
 

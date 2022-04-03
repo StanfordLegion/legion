@@ -134,6 +134,14 @@ namespace Realm {
 
     Memory::Kind get_kind(void) const;
 
+    // TODO: lift into a helper superclass?
+    template <typename T>
+    T *find_module_specific();
+    template <typename T>
+    const T *find_module_specific() const;
+
+    void add_module_specific(ModuleSpecificInfo *info);
+
     struct InstanceList {
       std::vector<RegionInstanceImpl *> instances;
       std::vector<size_t> free_list;
@@ -146,6 +154,7 @@ namespace Realm {
     MemoryKind kind;
     Memory::Kind lowlevel_kind;
     NetworkSegment *segment;
+    ModuleSpecificInfo *module_specific;
 
     // we keep a dedicated instance list for locally created
     //  instances, but we use a map indexed by creator node for others,
