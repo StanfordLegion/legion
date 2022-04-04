@@ -43,6 +43,8 @@ pub enum MemKind {
     L3Cache = 10,
     L2Cache = 11,
     L1Cache = 12,
+    GPUManaged = 13,
+    GPUDynamic = 14,
 }
 
 impl fmt::Display for MemKind {

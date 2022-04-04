@@ -365,6 +365,8 @@ impl fmt::Display for MemKindShort {
             MemKind::L3Cache => write!(f, "l3"),
             MemKind::L2Cache => write!(f, "l2"),
             MemKind::L1Cache => write!(f, "l1"),
+            MemKind::GPUManaged => write!(f, "uvm"),
+            MemKind::GPUDynamic => write!(f, "gpu-dyn"),
         }
     }
 }
@@ -387,7 +389,8 @@ impl fmt::Display for MemShort<'_> {
             | MemKind::Disk
             | MemKind::HDF5
             | MemKind::File
-            | MemKind::L3Cache => {
+            | MemKind::L3Cache
+            | MemKind::GPUManaged => {
                 write!(
                     f,
                     "[n{}] {}",
@@ -395,7 +398,7 @@ impl fmt::Display for MemShort<'_> {
                     MemKindShort(mem.kind)
                 )
             }
-            MemKind::Framebuffer => write!(
+            MemKind::Framebuffer | MemKind::GPUDynamic => write!(
                 f,
                 "[n{}][gpu{}] {}",
                 proc.proc_id.node_id().0,
