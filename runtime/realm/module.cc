@@ -78,6 +78,11 @@ REGISTER_REALM_MODULE_STATIC(Realm::LLVMJit::LLVMJitModule);
 REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 #endif
 
+#if defined REALM_USE_FPGA
+#include "realm/fpga/fpga_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::FPGA::FPGAModule);
+#endif
+
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
 REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module);

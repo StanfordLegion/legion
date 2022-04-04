@@ -12287,6 +12287,11 @@ namespace Legion {
                 LegionSpy::log_processor_kind(kind, "Python");
                 break;
               }
+            case Processor::FPGA_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "FPGA");
+                break;
+              }
             default:
               assert(false); // unknown processor kind
           }

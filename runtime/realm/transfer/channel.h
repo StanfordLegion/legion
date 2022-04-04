@@ -72,6 +72,11 @@ namespace Realm {
       XFER_FILE_WRITE,
       XFER_ADDR_SPLIT,
       XFER_MEM_FILL,
+      XFER_FPGA_TO_DEV,
+      XFER_FPGA_FROM_DEV,
+      XFER_FPGA_IN_DEV,
+      XFER_FPGA_PEER_DEV,
+      XFER_FPGA_COMP,
     };
 
     class Request {

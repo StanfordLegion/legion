@@ -59,6 +59,8 @@
 
 #cmakedefine REALM_USE_HDF5
 
+#cmakedefine REALM_USE_FPGA
+
 #cmakedefine REALM_USE_LIBDL
 #cmakedefine REALM_USE_DLMOPEN
 

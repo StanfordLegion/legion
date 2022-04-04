@@ -46,12 +46,14 @@ namespace Legion {
         DEFAULT_TUNABLE_LOCAL_IOS = 3,
         DEFAULT_TUNABLE_LOCAL_OMPS = 4,
         DEFAULT_TUNABLE_LOCAL_PYS = 5,
-        DEFAULT_TUNABLE_GLOBAL_CPUS = 6,
-        DEFAULT_TUNABLE_GLOBAL_GPUS = 7,
-        DEFAULT_TUNABLE_GLOBAL_IOS = 8,
-        DEFAULT_TUNABLE_GLOBAL_OMPS = 9,
-        DEFAULT_TUNABLE_GLOBAL_PYS = 10,
-        DEFAULT_TUNABLE_LAST = 11, // this one must always be last and unused
+        DEFAULT_TUNABLE_LOCAL_FPGAS = 6,
+        DEFAULT_TUNABLE_GLOBAL_CPUS = 7,
+        DEFAULT_TUNABLE_GLOBAL_GPUS = 8,
+        DEFAULT_TUNABLE_GLOBAL_IOS = 9,
+        DEFAULT_TUNABLE_GLOBAL_OMPS = 10,
+        DEFAULT_TUNABLE_GLOBAL_PYS = 11,
+        DEFAULT_TUNABLE_GLOBAL_FPGAS = 12,
+        DEFAULT_TUNABLE_LAST = 13, // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
@@ -383,6 +385,8 @@ namespace Legion {
       Processor default_get_next_global_procset(void);
       Processor default_get_next_local_omp(void);
       Processor default_get_next_global_omp(void);
+      Processor default_get_next_local_fpga(void);
+      Processor default_get_next_global_fpga(void);
       VariantInfo default_find_preferred_variant(
                                  const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
@@ -472,12 +476,14 @@ namespace Legion {
       std::vector<Processor> local_procsets;
       std::vector<Processor> local_omps;
       std::vector<Processor> local_pys;
+      std::vector<Processor> local_fpgas;
       std::vector<Processor> remote_gpus;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_procsets;
       std::vector<Processor> remote_omps;
       std::vector<Processor> remote_pys;
+      std::vector<Processor> remote_fpgas;
       // multipleNumaDomainsPresent is set to true when the target machine
       // has multiple separate NUMA memories (SOCKET_MEM). This controls how
       // processor selection for NUMA aware allocations is performed.
@@ -485,20 +491,24 @@ namespace Legion {
     protected:
       // For doing round-robining of tasks onto processors
       unsigned next_local_gpu, next_local_cpu, next_local_io,
-               next_local_procset, next_local_omp, next_local_py;
+               next_local_procset, next_local_omp, next_local_py,
+               next_local_fpga;
       Processor next_global_gpu, next_global_cpu, next_global_io,
-                next_global_procset, next_global_omp, next_global_py;
+                next_global_procset, next_global_omp, next_global_py,
+                next_global_fpga;
       Machine::ProcessorQuery *global_gpu_query, *global_cpu_query,
                               *global_io_query, *global_procset_query,
-                              *global_omp_query, *global_py_query;
-    protected:
+                              *global_omp_query, *global_py_query,
+                              *global_fpga_query;
+    protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > gpu_slices_cache,
                                                cpu_slices_cache,
                                                io_slices_cache,
                                                procset_slices_cache,
                                                omp_slices_cache,
-                                               py_slices_cache;
+                                               py_slices_cache,
+                                               fpga_slices_cache;
       std::map<std::pair<TaskID,Processor::Kind>,
                VariantInfo>                    preferred_variants;
       std::map<std::pair<TaskID,Processor>,

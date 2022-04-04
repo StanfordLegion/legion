@@ -699,6 +699,25 @@ ifeq ($(strip $(USE_HDF)), 1)
   endif
 endif
 
+# Realm doesn't use FPGA by default
+USE_FPGA ?= 0
+ifeq ($(strip $(USE_FPGA)), 1)
+  REALM_CC_FLAGS += -DREALM_USE_FPGA
+  LEGION_CC_FLAGS += -DLEGION_USE_FPGA
+  # provide this for backward-compatibility in applications
+  CC_FLAGS += -DUSE_FPGA -I$(XILINX_VIVADO)/include -I$(XILINX_XRT)/include 
+  FC_FLAGS += -DUSE_FPGA
+  LEGION_LD_FLAGS += -L$(XILINX_XRT)/lib -lOpenCL -pthread
+  ifdef FPGA_ROOT
+       CC_FLAGS += -I$(FPGA_ROOT)/include
+       FC_FLAGS += -I$(FPGA_ROOT)/include
+       LD_FLAGS += -L$(FPGA_ROOT)/lib
+  else
+    CC_FLAGS += -I/usr/include
+    FC_FLAGS += -I/usr/include
+  endif
+endif
+
 SKIP_MACHINES= titan% daint% excalibur% cori%
 # use mpi{cc,cxx,f90} compiler wrappers if USE_MPI=1
 ifeq ($(strip $(USE_MPI)),1)
@@ -937,6 +956,12 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
+ifeq ($(strip $(USE_FPGA)),1)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/fpga/fpga_module.cc \
+               $(LG_RT_DIR)/realm/fpga/fpga_utils.cc \
+               $(LG_RT_DIR)/realm/fpga/xcl2.cc
+endif
+
 REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
                    $(LG_RT_DIR)/realm/nodeset.cc \
                    $(LG_RT_DIR)/realm/network.cc

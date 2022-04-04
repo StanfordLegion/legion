@@ -62,6 +62,9 @@ namespace Realm {
 #ifdef REALM_USE_HDF5
       MKIND_HDF,     // HDF memory accessible by owner node
 #endif
+#ifdef REALM_USE_FPGA
+      MKIND_FPGA,    // FPGA device memory
+#endif
     };
 
     MemoryImpl(Memory _me, size_t _size,
