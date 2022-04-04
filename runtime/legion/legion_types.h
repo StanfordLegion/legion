@@ -819,6 +819,14 @@ namespace Legion {
       SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
       SEND_NEVER_GC_RESPONSE,
+      SEND_GC_REQUEST,
+      SEND_GC_RESPONSE,
+      SEND_GC_ACQUIRE,
+      SEND_GC_ACQUIRED,
+      SEND_GC_RELEASE,
+      SEND_GC_RELEASED,
+      SEND_GC_VERIFICATION,
+      SEND_GC_VERIFIED,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -997,6 +1005,14 @@ namespace Legion {
         "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
         "Send Never GC Response",                                     \
+        "Send GC Request",                                            \
+        "Send GC Response",                                           \
+        "Send GC Acquire Request",                                    \
+        "Send GC Acquire Response",                                   \
+        "Send GC Release Request",                                    \
+        "Send GC Release Response",                                   \
+        "Send GC Verification Request",                               \
+        "Send GC Verification Response",                              \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \

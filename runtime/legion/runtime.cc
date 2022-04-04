@@ -4278,16 +4278,21 @@ namespace Legion {
           }
         }
       }
+      std::vector<RtEvent> delete_effects;
       if (!to_delete.empty())
-        check_instance_deletions(to_delete, ready_events);
+        check_instance_deletions(to_delete, ready_events, delete_effects);
       // We can trigger as soon as we're done with our pass
-      Runtime::trigger_event(gc_event);
+      if (!delete_effects.empty())
+        Runtime::trigger_event(gc_event, Runtime::merge_events(delete_effects));
+      else
+        Runtime::trigger_event(gc_event);
     }
 
     //--------------------------------------------------------------------------
     void MemoryManager::check_instance_deletions(
-                                      std::vector<PhysicalManager*> &to_delete,
-                                      std::vector<RtEvent> &ready_events)
+                                const std::vector<PhysicalManager*> &to_delete,
+                                const std::vector<RtEvent> &ready_events,
+                                std::vector<RtEvent> &delete_effects)
     //--------------------------------------------------------------------------
     {
       std::vector<PhysicalManager*> deleted;
@@ -4300,8 +4305,14 @@ namespace Legion {
       }
       for (std::vector<PhysicalManager*>::const_iterator it =
             to_delete.begin(); it != to_delete.end(); it++)
-        if ((*it)->verify_collection())
-          deleted.push_back(*it);
+      {
+        RtEvent deletion_done;
+        if (!(*it)->verify_collection(deletion_done))
+          continue;
+        deleted.push_back(*it);
+        if (deletion_done.exists())
+          delete_effects.push_back(deletion_done);
+      }
       if (!deleted.empty())
       {
         AutoLock m_lock(manager_lock);
@@ -5060,9 +5071,13 @@ namespace Legion {
           }
         }
       }
+      std::vector<RtEvent> delete_effects;
       if (!to_delete.empty())
-        check_instance_deletions(to_delete, ready_events);
-      Runtime::trigger_event(gc_event);
+        check_instance_deletions(to_delete, ready_events, delete_effects);
+      if (!delete_effects.empty())
+        Runtime::trigger_event(gc_event, Runtime::merge_events(delete_effects));
+      else
+        Runtime::trigger_event(gc_event);
     }
 
 #if 0
@@ -6479,9 +6494,13 @@ namespace Legion {
             eit->second.pop_back();
             if (first.ready.exists() && !first.ready.has_triggered())
               first.ready.wait();
-            if (!first.manager->verify_collection())
+            RtEvent delete_done;
+            if (!first.manager->verify_collection(delete_done))
               continue;
             deleted.push_back(first.manager);
+            std::vector<RtEvent> deletions_done;
+            if (delete_done.exists())
+              deletions_done.push_back(delete_done);
             size_t hole_size = first.manager->instance_footprint; 
             while ((hole_size < needed_size) && !eit->second.empty())
             {
@@ -6517,15 +6536,19 @@ namespace Legion {
               eit->second.erase(eit->second.begin() + best);
               if (next.ready.exists() && !next.ready.has_triggered())
                 next.ready.wait();
-              if (next.manager->verify_collection())
+              if (next.manager->verify_collection(delete_done))
               {
                 deleted.push_back(next.manager);
                 hole_size = best_size;
+                if (delete_done.exists())
+                  deletions_done.push_back(delete_done);
               }
             }
             // Try to perform the allocation now
-            result = builder.create_physical_instance(
-                runtime->forest, collective, point, unsat_kind, unsat_index);
+            if (!deletions_done.empty())
+              delete_done = Runtime::merge_events(deletions_done);
+            result = builder.create_physical_instance(runtime->forest,
+                collective, point, unsat_kind, unsat_index, NULL, delete_done);
             if (result == NULL)
               continue;
             // If we succeed then unlock the deletions for the remainder 
@@ -6688,11 +6711,10 @@ namespace Legion {
           current_instances.erase(tree_finder);
       }
       // Perform the deletion contingent on references being removed
-      manager->perform_deletion();
+      const RtEvent result = manager->perform_deletion(runtime->address_space);
       if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
         delete manager;
-      // No conditions on being done with this now
-      return RtEvent::NO_RT_EVENT;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8384,6 +8406,46 @@ namespace Legion {
           case SEND_NEVER_GC_RESPONSE:
             {
               runtime->handle_never_gc_response(derez);
+              break;
+            }
+          case SEND_GC_REQUEST:
+            {
+              runtime->handle_gc_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_RESPONSE:
+            {
+              runtime->handle_gc_response(derez);
+              break;
+            }
+          case SEND_GC_ACQUIRE:
+            {
+              runtime->handle_gc_acquire(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_ACQUIRED:
+            {
+              runtime->handle_gc_acquired(derez);
+              break;
+            }
+          case SEND_GC_RELEASE:
+            {
+              runtime->handle_gc_release(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_RELEASED:
+            {
+              runtime->handle_gc_released(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_VERIFICATION:
+            {
+              runtime->handle_gc_verification(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_VERIFIED:
+            {
+              runtime->handle_gc_verified(derez);
               break;
             }
           case SEND_ACQUIRE_REQUEST:
@@ -16818,6 +16880,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_gc_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_REQUEST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_RESPONSE>(rez, 
+                                true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_acquire(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_ACQUIRE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_acquired(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_ACQUIRED>(rez,
+                                true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_release(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_RELEASE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_released(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_RELEASED>(rez,
+                                true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_verification(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_VERIFICATION>(rez,
+                                                      true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_verified(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_VERIFIED>(rez,
+                                 true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_acquire_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -18485,6 +18608,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_gc_request(Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_request(this, derez, source); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_response(derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_acquire(Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_acquire(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_acquired(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_acquired(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_release(Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_release(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_released(Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_released(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_verification(Deserializer &derez,
+                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_verification(this, derez, 
+                                                              source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_verified(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_verified(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_acquire_request(Deserializer &derez, 
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -18497,7 +18678,7 @@ namespace Legion {
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_acquire_response(derez);
+      PhysicalManager::handle_acquire_response(derez, source);
     }
 
     //--------------------------------------------------------------------------

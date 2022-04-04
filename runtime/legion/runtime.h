@@ -820,13 +820,6 @@ namespace Legion {
         FIND_MANY_CONSTRAINTS,
         FIND_MANY_LAYOUT,
       };
-      enum InstanceState {
-        COLLECTABLE_STATE = 0,
-        ACTIVE_STATE = 1,
-        PENDING_COLLECTED_STATE = 2, // sticky
-        VALID_STATE = 3,
-        PENDING_ACQUIRE_STATE = 4,
-      };
     public:
 #ifdef LEGION_MALLOC_INSTANCES
     public:
@@ -969,8 +962,9 @@ namespace Legion {
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
-      void check_instance_deletions(std::vector<PhysicalManager*> &to_delete,
-                                    std::vector<RtEvent> &ready_events);
+      void check_instance_deletions(const std::vector<PhysicalManager*> &to_del,
+                                    const std::vector<RtEvent> &ready_events,
+                                    std::vector<RtEvent> &delete_effects);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -2394,17 +2388,16 @@ namespace Legion {
       void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
       void send_never_gc_response(AddressSpaceID target, Serializer &rez);
-      void send_acquire_request(AddressSpaceID target, Serializer &rez);
-      void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_gc_request(AddressSpaceID target, Serializer &rez);
       void send_gc_response(AddressSpaceID target, Serializer &rez);
-      void send_gc_acquire(AddressSpaceID target, Serializer &rez);
+      void send_gc_acquire(AddressSpaceID target, Serializer &rez); // ref vc
       void send_gc_acquired(AddressSpaceID target, Serializer &rez);
       void send_gc_release(AddressSpaceID target, Serializer &rez);
-      void send_gc_released(AddressSpaceID target, Serializer &rez);
+      void send_gc_released(AddressSpaceID target, Serializer &rez); // ref vc
       void send_gc_verification(AddressSpaceID target, Serializer &rez);
       void send_gc_verified(AddressSpaceID target, Serializer &rez);
-      void send_gc_deletion(AddressSpaceID target, Serializer &rez);
+      void send_acquire_request(AddressSpaceID target, Serializer &rez);
+      void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
@@ -2651,6 +2644,14 @@ namespace Legion {
       void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
       void handle_never_gc_response(Deserializer &derez);
+      void handle_gc_request(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_response(Deserializer &derez);
+      void handle_gc_acquire(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_acquired(Deserializer &derez);
+      void handle_gc_release(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_released(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_verified(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -4440,6 +4441,22 @@ namespace Legion {
         case SEND_GC_PRIORITY_UPDATE:
           break;
         case SEND_NEVER_GC_RESPONSE:
+          break;
+        case SEND_GC_REQUEST:
+          break;
+        case SEND_GC_RESPONSE:
+          break;
+        case SEND_GC_ACQUIRE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_GC_ACQUIRED:
+          break;
+        case SEND_GC_RELEASE:
+          break;
+        case SEND_GC_RELEASED:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_GC_VERIFICATION:
+          break;
+        case SEND_GC_VERIFIED:
           break;
         case SEND_ACQUIRE_REQUEST:
           break;

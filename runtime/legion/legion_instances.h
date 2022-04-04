@@ -272,11 +272,10 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
-      
       bool try_collection(AddressSpaceID source, RtEvent &ready);
-      bool verify_collection(void);
+      bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
-      virtual void perform_deletion(void) = 0;
+      virtual RtEvent perform_deletion(AddressSpaceID source) = 0;
       virtual void force_collection(void) = 0;
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                 Processor p, GCPriority priority) = 0; 
@@ -304,11 +303,14 @@ namespace Legion {
                             bool tight_bounds = false) const;
     protected:
       void prune_gc_events(void);
+      void send_garbage_collection_releases(void);
+      void pack_garbage_collection_state(Serializer &rez,AddressSpaceID target);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
       static void handle_acquire_request(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
-      static void handle_acquire_response(Deserializer &derez);
+      static void handle_acquire_response(Deserializer &derez, 
+          AddressSpaceID source);
       static void handle_garbage_collection_request(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_response(Deserializer &derez);
@@ -319,6 +321,9 @@ namespace Legion {
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_released(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_verification(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_verified(Deserializer &derez);
     public:
       const size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -336,7 +341,6 @@ namespace Legion {
       unsigned pending_changes;
       std::atomic<unsigned> collection_guards;
       RtEvent collection_ready;
-      RtUserEvent collection_done;
 
       GCPriority min_gc_priority;
       std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
@@ -479,7 +483,7 @@ namespace Legion {
           LayoutConstraints *constraints, ApEvent use_event,
           ReductionOpID redop);
     public:
-      virtual void perform_deletion(void);
+      virtual RtEvent perform_deletion(AddressSpaceID source);
       virtual void force_collection(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                 Processor p, GCPriority priority); 
@@ -579,7 +583,7 @@ namespace Legion {
       void validate_collective(ReferenceMutator *mutator);
       void invalidate_collective(ReferenceMutator *mutator);
     public:
-      virtual void perform_deletion(void);
+      virtual RtEvent perform_deletion(AddressSpaceID source);
       virtual void force_collection(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                                     Processor p, GCPriority priority); 
@@ -713,7 +717,8 @@ namespace Legion {
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
                         CollectiveManager *collective, DomainPoint *point,
                         LayoutConstraintKind *unsat_kind,
-                        unsigned *unsat_index, size_t *footprint = NULL);
+                        unsigned *unsat_index, size_t *footprint = NULL,
+                        RtEvent precondition = RtEvent::NO_RT_EVENT);
       CollectiveManager* create_collective_instance(RegionTreeForest *forest,
                         Memory::Kind mem_kind, IndexSpaceNode *point_space,
                         LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
