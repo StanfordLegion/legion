@@ -9,6 +9,7 @@ barrier_reduce
 taskreg
 deppart
 memspeed
+memmodel
 idcheck
 inst_reuse
 transpose
