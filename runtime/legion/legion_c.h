@@ -111,6 +111,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_mapper_runtime_t);
   NEW_OPAQUE_TYPE(legion_mapper_context_t);
   NEW_OPAQUE_TYPE(legion_field_map_t);
+  NEW_OPAQUE_TYPE(legion_point_transform_functor_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -2777,6 +2778,19 @@ extern "C" {
                                            bool collective,
                                            legion_sharding_id_t sid,
                                            bool implicit_sharding);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::transform_future_map
+   */
+  legion_future_map_t
+  legion_future_map_transform(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_future_map_t fm,
+                              legion_index_space_t new_domain,
+                              legion_point_transform_functor_t functor,
+                              bool take_ownership);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations

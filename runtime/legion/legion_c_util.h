@@ -149,6 +149,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
+      NEW_OPAQUE_WRAPPER(legion_point_transform_functor_t, PointTransformFunctor *);
 #undef NEW_OPAQUE_WRAPPER
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
