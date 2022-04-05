@@ -6507,6 +6507,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
+      assert(lhs->is_valid());
+      assert(rhs->is_valid());
 #endif
       if (lhs == rhs)
         return lhs;
