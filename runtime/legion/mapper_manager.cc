@@ -2420,7 +2420,12 @@ namespace Legion {
             "Ignoring request for mapper %s to set garbage collection "
             "priority on an external instance", get_mapper_name())
       else
-        manager->set_garbage_collection_priority(mapper_id,processor,priority);
+      {
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                                        mapper_id, processor, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
       resume_mapper_call(ctx);
     }
 

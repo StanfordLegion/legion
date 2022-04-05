@@ -275,10 +275,12 @@ namespace Legion {
       bool try_collection(AddressSpaceID source, RtEvent &ready);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
+      RtEvent set_garbage_collection_priority(MapperID mapper_id,
+                                              Processor p, GCPriority priority);
       virtual RtEvent perform_deletion(AddressSpaceID source) = 0;
       virtual void force_collection(void) = 0;
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority) = 0; 
+      virtual RtEvent update_garbage_collection_priority(
+                                                       GCPriority priority) = 0;
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
@@ -305,6 +307,7 @@ namespace Legion {
       void prune_gc_events(void);
       void send_garbage_collection_releases(void);
       void pack_garbage_collection_state(Serializer &rez,AddressSpaceID target);
+      void initialize_remote_gc_state(GarbageCollectionState state);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
       static void handle_acquire_request(Runtime *runtime,
@@ -324,6 +327,8 @@ namespace Legion {
       static void handle_garbage_collection_verification(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_verified(Deserializer &derez);
+      static void handle_garbage_collection_priority_update(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
     public:
       const size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -339,10 +344,13 @@ namespace Legion {
       // Stuff for garbage collection
       GarbageCollectionState gc_state; 
       unsigned pending_changes;
-      std::atomic<unsigned> collection_guards;
+      std::atomic<unsigned> remaining_collection_guards;
       RtEvent collection_ready;
-
+      RtUserEvent deferred_deletion;
+      bool currently_active;
+      // Garbage collection priorities
       GCPriority min_gc_priority;
+      RtEvent priority_update_done;
       std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
     private:
       // Events that have to trigger before we can remove our GC reference
@@ -397,7 +405,7 @@ namespace Legion {
             const PendingRemoteExpression &pending, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use,
             ReductionOpID redop, const void *piece_list, size_t piece_list_size,
-            AddressSpaceID src);
+            AddressSpaceID src, GarbageCollectionState state);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -414,6 +422,7 @@ namespace Legion {
         const void *const piece_list;
         const size_t piece_list_size;
         const AddressSpaceID source;
+        const GarbageCollectionState state;
       };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
@@ -481,12 +490,11 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop);
+          ReductionOpID redop, GarbageCollectionState state);
     public:
       virtual RtEvent perform_deletion(AddressSpaceID source);
       virtual void force_collection(void);
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority); 
+      virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
@@ -512,13 +520,8 @@ namespace Legion {
       static const AllocationType alloc_type = COLLECTIVE_INST_MANAGER_ALLOC;
     public:
       enum MessageKind {
-        ACTIVATE_MESSAGE,
-        DEACTIVATE_MESSAGE,
-        VALIDATE_MESSAGE,
-        INVALIDATE_MESSAGE,
         PERFORM_DELETE_MESSAGE,
         FORCE_DELETE_MESSAGE,
-        SET_GC_PRIORITY_MESSAGE,
         DETACH_EXTERNAL_MESSAGE,
         FINALIZE_MESSAGE,
       };
@@ -533,7 +536,8 @@ namespace Legion {
             const PendingRemoteExpression &pending, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
             ReductionOpID redop, const void *piece_list,
-            size_t piece_list_size, AddressSpaceID source);
+            size_t piece_list_size, AddressSpaceID source,
+            GarbageCollectionState state);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -549,6 +553,7 @@ namespace Legion {
         const void *const piece_list;
         const size_t piece_list_size;
         const AddressSpaceID source;
+        const GarbageCollectionState state;
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
@@ -577,16 +582,10 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-    protected:
-      void activate_collective(ReferenceMutator *mutator);
-      void deactivate_collective(ReferenceMutator *mutator);
-      void validate_collective(ReferenceMutator *mutator);
-      void invalidate_collective(ReferenceMutator *mutator);
     public:
       virtual RtEvent perform_deletion(AddressSpaceID source);
       virtual void force_collection(void);
-      virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                    Processor p, GCPriority priority); 
+      virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
@@ -594,16 +593,12 @@ namespace Legion {
     protected:
       void perform_delete(RtEvent deferred_event, bool left); 
       void force_delete(bool left);
-      void set_gc_priority(MapperID mapper_id, Processor p, 
-                           GCPriority priority, bool left);
       void detach_external(RtUserEvent to_trigger, bool left, 
                   RtEvent full_detach = RtEvent::NO_RT_EVENT);
       bool finalize_message(void);
     protected:
       void collective_deletion(RtEvent deferred_event);
       void collective_force(void);
-      void collective_set_gc_priority(MapperID mapper_id, Processor proc,
-                                      GCPriority priority);
       void collective_detach(std::set<RtEvent> &detach_events);
     public:
       virtual ApEvent fill_from(FillView *fill_view,
@@ -640,7 +635,8 @@ namespace Legion {
           size_t inst_footprint, IndexSpaceExpression *inst_domain, 
           const void *piece_list, size_t piece_list_size, 
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
-          LayoutConstraints *constraints,ApEvent use_event,ReductionOpID redop);
+          LayoutConstraints *constraints, ApEvent use_event,
+          ReductionOpID redop, GarbageCollectionState state);
     public:
       IndexSpaceNode *const point_space;
     protected:

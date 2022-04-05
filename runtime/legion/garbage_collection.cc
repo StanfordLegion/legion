@@ -62,7 +62,7 @@ namespace Legion {
     void LocalReferenceMutator::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
-      mutation_effects.insert(event);
+      mutation_effects.push_back(event);
     }
 
     //--------------------------------------------------------------------------
@@ -181,6 +181,7 @@ namespace Legion {
 #endif
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_gc_reference(
                                              ReferenceMutator *mutator, int cnt)
@@ -488,6 +489,7 @@ namespace Legion {
       }
       return do_deletion;
     }
+#endif // !DEBUG_LEGION_GC
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
@@ -530,7 +532,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -559,7 +566,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_valid_references.find(source);
@@ -592,7 +599,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -621,7 +633,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -655,7 +667,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -684,7 +701,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_gc_references.find(source);
@@ -718,7 +735,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -747,7 +769,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -767,6 +789,7 @@ namespace Legion {
       return false;
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_resource_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -799,6 +822,7 @@ namespace Legion {
       else
         return false;
     }
+#endif
 
 #ifdef USE_REMOTE_REFERENCES
     //--------------------------------------------------------------------------

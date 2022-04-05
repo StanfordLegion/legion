@@ -923,7 +923,6 @@ namespace Legion {
                                     bool remote = false);
       void release_tree_instances(RegionTreeID tid);
       void set_garbage_collection_priority(PhysicalManager *manager,
-                                    MapperID mapper_id, Processor proc,
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
@@ -931,8 +930,6 @@ namespace Legion {
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
-      void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
-      void process_never_gc_response(Deserializer &derez);
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -2387,7 +2384,6 @@ namespace Legion {
       void send_external_attach(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
-      void send_never_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_request(AddressSpaceID target, Serializer &rez);
       void send_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_acquire(AddressSpaceID target, Serializer &rez); // ref vc
@@ -2643,7 +2639,6 @@ namespace Legion {
       void handle_external_attach(Deserializer &derez);
       void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
-      void handle_never_gc_response(Deserializer &derez);
       void handle_gc_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_response(Deserializer &derez);
       void handle_gc_acquire(Deserializer &derez, AddressSpaceID source);
@@ -4439,8 +4434,6 @@ namespace Legion {
         case SEND_EXTERNAL_DETACH:
           break;
         case SEND_GC_PRIORITY_UPDATE:
-          break;
-        case SEND_NEVER_GC_RESPONSE:
           break;
         case SEND_GC_REQUEST:
           break;

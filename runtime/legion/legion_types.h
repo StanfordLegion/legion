@@ -818,7 +818,6 @@ namespace Legion {
       SEND_EXTERNAL_ATTACH,
       SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
-      SEND_NEVER_GC_RESPONSE,
       SEND_GC_REQUEST,
       SEND_GC_RESPONSE,
       SEND_GC_ACQUIRE,
@@ -1004,7 +1003,6 @@ namespace Legion {
         "Send External Attach",                                       \
         "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
-        "Send Never GC Response",                                     \
         "Send GC Request",                                            \
         "Send GC Response",                                           \
         "Send GC Acquire Request",                                    \

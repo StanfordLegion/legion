@@ -2331,6 +2331,13 @@ namespace Legion {
     {
       views.clear();
       version_infos.clear();
+      if (!valid_instances.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              valid_instances.begin(); it != valid_instances.end(); it++)
+          if ((*it)->remove_base_valid_ref(TRACE_REF))
+            delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2355,6 +2362,14 @@ namespace Legion {
           Key key(tid, eq);
           FieldMaskSet <InstanceView> &vset = views_by_regions[key];
           vset.insert(it->first, eit->second);
+        }
+        // If we're capturing a postcondition, then we need a valie
+        // reference on each of the physical managers
+        if (postcondition)
+        {
+          PhysicalManager *manager = it->first->manager;
+          manager->add_base_valid_ref(TRACE_REF);
+          valid_instances.push_back(manager);
         }
       }
 

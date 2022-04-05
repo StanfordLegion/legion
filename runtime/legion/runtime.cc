@@ -1772,7 +1772,12 @@ namespace Legion {
       assert(!termination_event.exists());
 #endif
       if (!references.empty() && !replaying)
-        references.remove_resource_references(PHYSICAL_REGION_REF);
+      {
+        if (leaf_region)
+          references.remove_resource_references(PHYSICAL_REGION_REF);
+        else
+          references.remove_valid_references(PHYSICAL_REGION_REF, NULL/*mut*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2081,7 +2086,13 @@ namespace Legion {
       assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
       references.add_instance(ref);
-      ref.add_resource_reference(PHYSICAL_REGION_REF);
+      if (!replaying)
+      {
+        if (leaf_region)
+          ref.add_resource_reference(PHYSICAL_REGION_REF);
+        else
+          ref.add_valid_reference(PHYSICAL_REGION_REF, NULL/*mutator*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2093,8 +2104,13 @@ namespace Legion {
       assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
       references = refs;
-      if (!references.empty())
-        references.add_resource_references(PHYSICAL_REGION_REF);
+      if (!references.empty() && !replaying)
+      {
+        if (leaf_region)
+          references.add_resource_references(PHYSICAL_REGION_REF);
+        else
+          references.add_valid_references(PHYSICAL_REGION_REF, NULL/*mutator*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4268,6 +4284,9 @@ namespace Legion {
           for (TreeInstances::const_iterator it =
                 cit->second.begin(); it != cit->second.end(); it++)
           {
+            if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
+                it->first->is_owner())
+              it->first->remove_base_valid_ref(NEVER_GC_REF);
             RtEvent ready;
             if (it->first->try_collection(runtime->address_space, ready))
             {
@@ -5061,6 +5080,9 @@ namespace Legion {
           for (TreeInstances::const_iterator it =
                 finder->second.begin(); it != finder->second.end(); it++)
           {
+            if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
+                it->first->is_owner())
+              it->first->remove_base_valid_ref(NEVER_GC_REF);
             RtEvent ready;
             if (it->first->try_collection(runtime->address_space, ready))
             {
@@ -5080,204 +5102,26 @@ namespace Legion {
         Runtime::trigger_event(gc_event);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void MemoryManager::set_garbage_collection_priority(
-                                PhysicalManager *manager, MapperID mapper_id, 
-                                Processor processor, GCPriority priority)
+                                  PhysicalManager *manager, GCPriority priority)
     //--------------------------------------------------------------------------
     { 
-      bool remove_min_reference = false;
-      if (!is_owner)
-      {
-        RtUserEvent never_gc_wait;
-        bool remove_never_gc_ref = false;
-        std::pair<MapperID,Processor> key(mapper_id,processor);
-        // Check to see if this is or is going to be a max priority instance
-        if (priority == LEGION_GC_NEVER_PRIORITY)
-        {
-          // See if we need a handback
-          AutoLock m_lock(manager_lock,1,false);
-          std::map<RegionTreeID,TreeInstances>::const_iterator tree_finder =
-            current_instances.find(manager->tree_id);
-          if (tree_finder != current_instances.end())
-          {
-            TreeInstances::const_iterator finder = 
-              tree_finder->second.find(manager);
-            if (finder != tree_finder->second.end())
-            {
-              // If priority is already max priority, then we are done
-              if (finder->second.min_priority == priority)
-                return;
-              // Make an event for a callback
-              never_gc_wait = Runtime::create_rt_user_event();
-            }
-          }
-        }
-        else
-        {
-          AutoLock m_lock(manager_lock);
-          std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
-            current_instances.find(manager->tree_id);
-          if (tree_finder != current_instances.end())
-          {
-            TreeInstances::iterator finder = 
-              tree_finder->second.find(manager);
-            if (finder != tree_finder->second.end())
-            {
-              if (finder->second.min_priority == LEGION_GC_NEVER_PRIORITY)
-              {
-                finder->second.mapper_priorities.erase(key);
-                if (finder->second.mapper_priorities.empty())
-                {
-                  finder->second.min_priority = 0;
-                  remove_never_gc_ref = true;
-                }
-              }
-            }
-          }
-        }
-        // Won't delete the whole manager because we still hold
-        // a resource reference
-        if (remove_never_gc_ref)
-          manager->remove_base_valid_ref(NEVER_GC_REF);
-        // We are not the owner so send a message to the owner
-        // to update the priority, no need to send the manager
-        // since we know we are sending to the owner node
-        std::atomic<bool> success(true);
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(memory);
-          rez.serialize(manager->did);
-          rez.serialize(mapper_id);
-          rez.serialize(processor);
-          rez.serialize(priority);
-          rez.serialize(never_gc_wait);
-          if (never_gc_wait.exists())
-            rez.serialize(&success);
-        }
-        runtime->send_gc_priority_update(owner_space, rez);
-        // In most cases, we will fire and forget, the one exception
-        // is if we are waiting for a confirmation of setting max priority
-        if (never_gc_wait.exists())
-        {
-          never_gc_wait.wait();
-          bool remove_duplicate = false;
-          if (success.load())
-          {
-            LocalReferenceMutator local_mutator;
-            // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
-            const RtEvent reference_effects = local_mutator.get_done_event();
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                                 reference_effects);
-            if (reference_effects.exists())
-              local_mutator.record_reference_mutation_effect(reference_effects);
-            // Then record it
-            AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-            assert(current_instances.find(manager->tree_id) !=
-                    current_instances.end());
-            assert(current_instances[manager->tree_id].find(manager) != 
-                    current_instances[manager->tree_id].end());
+      assert(is_owner);
 #endif
-            InstanceInfo &info = current_instances[manager->tree_id][manager];
-            if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
-              remove_duplicate = true; // lost the race
-            else
-              info.min_priority = LEGION_GC_NEVER_PRIORITY;
-            info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
-          }
-          if (remove_duplicate && 
-              manager->remove_base_valid_ref(NEVER_GC_REF))
-            delete manager; 
-        }
-      }
-      else
-      {
-        // If this a max priority, try adding the reference beforehand, if
-        // it fails then we know the instance is already deleted so whatever
-        if ((priority == LEGION_GC_NEVER_PRIORITY) &&
-            !manager->acquire_instance(NEVER_GC_REF, NULL/*mutator*/))
-          return;
-        // Do the update locally 
-        AutoLock m_lock(manager_lock);
-        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-          current_instances.find(manager->tree_id);
-        if (tree_finder != current_instances.end())
-        {
-          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-            tree_finder->second.find(manager);
-          if (finder != tree_finder->second.end())
-          {
-            std::map<std::pair<MapperID,Processor>,GCPriority> 
-              &mapper_priorities = finder->second.mapper_priorities;
-            std::pair<MapperID,Processor> key(mapper_id,processor);
-            // If the new priority is NEVER_GC and we were already at NEVER_GC
-            // then we need to remove the redundant reference when we are done
-            if ((priority == LEGION_GC_NEVER_PRIORITY) && 
-                (finder->second.min_priority == LEGION_GC_NEVER_PRIORITY))
-              remove_min_reference = true;
-            // See if we can find the current priority  
-            std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
-              priority_finder = mapper_priorities.find(key);
-            if (priority_finder != mapper_priorities.end())
-            {
-              // See if it changed
-              if (priority_finder->second != priority)
-              {
-                // Update the min if necessary
-                if (priority < finder->second.min_priority)
-                {
-                  // It decreased 
-                  finder->second.min_priority = priority;
-                }
-                // It might go up if this was (one of) the min priorities
-                else if ((priority > finder->second.min_priority) &&
-                       (finder->second.min_priority == priority_finder->second))
-                {
-                  // This was (one of) the min priorities, but it 
-                  // is about to go up so compute the new min
-                  GCPriority new_min = priority;
-                  for (std::map<std::pair<MapperID,Processor>,GCPriority>::
-                        const_iterator it = mapper_priorities.begin(); it != 
-                        mapper_priorities.end(); it++)
-                  {
-                    if (it->first == key)
-                      continue;
-                    // If we find another one with the same as the current 
-                    // min then we know we are just going to stay the same
-                    if (it->second == finder->second.min_priority)
-                    {
-                      new_min = it->second;
-                      break;
-                    }
-                    if (it->second < new_min)
-                      new_min = it->second;
-                  }
-                  if ((finder->second.min_priority == LEGION_GC_NEVER_PRIORITY)
-                        && (new_min > LEGION_GC_NEVER_PRIORITY))
-                    remove_min_reference = true;
-                  finder->second.min_priority = new_min;
-                }
-                // Finally update the priority
-                priority_finder->second = priority;
-              }
-            }
-            else // previous priority was zero, see if we need to update it
-            {
-              mapper_priorities[key] = priority;
-              if (priority < finder->second.min_priority)
-                finder->second.min_priority = priority;
-            }
-          }
-        }
-      }
-      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
-        delete manager;
+      AutoLock m_lock(manager_lock);
+      std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
+        current_instances.find(manager->tree_id);
+#ifdef DEBUG_LEGION
+      assert(tree_finder != current_instances.end());
+#endif
+      TreeInstances::iterator finder = tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != tree_finder->second.end());
+#endif
+      finder->second = priority;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void MemoryManager::process_instance_request(Deserializer &derez,
@@ -5846,95 +5690,6 @@ namespace Legion {
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::process_gc_priority_update(Deserializer &derez,
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did;
-      derez.deserialize(did);
-      MapperID mapper_id;
-      derez.deserialize(mapper_id);
-      Processor processor;
-      derez.deserialize(processor);
-      GCPriority priority;
-      derez.deserialize(priority);
-      RtUserEvent never_gc_event;
-      derez.deserialize(never_gc_event);
-      // Hold our lock to make sure our allocation doesn't change
-      // when getting the reference
-      PhysicalManager *manager = NULL;
-      {
-        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        DistributedCollectable *dc = 
-          runtime->weak_find_distributed_collectable(did);
-        if (dc != NULL)
-        {
-#ifdef DEBUG_LEGION
-          manager = dynamic_cast<PhysicalManager*>(dc);
-#else
-          manager = static_cast<PhysicalManager*>(dc);
-#endif
-          manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-        }
-      }
-      // If the instance was already collected, there is nothing to do
-      if (manager == NULL)
-      {
-        if (never_gc_event.exists())
-        {
-          std::atomic<bool> *success;
-          derez.deserialize(success);
-          // Only have to send the message back when we fail
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(memory);
-            rez.serialize(success);
-            rez.serialize(never_gc_event);
-          }
-          runtime->send_never_gc_response(source, rez);
-        }
-        return;
-      }
-      set_garbage_collection_priority(manager, mapper_id, processor, priority);
-      if (never_gc_event.exists())
-      {
-        std::atomic<bool> *success;
-        derez.deserialize(success);
-        // If we succeed we can trigger immediately, otherwise we
-        // have to send back the response to fail
-        if (!manager->acquire_instance(REMOTE_DID_REF, NULL))
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(memory);
-            rez.serialize(success);
-            rez.serialize(never_gc_event);
-          }
-          runtime->send_never_gc_response(source, rez);
-        }
-        else
-          Runtime::trigger_event(never_gc_event);
-      }
-      // Remote our reference
-      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        delete manager;
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::process_never_gc_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      std::atomic<bool> *success;
-      derez.deserialize(success);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      success->store(false);
-      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -6607,17 +6362,24 @@ namespace Legion {
       // Add references first to prevent races with collection
       if (acquire)
       {
-        if (remote)
-          manager->add_base_valid_ref(REMOTE_DID_REF);
-        else
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const bool result = 
+#endif
+#endif
+        manager->acquire_instance(
+            remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/);
+#ifdef DEBUG_LEGION
+        assert(result);
+#endif
       }
       else if (remote)
         manager->add_base_resource_ref(REMOTE_DID_REF);
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      // If we're a never GC priority then we can add that reference too
-      if (priority == LEGION_GC_NEVER_PRIORITY)
+      // If we're setting the priority to min priority and this is the
+      // owner then add the reference for the manager
+      if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
         manager->add_base_valid_ref(NEVER_GC_REF);
       // Record the manager here as being eligible for collection
       {
@@ -8401,11 +8163,6 @@ namespace Legion {
           case SEND_GC_PRIORITY_UPDATE:
             {
               runtime->handle_gc_priority_update(derez, remote_address_space);
-              break;
-            }
-          case SEND_NEVER_GC_RESPONSE:
-            {
-              runtime->handle_never_gc_response(derez);
               break;
             }
           case SEND_GC_REQUEST:
@@ -16872,14 +16629,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_never_gc_response(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_NEVER_GC_RESPONSE>(rez,
-                                                        true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_gc_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -18589,22 +18338,8 @@ namespace Legion {
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      Memory target_memory;
-      derez.deserialize(target_memory);
-      MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_gc_priority_update(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_never_gc_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Memory target_memory;
-      derez.deserialize(target_memory);
-      MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_never_gc_response(derez);
+      PhysicalManager::handle_garbage_collection_priority_update(this, derez,
+                                                                 source);
     }
 
     //--------------------------------------------------------------------------

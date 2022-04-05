@@ -59,7 +59,7 @@ namespace Legion {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,
       VERSION_MANAGER_REF = 2,
-      VERSION_INFO_REF = 3,
+      PHYSICAL_ANALYSIS_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
       PENDING_GC_REF = 6,
@@ -203,7 +203,7 @@ namespace Legion {
     public:
       RtEvent get_done_event(void);
     private:
-      std::set<RtEvent> mutation_effects;
+      std::vector<RtEvent> mutation_effects;
     };
 
     /**
@@ -352,6 +352,7 @@ namespace Legion {
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
       bool check_active_and_increment(ReferenceSource source, int cnt = 1);
       bool check_active_and_increment(DistributedID source, int cnt = 1);
+#ifndef DEBUG_LEGION_GC
     private:
       void add_gc_reference(ReferenceMutator *mutator, int cnt);
       bool remove_gc_reference(ReferenceMutator *mutator, int cnt);
@@ -361,6 +362,7 @@ namespace Legion {
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
+#endif
 #ifdef USE_REMOTE_REFERENCES
     private:
       bool add_create_reference(AddressSpaceID source, 

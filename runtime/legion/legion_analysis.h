@@ -986,6 +986,10 @@ namespace Legion {
                                ReferenceMutator *mutator) const;
       void remove_valid_reference(ReferenceSource source,
                                   ReferenceMutator *mutator) const;
+#ifdef DEBUG_LEGION
+      void acquire_instance(ReferenceSource source,
+                            ReferenceMutator *mutator) const;
+#endif
     public:
       Memory get_memory(void) const;
       PhysicalManager* get_physical_manager(void) const;
@@ -1072,6 +1076,10 @@ namespace Legion {
                                 ReferenceMutator *mutator) const;
       void remove_valid_references(ReferenceSource source,
                                    ReferenceMutator *mutator) const;
+#ifdef DEBUG_LEGION
+      void acquire_instances(ReferenceSource source,
+                             ReferenceMutator *mutator) const;
+#endif
     public:
       void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:

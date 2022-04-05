@@ -579,6 +579,8 @@ namespace Legion {
       // The following containers are populated only when the 'cached' is true.
       LegionVector<FieldMaskSet<InstanceView> >          views;
       LegionVector<VersionInfo>                          version_infos;
+      // Managers that we keep valid
+      std::vector<PhysicalManager*>                      valid_instances; 
     };
 
     /**
