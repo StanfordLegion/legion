@@ -2070,7 +2070,7 @@ namespace Legion {
     public:
       static const LgEvent NO_LG_EVENT;
     public:
-      LgEvent(void) { id = 0; }
+      LgEvent(void) noexcept { id = 0; }
       LgEvent(const LgEvent &rhs) = default;
       explicit LgEvent(const Realm::Event e) { id = e.id; }
     public:
@@ -2085,7 +2085,7 @@ namespace Legion {
     public:
       static const PredEvent NO_PRED_EVENT;
     public:
-      PredEvent(void) : LgEvent() { } 
+      PredEvent(void) noexcept : LgEvent() { } 
       PredEvent(const PredEvent &rhs) = default;
       explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
     public:
@@ -2098,7 +2098,7 @@ namespace Legion {
     public:
       static const ApEvent NO_AP_EVENT;
     public:
-      ApEvent(void) : LgEvent() { }
+      ApEvent(void) noexcept : LgEvent() { }
       ApEvent(const ApEvent &rhs) = default;
       explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit ApEvent(const PredEvent &e) { id = e.id; }
@@ -2123,7 +2123,7 @@ namespace Legion {
     public:
       static const ApUserEvent NO_AP_USER_EVENT;
     public:
-      ApUserEvent(void) : ApEvent() { }
+      ApUserEvent(void) noexcept : ApEvent() { }
       ApUserEvent(const ApUserEvent &rhs) = default;
       explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
     public:
@@ -2136,7 +2136,7 @@ namespace Legion {
     public:
       static const ApBarrier NO_AP_BARRIER;
     public:
-      ApBarrier(void) : ApEvent(), timestamp(0) { }
+      ApBarrier(void) noexcept : ApEvent(), timestamp(0) { }
       ApBarrier(const ApBarrier &rhs) = default; 
       explicit ApBarrier(const Realm::Barrier &b) 
         : ApEvent(b), timestamp(b.timestamp) { }
@@ -2153,7 +2153,7 @@ namespace Legion {
     public:
       static const RtEvent NO_RT_EVENT;
     public:
-      RtEvent(void) : LgEvent() { }
+      RtEvent(void) noexcept : LgEvent() { }
       RtEvent(const RtEvent &rhs) = default;
       explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
       explicit RtEvent(const PredEvent &e) { id = e.id; }
@@ -2165,7 +2165,7 @@ namespace Legion {
     public:
       static const RtUserEvent NO_RT_USER_EVENT;
     public:
-      RtUserEvent(void) : RtEvent() { }
+      RtUserEvent(void) noexcept : RtEvent() { }
       RtUserEvent(const RtUserEvent &rhs) = default;
       explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
     public:
@@ -2178,7 +2178,7 @@ namespace Legion {
     public:
       static const RtBarrier NO_RT_BARRIER;
     public:
-      RtBarrier(void) : RtEvent(), timestamp(0) { }
+      RtBarrier(void) noexcept : RtEvent(), timestamp(0) { }
       RtBarrier(const RtBarrier &rhs) = default;
       explicit RtBarrier(const Realm::Barrier &b)
         : RtEvent(b), timestamp(b.timestamp) { }
