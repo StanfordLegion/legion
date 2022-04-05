@@ -277,7 +277,8 @@ namespace Legion {
       void release_collection(AddressSpaceID source);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
-      virtual RtEvent perform_deletion(AddressSpaceID source) = 0;
+      virtual RtEvent perform_deletion(AddressSpaceID source, 
+                                       AutoLock *i_lock = NULL) = 0;
       virtual void force_collection(void) = 0;
       virtual RtEvent update_garbage_collection_priority(
                                                        GCPriority priority) = 0;
@@ -492,7 +493,8 @@ namespace Legion {
           LayoutConstraints *constraints, ApEvent use_event,
           ReductionOpID redop, GarbageCollectionState state);
     public:
-      virtual RtEvent perform_deletion(AddressSpaceID source);
+      virtual RtEvent perform_deletion(AddressSpaceID source, 
+                                       AutoLock *i_lock = NULL);
       virtual void force_collection(void);
       virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);
@@ -583,7 +585,8 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
-      virtual RtEvent perform_deletion(AddressSpaceID source);
+      virtual RtEvent perform_deletion(AddressSpaceID source,
+                                       AutoLock *i_lock = NULL);
       virtual void force_collection(void);
       virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);

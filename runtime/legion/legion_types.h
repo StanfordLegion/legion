@@ -2274,31 +2274,24 @@ namespace Legion {
         if (previous != NULL)
           previous->check_for_reentrant_locks(&local_lock);
 #endif
-        Internal::local_lock_list = this;
       }
     public:
-      inline AutoLock(const AutoLock &rhs)
-        : local_lock(rhs.local_lock), previous(NULL), exclusive(false)
-      {
-        // should never be called
-        assert(false);
-      }
+      AutoLock(const AutoLock &rhs) = delete;
       inline ~AutoLock(void)
       {
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == this);
-#endif
         if (held)
+        {
+#ifdef DEBUG_LEGION
+          assert(Internal::local_lock_list == this);
+#endif
           local_lock.unlock();
-        Internal::local_lock_list = previous;
+          Internal::local_lock_list = previous;
+        }
+        else
+          assert(Internal::local_lock_list == previous);
       }
     public:
-      inline AutoLock& operator=(const AutoLock &rhs)
-      {
-        // should never be called
-        assert(false);
-        return *this;
-      }
+      AutoLock& operator=(const AutoLock &rhs) = delete;
     public:
       inline void release(void) 
       { 
@@ -2382,7 +2375,12 @@ namespace Legion {
         else
           ready = local_lock.rdlock();
         held = !ready.exists();
+        if (held)
+          Internal::local_lock_list = this;
       }
+      AutoTryLock(const AutoTryLock &rhs) = delete;
+    public:
+      AutoTryLock& operator=(const AutoTryLock &rhs) = delete;
     public:
       // Allow an easy test for whether we got the lock or not
       inline bool has_lock(void) const { return held; }
@@ -2426,9 +2424,6 @@ namespace Legion {
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == NULL); 
-#endif
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait
@@ -2484,9 +2479,6 @@ namespace Legion {
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == NULL); 
-#endif
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait

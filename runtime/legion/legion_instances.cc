@@ -830,7 +830,7 @@ namespace Legion {
       if (deferred_deletion.exists())
       {
 #ifdef DEBUG_LEGION
-        assert(gc_state == COLLECTED_GC_STATE);
+        assert((gc_state == COLLECTED_GC_STATE) || is_external_instance());
 #endif
         Runtime::trigger_event(deferred_deletion);
       }
@@ -843,7 +843,8 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert((gc_state == ACQUIRED_GC_STATE) || 
-             (gc_state == PENDING_COLLECTED_GC_STATE));
+             (gc_state == PENDING_COLLECTED_GC_STATE) ||
+             is_external_instance());
 #endif
       gc_state = VALID_GC_STATE;
     }
@@ -1473,10 +1474,8 @@ namespace Legion {
                 // Deletion success and we're the first ones to discover it
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
-                collection_ready = perform_deletion(runtime->address_space);
                 gc_state = COLLECTED_GC_STATE;
-                prune_gc_events();
-                ready = collection_ready;
+                ready = perform_deletion(runtime->address_space, &i_lock);
                 return true;
               }
               break;
@@ -2380,9 +2379,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndividualManager::perform_deletion(AddressSpaceID source)
+    RtEvent IndividualManager::perform_deletion(AddressSpaceID source,
+                                                AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
+      if (i_lock == NULL)
+      {
+        AutoLock instance_lock(inst_lock);
+        return perform_deletion(source, &instance_lock);
+      }
 #ifdef DEBUG_LEGION
       assert(is_owner());
       assert(source == local_space);
@@ -2390,12 +2395,18 @@ namespace Legion {
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
+      prune_gc_events();
+      // Grab the set of active contexts to notify
+      std::set<InnerContext*> to_notify;
+      to_notify.swap(active_contexts);
 #ifndef DISABLE_GC
       // If we're still active that means there are still outstanding
       // users so make an event for when we are done, not we're holding
       // the instance lock when this is called
       if (currently_active)
         deferred_deletion = Runtime::create_rt_user_event();
+      // Now we can release the lock since we're done with the atomic updates
+      i_lock->release();
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields); 
       if (!serdez_fields.empty())
@@ -2406,20 +2417,23 @@ namespace Legion {
       if (!is_external_instance())
         memory_manager->free_legion_instance(this, deferred_deletion);
 #endif
+#else
+      // Release the i_lock since we're done with the atomic updates
+      i_lock->release();
 #endif
       // Notify any contexts of our deletion
-      if (!active_contexts.empty())
+      if (!to_notify.empty())
       {
         for (std::set<InnerContext*>::const_iterator it =
-              active_contexts.begin(); it != active_contexts.end(); it++)
+              to_notify.begin(); it != to_notify.end(); it++)
         {
-          (*it)->notify_instance_deletion(const_cast<IndividualManager*>(this));
+          (*it)->notify_instance_deletion(this);
           if ((*it)->remove_reference())
             delete (*it);
         }
-        active_contexts.clear();
       }
-      return deferred_deletion;
+      // We issued the deletion to Realm so all our effects are done
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2614,7 +2628,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent CollectiveManager::perform_deletion(AddressSpaceID source)
+    RtEvent CollectiveManager::perform_deletion(AddressSpaceID source, 
+                                                AutoLock *i_lock /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
