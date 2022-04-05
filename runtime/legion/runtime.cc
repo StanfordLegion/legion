@@ -4468,7 +4468,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4563,7 +4571,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4661,7 +4677,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4771,7 +4795,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4864,7 +4896,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4920,7 +4960,15 @@ namespace Legion {
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const bool success =
+#endif
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+            assert(success);
+#else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
             manager->send_remote_valid_decrement(owner_space, NULL,
                                              local_mutator.get_done_event());
           }
@@ -4982,7 +5030,15 @@ namespace Legion {
             if (acquire)
             {
               LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const bool success =
+#endif
+              manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+              assert(success);
+#else
               manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
               manager->send_remote_valid_decrement(owner_space, NULL,
                                                local_mutator.get_done_event());
             }
@@ -5038,7 +5094,15 @@ namespace Legion {
             if (acquire)
             {
               LocalReferenceMutator local_mutator;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const bool success =
+#endif
+              manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
+              assert(success);
+#else
               manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+#endif
               manager->send_remote_valid_decrement(owner_space, NULL,
                                                local_mutator.get_done_event());
             }
@@ -5610,8 +5674,6 @@ namespace Legion {
       {
         DistributedID did;
         derez.deserialize(did);
-        bool acquire;
-        derez.deserialize(acquire);
         std::atomic<PhysicalManager*> *target;
         derez.deserialize(target);
         RequestKind kind;
