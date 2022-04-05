@@ -4277,16 +4277,19 @@ namespace Legion {
       std::vector<RtEvent> ready_events;
       std::vector<PhysicalManager*> to_delete;
       {
-        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+        AutoLock m_lock(manager_lock);
+        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
               current_instances.begin(); cit != current_instances.end(); cit++)
         {
-          for (TreeInstances::const_iterator it =
+          for (TreeInstances::iterator it =
                 cit->second.begin(); it != cit->second.end(); it++)
           {
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
+            {
               it->first->remove_base_valid_ref(NEVER_GC_REF);
+              it->second = 0;
+            }
             RtEvent ready;
             if (it->first->try_collection(runtime->address_space, ready))
             {
@@ -5136,17 +5139,20 @@ namespace Legion {
       std::vector<RtEvent> ready_events;
       std::vector<PhysicalManager*> to_delete, deleted;
       {
-        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+        AutoLock m_lock(manager_lock);
+        std::map<RegionTreeID,TreeInstances>::iterator finder = 
           current_instances.find(tree_id);
         if (finder != current_instances.end())
         {
-          for (TreeInstances::const_iterator it =
+          for (TreeInstances::iterator it =
                 finder->second.begin(); it != finder->second.end(); it++)
           {
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
+            {
               it->first->remove_base_valid_ref(NEVER_GC_REF);
+              it->second = 0;
+            }
             RtEvent ready;
             if (it->first->try_collection(runtime->address_space, ready))
             {
