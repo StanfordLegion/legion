@@ -2246,9 +2246,7 @@ namespace Legion {
     {
       // This is another kind of live expression made by the region tree
       this->add_base_expression_reference(LIVE_EXPR_REF);
-      if (implicit_reference_tracker == NULL)
-        implicit_reference_tracker = new ImplicitReferenceTracker;
-      implicit_reference_tracker->record_live_expression(this);
+      ImplicitReferenceTracker::record_live_expression(this);
 #ifdef DEBUG_LEGION
       assert(num_rects > 0);
 #endif

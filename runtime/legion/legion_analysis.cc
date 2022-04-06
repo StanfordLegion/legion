@@ -10054,6 +10054,13 @@ namespace Legion {
                         found_exprs.insert(it->second);
                         // Promote this up to the full set expression
                         set_expr->add_nested_expression_reference(did,&mutator);
+                        // Since we're going to use the old expression, we need
+                        // to keep it live until the end of the task
+                        it->second->add_base_expression_reference(LIVE_EXPR_REF,
+                                                                  &mutator);
+                        ImplicitReferenceTracker::record_live_expression(
+                                                                  it->second);
+                        // Now we can remove the previous live reference
                         if (it->second->remove_nested_expression_reference(did))
                           delete it->second;
                         it->second = set_expr;

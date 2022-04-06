@@ -6220,9 +6220,7 @@ namespace Legion {
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
       // Save it in the implicit live expression references
-      if (implicit_reference_tracker == NULL)
-        implicit_reference_tracker = new ImplicitReferenceTracker;
-      implicit_reference_tracker->record_live_expression(result);
+      ImplicitReferenceTracker::record_live_expression(result);
       // Remove the gc reference that comes back from finding it in the tree
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -6264,9 +6262,7 @@ namespace Legion {
             result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
           else
             result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-          if (implicit_reference_tracker == NULL)
-            implicit_reference_tracker = new ImplicitReferenceTracker;
-          implicit_reference_tracker->record_live_expression(result);
+          ImplicitReferenceTracker::record_live_expression(result);
         }
         return result;
       }
@@ -6291,9 +6287,7 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_reference_tracker == NULL)
-              implicit_reference_tracker = new ImplicitReferenceTracker;
-            implicit_reference_tracker->record_live_expression(result);
+            ImplicitReferenceTracker::record_live_expression(result);
           }
           return expressions.back();
         }
@@ -6381,9 +6375,7 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_reference_tracker == NULL)
-              implicit_reference_tracker = new ImplicitReferenceTracker;
-            implicit_reference_tracker->record_live_expression(result);
+            ImplicitReferenceTracker::record_live_expression(result);
           }
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
@@ -6404,9 +6396,7 @@ namespace Legion {
           result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
         else
           result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
       }
       // Remove the reference added by the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
@@ -6541,9 +6531,7 @@ namespace Legion {
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
       // Save it in the implicit live expression references
-      if (implicit_reference_tracker == NULL)
-        implicit_reference_tracker = new ImplicitReferenceTracker;
-      implicit_reference_tracker->record_live_expression(result);
+      ImplicitReferenceTracker::record_live_expression(result);
       // Remove the gc reference that comes back with the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -6596,9 +6584,7 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_reference_tracker == NULL)
-              implicit_reference_tracker = new ImplicitReferenceTracker;
-            implicit_reference_tracker->record_live_expression(result);
+            ImplicitReferenceTracker::record_live_expression(result);
           }
           return result;
         }
@@ -6673,9 +6659,7 @@ namespace Legion {
                                                       &local_mutator);
               else
                 unique->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-              if (implicit_reference_tracker == NULL)
-                implicit_reference_tracker = new ImplicitReferenceTracker;
-              implicit_reference_tracker->record_live_expression(unique);
+              ImplicitReferenceTracker::record_live_expression(unique);
             }
             // Remove references on all the things we no longer need
             for (std::set<IndexSpaceExpression*,CompareExpressions>::
@@ -6713,9 +6697,7 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_reference_tracker == NULL)
-              implicit_reference_tracker = new ImplicitReferenceTracker;
-            implicit_reference_tracker->record_live_expression(result);
+            ImplicitReferenceTracker::record_live_expression(result);
           }
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
@@ -6736,9 +6718,7 @@ namespace Legion {
           result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
         else
           result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
       }
       // Remove the reference added by the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
@@ -6939,9 +6919,7 @@ namespace Legion {
       }
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-      if (implicit_reference_tracker == NULL)
-        implicit_reference_tracker = new ImplicitReferenceTracker;
-      implicit_reference_tracker->record_live_expression(result);
+      ImplicitReferenceTracker::record_live_expression(result);
       // Remove the gc reference that comes back from finding it in the tree
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -7147,9 +7125,7 @@ namespace Legion {
           else
             node->send_remote_valid_decrement(pending.source,NULL/*mut*/,added);
         }
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(node);
+        ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
       else
@@ -7186,9 +7162,7 @@ namespace Legion {
           else
             op->send_remote_valid_decrement(pending.source, NULL/*mut*/, added);
         }
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
     }
@@ -7482,9 +7456,7 @@ namespace Legion {
           op->send_remote_valid_decrement(source, NULL/*mutator*/,
               mutator.get_done_event());
         }
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
       bool is_index_space;
@@ -7508,9 +7480,7 @@ namespace Legion {
           node->record_remote_owner_valid_reference();
         else
           node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(node);
+        ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
       else
@@ -7540,9 +7510,7 @@ namespace Legion {
           result->record_remote_owner_valid_reference();
         else
           op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
     }
@@ -7581,9 +7549,7 @@ namespace Legion {
           op->send_remote_valid_decrement(source, NULL/*mutator*/,
               mutator.get_done_event());
         }
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(result);
+        ImplicitReferenceTracker::record_live_expression(result);
         pending.done_ref_counting = true;
         return result;
       }
@@ -7612,9 +7578,7 @@ namespace Legion {
         else
           node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
         pending.done_ref_counting = true;
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        implicit_reference_tracker->record_live_expression(node);
+        ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
       derez.deserialize(pending.remote_expr_id);
@@ -7648,9 +7612,7 @@ namespace Legion {
       else
         op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
       pending.done_ref_counting = true;
-      if (implicit_reference_tracker == NULL)
-        implicit_reference_tracker = new ImplicitReferenceTracker;
-      implicit_reference_tracker->record_live_expression(result);
+      ImplicitReferenceTracker::record_live_expression(result);
       return result;
     }
 
