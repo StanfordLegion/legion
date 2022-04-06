@@ -842,16 +842,125 @@ namespace Legion {
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      // TODO: remove the !is_owner() check here
-      // If we really want to be strict on checking that acquires are always
-      // done first to avoid races with the garbage_collector. For now we'll
-      // settle for just checking that property on the owner node where the
-      // garbage collection decisions are ultimately made
-      assert((gc_state == ACQUIRED_GC_STATE) || !is_owner() ||
-              is_external_instance());
       assert(!deferred_deletion.exists());
+      assert(gc_state != COLLECTED_GC_STATE);
+      // In debug mode we eagerly add valid references such that the owner
+      // is valid as long as a copy of the manager on one node is valid
+      // This way we can easily check that acquires are being done safely
+      // if instance isn't already valid somewhere
+      if ((gc_state != ACQUIRED_GC_STATE) && !is_external_instance())
+      {
+        // Should never be here if we're the owner as it indicates that
+        // we tried to add a valid reference without first doing an acquire
+        assert(!is_owner());
+        // Send a message to check that we can safely do the acquire
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        std::atomic<bool> result(true);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&result);
+          rez.serialize(done);
+          rez.serialize<bool>(false/*acquired*/);
+        }
+        runtime->send_gc_debug_request(owner_space, rez);
+        if (!done.has_triggered())
+          done.wait();
+        assert(result.load());
+      }
+      else if (!is_owner())
+      {
+        // Send the message to do the acquire on the owner node
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        std::atomic<bool> result(true);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&result);
+          rez.serialize(done);
+          rez.serialize<bool>(true/*acquired*/);
+        }
+        runtime->send_gc_debug_request(owner_space, rez);
+        if (!done.has_triggered())
+          done.wait();
+        assert(result.load());
+      }
 #endif
       gc_state = VALID_GC_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_debug_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      std::atomic<bool> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      bool acquired;
+      derez.deserialize(acquired);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)
+      {
+        if (acquired)
+        {
+          LocalReferenceMutator mutator;
+          // Should be guaranteed to be able to acquire thi
+          if (manager->acquire_instance(REMOTE_DID_REF, &mutator))
+          {
+            Runtime::trigger_event(done, mutator.get_done_event());
+            return;
+          }
+        }
+        else
+        {
+          if (manager->check_valid_and_increment(REMOTE_DID_REF))
+          {
+            // This must already be valid for us to succeed
+            Runtime::trigger_event(done);
+            return;
+          }
+        }
+      }
+      // If we get here, we failed so send the response
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(target);
+        rez.serialize(done);
+      }
+      runtime->send_gc_debug_response(source, rez);
+#else
+      assert(false); // should never get this in release mode
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_debug_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      DerezCheck z(derez);
+      std::atomic<bool> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      target->store(false);
+      Runtime::trigger_event(done);
+#else
+      assert(false); // should never get this in release mode
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -861,6 +970,8 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(gc_state == VALID_GC_STATE);
+      if (!is_owner())
+        send_remote_valid_decrement(owner_space, mutator);
 #endif
       if (pending_changes == 0)
       {

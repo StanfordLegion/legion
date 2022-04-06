@@ -1158,7 +1158,7 @@ namespace Legion {
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
       // Maintain a static-mapping between message kinds and virtual channels
-      static inline VirtualChannelKind find_message_vc(MessageKind kind);
+      static constexpr VirtualChannelKind find_message_vc(MessageKind kind);
     private:
       VirtualChannel *const channels;
     public:
@@ -2392,6 +2392,8 @@ namespace Legion {
       void send_gc_released(AddressSpaceID target, Serializer &rez); // ref vc
       void send_gc_verification(AddressSpaceID target, Serializer &rez);
       void send_gc_verified(AddressSpaceID target, Serializer &rez);
+      void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
+      void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
@@ -2647,6 +2649,8 @@ namespace Legion {
       void handle_gc_released(Deserializer &derez, AddressSpaceID source);
       void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
       void handle_gc_verified(Deserializer &derez);
+      void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_debug_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -4143,7 +4147,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline VirtualChannelKind MessageManager::find_message_vc(
+    /*static*/ constexpr VirtualChannelKind MessageManager::find_message_vc(
                                                                MessageKind kind)
     //--------------------------------------------------------------------------
     {
@@ -4450,6 +4454,10 @@ namespace Legion {
         case SEND_GC_VERIFICATION:
           break;
         case SEND_GC_VERIFIED:
+          break;
+        case SEND_GC_DEBUG_REQUEST:
+          break;
+        case SEND_GC_DEBUG_RESPONSE:
           break;
         case SEND_ACQUIRE_REQUEST:
           break;

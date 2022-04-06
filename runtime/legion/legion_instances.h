@@ -330,6 +330,9 @@ namespace Legion {
       static void handle_garbage_collection_verified(Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_debug_request(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_debug_response(Deserializer &derez);
     public:
       const size_t instance_footprint;
       const ReductionOp *reduction_op;

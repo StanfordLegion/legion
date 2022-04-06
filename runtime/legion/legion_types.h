@@ -826,6 +826,8 @@ namespace Legion {
       SEND_GC_RELEASED,
       SEND_GC_VERIFICATION,
       SEND_GC_VERIFIED,
+      SEND_GC_DEBUG_REQUEST,
+      SEND_GC_DEBUG_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -1011,6 +1013,8 @@ namespace Legion {
         "Send GC Release Response",                                   \
         "Send GC Verification Request",                               \
         "Send GC Verification Response",                              \
+        "Send GC Debug Request",                                      \
+        "Send GC Debug Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \

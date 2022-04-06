@@ -8273,6 +8273,16 @@ namespace Legion {
               runtime->handle_gc_verified(derez);
               break;
             }
+          case SEND_GC_DEBUG_REQUEST:
+            {
+              runtime->handle_gc_debug_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_DEBUG_RESPONSE:
+            {
+              runtime->handle_gc_debug_response(derez);
+              break;
+            }
           case SEND_ACQUIRE_REQUEST:
             {
               runtime->handle_acquire_request(derez, remote_address_space);
@@ -8544,7 +8554,7 @@ namespace Legion {
       // Always flush for the profiler if we're doing that
       if (!flush && always_flush)
         flush = true;
-      VirtualChannelKind channel = find_message_vc(M);
+      constexpr VirtualChannelKind channel = find_message_vc(M);
       channels[channel].package_message(rez, M, flush, flush_precondition,
                                         runtime, target, response, shutdown);
     }
@@ -16758,6 +16768,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_gc_debug_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_DEBUG_REQUEST>(rez,
+                                                        true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_debug_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_DEBUG_RESPONSE>(rez,
+                                       true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_acquire_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -18466,6 +18492,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_verified(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_debug_request(Deserializer &derez,
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_debug_request(this, derez,
+                                                               source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_debug_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_debug_response(derez);
     }
 
     //--------------------------------------------------------------------------
