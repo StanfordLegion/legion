@@ -842,9 +842,14 @@ namespace Legion {
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert((gc_state == ACQUIRED_GC_STATE) || 
-             (gc_state == PENDING_COLLECTED_GC_STATE) ||
-             is_external_instance());
+      // TODO: remove the !is_owner() check here
+      // If we really want to be strict on checking that acquires are always
+      // done first to avoid races with the garbage_collector. For now we'll
+      // settle for just checking that property on the owner node where the
+      // garbage collection decisions are ultimately made
+      assert((gc_state == ACQUIRED_GC_STATE) || !is_owner() ||
+              is_external_instance());
+      assert(!deferred_deletion.exists());
 #endif
       gc_state = VALID_GC_STATE;
     }

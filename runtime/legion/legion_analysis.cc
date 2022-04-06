@@ -6463,10 +6463,6 @@ namespace Legion {
         output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (runtime->address_space != original_source)
-        target_instances.acquire_instances(PHYSICAL_ANALYSIS_REF, NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6486,10 +6482,6 @@ namespace Legion {
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_LEGION
-      if (runtime->address_space != original_source)
-        target_instances.remove_valid_references(PHYSICAL_ANALYSIS_REF, NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7406,10 +7398,6 @@ namespace Legion {
         trace_info(t_info), perfect(perf), across_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (runtime->address_space != original_source)
-        target_instances.acquire_instances(PHYSICAL_ANALYSIS_REF, NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7435,8 +7423,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!aggregator_guard.exists() || aggregator_guard.has_triggered());
-      if (runtime->address_space != original_source)
-        target_instances.remove_valid_references(PHYSICAL_ANALYSIS_REF, NULL);
 #endif 
       for (std::vector<CopyAcrossHelper*>::const_iterator it = 
             across_helpers.begin(); it != across_helpers.end(); it++)
@@ -7941,23 +7927,6 @@ namespace Legion {
         add_restriction(restriction), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (runtime->address_space != original_source)
-      {
-        for (std::set<LogicalView*>::const_iterator it =
-              views.begin(); it != views.end(); it++)
-        {
-          if (!(*it)->is_instance_view())
-            continue;
-          InstanceView *inst = (*it)->as_instance_view();
-#ifndef NDEBUG
-          const bool success =
-#endif
-          inst->manager->acquire_instance(PHYSICAL_ANALYSIS_REF, NULL);
-          assert(success);
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7976,20 +7945,6 @@ namespace Legion {
     OverwriteAnalysis::~OverwriteAnalysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (runtime->address_space != original_source)
-      {
-        for (std::set<LogicalView*>::const_iterator it =
-              views.begin(); it != views.end(); it++)
-        {
-          if (!(*it)->is_instance_view())
-            continue;
-          InstanceView *inst = (*it)->as_instance_view();
-          if (inst->manager->remove_base_valid_ref(PHYSICAL_ANALYSIS_REF))
-            delete inst->manager;
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8274,16 +8229,6 @@ namespace Legion {
         remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if ((runtime->address_space != original_source) && (inst_view != NULL))
-      {
-#ifndef NDEBUG
-        const bool success =
-#endif
-        inst_view->manager->acquire_instance(PHYSICAL_ANALYSIS_REF, NULL);
-        assert(success);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8301,11 +8246,6 @@ namespace Legion {
     FilterAnalysis::~FilterAnalysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if ((runtime->address_space != original_source) && (inst_view != NULL) &&
-          inst_view->manager->remove_base_valid_ref(PHYSICAL_ANALYSIS_REF))
-        delete inst_view->manager;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14856,22 +14796,6 @@ namespace Legion {
         delete manager;
     }
 
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void InstanceRef::acquire_instance(ReferenceSource source,
-                                       ReferenceMutator *mutator) const
-    //--------------------------------------------------------------------------
-    {
-      assert(manager != NULL);
-      assert(manager->is_physical_manager());
-#ifndef NDEBUG
-      const bool success =
-#endif
-      manager->as_physical_manager()->acquire_instance(source, mutator);
-      assert(success);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     Memory InstanceRef::get_memory(void) const
     //--------------------------------------------------------------------------
@@ -15556,25 +15480,6 @@ namespace Legion {
           refs.multi->vector[idx].remove_valid_reference(source, mutator);
       }
     }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void InstanceSet::acquire_instances(ReferenceSource source,
-                                        ReferenceMutator *mutator) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-        if (refs.single != NULL)
-          refs.single->acquire_instance(source, mutator);
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          refs.multi->vector[idx].acquire_instance(source, mutator);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void InstanceSet::update_wait_on_events(std::set<ApEvent> &wait_on) const 
