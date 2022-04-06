@@ -8327,6 +8327,7 @@ namespace Legion {
           coord_t c = color[dim];
           if (all_extents[dim][c] == -1)
             all_extents[dim][c] = extent[dim];
+          else if (extent[dim] <= 0) continue;
           else if (all_extents[dim][c] != extent[dim])
           {
             std::stringstream ss;
