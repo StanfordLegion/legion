@@ -275,7 +275,6 @@ namespace Legion {
       bool try_collection(AddressSpaceID source, RtEvent &ready);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
-      void perform_collection(AddressSpaceID source);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
       virtual RtEvent perform_deletion(AddressSpaceID source, 
@@ -307,7 +306,6 @@ namespace Legion {
                             bool tight_bounds = false) const;
     protected:
       void prune_gc_events(void);
-      void send_garbage_collection_releases(void);
       void pack_garbage_collection_state(Serializer &rez,AddressSpaceID target);
       void initialize_remote_gc_state(GarbageCollectionState state);
     public: 
@@ -323,10 +321,6 @@ namespace Legion {
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_acquired(Deserializer &derez);
       static void handle_garbage_collection_release(Runtime *runtime,
-          Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_released(Runtime *runtime,
-          Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_collected(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_verification(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);

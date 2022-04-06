@@ -1028,10 +1028,6 @@ namespace Legion {
                 // have checked the result of the collection
                 pending_changes++;
                 success = true;
-                // This deletion failed so we can send messages to all
-                // the remote copies reseting their states
-                if (has_remote_instances())
-                  send_garbage_collection_releases();
               }
               // Not the owner so we need to send a message to the
               // owner to have it try to do the acquire
@@ -1073,7 +1069,17 @@ namespace Legion {
         }
         runtime->send_acquire_request(owner_space, rez);
         ready.wait();
-        return result.load();
+        if (result.load())
+          return true;
+        // The only reason we fail is if the instance has been collected
+        // so we can update the gc_state
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert((gc_state == PENDING_COLLECTED_GC_STATE) || 
+                (gc_state == COLLECTED_GC_STATE)); 
+#endif
+        gc_state = COLLECTED_GC_STATE;
+        return false;
       }
     }
 
@@ -1242,7 +1248,8 @@ namespace Legion {
         {
           // We can setup the guard now
 #ifdef DEBUG_LEGION
-          assert(gc_state == COLLECTABLE_GC_STATE);
+          assert((gc_state == COLLECTABLE_GC_STATE) ||
+                  (gc_state == PENDING_COLLECTED_GC_STATE));
 #endif
           gc_state = PENDING_COLLECTED_GC_STATE;
         }
@@ -1329,10 +1336,6 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 
-      // Add a reference that will be remove when the manager is
-      // either released or collected
-      manager->add_base_resource_ref(PENDING_COLLECTIVE_REF);
-
       if (manager->try_collection(source, ready))
       {
         Serializer rez;
@@ -1384,17 +1387,10 @@ namespace Legion {
 #endif
         if (--pending_changes == 0)
         {
-          if (gc_state == PENDING_COLLECTED_GC_STATE)
+          if ((gc_state == ACQUIRED_GC_STATE) ||
+              (gc_state == PENDING_COLLECTED_GC_STATE))
           {
-            // Last delete didn't work so send out invalidations
-            if (has_remote_instances())
-              send_garbage_collection_releases();
             // Reset back to collectable state
-            gc_state = COLLECTABLE_GC_STATE;
-            prune_gc_events();
-          }
-          else if (gc_state == ACQUIRED_GC_STATE)
-          {
             gc_state = COLLECTABLE_GC_STATE;
             prune_gc_events();
           }
@@ -1402,56 +1398,16 @@ namespace Legion {
       }
       else
       {
-        // Not the owner, see where it came from
-        if (source == owner_space)
-        {
-          AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-          assert(pending_changes == 0);
-          assert((gc_state == PENDING_COLLECTED_GC_STATE) ||
-              (gc_state == VALID_GC_STATE) || (gc_state == COLLECTED_GC_STATE));
+        assert(source == runtime->address_space);
 #endif
-          if (gc_state == PENDING_COLLECTED_GC_STATE)
-          {
-            gc_state = COLLECTABLE_GC_STATE;
-            prune_gc_events();
-          }
-        }
-        else
+        Serializer rez;
         {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-          }
-          runtime->send_gc_release(owner_space, rez);
+          RezCheck z(rez);
+          rez.serialize(did);
         }
+        runtime->send_gc_release(owner_space, rez);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::send_garbage_collection_releases(void)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-      }
-      struct ReleaseFunctor {
-      ReleaseFunctor(Runtime *rt, Serializer &r) 
-        : runtime(rt), rez(r) { }
-        inline void apply(AddressSpaceID target)
-        {
-          if (target == runtime->address_space)
-            return;
-          runtime->send_gc_released(target, rez);
-        }
-        Runtime *const runtime;
-        Serializer &rez;
-      };
-      ReleaseFunctor functor(runtime, rez);
-      map_over_remote_instances(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -1470,84 +1426,6 @@ namespace Legion {
 #endif
       manager->release_collection(source);
       // Remove the reference added by the successful remote request
-      if (manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF))
-        delete manager;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_released(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-
-      RtEvent ready;
-      PhysicalManager *manager = 
-        runtime->find_or_request_instance_manager(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-
-      manager->release_collection(source);
-      // Remove the reference added by the acquire 
-      if (manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF))
-        delete manager;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::perform_collection(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-        }
-        struct CollectFunctor {
-        CollectFunctor(Runtime *rt, Serializer &r) 
-          : runtime(rt), rez(r) { }
-          inline void apply(AddressSpaceID target)
-          {
-            if (target == runtime->address_space)
-              return;
-            runtime->send_gc_collected(target, rez);
-          }
-          Runtime *const runtime;
-          Serializer &rez;
-        };
-        CollectFunctor functor(runtime, rez);
-        map_over_remote_instances(functor);
-      }
-      else
-      {
-        AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-        assert(gc_state == PENDING_COLLECTED_GC_STATE);
-#endif
-        gc_state = COLLECTED_GC_STATE;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_collected(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-
-      RtEvent ready;
-      PhysicalManager *manager = 
-        runtime->find_or_request_instance_manager(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-
-      manager->perform_collection(source);
-      // Remove the reference added by the acquire 
       if (manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF))
         delete manager;
     }
@@ -1644,10 +1522,6 @@ namespace Legion {
                 // keep it in this state
                 if (--pending_changes == 0)
                 {
-                  // Send the release messages since we failed
-                  // the deletion and we're the last one here
-                  if (has_remote_instances())
-                    send_garbage_collection_releases();
                   gc_state = COLLECTABLE_GC_STATE;
                   prune_gc_events();
                 }
@@ -1658,9 +1532,6 @@ namespace Legion {
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
                 gc_state = COLLECTED_GC_STATE;
-                // Send the deletion messages
-                if (has_remote_instances())
-                  perform_collection(runtime->address_space);
                 // Now we can perform the deletion which will release the lock
                 ready = perform_deletion(runtime->address_space, &i_lock);
                 return true;
@@ -1861,10 +1732,6 @@ namespace Legion {
                     // Garbage collector is trying to eat it, save it!
                     gc_state = ACQUIRED_GC_STATE;
                     pending_changes++;
-                    // This deletion failed so we can send messages to all
-                    // the remote copies reseting their states
-                    if (has_remote_instances())
-                      send_garbage_collection_releases();
                     break;
                   }
                 default:

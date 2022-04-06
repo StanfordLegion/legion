@@ -671,8 +671,7 @@ namespace Legion {
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
-      GARBAGE_COLLECTION_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
     };
 
     enum MessageKind {
@@ -824,8 +823,6 @@ namespace Legion {
       SEND_GC_ACQUIRE,
       SEND_GC_ACQUIRED,
       SEND_GC_RELEASE,
-      SEND_GC_RELEASED,
-      SEND_GC_COLLECTED,
       SEND_GC_VERIFICATION,
       SEND_GC_VERIFIED,
       SEND_GC_DEBUG_REQUEST,
@@ -1011,9 +1008,7 @@ namespace Legion {
         "Send GC Response",                                           \
         "Send GC Acquire Request",                                    \
         "Send GC Acquire Response",                                   \
-        "Send GC Release Request",                                    \
-        "Send GC Release Response",                                   \
-        "Send GC Collected",                                          \
+        "Send GC Release",                                            \
         "Send GC Verification Request",                               \
         "Send GC Verification Response",                              \
         "Send GC Debug Request",                                      \
