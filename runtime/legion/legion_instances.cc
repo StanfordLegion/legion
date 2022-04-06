@@ -1329,6 +1329,10 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 
+      // Add a reference that will be remove when the manager is
+      // either released or collected
+      manager->add_base_resource_ref(PENDING_COLLECTIVE_REF);
+
       if (manager->try_collection(source, ready))
       {
         Serializer rez;
@@ -1486,6 +1490,66 @@ namespace Legion {
         ready.wait();
 
       manager->release_collection(source);
+      // Remove the reference added by the acquire 
+      if (manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::perform_collection(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+        }
+        struct CollectFunctor {
+        CollectFunctor(Runtime *rt, Serializer &r) 
+          : runtime(rt), rez(r) { }
+          inline void apply(AddressSpaceID target)
+          {
+            if (target == runtime->address_space)
+              return;
+            runtime->send_gc_collected(target, rez);
+          }
+          Runtime *const runtime;
+          Serializer &rez;
+        };
+        CollectFunctor functor(runtime, rez);
+        map_over_remote_instances(functor);
+      }
+      else
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(gc_state == PENDING_COLLECTED_GC_STATE);
+#endif
+        gc_state = COLLECTED_GC_STATE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_collected(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+
+      RtEvent ready;
+      PhysicalManager *manager = 
+        runtime->find_or_request_instance_manager(did, ready);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+
+      manager->perform_collection(source);
+      // Remove the reference added by the acquire 
+      if (manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF))
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -1530,6 +1594,9 @@ namespace Legion {
       assert(gc_state == COLLECTABLE_GC_STATE);
 #endif
       gc_state = state;
+      // If we're in a pending collectable state, then add a reference
+      if (state == PENDING_COLLECTED_GC_STATE)
+        add_base_resource_ref(PENDING_COLLECTIVE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1591,6 +1658,10 @@ namespace Legion {
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
                 gc_state = COLLECTED_GC_STATE;
+                // Send the deletion messages
+                if (has_remote_instances())
+                  perform_collection(runtime->address_space);
+                // Now we can perform the deletion which will release the lock
                 ready = perform_deletion(runtime->address_space, &i_lock);
                 return true;
               }
@@ -2553,7 +2624,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualManager::force_collection(void)
+    void IndividualManager::force_deletion(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2754,7 +2825,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::force_collection(void)
+    void CollectiveManager::force_deletion(void)
     //--------------------------------------------------------------------------
     {
       force_delete(true/*left*/);

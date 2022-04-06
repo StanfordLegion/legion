@@ -275,11 +275,12 @@ namespace Legion {
       bool try_collection(AddressSpaceID source, RtEvent &ready);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
+      void perform_collection(AddressSpaceID source);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL) = 0;
-      virtual void force_collection(void) = 0;
+      virtual void force_deletion(void) = 0;
       virtual RtEvent update_garbage_collection_priority(
                                                        GCPriority priority) = 0;
       virtual RtEvent attach_external_instance(void) = 0;
@@ -324,6 +325,8 @@ namespace Legion {
       static void handle_garbage_collection_release(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_released(Runtime *runtime,
+          Deserializer &derez, AddressSpaceID source);
+      static void handle_garbage_collection_collected(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_verification(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
@@ -498,7 +501,7 @@ namespace Legion {
     public:
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL);
-      virtual void force_collection(void);
+      virtual void force_deletion(void);
       virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
@@ -590,7 +593,7 @@ namespace Legion {
     public:
       virtual RtEvent perform_deletion(AddressSpaceID source,
                                        AutoLock *i_lock = NULL);
-      virtual void force_collection(void);
+      virtual void force_deletion(void);
       virtual RtEvent update_garbage_collection_priority(GCPriority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);

@@ -2386,10 +2386,11 @@ namespace Legion {
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
       void send_gc_request(AddressSpaceID target, Serializer &rez);
       void send_gc_response(AddressSpaceID target, Serializer &rez);
-      void send_gc_acquire(AddressSpaceID target, Serializer &rez); // ref vc
+      void send_gc_acquire(AddressSpaceID target, Serializer &rez); // gc vc
       void send_gc_acquired(AddressSpaceID target, Serializer &rez);
       void send_gc_release(AddressSpaceID target, Serializer &rez);
-      void send_gc_released(AddressSpaceID target, Serializer &rez); // ref vc
+      void send_gc_released(AddressSpaceID target, Serializer &rez); // gc vc
+      void send_gc_collected(AddressSpaceID target, Serializer &rez); // gc vc
       void send_gc_verification(AddressSpaceID target, Serializer &rez);
       void send_gc_verified(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
@@ -2647,6 +2648,7 @@ namespace Legion {
       void handle_gc_acquired(Deserializer &derez);
       void handle_gc_release(Deserializer &derez, AddressSpaceID source);
       void handle_gc_released(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_collected(Deserializer &derez, AddressSpaceID source);
       void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
       void handle_gc_verified(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
@@ -4444,13 +4446,15 @@ namespace Legion {
         case SEND_GC_RESPONSE:
           break;
         case SEND_GC_ACQUIRE:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          return GARBAGE_COLLECTION_VIRTUAL_CHANNEL;
         case SEND_GC_ACQUIRED:
           break;
         case SEND_GC_RELEASE:
           break;
         case SEND_GC_RELEASED:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          return GARBAGE_COLLECTION_VIRTUAL_CHANNEL;
+        case SEND_GC_COLLECTED:
+          return GARBAGE_COLLECTION_VIRTUAL_CHANNEL;
         case SEND_GC_VERIFICATION:
           break;
         case SEND_GC_VERIFIED:

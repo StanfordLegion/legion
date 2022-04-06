@@ -4370,7 +4370,7 @@ namespace Legion {
             current_instances.begin(); cit != current_instances.end(); cit++)
         for (TreeInstances::const_iterator it = 
               cit->second.begin(); it != cit->second.end(); it++)
-          it->first->force_collection();
+          it->first->force_deletion();
       current_instances.clear();
 #ifdef LEGION_MALLOC_INSTANCES
       for (std::map<RtEvent,uintptr_t>::const_iterator it = 
@@ -8261,6 +8261,11 @@ namespace Legion {
           case SEND_GC_RELEASED:
             {
               runtime->handle_gc_released(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_COLLECTED:
+            {
+              runtime->handle_gc_collected(derez, remote_address_space);
               break;
             }
           case SEND_GC_VERIFICATION:
@@ -16719,7 +16724,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_GC_RESPONSE>(rez, 
                                 true/*flush*/, true/*response*/);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_gc_acquire(AddressSpaceID target, Serializer &rez)
@@ -16749,6 +16754,14 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_GC_RELEASED>(rez,
                                 true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_collected(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_COLLECTED>(rez, 
+                                  true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -18476,6 +18489,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_released(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_collected(Deserializer &derez,AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_collected(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
