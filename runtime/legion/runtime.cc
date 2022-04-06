@@ -8554,7 +8554,7 @@ namespace Legion {
       // Always flush for the profiler if we're doing that
       if (!flush && always_flush)
         flush = true;
-      constexpr VirtualChannelKind channel = find_message_vc(M);
+      const VirtualChannelKind channel = find_message_vc(M);
       channels[channel].package_message(rez, M, flush, flush_precondition,
                                         runtime, target, response, shutdown);
     }

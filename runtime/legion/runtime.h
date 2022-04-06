@@ -1158,7 +1158,7 @@ namespace Legion {
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
       // Maintain a static-mapping between message kinds and virtual channels
-      static constexpr VirtualChannelKind find_message_vc(MessageKind kind);
+      static inline VirtualChannelKind find_message_vc(MessageKind kind);
     private:
       VirtualChannel *const channels;
     public:
@@ -4147,7 +4147,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ constexpr VirtualChannelKind MessageManager::find_message_vc(
+    /*static*/ inline VirtualChannelKind MessageManager::find_message_vc(
                                                                MessageKind kind)
     //--------------------------------------------------------------------------
     {
