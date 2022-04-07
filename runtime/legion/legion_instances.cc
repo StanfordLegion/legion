@@ -3706,21 +3706,9 @@ namespace Legion {
       ApEvent ready;
 #ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
-      {
         runtime->profiler->add_inst_request(requests, creator_id);
-        ready = ApEvent(PhysicalInstance::create_instance(instance,
-              memory_manager->memory, inst_layout, requests, precondition));
-        if (instance.exists())
-        {
-          unsigned long long creation_time = 
-            Realm::Clock::current_time_in_nanoseconds();
-          runtime->profiler->record_instance_creation(instance,
-              memory_manager->memory, creator_id, creation_time);
-        }
-      }
-      else
-        ready = ApEvent(PhysicalInstance::create_instance(instance,
-              memory_manager->memory, inst_layout, requests, precondition));
+      ready = ApEvent(PhysicalInstance::create_instance(instance,
+            memory_manager->memory, inst_layout, requests, precondition));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
@@ -3747,10 +3735,6 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
       {
-#ifndef LEGION_MALLOC_INSTANCES
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-#endif
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -3996,6 +3980,15 @@ namespace Legion {
         // Destroy the instance first so that Realm can reclaim the ID
         instance.destroy();
         instance = PhysicalInstance::NO_INST;
+        if (runtime->profiler != NULL)
+          runtime->profiler->handle_failed_instance_allocation();
+      }
+      else if (runtime->profiler != NULL)
+      {
+        unsigned long long creation_time = 
+          Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_instance_creation(instance,
+            memory_manager->memory, creator_id, creation_time);
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
