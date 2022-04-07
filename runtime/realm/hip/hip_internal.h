@@ -501,6 +501,7 @@ namespace Realm {
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
       void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
+      void create_dynamic_fb_memory(RuntimeImpl *runtime, size_t max_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -736,6 +737,20 @@ namespace Realm {
       Realm::CoreReservation *core_rsrv;
     };
 
+    // this can be attached to any MemoryImpl if the underlying memory is
+    //  guaranteed to belong to a given device - this will allow that
+    //  context's processor and dma channels to work with it
+    // the creator is expected to know what device they want but need
+    //  not know which GPU object that corresponds to
+    class HipDeviceMemoryInfo : public ModuleSpecificInfo
+    {
+    public:
+      HipDeviceMemoryInfo(int _device_id);
+
+      int device_id;
+      GPU *gpu;
+    };
+
     class GPUFBMemory : public LocalManagedMemory {
     public:
       GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
@@ -752,6 +767,35 @@ namespace Realm {
       GPU *gpu;
       char *base;
       NetworkSegment local_segment;
+    };
+
+    class GPUDynamicFBMemory : public MemoryImpl {
+    public:
+      GPUDynamicFBMemory(Memory _me, GPU *_gpu, size_t _max_size);
+
+      virtual ~GPUDynamicFBMemory(void);
+
+      // deferred allocation not supported
+      virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
+							  bool need_alloc_result,
+							  bool poisoned,
+							  TimeLimit work_until);
+
+      virtual void release_storage_immediate(RegionInstanceImpl *inst,
+					     bool poisoned,
+					     TimeLimit work_until);
+
+      // these work, but they are SLOW
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+
+    public:
+      GPU *gpu;
+      Mutex mutex;
+      size_t cur_size;
+      std::map<RegionInstance, void*> alloc_bases;
     };
 
     class GPUZCMemory : public LocalManagedMemory {
