@@ -2882,8 +2882,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                                      FieldMaskSet<LogicalView> > &target) const
+    void TraceViewSet::transpose_uniquely(
+            LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > &target,
+            std::set<IndexSpaceExpression*> &unique_exprs,
+            ReferenceMutator &mutator) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2893,7 +2895,12 @@ namespace Legion {
             conditions.begin(); vit != conditions.end(); ++vit)
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); it++)
+        {
           target[it->first].insert(vit->first, it->second);
+          // Track the unique expressions
+          if (unique_exprs.insert(it->first).second)
+            it->first->add_base_expression_reference(TRACE_REF, &mutator);
+        }
       if (target.size() == 1)
         return;
       // Now for the hard part, we need to compare any expresions that overlap
@@ -3238,17 +3245,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceConditionSet::TraceConditionSet(const TraceConditionSet &rhs)
-      : context(rhs.context), forest(rhs.forest),
-        condition_expr(rhs.condition_expr), condition_mask(rhs.condition_mask),
-        regions(rhs.regions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     TraceConditionSet::~TraceConditionSet(void)
     //--------------------------------------------------------------------------
     {
@@ -3288,6 +3284,11 @@ namespace Legion {
         if (eit->first->remove_base_expression_reference(TRACE_REF))
           delete eit->first;
       }
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            unique_view_expressions.begin(); it != 
+            unique_view_expressions.end(); it++) 
+        if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
       for (std::vector<RegionNode*>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
         if ((*it)->remove_base_resource_ref(TRACE_REF))
@@ -3300,16 +3301,6 @@ namespace Legion {
         delete anticondition_views;
       if (postcondition_views != NULL)
         delete postcondition_views;
-    }
-
-    //--------------------------------------------------------------------------
-    TraceConditionSet& TraceConditionSet::operator=(
-                                                   const TraceConditionSet &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -3430,7 +3421,8 @@ namespace Legion {
       WrapperReferenceMutator mutator(ready);
       if (precondition_views != NULL)
       {
-        precondition_views->transpose_uniquely(preconditions);
+        precondition_views->transpose_uniquely(preconditions,
+                            unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = preconditions.begin(); eit != preconditions.end(); eit++)
@@ -3443,7 +3435,8 @@ namespace Legion {
       }
       if (anticondition_views != NULL)
       {
-        anticondition_views->transpose_uniquely(anticonditions);
+        anticondition_views->transpose_uniquely(anticonditions,
+                              unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3456,7 +3449,8 @@ namespace Legion {
       }
       if (postcondition_views != NULL)
       {
-        postcondition_views->transpose_uniquely(postconditions);
+        postcondition_views->transpose_uniquely(postconditions,
+                              unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = postconditions.begin(); eit != postconditions.end(); eit++)
