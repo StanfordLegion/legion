@@ -5262,13 +5262,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(unsigned i,
-                                       const RegionRequirement &r,
+                                       const OutputRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
                                        Runtime *rt, const bool global,
                                        const bool valid)
       : Collectable(), runtime(rt), context(ctx),
-        req(r), instance_set(is), num_elements(-1LU), index(i), 
+        req(r), instance_set(is), extents(), index(i), 
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
@@ -5279,7 +5279,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        req(), instance_set(), num_elements(-1LU), index(-1U), 
+        req(), instance_set(), extents(), index(-1U), 
         created_region(false), global_indexing(false)
     //--------------------------------------------------------------------------
     {
@@ -5336,7 +5336,80 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t new_num_elements,
+    void OutputRegionImpl::check_type_tag(TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      if (type_tag == req.type_tag) return;
+
+      REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_RETURN,
+        "The deferred buffer passed to output region %u of task %s (UID: %lld) "
+        "is incompatible with the output region. Make sure the deferred buffer "
+        "has the right dimension and the coordinate type.",
+        index, context->owner_task->get_task_name(),
+        context->owner_task->get_unique_op_id());
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::check_field_size(
+                                      FieldID field_id, size_t field_size) const
+    //--------------------------------------------------------------------------
+    {
+      size_t impl_field_size = get_field_size(field_id);
+      if (field_size == impl_field_size) return;
+
+      REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_RETURN,
+        "The deferred buffer passed to field %u of output region %u of task %s "
+        "(UID: %lld) has elements of %zd bytes each, but the field size is "
+        "%zd bytes. Make sure you pass a buffer of the right element type.",
+        field_id, index, context->owner_task->get_task_name(),
+        context->owner_task->get_unique_op_id(), field_size, impl_field_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::get_layout(FieldID field_id,
+                                      std::vector<DimensionKind> &ordering,
+                                      size_t &alignment) const
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager *manager = get_manager(field_id);
+      LayoutConstraints *cons = manager->layout->constraints;
+
+#ifdef DEBUG_LEGION
+      assert(cons->ordering_constraint.ordering.size() > 1);
+      assert(cons->ordering_constraint.ordering.back() == LEGION_DIM_F);
+#endif
+      int32_t ndim = cons->ordering_constraint.ordering.size() - 1;
+      ordering.resize(ndim);
+      for (int32_t idx = 0; idx < ndim; ++idx)
+        ordering[idx] = cons->ordering_constraint.ordering[idx];
+
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+           cons->alignment_constraints.begin(); it !=
+           cons->alignment_constraints.end(); ++it)
+      {
+        if (it->fid == field_id && it->eqk == LEGION_EQ_EK)
+        {
+          alignment = it->alignment;
+          return;
+        }
+      }
+
+      // If no alignment constraint was given, use the field size
+      // for alignment
+      alignment = get_field_size(field_id);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t OutputRegionImpl::get_field_size(FieldID field_id) const
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = runtime->forest->get_node(req.region);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+      return fspace_node->get_field_size(field_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::return_data(const DomainPoint &new_extents,
                                        FieldID field_id,
                                        uintptr_t ptr,
                                        size_t alignment,
@@ -5355,19 +5428,19 @@ namespace Legion {
           context->owner_task->get_unique_op_id());
       }
 
-      if (num_elements != -1LU && new_num_elements != num_elements)
+      if (extents.dim != 0 && new_extents != extents)
       {
-          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-            "Output region %u of task %s (UID: %lld) has already been "
-            "initialized to have %zd elements, but the new output data "
-            "holds %zd elements. You must return the same number of "
-            "elements to all the fields in the same output region.",
-            index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id(),
-            num_elements, new_num_elements);
+        std::stringstream ss;
+        ss << "Output region " << index << " of task "
+           << context->owner_task->get_task_name() << " (UID: "
+           << context->owner_task->get_unique_op_id() << ") has already been "
+           << "initialized to extents " << extents << ", but the new output "
+           << "has extents " << new_extents << ". You must return data having "
+           << "the same extents to all the fields in the same output region.";
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
       }
       else
-        num_elements = new_num_elements;
+        extents = new_extents;
 
       if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
       {
@@ -5382,12 +5455,15 @@ namespace Legion {
       ExternalInstanceInfo &info = returned_instances[field_id];
       info.eager_pool = eager_pool;
       // Sanitize the pointer when the size is 0
+      size_t num_elements = 1;
+      for (int32_t dim = 0; dim < extents.dim; ++dim)
+        num_elements *= extents[dim];
       info.ptr = num_elements != 0 ? ptr : 0;
       info.alignment = alignment;
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t num_elements,
+    void OutputRegionImpl::return_data(const DomainPoint &extents,
                                        std::map<FieldID,void*> ptrs,
                                        std::map<FieldID,size_t> *_alignments)
     //--------------------------------------------------------------------------
@@ -5401,7 +5477,7 @@ namespace Legion {
       {
         std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
         size_t alignment = finder != alignments.end() ? finder->second : 0;
-        return_data(num_elements,
+        return_data(extents,
                     it->first,
                     reinterpret_cast<uintptr_t>(it->second),
                     alignment,
@@ -5410,24 +5486,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(FieldID field_id,
-                                       PhysicalInstance instance,
-                                       size_t field_size,
-                                       const size_t *pnum_elements)
+    void OutputRegionImpl::return_data(
+                              const DomainPoint &extents,
+                              FieldID field_id,
+                              PhysicalInstance instance,
+                              const LayoutConstraintSet *constraints,
+                              bool check_constraints)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *fspace_node = 
-        runtime->forest->get_node(req.region.get_field_space());
-      size_t alloc_size = fspace_node->get_field_size(field_id);
-
-      if (alloc_size != field_size)
-        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-          "Field %u of output region %u of task %s (UID: %lld) has a type of "
-          "size %zd, but the returned deferred buffer is allocaited with a "
-          "type of size %zd.",
-          field_id, index, context->owner_task->get_task_name(),
-          context->owner_task->get_unique_op_id(), alloc_size, field_size);
-
       IndividualManager *manager = get_manager(field_id);
       if (instance.get_location() != manager->get_memory())
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
@@ -5438,21 +5504,75 @@ namespace Legion {
           context->owner_task->get_unique_op_id(),
           manager->get_memory().id, instance.get_location().id);
 
+      if (!context->is_task_local_instance(instance))
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_RETURN_REQUESTS,
+          "Instance passed to field %u of output region %u of task %s "
+          "(UID: %lld) is already bound to this field or some other fields. "
+          "You cannot assign a buffer to more than one output region field. ",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
+
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
       // now escapes the context.
       uintptr_t ptr = context->escape_task_local_instance(instance);
 
-      // This is safe to do as we require the deferred buffer to be 1-D.
-      const Realm::InstanceLayout<1,coord_t> *layout =
-        static_cast<const Realm::InstanceLayout<1,coord_t>*>(
-            instance.get_layout());
+      if (check_constraints && constraints != NULL)
+      {
+        bool has_conflict = false;
 
-      size_t num_elements = pnum_elements != NULL
-                          ? *pnum_elements
-                          : layout->space.bounds.volume();
+        LayoutConstraints *manager_cons = manager->layout->constraints;
+        if (!req.global_indexing && context->owner_task->is_index_space)
+        {
+          // Unfortunately, for local indexing, the ordering constraint
+          // prescribes the ordering of dimensions that the returned
+          // buffer does not contain. (those dimensions are added
+          // by the runtime and invisible to the point task.) So, here
+          // we filter out the dimensions that would otherwise fail
+          // the constraint check innocuously.
+          LayoutConstraintSet copied;
+          copied.alignment_constraints = manager_cons->alignment_constraints;
+          std::vector<DimensionKind> ordering;
+          int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
+          for (std::vector<DimensionKind>::const_iterator it =
+               manager_cons->ordering_constraint.ordering.begin(); it !=
+               manager_cons->ordering_constraint.ordering.end(); ++it)
+          {
+            int32_t dim = *it;
+            if (dim - LEGION_DIM_X < ndim || dim == LEGION_DIM_F)
+              ordering.push_back(static_cast<DimensionKind>(dim));
+          }
+          copied.ordering_constraint =
+            OrderingConstraint(
+              ordering, manager_cons->ordering_constraint.contiguous);
 
-      return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
+          has_conflict = constraints->conflicts(copied);
+        }
+        else
+          has_conflict = constraints->conflicts(*manager_cons);
+
+        if (has_conflict)
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "The returned instance for field %u of output region %u of "
+            "task %s (UID: %lld) does not satisfy the layout constraints "
+            "chosen by the mapper. This is an illegal usage right now. "
+            "In the future, the runtime will copy this returned instance "
+            "into a fresh one with the correct layout.",
+            field_id, index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id());
+      }
+      else if (check_constraints)
+      {
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+          "Currently the constraint checks need to be turned off to pass "
+          "naked instances to output regions. In the future, layout "
+          "constraints will be inferred from the instances and used for "
+          "the checks.");
+      }
+
+      return_data(
+          extents, field_id, ptr, instance.get_layout()->alignment_reqd, true);
+
       // This instance was escaped so the context is no longer responsible
       // for destroying it when the task is done, we take that responsibility
       escaped_instances.push_back(instance);
@@ -5486,7 +5606,7 @@ namespace Legion {
           if (!global_indexing)
           {
             DomainPoint index_point = context->owner_task->index_point;
-            domain.dim = index_point.get_dim() + 1;
+            domain.dim = index_point.dim + extents.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
 #endif
@@ -5495,15 +5615,11 @@ namespace Legion {
               domain.rect_data[idx] = index_point[idx];
               domain.rect_data[idx + domain.dim] = index_point[idx];
             }
-            if (num_elements > 0)
+            for (int idx = 0; idx < extents.dim; ++idx)
             {
-              domain.rect_data[domain.dim-1] = 0;
-              domain.rect_data[2*domain.dim-1] = num_elements - 1;
-            }
-            else
-            {
-              domain.rect_data[domain.dim-1] = 1;
-              domain.rect_data[2*domain.dim-1] = 0;
+              int off = index_point.dim + idx;
+              domain.rect_data[off] = 0;
+              domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }
 
             runtime->forest->set_pending_space_domain(
@@ -5522,8 +5638,8 @@ namespace Legion {
         }
         else
         {
-          domain =
-            num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
+          DomainPoint lo; lo.dim = extents.dim;
+          domain = Domain(lo, extents - 1);
           index_node->set_domain(domain, runtime->address_space);
         }
       }
@@ -5542,37 +5658,33 @@ namespace Legion {
         IndividualManager *manager = get_manager(field_id);
 
         // Create a Realm layout
+        LayoutConstraints *manager_cons = manager->layout->constraints;
+
+        // Extract the order of dimensions from the ordering constraint
+        const std::vector<DimensionKind> &ordering =
+          manager_cons->ordering_constraint.ordering;
+        std::vector<int> dim_order;
+        for (size_t idx = 0; idx < ordering.size(); ++idx)
+          if (ordering[idx] != LEGION_DIM_F)
+            dim_order.push_back(ordering[idx] - static_cast<int>(LEGION_DIM_X));
+
         std::map<Realm::FieldID,size_t> field_sizes;
         size_t field_size = fspace_node->get_field_size(field_id);
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
+
+        // Make a Realm layout descriptor of the right type using demux
         Realm::InstanceLayoutGeneric *layout = NULL;
-        switch (domain.get_dim())
-        {
-#define DIMFUNC(DIM)                                                         \
-          case DIM:                                                          \
-            {                                                                \
-              int dim_order[DIM];                                            \
-              for (unsigned idx = 0; idx < DIM; ++idx)                       \
-                dim_order[idx] = idx;                                        \
-              const DomainT<DIM,coord_t> bounds = Rect<DIM,coord_t>(domain); \
-              layout =                                                       \
-                Realm::InstanceLayoutGeneric::choose_instance_layout(        \
-                    bounds, constraints, dim_order);                         \
-              break;                                                         \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
+        LayoutCreator creator(layout, domain, constraints, dim_order);
+        NT_TemplateHelper::demux<LayoutCreator>(req.region.get_type_tag(),
+                                                &creator);
 #ifdef DEBUG_LEGION
         assert(layout != NULL);
 #endif
 
-        LayoutConstraints *manager_cons = manager->layout->constraints;
-
+        // Extract the alignment info from the alignment constraints
+        // if there is one
         size_t alignment = 0;
         if (!manager_cons->alignment_constraints.empty())
         {
@@ -5583,11 +5695,14 @@ namespace Legion {
           alignment = manager_cons->alignment_constraints[0].alignment;
         }
         // If no alignment is given, set it to the field size
-        if (alignment == 0)
-          alignment = field_size;
+        if (alignment == 0) alignment = field_size;
+
+        size_t volume = 1;
+        for (int32_t dim = 0; dim < extents.dim; ++dim) volume *= extents[dim];
+
         size_t bytes_used =
           field_size > 0
-          ? (num_elements * field_size + alignment - 1) / alignment * alignment
+          ? (volume * field_size + alignment - 1) / alignment * alignment
           : 0;
         layout->bytes_used = bytes_used;
 
@@ -5660,7 +5775,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id)
+    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(req.region);

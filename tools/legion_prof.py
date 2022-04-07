@@ -37,7 +37,7 @@ from legion_serializer import LegionProfASCIIDeserializer, LegionProfBinaryDeser
 
 root_dir = os.path.dirname(os.path.realpath(__file__))
 
-# Make sure this is up to date with lowlevel.h
+# Make sure this is up to date with realm_c.h
 processor_kinds = {
     1 : 'GPU',
     2 : 'CPU',
@@ -49,7 +49,7 @@ processor_kinds = {
     8 : 'Python',
 }
 
-# Make sure this is up to date with lowlevel.h
+# Make sure this is up to date with realm_c.h
 memory_kinds = {
     0 : 'No MemKind',
     1 : 'GASNet Global',
@@ -64,6 +64,8 @@ memory_kinds = {
     10 : 'L3 Cache',
     11 : 'L2 Cache',
     12 : 'L1 Cache',
+    13 : 'GPU Managed',
+    14 : 'GPU Dynamic',
 }
 # Make sure this is up to date with memory_kinds
 memory_node_proc = {
@@ -80,6 +82,8 @@ memory_node_proc = {
     'L3 Cache': 'Node_id',
     'L2 Cache': 'Proc_id',
     'L1 Cache': 'Proc_id',
+    'GPU Managed': 'Node_id',
+    'GPU Dynamic': 'GPU_proc_id',
 }
 
 memory_kinds_abbr = {
@@ -96,6 +100,8 @@ memory_kinds_abbr = {
     'L3 Cache': ' l3',
     'L2 Cache': ' l2',
     'L1 Cache': ' l1',
+    'GPU Managed': ' uvm',
+    'GPU Dynamic': ' gpu-dyn'
 }
 
 # Make sure this is up to date with legion_types.h

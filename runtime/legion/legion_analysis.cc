@@ -10286,6 +10286,13 @@ namespace Legion {
                         found_exprs.insert(it->second);
                         // Promote this up to the full set expression
                         set_expr->add_nested_expression_reference(did,&mutator);
+                        // Since we're going to use the old expression, we need
+                        // to keep it live until the end of the task
+                        it->second->add_base_expression_reference(LIVE_EXPR_REF,
+                                                                  &mutator);
+                        ImplicitReferenceTracker::record_live_expression(
+                                                                  it->second);
+                        // Now we can remove the previous live reference
                         if (it->second->remove_nested_expression_reference(did))
                           delete it->second;
                         it->second = set_expr;
@@ -17782,8 +17789,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!node->as_region_node()->row_source->is_empty() ||
-             (node == set->region_node));
+      assert((node == set->region_node)
+             || !node->as_region_node()->row_source->is_empty());
 #endif
       AutoLock m_lock(manager_lock);
       if (equivalence_sets.insert(set, mask))
@@ -17868,8 +17875,8 @@ namespace Legion {
             if (it->second * finder->second)
               continue;
 #ifdef DEBUG_LEGION
-            assert(!node->as_region_node()->row_source->is_empty() ||
-                   (node == it->first->region_node));
+            assert((node == it->first->region_node)
+                   || !node->as_region_node()->row_source->is_empty());
 #endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);

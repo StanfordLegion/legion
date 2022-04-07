@@ -81,6 +81,8 @@ namespace Realm {
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
       size_t cfg_fb_mem_size, cfg_fb_ib_size;
+      bool cfg_use_dynamic_fb;
+      size_t cfg_dynfb_max_size;
       unsigned cfg_num_gpus;
       std::string cfg_gpu_idxs;
       unsigned cfg_task_streams, cfg_d2d_streams;

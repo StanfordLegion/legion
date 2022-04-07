@@ -50,7 +50,8 @@ set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and bin
 # 3) the contents of 'VERSION' (at the root of the source tree), if available
 # 4) "unknown", if all else fails
 
-if(NOT DEFINED Legion_VERSION)
+set(Legion_VERSION "" CACHE STRING "string to use for Legion/Realm version")
+if(Legion_VERSION STREQUAL "")
   find_package(Git)
   if(GIT_FOUND)
     execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
@@ -76,11 +77,7 @@ if(NOT DEFINED Legion_VERSION)
     endif()
   endif()
   unset(_git_result)
-else()
-  # it's just a "cache variable" right now, so turn into a normal variable
-  set(Legion_VERSION "$CACHE{Legion_VERSION}")
 endif()
-set(Legion_VERSION "${Legion_VERSION}" CACHE STRING "string to use for Legion/Realm version")
 # these are the actual variables that are written into the headers
 set(LEGION_VERSION "${Legion_VERSION}")
 set(REALM_VERSION "${Legion_VERSION}")

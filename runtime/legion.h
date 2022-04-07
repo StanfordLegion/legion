@@ -1095,7 +1095,7 @@ namespace Legion {
      * \struct OutputRequirement
      * Output requirements are a special kind of region requirement to inform
      * the runtime that the task will be producing new instances as part of its
-     * execution that will be attached to the logical region at the end of the 
+     * execution that will be attached to the logical region at the end of the
      * task, and are therefore not mapped ahead of the task's execution.
      *
      * Output region requirements come in two flavors: those that are already
@@ -1107,33 +1107,46 @@ namespace Legion {
      * right after the task is launched. Output requirements still pick
      * field IDs and the field space for the output regions.
      *
-     * Output regions are always 1D in case of individual task launch and no
-     * partitions will be created by the runtime. For index space launches,
-     * the runtime gives back a fresh region and partition, whose construction
-     * is controlled by the indexing mode specified the output requirement:
+     * In case of individual task launch, the dimension of an output region
+     * is chosen by the `dim` argument to the output requirement , and
+     * and no partitions will be created by the runtime. For index space
+     * launches, the runtime gives back a fresh region and partition,
+     * whose construction is controlled by the indexing mode specified
+     * the output requirement:
      *
      * 0) For either indexing mode, the output partition is a disjoint
      *    partition whose color space is identical to the launch domain.
      *
-     * 1) When the global indexing is requested, the output region has
-     *    a contiguous 1D index space whose volume is the sum of the sizes of
-     *    the outputs produced by point tasks. The range of the i-th subregion
-     *    is [S, S+n), where S is the sum of the previous i-1 subregions' sizes
-     *    and n is the output size of the i-th point task. The launch domain
-     *    must be 1D for the global indexing to be used.
+     * 1) When the global indexing is requested, the dimension of the output
+     *    region must be the same as the color space. The index space is
+     *    constructed such that the extent of each dimension is a sum of
+     *    that dimension's extents of the outputs produced by point tasks;
+     *    i.e., the range of the i-th subregion on dimension k
+     *    is [S, S+n), where S is the sum of the previous i-1 subregions'
+     *    extents on the k dimension and n is the extent of the output of
+     *    the i-th point task on the k dimension. Outputs are well-formed
+     *    only when their extents are aligned with their neighbors'. For
+     *    example, outputs of extents (3, 4) and (5, 4), respectively,
+     *    are valid if the producers' points are (0, 0) and (1, 0),
+     *    respectively, whereas they are not well-formed if the colors
+     *    are (0, 0) and (0, 1); for the former, the bounds of the output
+     *    subregions are ([0, 2], [0, 3]) and ([3, 7], [0, 3]),
+     *    respectively.
      *
-     * 2) With the local indexing, the output region has an (N+1)-D index
-     *    space for an N-D launch domain. The range of the subregion produced
+     * 2) With the local indexing, the output region has an (N+k)-D index
+     *    space for an N-D launch domain, where k is the dimension chosen
+     *    by the output requirement. The range of the subregion produced
      *    by the point task p (where p is a point in an N-D space) is
-     *    [<0, p>, <n-1, p>] where n is the output size of the point task p.
+     *    [<p,lo>, <p,hi>] where [lo, hi] is the bounds of the point task p
+     *    and <v1,v2> denotes a concatenation of points v1 and v2.
      *    The root index space is simply a union of all subspaces.
      *
      * 3) In the case of local indexing, the output region can either have a
      *    "loose" convex hull parent index space or a "tight" index space that
      *    contains exactly the points in the child space. With the convex hull,
-     *    the runtime computes an upper bound 2-D rectangle with as many rows as
+     *    the runtime computes an upper bound rectangle with as many rows as
      *    children and as many columns as the extent of the larges child space.
-     *    If convex_hull is set to false, the runtime will compute a more 
+     *    If convex_hull is set to false, the runtime will compute a more
      *    expensive sparse index space containing exactly the children points.
      *
      * Note that the global indexing has performance consequences since
@@ -1148,6 +1161,7 @@ namespace Legion {
       OutputRequirement(const RegionRequirement &req);
       OutputRequirement(FieldSpace field_space,
                         const std::set<FieldID> &fields,
+                        int dim = 1,
                         bool global_indexing = false);
     public:
       OutputRequirement(const OutputRequirement &rhs);
@@ -1158,6 +1172,10 @@ namespace Legion {
       bool operator==(const OutputRequirement &req) const;
       bool operator<(const OutputRequirement &req) const;
     public:
+      template <int DIM, typename COORD_T>
+      void set_type_tag();
+    public:
+      TypeTag type_tag;
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
       bool valid_requirement; /**< indicate requirement is valid */
@@ -3575,21 +3593,59 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      void return_data(size_t num_elements,
+      // Returns a deferred buffer that satisfies the layout constraints of
+      // this output region. The caller still needs to pass this buffer to
+      // a return_data call if the buffer needs to be bound to this output
+      // region. The caller can optionally choose to bind the returned buffer
+      // to the output region; such a call cannot be made more than once.
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS>
+      create_buffer(const Point<DIM, COORD_T> &extents,
+                    FieldID field_id,
+                    const T *initial_value = NULL,
+                    bool return_buffer = false);
+    private:
+      void check_type_tag(TypeTag type_tag) const;
+      void check_field_size(FieldID field_id, size_t field_size) const;
+      void get_layout(FieldID field_id,
+                      std::vector<DimensionKind> &ordering,
+                      size_t &alignment) const;
+    public:
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        void *ptr,
                        size_t alignment = 0);
-      void return_data(size_t num_elements,
+      void return_data(const DomainPoint &extents,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
-      template<typename T>
-      void return_data(FieldID field_id,
-                       DeferredBuffer<T,1> &buffer,
-                       const size_t *num_elements = NULL);
-      void return_data(FieldID field_id,
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      void return_data(const Point<DIM,COORD_T> &extents,
+                       FieldID field_id,
+                       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> &buffer);
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
                        Realm::RegionInstance instance,
-                       size_t field_size,
-                       const size_t *num_elements);
+                       bool check_constraints = true);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       Realm::RegionInstance instance,
+                       const LayoutConstraintSet *constraints,
+                       bool check_constraints);
     };
 
     //==========================================================================
@@ -3943,7 +3999,7 @@ namespace Legion {
       TaskID                              task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
-      std::vector<RegionRequirement>      output_regions;
+      std::vector<OutputRequirement>      output_regions;
       std::vector<Future>                 futures;
       std::vector<Grant>                  grants;
       std::vector<PhaseBarrier>           wait_barriers;

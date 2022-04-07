@@ -247,8 +247,12 @@ namespace Legion {
       ImplicitReferenceTracker& operator=(
                                const ImplicitReferenceTracker&) = delete;
     public:
-      inline void record_live_expression(IndexSpaceExpression *expr) 
-        { live_expressions.emplace_back(expr); }
+      static inline void record_live_expression(IndexSpaceExpression *expr)
+      {
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->live_expressions.push_back(expr);
+      }
     private:
       std::vector<IndexSpaceExpression*> live_expressions;
     };

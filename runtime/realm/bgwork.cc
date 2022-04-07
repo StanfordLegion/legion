@@ -158,7 +158,7 @@ namespace Realm {
           continue;
       }
 
-      log_bgwork.info() << "dedicated worker sleeping - worker=" << this;
+      log_bgwork.debug() << "dedicated worker sleeping - worker=" << this;
       {
         Doorbell *db = Doorbell::get_thread_doorbell();
         db->prepare();
@@ -169,7 +169,7 @@ namespace Realm {
           db->cancel();
         }
       }
-      log_bgwork.info() << "dedicated worker awake - worker=" << this;
+      log_bgwork.debug() << "dedicated worker awake - worker=" << this;
     }
 
     log_bgwork.info() << "dedicated worker terminating - worker=" << this;
@@ -417,9 +417,9 @@ namespace Realm {
   void BackgroundWorkItem::make_active(void)
   {
     if(!manager) return;
-    log_bgwork.info() << "work advertised: manager=" << manager
-		      << " item=" << this
-		      << " slot=" << index;
+    log_bgwork.debug() << "work advertised: manager=" << manager
+		       << " item=" << this
+		       << " slot=" << index;
 #ifdef DEBUG_REALM
     State old_state = state.exchange(STATE_ACTIVE);
     if(old_state != STATE_IDLE) {
@@ -596,7 +596,7 @@ namespace Realm {
           manager->worker_state.fetch_sub(1 << BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT);
 
 	  unsigned slot = ((elem * BITMASK_BITS) + ctz(target_bit));
-	  log_bgwork.info() << "work claimed: manager=" << manager
+	  log_bgwork.debug() << "work claimed: manager=" << manager
 			    << " slot=" << slot
 			    << " worker=" << this;
 	  long long t_start = Clock::current_time_in_nanoseconds(true /*absolute*/);

@@ -41,6 +41,12 @@ namespace Legion {
       void unpack_external_task(Deserializer &derez, Runtime *runtime,
                                 ReferenceMutator *mutator);
     public:
+      static void pack_output_requirement(
+          const OutputRequirement &req, Serializer &rez);
+    public:
+      static void unpack_output_requirement(
+          OutputRequirement &req, Deserializer &derez);
+    public:
       virtual void set_context_index(size_t index) = 0;
     protected:
       AllocManager *arg_manager;
@@ -443,7 +449,8 @@ namespace Legion {
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances);
     protected:
-      void prepare_output_instance(InstanceSet &instance_set,
+      void prepare_output_instance(unsigned index,
+                                   InstanceSet &instance_set,
                                    const RegionRequirement &req,
                                    Memory target,
                                    const LayoutConstraintSet &constraints);
@@ -1086,6 +1093,33 @@ namespace Legion {
      * the machine and eventually returned to this index space task.
      */
     class IndexTask : public MultiTask, public LegionHeapify<IndexTask> {
+    private:
+      struct OutputRegionTagCreator {
+      public:
+        OutputRegionTagCreator(TypeTag *_type_tag, int _launch_ndim)
+          : type_tag(_type_tag), launch_ndim(_launch_ndim) { }
+        template<typename DIM, typename COLOR_T>
+        static inline void demux(OutputRegionTagCreator *creator)
+        {
+          switch (DIM::N + creator->launch_ndim)
+          {
+#define DIMFUNC(DIM)                                             \
+            case DIM:                                            \
+              {                                                  \
+                *creator->type_tag =                             \
+                  NT_TemplateHelper::encode_tag<DIM, COLOR_T>(); \
+                break;                                           \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+        }
+      private:
+        TypeTag *type_tag;
+        int launch_ndim;
+      };
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
@@ -1122,6 +1156,11 @@ namespace Legion {
     public:
       virtual void prepare_map_must_epoch(void);
     protected:
+      typedef std::map<DomainPoint,DomainPoint> SizeMap;
+      Domain compute_global_output_ranges(IndexSpaceNode *parent,
+                                          IndexPartNode *part,
+                                          const SizeMap& output_sizes,
+                                          const SizeMap& local_sizes);
       virtual void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const
@@ -1193,8 +1232,8 @@ namespace Legion {
       void return_slice_mapped(unsigned points, RtEvent applied_condition,
                                ApEvent slice_complete);
       void return_slice_complete(unsigned points, RtEvent applied_condition,
-         const std::map<unsigned,std::map<DomainPoint,size_t> > &output_sizes,
-         void *metadata = NULL, size_t metasize = 0);
+                             const std::map<unsigned,SizeMap> &output_sizes,
+                             void *metadata = NULL, size_t metasize = 0);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
@@ -1267,7 +1306,7 @@ namespace Legion {
 #endif
     protected:
       // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned,std::map<DomainPoint,size_t> > all_output_sizes;
+      std::map<unsigned, SizeMap> all_output_sizes;
     };
 
     /**
@@ -1466,7 +1505,7 @@ namespace Legion {
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
     protected:
       // Sizes of subspaces for globally indexed output regions
-      std::map<unsigned,std::map<DomainPoint,size_t> > all_output_sizes;
+      std::map<unsigned,std::map<DomainPoint,DomainPoint> > all_output_sizes;
     };
 
   }; // namespace Internal

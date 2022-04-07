@@ -423,14 +423,14 @@ namespace Realm {
   void TaskQueue::add_subscription(NotificationCallback *callback,
 				   priority_t higher_than /*= PRI_NEG_INF*/)
   {
-    AutoLock<> al(mutex);
+    AutoLock<FIFOMutex> al(mutex);
     callbacks.push_back(callback);
     callback_priorities.push_back(higher_than);
   }
 
   void TaskQueue::remove_subscription(NotificationCallback *callback)
   {
-    AutoLock<> al(mutex);
+    AutoLock<FIFOMutex> al(mutex);
     std::vector<NotificationCallback *>::iterator cit = callbacks.begin();
     std::vector<priority_t>::iterator cpit = callback_priorities.begin();
     while (cit != callbacks.end()) {
@@ -467,7 +467,7 @@ namespace Realm {
 	it++) {
       Task *new_task;
       {
-	AutoLock<> al((*it)->mutex);
+	AutoLock<FIFOMutex> al((*it)->mutex);
 	new_task = (*it)->ready_task_list.pop_front(task_priority+1);
       }
       if(new_task) {
@@ -477,7 +477,7 @@ namespace Realm {
 	// if we got something better, put back the old thing (if any)
 	if(task) {
 	  {
-	    AutoLock<> al(task_source->mutex);
+	    AutoLock<FIFOMutex> al(task_source->mutex);
 	    task_source->ready_task_list.push_front(task);
 	  }
 	  if(task_source->task_count_gauge)
@@ -505,7 +505,7 @@ namespace Realm {
 //#endif
 
       {
-	AutoLock<> al(mutex);
+	AutoLock<FIFOMutex> al(mutex);
 	if(ready_task_list.empty(task->priority))
 	  notify_priority = task->priority;
 	ready_task_list.push_back(task);
@@ -552,7 +552,7 @@ namespace Realm {
     priority_t notify_priority = tasks.front()->priority;
 
     {
-      AutoLock<> al(mutex);
+      AutoLock<FIFOMutex> al(mutex);
       // cancel notification if we already have equal/higher priority tasks
       if(!ready_task_list.empty(notify_priority))
 	notify_priority = PRI_NEG_INF;

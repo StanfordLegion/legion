@@ -580,7 +580,9 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                              FieldMaskSet<LogicalView> > &target) const;
+                                        FieldMaskSet<LogicalView> > &target,
+                              std::set<IndexSpaceExpression*> &unique_exprs,
+                              ReferenceMutator &mutator) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
                          const bool expr_covers, const FieldMask &mask,
                          ReferenceMutator &mutator) const;
@@ -653,10 +655,10 @@ namespace Legion {
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         const std::set<RegionNode*> &regions); 
-      TraceConditionSet(const TraceConditionSet &rhs);
+      TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
-      TraceConditionSet& operator=(const TraceConditionSet &rhs);
+      TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
       virtual void add_tracker_reference(unsigned cnt = 1);
       virtual bool remove_tracker_reference(unsigned cnt = 1);
@@ -712,6 +714,10 @@ namespace Legion {
       ExprViews preconditions;
       ExprViews anticonditions;
       ExprViews postconditions;
+      // A unique set of index space expressions from the *_ views
+      // This is needed because transpose_uniquely might not capture
+      // all the needed expression references
+      std::set<IndexSpaceExpression*> unique_view_expressions;
     private:
       std::vector<InvalidInstAnalysis*> precondition_analyses;
       std::vector<AntivalidInstAnalysis*> anticondition_analyses;

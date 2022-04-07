@@ -1322,7 +1322,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(bool valid)
-      : RegionRequirement(), field_space(FieldSpace::NO_SPACE),
+      : RegionRequirement(), type_tag(TYPE_TAG_1D),
+        field_space(FieldSpace::NO_SPACE),
         global_indexing(false), valid_requirement(valid)
     //--------------------------------------------------------------------------
     {
@@ -1330,7 +1331,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const RegionRequirement &req)
-      : RegionRequirement(req), global_indexing(false), valid_requirement(true)
+      : RegionRequirement(req), type_tag(req.parent.get_type_tag()),
+        global_indexing(false), valid_requirement(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -1338,11 +1340,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(FieldSpace _field_space,
                                         const std::set<FieldID> &fields,
+                                        int dim /*=1*/,
                                         bool _global_indexing /*=false*/)
       : RegionRequirement(), field_space(_field_space),
         global_indexing(_global_indexing), valid_requirement(false)
     //--------------------------------------------------------------------------
     {
+      switch (dim)
+      {
+#define DIMFUNC(DIM)                      \
+        case DIM:                         \
+          {                               \
+            type_tag = TYPE_TAG_##DIM##D; \
+            break;                        \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
       for (std::set<FieldID>::const_iterator it = fields.begin();
            it != fields.end(); ++it)
         RegionRequirement::add_field(*it);
@@ -1351,7 +1367,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const OutputRequirement &other)
       : RegionRequirement(static_cast<const RegionRequirement&>(other)),
-        field_space(other.field_space), global_indexing(other.global_indexing),
+        type_tag(other.type_tag), field_space(other.field_space),
+        global_indexing(other.global_indexing),
         valid_requirement(other.valid_requirement)
     //--------------------------------------------------------------------------
     {
@@ -1369,10 +1386,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       static_cast<RegionRequirement&>(*this) =
-        static_cast<const OutputRequirement&>(rhs);
+        static_cast<const RegionRequirement&>(rhs);
       field_space = rhs.field_space;
       global_indexing = rhs.global_indexing;
       valid_requirement = rhs.valid_requirement;
+      type_tag = rhs.type_tag;
       return *this;
     }
 
@@ -1382,10 +1400,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       static_cast<RegionRequirement&>(*this) =
-        static_cast<const OutputRequirement&>(rhs);
+        static_cast<const RegionRequirement&>(rhs);
       field_space = FieldSpace::NO_SPACE;
       global_indexing = false;
       valid_requirement = true;
+      type_tag = rhs.region.get_type_tag();
       return *this;
     }
 
@@ -2998,7 +3017,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(size_t num_elements,
+    void OutputRegion::check_type_tag(TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      assert(impl != NULL);
+      impl->check_type_tag(type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::check_field_size(
+                                      FieldID field_id, size_t field_size) const
+    //--------------------------------------------------------------------------
+    {
+      assert(impl != NULL);
+      impl->check_field_size(field_id, field_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::get_layout(FieldID field_id,
+                                  std::vector<DimensionKind> &ordering,
+                                  size_t &alignment) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->get_layout(field_id, ordering, alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(const DomainPoint &extents,
                                    FieldID field_id,
                                    void *ptr,
                                    size_t alignment /*= 0*/)
@@ -3008,11 +3056,11 @@ namespace Legion {
       assert(impl != NULL);
 #endif
       impl->return_data(
-          num_elements, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
+          extents, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(size_t num_elements,
+    void OutputRegion::return_data(const DomainPoint &extents,
                                    std::map<FieldID,void*> ptrs,
                                 std::map<FieldID,size_t> *alignments /*= NULL*/)
     //--------------------------------------------------------------------------
@@ -3020,20 +3068,32 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(num_elements, ptrs, alignments);
+      impl->return_data(extents, ptrs, alignments);
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(FieldID field_id,
+    void OutputRegion::return_data(const DomainPoint &extents,
+                                   FieldID field_id,
                                    Realm::RegionInstance instance,
-                                   size_t field_size,
-                                   const size_t *num_elements)
+                                   bool check_constraints /*= true */)
+    //--------------------------------------------------------------------------
+    {
+      return_data(extents, field_id, instance, NULL, check_constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(const DomainPoint &extents,
+                                   FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   const LayoutConstraintSet *constraints,
+                                   bool check_constraints)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(field_id, instance, field_size, num_elements);
+      impl->return_data(
+          extents, field_id, instance, constraints, check_constraints);
     }
 
     /////////////////////////////////////////////////////////////

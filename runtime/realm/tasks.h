@@ -141,7 +141,8 @@ namespace Realm {
 	virtual void item_available(priority_t item_priority) = 0;
       };
 
-      Mutex mutex;
+      // starvation seems to be a problem on shared task queues
+      FIFOMutex mutex;
       Task::TaskList ready_task_list;
       std::vector<NotificationCallback *> callbacks;
       std::vector<priority_t> callback_priorities;

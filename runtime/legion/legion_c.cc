@@ -2689,6 +2689,7 @@ legion_output_requirement_t
 legion_output_requirement_create(legion_field_space_t field_space_,
                                  legion_field_id_t *fields_,
                                  size_t fields_size,
+                                 int dim,
                                  bool global_indexing)
 {
   FieldSpace field_space = CObjectWrapper::unwrap(field_space_);
@@ -2698,6 +2699,7 @@ legion_output_requirement_create(legion_field_space_t field_space_,
 
   OutputRequirement *req = new OutputRequirement(field_space,
                                                  fields,
+                                                 dim,
                                                  global_indexing);
   return CObjectWrapper::wrap(req);
 }
@@ -3298,6 +3300,26 @@ legion_future_map_construct_from_futures(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(new FutureMap(
     runtime->construct_future_map(ctx, domain, futures, collective, sid,
                                   implicit_sharding)));
+}
+
+legion_future_map_t
+legion_future_map_transform(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_future_map_t fm_,
+                            legion_index_space_t new_domain_,
+                            legion_point_transform_functor_t functor_,
+                            bool take_ownership)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace new_domain = CObjectWrapper::unwrap(new_domain_);
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  PointTransformFunctor *functor = CObjectWrapper::unwrap(functor_);
+
+  FutureMap result =
+    runtime->transform_future_map(
+      ctx, *fm, new_domain, functor, take_ownership);
+  return CObjectWrapper::wrap(new FutureMap(result));
 }
 
 // -----------------------------------------------------------------------

@@ -149,10 +149,27 @@ namespace Realm {
   inline bool atomic<T>::compare_exchange(T& expected, T newval)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a relaxed version of this?
     return value.compare_exchange_strong(expected, newval,
                                          std::memory_order_acq_rel,
                                          std::memory_order_acquire);
+#else
+    T oldval = __sync_val_compare_and_swap(&value, expected, newval);
+    if(oldval == expected) {
+      return true;
+    } else {
+      expected = oldval;
+      return false;
+    }
+#endif
+  }
+
+  template <typename T>
+  inline bool atomic<T>::compare_exchange_relaxed(T& expected, T newval)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.compare_exchange_strong(expected, newval,
+                                         std::memory_order_relaxed,
+                                         std::memory_order_relaxed);
 #else
     T oldval = __sync_val_compare_and_swap(&value, expected, newval);
     if(oldval == expected) {
