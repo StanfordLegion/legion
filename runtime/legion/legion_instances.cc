@@ -2497,14 +2497,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      AutoLock i_lock(inst_lock);
-      if (deferred_deletion.exists() && currently_active)
-      {
-        log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
+      log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
-        Runtime::trigger_event(deferred_deletion);
-        deferred_deletion = RtUserEvent::NO_RT_USER_EVENT;
-      }
+#ifndef DISABLE_GC
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields); 
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
+      else
+        instance.destroy();
+#ifdef LEGION_MALLOC_INSTANCES
+      if (!is_external_instance())
+        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+#endif
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3704,6 +3710,13 @@ namespace Legion {
         runtime->profiler->add_inst_request(requests, creator_id);
         ready = ApEvent(PhysicalInstance::create_instance(instance,
               memory_manager->memory, inst_layout, requests, precondition));
+        if (instance.exists())
+        {
+          unsigned long long creation_time = 
+            Realm::Clock::current_time_in_nanoseconds();
+          runtime->profiler->record_instance_creation(instance,
+              memory_manager->memory, creator_id, creation_time);
+        }
       }
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
@@ -3734,6 +3747,10 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
       {
+#ifndef LEGION_MALLOC_INSTANCES
+        if (runtime->profiler != NULL)
+          runtime->profiler->handle_failed_instance_allocation();
+#endif
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -3979,15 +3996,6 @@ namespace Legion {
         // Destroy the instance first so that Realm can reclaim the ID
         instance.destroy();
         instance = PhysicalInstance::NO_INST;
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-      }
-      else if (runtime->profiler != NULL)
-      {
-        unsigned long long creation_time = 
-          Realm::Clock::current_time_in_nanoseconds();
-        runtime->profiler->record_instance_creation(instance,
-            memory_manager->memory, creator_id, creation_time);
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
