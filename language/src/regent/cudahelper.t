@@ -507,6 +507,34 @@ function cudahelper.generate_atomic_update(op, typ)
       return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
                                 {&double,double} -> {double})
     end
+  else
+    local opname
+    if op == "+" then
+      if typ:isfloat() then
+        opname = "fadd"
+      else
+        opname = "add"
+      end
+    elseif op == "min" and typ:isintegral() then
+      if typ.signed then
+        opname = "min"
+      else
+        opname = "umin"
+      end
+    elseif op == "max" and typ:isintegral() then
+      if typ.signed then
+        opname = "max"
+      else
+        opname = "umax"
+      end
+    end
+    if opname then
+      local terra atomic_op(addr : &typ, value : typ)
+        return terralib.atomicrmw(opname, addr, value, {ordering = "monotonic"})
+      end
+      atomic_op:setinlined(true)
+      return atomic_op
+    end
   end
 
   local cas_type

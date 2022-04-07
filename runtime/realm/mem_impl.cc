@@ -86,6 +86,7 @@ namespace Realm {
 			   NetworkSegment *_segment)
       : me(_me), size(_size), kind(_kind), lowlevel_kind(_lowlevel_kind)
       , segment(_segment)
+      , module_specific(0)
     {}
 
     MemoryImpl::~MemoryImpl(void)
@@ -106,6 +107,19 @@ namespace Realm {
 	    delete *it2;
 	delete it->second;
       }
+
+      // free any module-specific info we have
+      while(module_specific) {
+        ModuleSpecificInfo *next = module_specific->next;
+        delete module_specific;
+        module_specific = next;
+      }
+    }
+
+    void MemoryImpl::add_module_specific(ModuleSpecificInfo *info)
+    {
+      info->next = module_specific;
+      module_specific = info;
     }
 
     // default implementation handles deferral, but falls through to

@@ -1057,6 +1057,7 @@ namespace Realm {
     , tgt_ep_index(_tgt_ep_index)
     , packets_reserved(0)
     , packets_sent(0)
+    , push_mutex_check("xpair push", this)
     , first_pbuf(nullptr)
     , cur_pbuf(nullptr)
     , imm_fail_count(0)
@@ -1349,13 +1350,8 @@ namespace Realm {
       }
     }
 
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
   }
 
   void XmitSrcDestPair::commit_pbuf_long(OutbufMetadata *pktbuf, int pktidx,
@@ -1408,13 +1404,8 @@ namespace Realm {
       }
     }
 
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
   }
 
   void XmitSrcDestPair::commit_pbuf_rget(OutbufMetadata *pktbuf, int pktidx,
@@ -1468,13 +1459,8 @@ namespace Realm {
       }
     }
 
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
   }
 
   void XmitSrcDestPair::commit_pbuf_put(OutbufMetadata *pktbuf, int pktidx,
@@ -1513,13 +1499,8 @@ namespace Realm {
       }
     }
 
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
   }
 
   void XmitSrcDestPair::cancel_pbuf(OutbufMetadata *pktbuf, int pktidx)
@@ -1585,13 +1566,8 @@ namespace Realm {
       comp_reply_wrptr = (comp_reply_wrptr + 1) % comp_reply_capacity;
       comp_reply_count.store(cur_count + 1);
     }
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
   }
 
   void XmitSrcDestPair::enqueue_put_header(PendingPutHeader *put)
@@ -1638,13 +1614,20 @@ namespace Realm {
       (*put_tailp).store_release(put);
       put_tailp = &put->next_put;
     }
-    if(enqueue_pair) {
-      // we were idle, so use the injector if we're allowed to
-      if(internal->module->cfg_crit_timeout >= 0)
-	internal->injector.add_ready_xpair(this);
-      else
-	internal->poller.add_critical_xpair(this);
-    }
+    if(enqueue_pair)
+      request_push(false /*!force_critical*/);
+  }
+
+  void XmitSrcDestPair::request_push(bool force_critical)
+  {
+    // as soon as we're enqueued, some bgworker might start running
+    //  push_packets so the mutual exclusion zone starts now
+    push_mutex_check.lock();
+
+    if(!force_critical && (internal->module->cfg_crit_timeout >= 0))
+      internal->injector.add_ready_xpair(this);
+    else
+      internal->poller.add_critical_xpair(this);
   }
 
   void XmitSrcDestPair::push_packets(bool immediate_mode, TimeLimit work_until)
@@ -1713,6 +1696,7 @@ namespace Realm {
 	      //  ready packets
 	      ncomps = 0;
 	      do_push = has_ready_packets || put_head.load();
+              if(!do_push) push_mutex_check.unlock();
 	    }
 	  }
 	} else {
@@ -1721,17 +1705,16 @@ namespace Realm {
 	  // failed - always go to the poller after hitting backpressure
 	  if(first_fail_time < 0)
 	    first_fail_time = Clock::current_time_in_nanoseconds();
-	  internal->poller.add_critical_xpair(this);
+          push_mutex_check.unlock();
+          request_push(true /*force_critical*/);
 	  return;
 	}
       } while(ncomps > 0);
 
       if(requeue) {
 	assert(!do_push);
-	if(internal->module->cfg_crit_timeout >= 0)
-	  internal->injector.add_ready_xpair(this);
-	else
-	  internal->poller.add_critical_xpair(this);
+        push_mutex_check.unlock();
+        request_push(false /*!force_critical*/);
       }
 
       if(!do_push)
@@ -1799,9 +1782,10 @@ namespace Realm {
               //  either empty or we just have replies, in which case we need
               //  to requeue (but not continue on to trying to send packets)
               if(!has_ready_packets) {
-                if(comp_reply_count.load() == 0)
+                if(comp_reply_count.load() == 0) {
                   now_empty = true;
-                else
+                  push_mutex_check.unlock();
+                } else
                   just_replies = true;
               }
             } else {
@@ -1826,10 +1810,8 @@ namespace Realm {
         }
 
         if(just_replies) {
-          if(internal->module->cfg_crit_timeout >= 0)
-            internal->injector.add_ready_xpair(this);
-          else
-            internal->poller.add_critical_xpair(this);
+          push_mutex_check.unlock();
+          request_push(false /*!force_critical*/);
           return;
         }
 
@@ -1842,7 +1824,8 @@ namespace Realm {
       // finally, if we didn't send all the put headers we knew about, we need
       //  to requeue for later
       if(cur_put) {
-        internal->poller.add_critical_xpair(this);
+        push_mutex_check.unlock();
+        request_push(true /*force_critical*/);
         return;
       }
     }
@@ -1866,7 +1849,8 @@ namespace Realm {
 	  log_gex_xpair.debug() << "re-enqueue (overflow stall) " << this;
 	  if(first_fail_time < 0)
 	    first_fail_time = Clock::current_time_in_nanoseconds();
-	  internal->poller.add_critical_xpair(this);
+          push_mutex_check.unlock();
+          request_push(true /*force_critical*/);
 	  return;
 	}
       } else {
@@ -1879,6 +1863,7 @@ namespace Realm {
       int ready_packets = head->pktbuf_ready_packets.load_acquire();
       while(head->pktbuf_sent_packets < ready_packets) {
 	bool pkt_sent = false;
+        bool force_critical = false;
 	OutbufMetadata::PktType pkttype = head->pktbuf_pkt_types[head->pktbuf_sent_packets].load();
 
 	// see if we can batch multiple messages into a single packet
@@ -2388,13 +2373,25 @@ namespace Realm {
 
               gex_TM_t pair = gex_TM_Pair(internal->eps[src_ep_index],
                                           tgt_ep_index);
-              gex_Event_t rc_event = gex_RMA_PutNB(pair,
-                                                   tgt_rank,
-                                                   reinterpret_cast<void *>(meta->dest_addr),
-                                                   const_cast<void *>(meta->src_addr),
-                                                   meta->payload_bytes,
-                                                   lc_opt,
-                                                   flags);
+
+              gex_Event_t rc_event = GEX_EVENT_NO_OP;
+#ifndef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
+              // conduit isn't promising to return right away in the face of
+              //  back-pressure, so don't even try in immediate mode
+              if(immediate_mode) {
+                // further retries in immediate mode won't help either...
+                force_critical = true;
+              } else
+#endif
+              {
+                rc_event = gex_RMA_PutNB(pair,
+                                         tgt_rank,
+                                         reinterpret_cast<void *>(meta->dest_addr),
+                                         const_cast<void *>(meta->src_addr),
+                                         meta->payload_bytes,
+                                         lc_opt,
+                                         flags);
+              }
 
               if(rc_event != GEX_EVENT_NO_OP) {
                 // successful injection
@@ -2444,11 +2441,16 @@ namespace Realm {
 	    immediate_mode = true;
 	} else {
 	  // if we failed to send a packet, stop trying and reenqueue ourselves
-	  if(first_fail_time < 0)
-	    first_fail_time = Clock::current_time_in_nanoseconds();
+          if(force_critical) {
+            first_fail_time = 0; // so long ago we're guaranteed to be critical
+          } else {
+            if(first_fail_time < 0)
+              first_fail_time = Clock::current_time_in_nanoseconds();
+          }
 	  // always go to the poller after hitting backpressure
 	  log_gex_xpair.debug() << "re-enqueue (send failed) " << this;
-	  internal->poller.add_critical_xpair(this);
+          push_mutex_check.unlock();
+          request_push(true /*force_critical*/);
 	  return;
 	}
 
@@ -2458,10 +2460,8 @@ namespace Realm {
 	   (head->pktbuf_sent_packets < ready_packets)) {
 	  // we made progress, so use the injector next if we can
 	  log_gex_xpair.debug() << "re-enqueue (expired) " << this;
-	  if(internal->module->cfg_crit_timeout >= 0)
-	    internal->injector.add_ready_xpair(this);
-	  else
-	    internal->poller.add_critical_xpair(this);
+          push_mutex_check.unlock();
+          request_push(false /*!force_critical*/);
 	  return;
 	}
       }
@@ -2481,6 +2481,7 @@ namespace Realm {
 	    // still writing to this one, so we're done for now - no requeue
 	    has_ready_packets = false;
 	    requeue = put_head.load() || (comp_reply_count.load() != 0);
+            push_mutex_check.unlock();
 	  } else {
 	    // we can remove the head and work on the next one
 	    new_head = head->nextbuf;
@@ -2495,6 +2496,7 @@ namespace Realm {
 	    has_ready_packets = false;
 	    requeue = put_head.load() || (comp_reply_count.load() != 0);
 	  }
+          push_mutex_check.unlock();
 	}
       }
 
@@ -2508,7 +2510,7 @@ namespace Realm {
 	  // go to poller so that we don't waste injector time while packets
 	  //  are being committed
 	  log_gex_xpair.debug() << "re-enqueue (refill race) " << this;
-	  internal->poller.add_critical_xpair(this);
+          request_push(true /*force_critical*/);
 	}
 	return;
       }
@@ -2643,6 +2645,12 @@ namespace Realm {
     return *this;
   }
 
+  void GASNetEXEvent::propagate_to_leaves()
+  {
+    if(leaf)
+      leaf->event = GEX_EVENT_NO_OP;
+  }
+
   void GASNetEXEvent::trigger(GASNetEXInternal *internal)
   {
     event = GEX_EVENT_INVALID;
@@ -2657,8 +2665,6 @@ namespace Realm {
       rget->rgetter->reverse_get_complete(rget);
     if(put)
       put->xpair->enqueue_put_header(put);
-    if(leaf)
-      leaf->event = GEX_EVENT_NO_OP;
   }
 
 
@@ -2789,7 +2795,7 @@ namespace Realm {
     // first go through all(?) the pending events to see if any have
     //  finished
     {
-      GASNetEXEvent::EventList to_check, still_pending;
+      GASNetEXEvent::EventList to_check, still_pending, to_complete;
 
       // atomically grab all the known ones so that we don't have to hold the
       //  mutex while we're testing the events
@@ -2811,8 +2817,11 @@ namespace Realm {
 	switch(ret) {
 	case GASNET_OK:
 	  {
-	    ev->trigger(internal);
-	    internal->event_alloc.free_obj(ev);
+            // even if we don't handle callbacks right away, we have to deal
+            //  with root/leaf event relationships before we can safely test
+            //  any more events
+            ev->propagate_to_leaves();
+            to_complete.push_back(ev);
 	    break;
 	  }
 	case GASNET_ERR_NOT_READY:
@@ -2834,6 +2843,10 @@ namespace Realm {
 	still_pending.absorb_append(pending_events);
 	still_pending.swap(pending_events);
       }
+
+      // if we have any completed events, give them to the completer
+      if(!to_complete.empty())
+        internal->completer.add_ready_events(to_complete);
     }
 
     // try to push packets for any xmit pairs that are critical (i.e. cannot
@@ -2901,6 +2914,79 @@ namespace Realm {
     AutoLock<> al(mutex);
     pollwait_flag.store(true);
     pollwait_cond.wait();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GASNetEXCompleter
+  //
+
+  GASNetEXCompleter::GASNetEXCompleter(GASNetEXInternal *_internal)
+    : BackgroundWorkItem("gex-complete")
+    , internal(_internal)
+    , has_work(false)
+  {}
+
+  void GASNetEXCompleter::add_ready_events(GASNetEXEvent::EventList& newly_ready)
+  {
+    bool enqueue = false;
+
+    if(!newly_ready.empty()) {
+      AutoLock<> al(mutex);
+      // use has_work rather than list emptiness to decide whether to enqueue
+      enqueue = !has_work.load();
+      has_work.store(true);
+      ready_events.absorb_append(newly_ready);
+    }
+
+    if(enqueue)
+      make_active();
+  }
+
+  bool GASNetEXCompleter::has_work_remaining()
+  {
+    return has_work.load();
+  }
+
+  bool GASNetEXCompleter::do_work(TimeLimit work_until)
+  {
+    // grab all the events but don't clear 'has_work' since we don't want
+    //  to be reactivated yet
+    GASNetEXEvent::EventList todo;
+    {
+      AutoLock<> al(mutex);
+      todo.swap(ready_events);
+    }
+
+    while(!todo.empty()) {
+      GASNetEXEvent *ev = todo.pop_front();
+      ev->trigger(internal);
+      internal->event_alloc.free_obj(ev);
+
+      if(work_until.is_expired())
+        break;
+    }
+
+    // retake lock to either put back events we didn't get to or clear
+    //  'has_work' flag
+    bool requeue = false;
+    {
+      AutoLock<> al(mutex);
+      if(todo.empty()) {
+        if(ready_events.empty())
+          has_work.store(false);
+        else
+          requeue = true;  // new events showed up
+      } else {
+        // the events we didn't get to should be at the front of the list
+        todo.absorb_append(ready_events);
+        ready_events.swap(todo);
+        requeue = true;
+      }
+    }
+
+    return requeue;
   }
 
 
@@ -3058,6 +3144,7 @@ namespace Realm {
     , runtime(_runtime)
     , poller(this)
     , injector(this)
+    , completer(this)
     , rgetter(this)
     , total_packets_received(0)
     , databuf_md(nullptr)
@@ -3103,6 +3190,8 @@ namespace Realm {
     poller.begin_polling();
 
     injector.add_to_manager(&runtime->bgwork);
+
+    completer.add_to_manager(&runtime->bgwork);
 
     rgetter.add_to_manager(&runtime->bgwork);
 
@@ -3302,6 +3391,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
     poller.shutdown_work_item();
     injector.shutdown_work_item();
+    completer.shutdown_work_item();
     rgetter.shutdown_work_item();
     obmgr.shutdown_work_item();
 #endif
@@ -3380,6 +3470,10 @@ namespace Realm {
     }
     if(injector.has_work_remaining()) {
       log_gex_quiesce.debug() << "injector busy";
+      local_counts[0]++;
+    }
+    if(completer.has_work_remaining()) {
+      log_gex_quiesce.debug() << "completer busy";
       local_counts[0]++;
     }
     if(rgetter.has_work_remaining()) {
@@ -3783,6 +3877,12 @@ namespace Realm {
         // TODO: will we never need to make a put vs. get decision on a
         //  per-endpoint basis?
         bool use_rmaput = (!use_long && module->cfg_use_rma_put);
+#ifndef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
+        // if we're using RMA put and the conduit doesn't actually honor
+        //  GEX_FLAG_IMMEDIATE, disable immediate mode
+        if(use_rmaput)
+          imm_ok = false;
+#endif
 
 	XmitSrcDestPair *xpair;
 	if(use_long || use_rmaput) {
@@ -4543,6 +4643,7 @@ namespace Realm {
 
     case PreparedMessage::STRAT_PUT_IMMEDIATE:
       {
+#ifdef REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
 	// rma put, header already in a PendingPutHeader, attempt to inject
         //  without using a pbuf
 
@@ -4632,6 +4733,11 @@ namespace Realm {
                                  payload_base, payload_size,
                                  msg->dest_payload_addr);
         }
+#else
+        // should not have chosen this in prepare_message...
+        log_gex.fatal() << "STRAT_PUT_IMMEDIATE used without immediate support!";
+        abort();
+#endif
         break;
       }
 
