@@ -4262,52 +4262,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::prepare_for_shutdown(void)
+    void MemoryManager::prepare_for_shutdown(std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Only need to do things if we are the owner memory
       if (!is_owner)
         return;
-      // This is a kind of deletion so make sure it is ordered
-      const RtUserEvent gc_event = Runtime::create_rt_user_event();
-      RtEvent precondition = gc_precondition.exchange(gc_event);
-      if (!precondition.has_triggered())
-        precondition.wait();
-      // This a collection so make sure we're ordered with other collections
-      std::vector<RtEvent> ready_events;
-      std::vector<PhysicalManager*> to_delete;
+      // Make sure any prior collections are done
+      RtEvent precondition = gc_precondition.load();
+      if (precondition.exists() && !precondition.has_triggered())
+        preconditions.insert(precondition);
+      // No need for the lock here anymore, nobody is mutating this data
+      // structure any longer at this point
+      for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+            current_instances.begin(); cit != current_instances.end(); cit++)
       {
-        AutoLock m_lock(manager_lock);
-        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
-              current_instances.begin(); cit != current_instances.end(); cit++)
+        for (TreeInstances::iterator it =
+              cit->second.begin(); it != cit->second.end(); it++)
         {
-          for (TreeInstances::iterator it =
-                cit->second.begin(); it != cit->second.end(); it++)
-          {
-            if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
-                it->first->is_owner())
-            {
-              it->first->remove_base_valid_ref(NEVER_GC_REF);
-              it->second = 0;
-            }
-            RtEvent ready;
-            if (it->first->try_collection(runtime->address_space, ready))
-            {
-              to_delete.push_back(it->first);
-              if (ready.exists())
-                ready_events.push_back(ready);
-            }
-          }
+          RtEvent ready = it->first->perform_deletion(runtime->address_space);
+          if (ready.exists())
+            preconditions.insert(ready);
         }
       }
-      std::vector<RtEvent> delete_effects;
-      if (!to_delete.empty())
-        check_instance_deletions(to_delete, ready_events, delete_effects);
-      // We can trigger as soon as we're done with our pass
-      if (!delete_effects.empty())
-        Runtime::trigger_event(gc_event, Runtime::merge_events(delete_effects));
-      else
-        Runtime::trigger_event(gc_event);
     }
 
     //--------------------------------------------------------------------------
@@ -4368,9 +4345,15 @@ namespace Legion {
       // No need for the lock, no one should be doing anything at this point
       for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
             current_instances.begin(); cit != current_instances.end(); cit++)
+      {
         for (TreeInstances::const_iterator it = 
               cit->second.begin(); it != cit->second.end(); it++)
+        {
           it->first->force_deletion();
+          if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            delete it->first;
+        }
+      }
       current_instances.clear();
 #ifdef LEGION_MALLOC_INSTANCES
       for (std::map<RtEvent,uintptr_t>::const_iterator it = 
@@ -19879,11 +19862,11 @@ namespace Legion {
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
         it->second->prepare_for_shutdown();
+      std::set<RtEvent> applied;
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
-        it->second->prepare_for_shutdown();
+        it->second->prepare_for_shutdown(applied);
       // Destroy any index slice spaces that we made during execution
-      std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
         forest->destroy_index_space(it->second, address_space, applied);

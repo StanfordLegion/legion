@@ -859,7 +859,7 @@ namespace Legion {
 #endif
     public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
-      void prepare_for_shutdown(void);
+      void prepare_for_shutdown(std::set<RtEvent> &preconditions);
       void finalize(void);
     public:
       void register_remote_instance(PhysicalManager *manager);
