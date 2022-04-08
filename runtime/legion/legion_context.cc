@@ -10015,26 +10015,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      if (current_trace != NULL)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
-            "Illegal call to 'perform_registration_callback' performed "
-            "inside of a trace by task %s (UID %lld). Calls to "
-            "'perform_registration_callback' are only permitted outside "
-            "of traces.", get_task_name(), get_unique_id()) 
-      // Dump a mapping fence into the stream that will not be considered
-      // mapped until these effects are done so that we can ensure that 
-      // no downstream operations attempt to do anything on remote nodes
-      // which could need the results of the registration
-      FenceOp *fence_op = runtime->get_available_fence_op(); 
-      fence_op->initialize(this, FenceOp::MAPPING_FENCE, false/*need future*/);
-      fence_op->add_mapping_applied_condition(effects);
-      add_to_dependence_queue(fence_op);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::analyze_free_local_fields(FieldSpace handle,
                                      const std::vector<FieldID> &local_to_free,
                                      std::vector<unsigned> &local_field_indexes)
@@ -11081,14 +11061,6 @@ namespace Legion {
                       child->get_task_name())
       }
       return variant_impl;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(leaf_lock);
-      execution_events.insert(effects);
     }
 
     //--------------------------------------------------------------------------

@@ -99,7 +99,6 @@ namespace Legion {
                      RtEvent local_done, RtEvent global_done, 
                      std::set<RtEvent> &preconditions);
 #endif
-      virtual void handle_registration_callback_effects(RtEvent effects) = 0;
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
@@ -932,7 +931,6 @@ namespace Legion {
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
-      virtual void handle_registration_callback_effects(RtEvent effects);
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
                                   std::vector<unsigned> &local_field_indexes);
@@ -1710,7 +1708,6 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child,
                 const std::vector<PhysicalRegion> &parent_regions,
                 std::deque<InstanceSet> &physical_instances);
-      virtual void handle_registration_callback_effects(RtEvent effects);
       virtual bool is_leaf_context(void) const;
     public:
       using TaskContext::create_index_space;
