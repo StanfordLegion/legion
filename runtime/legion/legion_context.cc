@@ -136,8 +136,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions)
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done,
+                     std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Send messages to all the other nodes to perform it
@@ -147,7 +148,8 @@ namespace Legion {
         if (space == runtime->address_space)
           continue;
         runtime->send_registration_callback(space, dso, global_done,
-                      preconditions, buffer, buffer_size, withargs);
+            preconditions, buffer, buffer_size, withargs, 
+            true/*deduplicate*/, dedup_tag);
       }
     }
 #endif

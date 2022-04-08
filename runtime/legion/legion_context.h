@@ -95,8 +95,9 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
       virtual void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions);
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done, 
+                     std::set<RtEvent> &preconditions);
 #endif
       virtual void handle_registration_callback_effects(RtEvent effects) = 0;
     public:
