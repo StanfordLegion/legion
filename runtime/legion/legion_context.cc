@@ -139,8 +139,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions)
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done,
+                     std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Send messages to all the other nodes to perform it
@@ -150,7 +151,8 @@ namespace Legion {
         if (space == runtime->address_space)
           continue;
         runtime->send_registration_callback(space, dso, global_done,
-                      preconditions, buffer, buffer_size, withargs);
+            preconditions, buffer, buffer_size, withargs, 
+            true/*deduplicate*/, dedup_tag);
       }
     }
 #endif
@@ -10803,28 +10805,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      if (current_trace != NULL)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
-            "Illegal call to 'perform_registration_callback' performed "
-            "inside of a trace by task %s (UID %lld). Calls to "
-            "'perform_registration_callback' are only permitted outside "
-            "of traces.", get_task_name(), get_unique_id()) 
-      if (effects.has_triggered())
-        return;
-      // Dump a mapping fence into the stream that will not be considered
-      // mapped until these effects are done so that we can ensure that 
-      // no downstream operations attempt to do anything on remote nodes
-      // which could need the results of the registration
-      FenceOp *fence_op = runtime->get_available_fence_op(); 
-      fence_op->initialize(this, FenceOp::MAPPING_FENCE, false/*need future*/);
-      fence_op->add_mapping_applied_condition(effects);
-      add_to_dependence_queue(fence_op);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::analyze_free_local_fields(FieldSpace handle,
                                      const std::vector<FieldID> &local_to_free,
                                      std::vector<unsigned> &local_field_indexes)
@@ -11337,8 +11317,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions)
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done, 
+                     std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
@@ -11350,35 +11331,16 @@ namespace Legion {
         hasher.hash(dso->symbol_name.c_str(), dso->symbol_name.size(),
                     "symbol_name");
         hasher.hash(withargs, "withargs");
+        hasher.hash(dedup_tag, "dedup_tag");
         if (runtime->safe_control_replication > 1)
           hasher.hash(buffer, buffer_size, "buffer");
         if (hasher.verify(__func__))
           break;
       }
       shard_manager->perform_global_registration_callbacks(dso, buffer, 
-          buffer_size, withargs, local_done, global_done, preconditions);
+          buffer_size,withargs,dedup_tag,local_done,global_done,preconditions);
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      if (current_trace != NULL)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
-            "Illegal call to 'perform_registration_callback' performed "
-            "inside of a trace by task %s (UID %lld). Calls to "
-            "'perform_registration_callback' are only permitted outside "
-            "of traces.", get_task_name(), get_unique_id())
-      // Dump a mapping fence into the stream that will not be considered
-      // mapped until these effects are done so that we can ensure that 
-      // no downstream operations attempt to do anything on remote nodes
-      // which could need the results of the registration
-      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize(this, FenceOp::MAPPING_FENCE, false);
-      fence_op->add_mapping_applied_condition(effects);
-      add_to_dependence_queue(fence_op);
-    }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::print_once(FILE *f, const char *message) const
@@ -21414,16 +21376,6 @@ namespace Legion {
                       child->get_task_name())
       }
       return variant_impl;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::handle_registration_callback_effects(RtEvent effects)
-    //--------------------------------------------------------------------------
-    {
-      if (effects.has_triggered())
-        return;
-      AutoLock l_lock(leaf_lock);
-      execution_events.insert(effects);
     }
 
     //--------------------------------------------------------------------------

@@ -4707,7 +4707,7 @@ namespace Realm {
 
             // attempt to import each entry
             for(unsigned i = 0; i < args.count; i++) {
-              CUdeviceptr dptr;
+              CUdeviceptr dptr = 0;
               CUresult ret = CUDA_DRIVER_FNPTR(cuIpcOpenMemHandle)(&dptr,
                                                                    entries[i].handle,
                                                                    CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
@@ -4716,23 +4716,29 @@ namespace Realm {
                                  << " local=" << dptr << std::dec
                                  << " ret=" << ret;
 
-              if(ret != CUDA_SUCCESS)
-                continue; // complain louder?
+              if(ret == CUDA_SUCCESS) {
+                // take the cudaipc mutex to actually add the mapping
+                GPU::CudaIpcMapping mapping;
+                mapping.owner = sender;
+                mapping.mem = entries[i].mem;
+                mapping.local_base = dptr;
+                mapping.address_offset = entries[i].base_ptr - dptr;
+                {
+                  AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+                  (*it)->cudaipc_mappings.push_back(mapping);
 
-              // take the cudaipc mutex to actually add the mapping
-              GPU::CudaIpcMapping mapping;
-              mapping.owner = sender;
-              mapping.mem = entries[i].mem;
-              mapping.local_base = dptr;
-              mapping.address_offset = entries[i].base_ptr - dptr;
-              {
-                AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
-                (*it)->cudaipc_mappings.push_back(mapping);
+                  // do we have a stream for this target?
+                  if((*it)->cudaipc_streams.count(sender) == 0)
+                    (*it)->cudaipc_streams[sender] = new GPUStream(*it,
+                                                                   (*it)->worker);
+                }
+              } else {
+                // consider complaining louder?
 
-                // do we have a stream for this target?
-                if((*it)->cudaipc_streams.count(sender) == 0)
-                  (*it)->cudaipc_streams[sender] = new GPUStream(*it,
-                                                                 (*it)->worker);
+                // also, go ahead and release the handle now since we can't
+                //  use it
+                ActiveMessage<CudaIpcRelease> amsg(sender);
+                amsg.commit();
               }
             }
           }

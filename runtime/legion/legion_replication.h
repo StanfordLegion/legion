@@ -2658,8 +2658,9 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
       void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions);
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done,
+                     std::set<RtEvent> &preconditions);
 #endif
       bool perform_semantic_attach(void);
     public:
@@ -2733,8 +2734,7 @@ namespace Legion {
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;
 #ifdef LEGION_USE_LIBDL
-      std::set<std::pair<std::string,std::string> > 
-                               unique_registration_callbacks;
+      std::set<Runtime::RegistrationKey> unique_registration_callbacks;
 #endif
     protected:
       AttachDeduplication *attach_deduplication;

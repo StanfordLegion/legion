@@ -7596,46 +7596,50 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                             RegistrationCallbackFnptr callback)
+                                             RegistrationCallbackFnptr callback,
+                                             bool dedup, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, dedup, dedup_tag);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-        RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer)
+                       RegistrationWithArgsCallbackFnptr callback, 
+                       const UntypedBuffer &buffer, bool dedup, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback, buffer);
+      Internal::Runtime::add_registration_callback(callback, buffer, 
+                                                   dedup, dedup_tag);
     }
 
-#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void Runtime::perform_registration_callback(
-                                RegistrationCallbackFnptr callback, bool global)
+                                RegistrationCallbackFnptr callback, bool global,
+                                bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::perform_dynamic_registration_callback(callback,global);
+      Internal::Runtime::perform_dynamic_registration_callback(callback,
+                                        global, deduplicate, dedup_tag);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::perform_registration_callback(
                                      RegistrationWithArgsCallbackFnptr callback,
-                                     const UntypedBuffer &buffer, bool global)
+                                     const UntypedBuffer &buffer, bool global,
+                                     bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::perform_dynamic_registration_callback(callback,
-                                                               buffer, global);
+      Internal::Runtime::perform_dynamic_registration_callback(callback, buffer,
+                                                global, deduplicate, dedup_tag);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, true/*dedup*/, 0);
     }
 
     //--------------------------------------------------------------------------
