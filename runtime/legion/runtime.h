@@ -1871,10 +1871,12 @@ namespace Legion {
                                       Realm::DSOReferenceImplementation *impl,
                                       RtEvent done, std::set<RtEvent> &applied,
                                       const void *buffer, size_t buffer_size,
-                                      bool withargs);
+                                      bool withargs, bool deduplicate,
+                                      size_t dedupl_tag);
 #endif
       RtEvent perform_registration_callback(void *callback, const void *buffer,
-          size_t size, bool withargs, bool global, bool preregistered = false);
+          size_t size, bool withargs, bool global, bool preregistered,
+          bool deduplicate, size_t dedup_tag);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -3180,12 +3182,26 @@ namespace Legion {
       Realm::DSOCodeTranslator callback_translator;
 #endif
       std::map<void*,RtEvent> local_callbacks_done;
-      std::map<std::pair<std::string,std::string>,RtEvent> 
-                                                  global_callbacks_done;
-      std::map<std::pair<std::string,std::string>,RtEvent>
-                                                  global_local_done;
-      std::map<std::pair<std::string,std::string>,
-                std::set<RtUserEvent> >           pending_remote_callbacks;
+      struct RegistrationKey {
+        inline RegistrationKey(void) : tag(0) { }
+        inline RegistrationKey(size_t t, const std::string &dso, 
+                               const std::string &symbol)
+          : tag(t), dso_name(dso), symbol_name(symbol) { }
+        inline bool operator<(const RegistrationKey &rhs) const
+        { 
+          if (tag < rhs.tag) return true;
+          if (tag > rhs.tag) return false;
+          if (dso_name < rhs.dso_name) return true;
+          if (dso_name > rhs.dso_name) return false;
+          return symbol_name < rhs.symbol_name; 
+        }
+        size_t tag;
+        std::string dso_name;
+        std::string symbol_name;
+      };
+      std::map<RegistrationKey,RtEvent>                global_callbacks_done;
+      std::map<RegistrationKey,RtEvent>                global_local_done;
+      std::map<RegistrationKey,std::set<RtUserEvent> > pending_remote_callbacks;
     protected:
       mutable LocalLock redop_lock;
       std::map<ReductionOpID,FillView*> redop_fill_views;
@@ -3399,16 +3415,18 @@ namespace Legion {
                                            bool has_lock = false);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
                                                         bool has_lock = false);
-      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback,
+                                            bool dedup, size_t dedup_tag);
       static void add_registration_callback(
-       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer);
-#ifdef LEGION_USE_LIBDL
+       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer,
+                                            bool dedup, size_t dedup_tag);
       static void perform_dynamic_registration_callback(
-                               RegistrationCallbackFnptr callback, bool global);
+                               RegistrationCallbackFnptr callback, bool global,
+                               bool deduplicate, size_t dedup_tag);
       static void perform_dynamic_registration_callback(
                                RegistrationWithArgsCallbackFnptr callback,
-                               const UntypedBuffer &buffer, bool global);
-#endif
+                               const UntypedBuffer &buffer, bool global,
+                               bool deduplicate, size_t dedup_tag);
       static ReductionOpTable& get_reduction_table(bool safe);
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);
@@ -3436,6 +3454,8 @@ namespace Legion {
           RegistrationWithArgsCallbackFnptr withargs;
         } callback;
         UntypedBuffer buffer;
+        size_t dedup_tag;
+        bool deduplicate;
         bool has_args;
       };
       static std::vector<RegistrationCallback>&
