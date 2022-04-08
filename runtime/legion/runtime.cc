@@ -17935,10 +17935,11 @@ namespace Legion {
               registration_callbacks.begin(); it !=
               registration_callbacks.end(); it++)
         {
-          perform_registration_callback(it->has_args ? 
+          perform_registration_callback(it->has_args ?
               (void*)it->callback.withargs : (void*)it->callback.withoutargs,
               it->buffer.get_ptr(), it->buffer.get_size(), it->has_args,
-              false/*global*/, true/*preregistered*/);
+              false/*global*/, true/*preregistered*/, it->deduplicate,
+              it->dedup_tag);
           if (it->buffer.get_size() > 0)
             free(it->buffer.get_ptr());
         }
@@ -17954,7 +17955,8 @@ namespace Legion {
                                          RtEvent global_done_event,
                                          std::set<RtEvent> &applied_events,
                                          const void *buffer, size_t buffer_size,
-                                         bool withargs)
+                                         bool withargs, bool deduplicate,
+                                         size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
       const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -17971,6 +17973,8 @@ namespace Legion {
         if (buffer_size > 0)
           rez.serialize(buffer, buffer_size);
         rez.serialize<bool>(withargs);
+        rez.serialize<bool>(deduplicate);
+        rez.serialize(dedup_tag);
         rez.serialize(global_done_event);
         rez.serialize(done_event);
       }
@@ -17983,13 +17987,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent Runtime::perform_registration_callback(void *callback,
                                  const void *buffer, size_t buffer_size,
-                                 bool withargs, bool global, bool preregistered)
+                                 bool withargs, bool global, bool preregistered,
+                                 bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     { 
       if (inside_registration_callback)
         REPORT_LEGION_ERROR(ERROR_NESTED_REGISTRATION_CALLBACKS,
             "Nested registration callbacks are not permitted in Legion")
-      std::pair<std::string,std::string> global_key;
+      RegistrationKey global_key;
 #ifdef LEGION_USE_LIBDL
       Realm::DSOReferenceImplementation *dso = NULL;
       if (global)
@@ -18021,31 +18026,40 @@ namespace Legion {
                 "shared object or the binary is linked with the '-rdynamic' "
                 "flag.", callback)
           global_key = 
-            std::pair<std::string,std::string>(dso->dso_name, dso->symbol_name);
+            RegistrationKey(dedup_tag, dso->dso_name, dso->symbol_name); 
         }
         else
           global = false;
       }
 #else
-      assert(!global);
+      if (global)
+      {
+        if (total_address_spaces > 1)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
+              "Global registration callbacks are not supported in multi-node "
+              "executions without support for libdl. Please build Legion "
+              "with LEGION_USE_LIBDL defined.")
+        else
+          global = false;
+      }
 #endif
       RtEvent local_done, global_done;
       RtUserEvent local_perform, global_perform;
+      if (deduplicate)
       {
         AutoLock c_lock(callback_lock); 
         if (global)
         {
           // See if we're going to perform this or not
-          std::map<std::pair<std::string,std::string>,RtEvent>::const_iterator
-            local_finder = global_local_done.find(global_key);
+          std::map<RegistrationKey,RtEvent>::const_iterator local_finder =
+            global_local_done.find(global_key);
           if (local_finder == global_local_done.end())
           {
             local_perform = Runtime::create_rt_user_event();
             global_local_done[global_key] = local_perform;
             // Check to see if we have any pending global callbacks to 
             // notify about being done locally
-            std::map<std::pair<std::string,std::string>,
-                      std::set<RtUserEvent> >::iterator
+            std::map<RegistrationKey,std::set<RtUserEvent> >::iterator
               pending_finder = pending_remote_callbacks.find(global_key);
             if (pending_finder != pending_remote_callbacks.end())
             {
@@ -18059,8 +18073,8 @@ namespace Legion {
           else
             local_done = local_finder->second;
           // Now see if we need to do our global registration callbacks
-          std::map<std::pair<std::string,std::string>,RtEvent>::const_iterator
-            global_finder = global_callbacks_done.find(global_key);
+          std::map<RegistrationKey,RtEvent>::const_iterator global_finder = 
+            global_callbacks_done.find(global_key);
           if (global_finder == global_callbacks_done.end())
           {
             global_perform = Runtime::create_rt_user_event();
@@ -18082,8 +18096,10 @@ namespace Legion {
             return local_finder->second;
         }
       }
+      else if (global)
+        global_perform = Runtime::create_rt_user_event();
       // Do the local callback and record it now 
-      if (local_perform.exists())
+      if (!deduplicate || local_perform.exists())
       {
         // All the pregistered cases are effectively global too
         if (global || preregistered)
@@ -18105,7 +18121,8 @@ namespace Legion {
           (*callbackwithoutargs)(machine, external, local_procs);
         }
         inside_registration_callback = NO_REGISTRATION_CALLBACK;
-        Runtime::trigger_event(local_perform);
+        if (local_perform.exists())
+          Runtime::trigger_event(local_perform);
         if (!global)
           return local_perform;
       }
@@ -18123,7 +18140,7 @@ namespace Legion {
 #endif
       // See if we're inside of a task and can use that to help do the 
       // global invocations of this registration callback
-      if (implicit_context == NULL)
+      if (!deduplicate || (implicit_context == NULL))
       {
 #ifdef DEBUG_LEGION
         assert(implicit_runtime == NULL);
@@ -18137,7 +18154,7 @@ namespace Legion {
           if (space == address_space)
             continue;
           send_registration_callback(space, dso, global_perform, preconditions,
-                                     buffer, buffer_size, withargs);
+              buffer, buffer_size, withargs, deduplicate, dedup_tag);
         }
         if (!preconditions.empty())
           Runtime::trigger_event(global_perform,
@@ -18149,7 +18166,7 @@ namespace Legion {
       {
         std::set<RtEvent> preconditions;
         implicit_context->perform_global_registration_callbacks(
-            dso, buffer, buffer_size, withargs, local_done, 
+            dso, buffer, buffer_size, withargs, dedup_tag, local_done,
             global_perform, preconditions);
         if (!preconditions.empty())
           Runtime::trigger_event(global_perform,
@@ -23797,6 +23814,10 @@ namespace Legion {
         derez.advance_pointer(buffer_size);
       bool withargs;
       derez.deserialize<bool>(withargs);
+      bool deduplicate;
+      derez.deserialize(deduplicate);
+      size_t dedup_tag;
+      derez.deserialize(dedup_tag);
       RtEvent global_done_event;
       derez.deserialize(global_done_event);
       RtUserEvent done_event;
@@ -23805,13 +23826,14 @@ namespace Legion {
       // Converting the DSO reference could call dlopen and might block
       // us if the constructor for that shared object requests its own
       // global registration callback, so register our guards first
-      const std::pair<std::string,std::string> key(dso_name, sym_name);
+      const RegistrationKey key(dedup_tag, dso_name, sym_name);
+      if (deduplicate)
       {
         AutoLock c_lock(callback_lock);
         // First see if the local case has already been done in which case
         // we know that we are done also when it is done
-        std::map<std::pair<std::string,std::string>,RtEvent>::const_iterator
-          finder = global_local_done.find(key);
+        std::map<RegistrationKey,RtEvent>::const_iterator finder =
+          global_local_done.find(key);
         if (finder != global_local_done.end())
         {
           Runtime::trigger_event(done_event, finder->second);
@@ -23842,10 +23864,10 @@ namespace Legion {
       void* callback = impl->get_impl<void*>();
       RtEvent precondition;
       // Now take the lock and see if we need to perform anything
+      if (deduplicate)
       {
         AutoLock c_lock(callback_lock);
-        std::map<std::pair<std::string,std::string>,
-          std::set<RtUserEvent> >::iterator finder = 
+        std::map<RegistrationKey,std::set<RtUserEvent> >::iterator finder =
             pending_remote_callbacks.find(key);
         // If someone already handled everything then we are done
         if (finder != pending_remote_callbacks.end())
@@ -23876,7 +23898,7 @@ namespace Legion {
         else // We were already handled so nothing to do
           done_event = RtUserEvent::NO_RT_USER_EVENT;
       }
-      if (done_event.exists())
+      if (!deduplicate || done_event.exists())
       {
         // This is the signal that we need to do the callback
         if (!precondition.exists())
@@ -23898,7 +23920,8 @@ namespace Legion {
           }
           inside_registration_callback = NO_REGISTRATION_CALLBACK;
         }
-        Runtime::trigger_event(done_event, precondition);
+        if (done_event.exists())
+          Runtime::trigger_event(done_event, precondition);
       }
       // Delete our resources that we allocated
       delete impl;
@@ -31166,7 +31189,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                             RegistrationCallbackFnptr callback)
+                                             RegistrationCallbackFnptr callback,
+                                             bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
       if (!runtime_started)
@@ -31176,6 +31200,8 @@ namespace Legion {
         registration_callbacks.resize(registration_callbacks.size() + 1);
         RegistrationCallback &reg = registration_callbacks.back();
         reg.callback.withoutargs = callback;
+        reg.deduplicate = deduplicate;
+        reg.dedup_tag = dedup_tag;
         reg.has_args = false;
       }
       else
@@ -31188,7 +31214,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-        RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer)
+                                  RegistrationWithArgsCallbackFnptr callback,
+                                  const UntypedBuffer &buffer, 
+                                  bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
       if (!runtime_started)
@@ -31198,6 +31226,8 @@ namespace Legion {
         registration_callbacks.resize(registration_callbacks.size() + 1);
         RegistrationCallback &reg = registration_callbacks.back();
         reg.callback.withargs = callback;
+        reg.deduplicate = deduplicate;
+        reg.dedup_tag = dedup_tag;
         reg.has_args = true;
         const size_t size = buffer.get_size();
         if (size > 0)
@@ -31215,10 +31245,10 @@ namespace Legion {
                       "calls to be done after the runtime has started.")
     }
 
-#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::perform_dynamic_registration_callback(
-                                RegistrationCallbackFnptr callback, bool global)
+                                RegistrationCallbackFnptr callback, bool global,
+                                bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
@@ -31232,30 +31262,28 @@ namespace Legion {
                 "Dynamic registration callbacks cannot be registered after "
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = the_runtime->perform_registration_callback(
-            (void*)callback,NULL/*buffer*/,0/*size*/,false/*withargs*/,global);
-        if (done_event.exists())
+            (void*)callback, NULL/*buffer*/, 0/*size*/, false/*withargs*/,
+            global, false/*preregistered*/, deduplicate, dedup_tag);
+        if (done_event.exists() && !done_event.has_triggered())
         {
-          // If we have a context then record that no operations are 
-          // allowed to be executed until after this registration is done
-          if (implicit_context != NULL)
-            implicit_context->handle_registration_callback_effects(done_event);
-          else if (!done_event.has_triggered())
-          {
-            if (Processor::get_executing_processor().exists())
-              done_event.wait();
-            else
-              done_event.external_wait();
-          }
+          // Block waiting for these to finish currently since we need
+          // to guarantee that all the resources are registered before
+          // we proceed any further
+          if (Processor::get_executing_processor().exists())
+            done_event.wait();
+          else
+            done_event.external_wait();
         }
       }
       else // can safely ignore global as this call must be done everywhere
-        add_registration_callback(callback);
+        add_registration_callback(callback, deduplicate, dedup_tag);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::perform_dynamic_registration_callback(
                                      RegistrationWithArgsCallbackFnptr callback,
-                                     const UntypedBuffer &buffer, bool global)
+                                     const UntypedBuffer &buffer, bool global,
+                                     bool deduplicate, size_t dedup_tag)
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
@@ -31270,23 +31298,22 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = the_runtime->perform_registration_callback(
             (void*)callback, buffer.get_ptr(), buffer.get_size(), 
-            true/*withargs*/, global);
+            true/*withargs*/, global, false/*preregistered*/, false/*dedup*/,
+            0/*dedup tag*/);
         if (done_event.exists() && !done_event.has_triggered())
         {
-          // If we have a context then record that no operations are 
-          // allowed to be executed until after this registration is done
-          if (implicit_context != NULL)
-            implicit_context->handle_registration_callback_effects(done_event);
-          else if (Processor::get_executing_processor().exists())
+          // Block waiting for these to finish currently since we need
+          // to guarantee that all the resources are registered before
+          // we proceed any further
+          if (Processor::get_executing_processor().exists())
             done_event.wait();
           else
             done_event.external_wait();
         }
       }
       else // can safely ignore global as this call must be done everywhere
-        add_registration_callback(callback, buffer);
+        add_registration_callback(callback, buffer, deduplicate, dedup_tag);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(bool safe)

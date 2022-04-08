@@ -94,6 +94,10 @@ struct RWLockImpl {
 #include <sys/syscall.h>
 #endif
 
+#ifdef REALM_ON_MACOS
+#include <unistd.h>
+#endif
+
 #ifdef __SSE2__
 // technically pause is an "SSE2" instruction, but it's defined in xmmintrin
 //  (it'd be fine to call it on older CPUs, but since we're doing conditional

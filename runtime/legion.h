@@ -9087,10 +9087,18 @@ namespace Legion {
        * configure any other static runtime variables prior to beginning
        * the application.
        * @param callback function pointer to the callback function to be run
+       * @param buffer optional argument buffer to pass to the callback
+       * @param dedup whether to deduplicate this with other registration
+       *              callbacks for the same function
+       * @param dedup_tag a tag to use for deduplication in the case where
+       *              applications may want to deduplicate across multiple 
+       *              callbacks with the same function pointer
        */
-      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback,
+                                      bool dedup = true, size_t dedup_tag = 0);
       static void add_registration_callback(
-       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer);
+       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer,
+                                      bool dedup = true, size_t dedup_tag = 0);
 
       /**
        * This call allows applications to request a registration callback
@@ -9109,14 +9117,20 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param global whether this registration needs to be performed
        *               in all address spaces or just the local one
+       * @param buffer optional buffer of data to pass to callback
+       * @param dedup whether to deduplicate this with other registration
+       *              callbacks for the same function
+       * @param dedup_tag a tag to use for deduplication in the case where
+       *              applications may want to deduplicate across multiple 
+       *              callbacks with the same function pointer
        */
-#ifdef LEGION_USE_LIBDL
       static void perform_registration_callback(
-                               RegistrationCallbackFnptr callback, bool global);
+                               RegistrationCallbackFnptr callback, bool global,
+                               bool deduplicate = true, size_t dedup_tag = 0);
       static void perform_registration_callback(
                                RegistrationWithArgsCallbackFnptr callback,
-                               const UntypedBuffer &buffer, bool global);
-#endif
+                               const UntypedBuffer &buffer, bool global,
+                               bool deduplicate = true , size_t dedup_tag = 0);
 
       /**
        * @deprecated

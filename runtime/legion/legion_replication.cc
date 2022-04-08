@@ -12385,17 +12385,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ShardManager::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, const void *buffer,
-                     size_t buffer_size, bool withargs, RtEvent local_done,
-                     RtEvent global_done, std::set<RtEvent> &preconditions)
+                     size_t buffer_size, bool withargs, size_t dedup_tag,
+                     RtEvent local_done, RtEvent global_done,
+                     std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // See if we're the first one to handle this DSO
-      const std::pair<std::string,std::string> 
-        key(dso->dso_name, dso->symbol_name);
+      const Runtime::RegistrationKey key(dedup_tag, 
+                                         dso->dso_name, dso->symbol_name);
       {
         AutoLock m_lock(manager_lock);
         // Check to see if we've already handled this
-        std::set<std::pair<std::string,std::string> >::const_iterator finder =
+        std::set<Runtime::RegistrationKey>::const_iterator finder =
           unique_registration_callbacks.find(key);
         if (finder != unique_registration_callbacks.end())
           return;
@@ -12424,8 +12425,9 @@ namespace Legion {
         {
           if (unique_shard_spaces.find(space) != unique_shard_spaces.end())
             continue;
-          runtime->send_registration_callback(space, dso, global_done, 
-                  local_preconditions, buffer, buffer_size, withargs);
+          runtime->send_registration_callback(space, dso, global_done,
+              local_preconditions, buffer, buffer_size, withargs, 
+              true/*deduplicate*/, dedup_tag);
         }
         if (!local_preconditions.empty())
         {
