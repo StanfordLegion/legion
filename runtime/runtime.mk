@@ -68,12 +68,22 @@ LEGION_CC_FLAGS += -DLEGION_VERSION='"${REALM_VERSION}"'
 
 USE_OPENMP ?= 0
 ifeq ($(shell uname -s),Darwin)
-DARWIN = 1
-CC_FLAGS += -DDARWIN
-FC_FLAGS += -DDARWIN
-ifeq ($(strip $(USE_OPENMP)),1)
-$(warning "Some versions of Clang on Mac OSX do not support OpenMP")
-endif
+  DARWIN = 1
+  CC_FLAGS += -DDARWIN
+  FC_FLAGS += -DDARWIN
+  # Detect if we're using Apple Clang or Normal Clang
+  ifeq ($(findstring Apple,$(shell $(CXX) --version)),Apple)
+    APPLECLANG = 1
+    REALM_LIMIT_SYMBOL_VISIBILITY=0
+    $(warning "Apple Clang is a weird compiler and untested by Legion CI. Tread lightly...")
+  else
+    APPLECLANG = 0
+  endif
+  ifeq ($(strip $(USE_OPENMP)),1)
+    $(warning "Some versions of Clang on Mac OSX do not support OpenMP")
+  endif
+else
+  APPLECLANG = 0
 endif
 
 ifndef LG_RT_DIR
@@ -233,14 +243,15 @@ ifneq (${MARCH},)
     else
       $(error PGI compilers do not currently support the PowerPC architecture)
     endif
+  else ifeq ($(strip $(USE_PGI)),1)
+    CC_FLAGS += -tp=${MARCH}
+    FC_FLAGS += -tp=${MARCH}
+  else ifeq ($(strip $(APPLECLANG)),1)
+    CC_FLAGS += -mcpu=${MARCH}
+    FC_FLAGS += -mcpu=${MARCH}
   else
-    ifeq ($(strip $(USE_PGI)),0)
-      CC_FLAGS += -march=${MARCH}
-      FC_FLAGS += -march=${MARCH}
-    else
-      CC_FLAGS += -tp=${MARCH}
-      FC_FLAGS += -tp=${MARCH}
-    endif
+    CC_FLAGS += -march=${MARCH}
+    FC_FLAGS += -march=${MARCH}
   endif
 endif
 
@@ -821,6 +832,29 @@ ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
 endif
+
+# Check for a minimum C++ version and if none is specified then set it
+ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
+ifeq ($(shell $(CXX) -x c++ -std=c++23 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+  CC_FLAGS += -std=c++23
+else ifeq ($(shell $(CXX) -x c++ -std=c++20 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+  ifeq ($(strip $(APPLECLANG)),1)
+    # Apple compiler claims it supports c++20 but it lies!
+    CC_FLAGS += -std=c++17
+  else
+    CC_FLAGS += -std=c++20
+  endif
+else ifeq ($(shell $(CXX) -x c++ -std=c++17 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+  CC_FLAGS += -std=c++17
+else ifeq ($(shell $(CXX) -x c++ -std=c++14 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+  CC_FLAGS += -std=c++14
+else ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+  CC_FLAGS += -std=c++11
+else
+  $(error Legion requires a C++ compiler that supports at least C++11)
+endif
+endif
+
 
 # if requested, add --defcheck flags to the compile line so that the
 #  cxx_defcheck wrapper can verify that source files include the configuration
