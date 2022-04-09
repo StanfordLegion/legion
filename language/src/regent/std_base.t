@@ -21,6 +21,15 @@ local base = {}
 
 base.config, base.args = config.args()
 
+local cpu_fast, gpu_fast = false, "contract"
+if base.config["fast-math"] == 0 then
+  cpu_fast, gpu_fast = false, false
+elseif base.config["fast-math"] >= 1 then
+  cpu_fast, gpu_fast = true, true
+end
+base.opt_profile = {fastmath = cpu_fast}
+base.gpu_opt_profile = {fastmath = gpu_fast}
+
 -- Hack: Terra symbols don't support the hash() method so monkey patch
 -- it in here. This allows deterministic hashing of Terra symbols,
 -- which is currently required by OpenMP codegen.

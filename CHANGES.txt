@@ -1,6 +1,16 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (????? ??, ????)
+  * Regent
+     - Support for new flag `-ffast-math 1` which enables fast-math
+        optimizations on CPU and GPU. By default, CPU code has this
+        disabled, and GPU code uses only the `contract` flag in LLVM
+        to generate FMA instructions. For compute-intensive
+        applications, additional performance can sometimes be unlocked
+        by enabling the full suite of optimizations with `-ffast-math 1`,
+        at the cost of numerical accuracy.
+
 Version 22.03.0 (March 27, 2022)
   * Build
      - Minimum supported cmake version is now 3.7.  (Some optional features
