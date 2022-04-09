@@ -22,6 +22,9 @@ local base = {}
 base.config, base.args = config.args()
 
 local cpu_fast, gpu_fast = false, "contract"
+if terralib.llvm_version < 50 then
+  gpu_fast = false
+end
 if base.config["fast-math"] == 0 then
   cpu_fast, gpu_fast = false, false
 elseif base.config["fast-math"] >= 1 then
