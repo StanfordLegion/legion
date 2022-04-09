@@ -2404,7 +2404,7 @@ namespace Legion {
                   }
                 }
                 if (!previous_regions.empty() &&
-                    !(constraints.equals(collective_finder->second.constraints,
+                    !(constraints.equals(*collective_finder->second.constraints,
                         &finder->second.bad_kind, &finder->second.bad_index)))
                   previous_regions.clear();
               }
@@ -2567,8 +2567,8 @@ namespace Legion {
                     }
                   }
                   if (!previous_regions.empty() &&
-                      !(pit->second.constraints.equals(
-                         collective_finder->second.constraints,
+                      !(pit->second.constraints->equals(
+                         *(collective_finder->second.constraints),
                           &finder->second.bad_kind, &finder->second.bad_index)))
                     previous_regions.clear();
                 }

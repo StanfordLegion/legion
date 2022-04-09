@@ -602,7 +602,7 @@ namespace Legion {
               pit != instances.end(); pit++)
         {
           rez.serialize(pit->first);
-          pit->second.constraints.serialize(rez);
+          pit->second.constraints->serialize(rez);
           rez.serialize<size_t>(pit->second.regions.size());
           for (std::vector<LogicalRegion>::const_iterator it = 
                 pit->second.regions.begin(); it !=

@@ -817,10 +817,10 @@ namespace Legion {
         PendingCollective(const LayoutConstraintSet &cons,
                           const std::vector<LogicalRegion> &regs,
                           size_t points)
-          : constraints(cons), regions(regs), total_points(points),
+          : constraints(&cons), regions(regs), total_points(points),
             collective(NULL) { }
       public:
-        const LayoutConstraintSet &constraints;
+        const LayoutConstraintSet *constraints;
         std::vector<LogicalRegion> regions;
         std::map<AddressSpaceID,unsigned> memory_spaces;
         size_t total_points;
