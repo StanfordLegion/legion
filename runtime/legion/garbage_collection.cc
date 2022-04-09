@@ -62,7 +62,7 @@ namespace Legion {
     void LocalReferenceMutator::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
-      mutation_effects.insert(event);
+      mutation_effects.push_back(event);
     }
 
     //--------------------------------------------------------------------------
@@ -181,6 +181,7 @@ namespace Legion {
 #endif
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_gc_reference(
                                              ReferenceMutator *mutator, int cnt)
@@ -488,6 +489,7 @@ namespace Legion {
       }
       return do_deletion;
     }
+#endif // !DEBUG_LEGION_GC
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
@@ -530,7 +532,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -559,7 +566,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_valid_references.find(source);
@@ -592,7 +599,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -621,7 +633,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(has_valid_references);
 #endif
-#ifdef DDEBUG_LEGION_GC
+#ifdef DEBUG_LEGION_GC
         valid_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -655,7 +667,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -684,7 +701,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         std::map<ReferenceSource,int>::iterator finder = 
           detailed_base_gc_references.find(source);
@@ -718,7 +735,12 @@ namespace Legion {
       {
         int next = current + cnt;
         if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
       }
 #endif
       // Need to wait until all transitions are done 
@@ -747,7 +769,7 @@ namespace Legion {
 #endif
 #ifdef DEBUG_LEGION_GC
         if (gc_references == 0)
-          has_gc_reference = true;
+          has_gc_references = true;
         gc_references += cnt;
         source = LEGION_DISTRIBUTED_ID_FILTER(source);
         std::map<DistributedID,int>::iterator finder = 
@@ -767,6 +789,7 @@ namespace Legion {
       return false;
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_resource_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -799,6 +822,7 @@ namespace Legion {
       else
         return false;
     }
+#endif
 
 #ifdef USE_REMOTE_REFERENCES
     //--------------------------------------------------------------------------
@@ -1888,7 +1912,7 @@ namespace Legion {
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, true/*valid*/);
+                                            signed_count, VALID_REF_KIND);
         return runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
@@ -1924,7 +1948,7 @@ namespace Legion {
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, true/*valid*/);
+                                            signed_count, VALID_REF_KIND);
         return runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
@@ -1960,7 +1984,7 @@ namespace Legion {
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, false/*valid*/);
+                                            signed_count, GC_REF_KIND);
         return runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
@@ -1996,7 +2020,7 @@ namespace Legion {
       if (precondition.exists() && !precondition.has_triggered())
       {
         DeferRemoteReferenceUpdateArgs args(this, target, done_event,
-                                            signed_count, false/*valid*/);
+                                            signed_count, GC_REF_KIND);
         return runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, precondition);
       }
@@ -2010,6 +2034,32 @@ namespace Legion {
       }
       runtime->send_did_remote_gc_update(target, rez);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::send_remote_resource_decrement(
+                    AddressSpaceID target, RtEvent precondition, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      const int signed_count = -(int(count));
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteReferenceUpdateArgs args(this, target,
+            RtUserEvent::NO_RT_USER_EVENT, signed_count, RESOURCE_REF_KIND);
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, precondition);
+      }
+      else
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(signed_count);
+          rez.serialize<bool>(target == owner_space);
+        }
+        runtime->send_did_remote_resource_update(target, rez);
+      }
     }
 
 #ifdef USE_REMOTE_REFERENCES
@@ -2193,6 +2243,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
+                                         Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      int count;
+      derez.deserialize(count);
+      bool is_owner;
+      derez.deserialize(is_owner);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+#ifdef DEBUG_LEGION
+      assert(!done_event.exists());
+      assert(count <= 0);
+#endif
+      DistributedCollectable *target = NULL;
+      if (!is_owner)
+      {
+        RtEvent ready;
+        target = runtime->find_distributed_collectable(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
+      else
+        target = runtime->find_distributed_collectable(did);
+      if (count > 0)
+        target->add_base_resource_ref(REMOTE_DID_REF, unsigned(count));
+      else if(target->remove_base_resource_ref(REMOTE_DID_REF,unsigned(-count)))
+        delete target;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void 
       DistributedCollectable::handle_defer_remote_reference_update(
                                              Runtime *runtime, const void *args)
@@ -2208,10 +2292,26 @@ namespace Legion {
         rez.serialize<bool>(dargs->owner);
         rez.serialize(dargs->done_event);
       }
-      if (dargs->valid)
-        runtime->send_did_remote_valid_update(dargs->target, rez);
-      else
-        runtime->send_did_remote_gc_update(dargs->target, rez);
+      switch (dargs->kind)
+      {
+        case GC_REF_KIND:
+          {
+            runtime->send_did_remote_gc_update(dargs->target, rez);
+            break;
+          }
+        case VALID_REF_KIND:
+          {
+            runtime->send_did_remote_valid_update(dargs->target, rez);
+            break;
+          }
+        case RESOURCE_REF_KIND:
+          {
+            runtime->send_did_remote_resource_update(dargs->target, rez);
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------

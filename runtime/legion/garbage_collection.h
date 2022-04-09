@@ -59,7 +59,7 @@ namespace Legion {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,
       VERSION_MANAGER_REF = 2,
-      VERSION_INFO_REF = 3,
+      PHYSICAL_ANALYSIS_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
       PENDING_GC_REF = 6,
@@ -203,7 +203,7 @@ namespace Legion {
     public:
       RtEvent get_done_event(void);
     private:
-      std::set<RtEvent> mutation_effects;
+      std::vector<RtEvent> mutation_effects;
     };
 
     /**
@@ -288,17 +288,17 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REMOTE_REF_UPDATE_TASK_ID;
       public:
         DeferRemoteReferenceUpdateArgs(DistributedCollectable *d, 
-            AddressSpaceID t, RtUserEvent e, unsigned c, bool v)
+            AddressSpaceID t, RtUserEvent e, unsigned c, ReferenceKind k)
           : LgTaskArgs<DeferRemoteReferenceUpdateArgs>(implicit_provenance),
             did(d->did), target(t), done_event(e), count(c),
-            owner(d->owner_space == t), valid(v) { } 
+            kind(k), owner(d->owner_space == t) { } 
       public:
         const DistributedID did;
         const AddressSpaceID target;
         const RtUserEvent done_event;
         const int count;
+        const ReferenceKind kind;
         const bool owner;
-        const bool valid;
       };
       struct DeferRemoteUnregisterArgs :
         public LgTaskArgs<DeferRemoteUnregisterArgs> {
@@ -352,6 +352,7 @@ namespace Legion {
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
       bool check_active_and_increment(ReferenceSource source, int cnt = 1);
       bool check_active_and_increment(DistributedID source, int cnt = 1);
+#ifndef DEBUG_LEGION_GC
     private:
       void add_gc_reference(ReferenceMutator *mutator, int cnt);
       bool remove_gc_reference(ReferenceMutator *mutator, int cnt);
@@ -361,6 +362,7 @@ namespace Legion {
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
+#endif
 #ifdef USE_REMOTE_REFERENCES
     private:
       bool add_create_reference(AddressSpaceID source, 
@@ -407,6 +409,7 @@ namespace Legion {
       void filter_remote_instances(AddressSpaceID remote_space);
     public:
       inline bool has_remote_instances(void) const;
+      inline size_t count_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
@@ -439,6 +442,9 @@ namespace Legion {
                                     ReferenceMutator *mutator = NULL,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
+      void send_remote_resource_decrement(AddressSpaceID target,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    unsigned count = 1);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -453,6 +459,8 @@ namespace Legion {
                                                  Deserializer &derez);
       static void handle_did_remote_gc_update(Runtime *runtime,
                                               Deserializer &derez);
+      static void handle_did_remote_resource_update(Runtime *runtime,
+                                                    Deserializer &derez);
       static void handle_defer_remote_reference_update(Runtime *runtime,
                                                       const void *args);
       static void handle_defer_remote_unregister(Runtime *runtime,
@@ -587,6 +595,14 @@ namespace Legion {
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       return !remote_instances.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    inline size_t DistributedCollectable::count_remote_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return remote_instances.size();
     }
 
     //--------------------------------------------------------------------------
