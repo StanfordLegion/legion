@@ -747,7 +747,9 @@ namespace Legion {
              index_domain->create_layout_expression(pl, pl_size) : index_domain,
           tree_id, register_now), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
-        unique_event(u_event), piece_list(pl), piece_list_size(pl_size)
+        unique_event(u_event), piece_list(pl), piece_list_size(pl_size),
+        gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
+        remaining_collection_guards(0), currently_active(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1142,20 +1144,1039 @@ namespace Legion {
                                                   piece_list, piece_list_size);
     }
 
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(!currently_active);
+      assert((gc_state == COLLECTABLE_GC_STATE) ||
+              (gc_state == ACQUIRED_GC_STATE));
+      assert(!deferred_deletion.exists());
+#endif
+      currently_active = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(currently_active);
+#endif
+      currently_active = false;
+      if (deferred_deletion.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert((gc_state == COLLECTED_GC_STATE) || is_external_instance());
+#endif
+        Runtime::trigger_event(deferred_deletion);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(!deferred_deletion.exists());
+      assert(gc_state != COLLECTED_GC_STATE);
+      // In debug mode we eagerly add valid references such that the owner
+      // is valid as long as a copy of the manager on one node is valid
+      // This way we can easily check that acquires are being done safely
+      // if instance isn't already valid somewhere
+      if ((gc_state != ACQUIRED_GC_STATE) && !is_external_instance())
+      {
+        // Should never be here if we're the owner as it indicates that
+        // we tried to add a valid reference without first doing an acquire
+        assert(!is_owner());
+        // Send a message to check that we can safely do the acquire
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        std::atomic<bool> result(true);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&result);
+          rez.serialize(done);
+          rez.serialize<bool>(false/*acquired*/);
+        }
+        runtime->send_gc_debug_request(owner_space, rez);
+        if (!done.has_triggered())
+          done.wait();
+        assert(result.load());
+      }
+      else if (!is_owner())
+      {
+        // Send the message to do the acquire on the owner node
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        std::atomic<bool> result(true);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&result);
+          rez.serialize(done);
+          rez.serialize<bool>(true/*acquired*/);
+        }
+        runtime->send_gc_debug_request(owner_space, rez);
+        if (!done.has_triggered())
+          done.wait();
+        assert(result.load());
+      }
+#endif
+      gc_state = VALID_GC_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_debug_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      std::atomic<bool> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      bool acquired;
+      derez.deserialize(acquired);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)
+      {
+        if (acquired)
+        {
+          LocalReferenceMutator mutator;
+          // Should be guaranteed to be able to acquire thi
+          if (manager->acquire_instance(REMOTE_DID_REF, &mutator))
+          {
+            Runtime::trigger_event(done, mutator.get_done_event());
+            manager->remove_base_resource_ref(RUNTIME_REF);
+            return;
+          }
+        }
+        else
+        {
+          if (manager->check_valid_and_increment(REMOTE_DID_REF))
+          {
+            // This must already be valid for us to succeed
+            Runtime::trigger_event(done);
+            manager->remove_base_resource_ref(RUNTIME_REF);
+            return;
+          }
+        }
+      }
+      // If we get here, we failed so send the response
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(target);
+        rez.serialize(done);
+      }
+      runtime->send_gc_debug_response(source, rez);
+      if ((manager != NULL) && manager->remove_base_resource_ref(RUNTIME_REF))
+        delete manager;
+#else
+      assert(false); // should never get this in release mode
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_debug_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      DerezCheck z(derez);
+      std::atomic<bool> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      target->store(false);
+      Runtime::trigger_event(done);
+#else
+      assert(false); // should never get this in release mode
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(gc_state == VALID_GC_STATE);
+      if (!is_owner())
+        send_remote_valid_decrement(owner_space, mutator);
+#endif
+      if (pending_changes == 0)
+      {
+        gc_state = COLLECTABLE_GC_STATE;
+        prune_gc_events();
+      }
+      else
+        gc_state = ACQUIRED_GC_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::acquire_instance(ReferenceSource source,
+                                           ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Do an atomic operation to check to see if we are already valid
+      // and increment our count if we are, in this case the acquire 
+      // has succeeded and we are done, this should be the common case
+      // since we are likely already holding valid references elsewhere
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance() && check_valid_and_increment(source))
+        return true;
+      bool success = false;
+      {
+        AutoLock i_lock(inst_lock);
+        switch (gc_state)
+        {
+          case VALID_GC_STATE:
+          case ACQUIRED_GC_STATE:
+            {
+              pending_changes++;
+              success = true;
+              break;
+            }
+          case COLLECTABLE_GC_STATE:
+            {
+              gc_state = ACQUIRED_GC_STATE;
+              pending_changes++;
+              success = true;
+              break;
+            }
+          case PENDING_COLLECTED_GC_STATE:
+            {
+              // Hurry the garbage collector is trying to eat it!
+              if (is_owner())
+              {
+                // We're the owner so we can save this
+                gc_state = ACQUIRED_GC_STATE;
+                // We add the collection counts to the pending
+                // changes to ensure we won't try to collect again
+                // until all the participants of the previous collection
+                // have checked the result of the collection
+                pending_changes++;
+                success = true;
+              }
+              // Not the owner so we need to send a message to the
+              // owner to have it try to do the acquire
+              break;
+            }
+          case COLLECTED_GC_STATE:
+            return false;
+          default:
+            assert(false);
+        }
+      }
+      if (success)
+      {
+        add_base_valid_ref(source, mutator);
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(pending_changes > 0);
+        assert(gc_state == VALID_GC_STATE);
+#endif
+        pending_changes--;
+        return true;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_owner()); 
+#endif
+        std::atomic<bool> result(false);
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(this);
+          rez.serialize(source);
+          rez.serialize(mutator);
+          rez.serialize(&result);
+          rez.serialize(ready);
+        }
+        runtime->send_acquire_request(owner_space, rez);
+        ready.wait();
+        if (result.load())
+          return true;
+        // The only reason we fail is if the instance has been collected
+        // so we can update the gc_state
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert((gc_state == PENDING_COLLECTED_GC_STATE) || 
+                (gc_state == COLLECTED_GC_STATE)); 
+#endif
+        gc_state = COLLECTED_GC_STATE;
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_acquire_request(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source) 
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      PhysicalManager *remote;
+      derez.deserialize(remote);
+      ReferenceSource ref;
+      derez.deserialize(ref);
+      ReferenceMutator *remote_mutator;
+      derez.deserialize(remote_mutator);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)
+      {
+        LocalReferenceMutator mutator;
+        if (manager->acquire_instance(REMOTE_DID_REF, &mutator))
+        {
+          // We succeeded so send the response back with the reference
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(remote);
+            rez.serialize(ref);
+            rez.serialize(remote_mutator);
+            rez.serialize(mutator.get_done_event());
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_acquire_response(source, rez);
+        }
+        if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
+      }
+      // We failed, so the flag is already set, just trigger the event
+      Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_acquire_response(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      PhysicalManager *manager;
+      derez.deserialize(manager);
+      ReferenceSource ref;
+      derez.deserialize(ref);
+      ReferenceMutator *local_mutator;
+      derez.deserialize(local_mutator);
+      RtEvent applied;
+      derez.deserialize(applied);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      // Add the local reference with the right kind and then remove the
+      // remote distributed reference we added on the owner node
+      LocalReferenceMutator mutator;
+      manager->add_base_valid_ref(ref, &mutator);
+      if (applied.exists())
+        mutator.record_reference_mutation_effect(applied);
+      manager->send_remote_valid_decrement(source, local_mutator,
+          mutator.get_done_event());
+      result->store(true);
+      Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::try_collection(AddressSpaceID source, RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+      // Do a quick to check to see if we can do a collection on the local node
+      if ((gc_state == ACQUIRED_GC_STATE) || (gc_state == VALID_GC_STATE))
+        return false;
+      // If it's already collected then we're done
+      if (gc_state == COLLECTED_GC_STATE)
+        return true;
+      if (is_owner())
+      {
+        // Check to see if anyone is already performing a deletion
+        // on this manager, if so then deduplicate
+        if (gc_state == COLLECTABLE_GC_STATE)
+        {
+#ifdef DEBUG_LEGION
+          assert(pending_changes == 0);
+#endif
+          gc_state = PENDING_COLLECTED_GC_STATE;
+          const size_t needed_guards = count_remote_instances();
+          if (needed_guards > 0)
+          {
+            remaining_collection_guards.store(needed_guards);
+            struct AcquireFunctor {
+              AcquireFunctor(DistributedID d, Runtime *rt, 
+                             std::atomic<unsigned> *c)
+                : did(d), runtime(rt), count(c) { }
+              inline void apply(AddressSpaceID target)
+              {
+                if (target == runtime->address_space)
+                  return;
+                const RtUserEvent ready_event = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  rez.serialize(count);
+                  rez.serialize(ready_event);
+                }
+                runtime->send_gc_acquire(target, rez);
+                ready_events.push_back(ready_event);
+              }
+              const DistributedID did;
+              Runtime *const runtime;
+              std::atomic<unsigned> *const count;
+              std::vector<RtEvent> ready_events;
+            };
+            AcquireFunctor functor(did, runtime, &remaining_collection_guards);
+            map_over_remote_instances(functor);
+            collection_ready = Runtime::merge_events(functor.ready_events);
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(gc_state == PENDING_COLLECTED_GC_STATE); 
+          // Should alaready have outstanding changes for this deletion
+          assert(pending_changes > 0);
+#endif
+        }
+        pending_changes++;
+        ready = collection_ready;
+      }
+      else
+      {
+        if (source != owner_space)
+        {
+          // No longer need the lock here since we're just sending a message
+          i_lock.release();
+          // Send the message to the owner to perform the collection
+          std::atomic<bool> result(false);
+          const RtUserEvent ready_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(ready_event);
+            rez.serialize(&result);
+            rez.serialize(&ready);
+          }
+          runtime->send_gc_request(owner_space, rez);
+          ready_event.wait();
+          return result.load();
+        }
+        else
+        {
+          // We can setup the guard now
+#ifdef DEBUG_LEGION
+          assert((gc_state == COLLECTABLE_GC_STATE) ||
+                  (gc_state == PENDING_COLLECTED_GC_STATE));
+#endif
+          gc_state = PENDING_COLLECTED_GC_STATE;
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtEvent *target;
+      derez.deserialize(target);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager == NULL)
+      {
+        Runtime::trigger_event(done);
+        return;
+      }
+      RtEvent ready;
+      if (manager->try_collection(source, ready))
+      {
+        // Add a reference to ensure it is still there when 
+        // we do the check or release
+        manager->add_base_resource_ref(PENDING_COLLECTIVE_REF);
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(result);
+          rez.serialize(target);
+          rez.serialize(ready);
+          rez.serialize(done);
+        }
+        runtime->send_gc_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done);
+      if (manager->remove_base_resource_ref(RUNTIME_REF))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtEvent *target;
+      derez.deserialize(target);
+      derez.deserialize(*target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      result->store(true);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_acquire(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      std::atomic<unsigned> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      RtEvent ready;
+      PhysicalManager *manager = 
+        runtime->find_or_request_instance_manager(did, ready);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+
+      if (manager->try_collection(source, ready))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(done);
+        }
+        runtime->send_gc_acquired(source, rez);
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_acquired(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::atomic<unsigned> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const unsigned prev =
+#endif
+#endif
+      target->fetch_sub(1);
+#ifdef DEBUG_LEGION
+      assert(prev > 0);
+#endif
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::release_collection(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(pending_changes > 0); 
+        // Can be in any state but collectable
+        assert(gc_state != COLLECTABLE_GC_STATE);
+#endif
+        if (--pending_changes == 0)
+        {
+          if ((gc_state == ACQUIRED_GC_STATE) ||
+              (gc_state == PENDING_COLLECTED_GC_STATE))
+          {
+            // Reset back to collectable state
+            gc_state = COLLECTABLE_GC_STATE;
+            prune_gc_events();
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(source == runtime->address_space);
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+        }
+        runtime->send_gc_release(owner_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_release(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      manager->release_collection(source);
+      // Remove the reference added by the successful remote request
+      manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF);
+      if (manager->remove_base_resource_ref(RUNTIME_REF))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::pack_garbage_collection_state(Serializer &rez,
+                                                        AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // We have to atomically get the current collection state and 
+      // update the set of remote instances, note that it can be read-only
+      // since we're just reading the state and the `update-remote_instaces'
+      // call will take its own exclusive lock
+      AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+      switch (gc_state)
+      {
+        case VALID_GC_STATE:
+        case ACQUIRED_GC_STATE:
+        case COLLECTABLE_GC_STATE:
+          {
+            rez.serialize(COLLECTABLE_GC_STATE);
+            break;
+          }
+        case PENDING_COLLECTED_GC_STATE:
+        case COLLECTED_GC_STATE:
+          {
+            rez.serialize(gc_state);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::initialize_remote_gc_state(
+                                                   GarbageCollectionState state)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(gc_state == COLLECTABLE_GC_STATE);
+#endif
+      gc_state = state;
+      // If we're in a pending collectable state, then add a reference
+      if (state == PENDING_COLLECTED_GC_STATE)
+        add_base_resource_ref(PENDING_COLLECTIVE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::verify_collection(RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(pending_changes > 0);
+#endif
+        switch (gc_state)
+        {
+          // Anything in these states means the collection attempt failed
+          case VALID_GC_STATE:
+          case ACQUIRED_GC_STATE:
+            {
+              // Something else has acquired the instance before we
+              // could finish the collection and already sent the
+              // release notifications, remove our pending reference
+              if (--pending_changes == 0)
+              {
+                // If we're not in the valid state then go back
+                // to the collectable state so we can try again
+                if (gc_state == ACQUIRED_GC_STATE)
+                {
+                  gc_state = COLLECTABLE_GC_STATE;
+                  prune_gc_events();
+                }
+              }
+              break;
+            }
+          case PENDING_COLLECTED_GC_STATE:
+            {
+#ifdef DEBUG_LEGION
+              // Precondition should have triggered if we're here
+              assert(collection_ready.has_triggered());
+#endif
+              // Check to see if there were any collection guards we
+              // were unable to acquire on remote nodes
+              if (remaining_collection_guards.load() > 0)
+              {
+                // See if we're the last release, if not then we
+                // keep it in this state
+                if (--pending_changes == 0)
+                {
+                  gc_state = COLLECTABLE_GC_STATE;
+                  prune_gc_events();
+                }
+              }
+              else
+              {
+                // Deletion success and we're the first ones to discover it
+                // Move to the deletion state and send the deletion messages
+                // to mark that we successfully performed the deletion
+                gc_state = COLLECTED_GC_STATE;
+                // Now we can perform the deletion which will release the lock
+                ready = perform_deletion(runtime->address_space, &i_lock);
+                return true;
+              }
+              break;
+            }
+          case COLLECTED_GC_STATE:
+            {
+              // Save the event for when the collection is done
+              ready = collection_ready;
+              return true;
+            }
+          default:
+            assert(false); // should not be in any other state
+        }
+        return false;
+      }
+      else
+      {
+        // Send it to the owner to check
+        std::atomic<bool> result(false);
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&result);
+          rez.serialize(&ready);
+          rez.serialize(done);
+        }
+        runtime->send_gc_verification(owner_space, rez);
+        done.wait();
+        return result.load();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_verification(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtEvent *ready;
+      derez.deserialize(ready);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      RtEvent local_ready;
+      if (manager->verify_collection(local_ready))
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(result);
+          rez.serialize(ready);
+          rez.serialize(local_ready);
+          rez.serialize(done);
+        }
+        runtime->send_gc_verified(source, rez);
+      }
+      else // Failed and flag is already set, so just trigger done
+        Runtime::trigger_event(done);
+      // Remove the reference added by the successful remote request
+      manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF);
+      if (manager->remove_base_resource_ref(RUNTIME_REF))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_verified(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtEvent *ready;
+      derez.deserialize(ready);
+      derez.deserialize(*ready);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      result->store(true);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
+                                               Processor p, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_external_instance());
+#endif
+      RtEvent wait_on;
+      RtUserEvent done_event;
+      bool add_never_reference = false;
+      bool remove_never_reference = false;
+      { 
+        const std::pair<MapperID,Processor> key(mapper_id, p);
+        AutoLock i_lock(inst_lock);
+        // If this thing is already deleted then there is nothing to do
+        if (gc_state == COLLECTED_GC_STATE)
+          return RtEvent::NO_RT_EVENT;
+        std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
+          mapper_gc_priorities.find(key);
+        if (finder == mapper_gc_priorities.end())
+        {
+          mapper_gc_priorities[key] = priority;
+          if (min_gc_priority < priority)
+            return RtEvent::NO_RT_EVENT;
+        }
+        else
+        {
+          // See if we're the minimum priority
+          if (min_gc_priority < finder->second)
+          {
+            // We weren't one of the minimum priorities before
+            finder->second = priority;
+            if (min_gc_priority <= priority)
+              return RtEvent::NO_RT_EVENT;
+            // Otherwise fall through and update the min priority
+          }
+          else
+          {
+            // We were one of the minimum priorities before
+#ifdef DEBUG_LEGION
+            assert(finder->second == min_gc_priority);
+#endif
+            // If things don't change then there is nothing to do
+            if (finder->second == priority)
+              return RtEvent::NO_RT_EVENT;
+            finder->second = priority;
+            if (min_gc_priority < priority)
+            {
+              // Raising one of the old minimum priorities
+              // See what the new min priority is
+              for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                    const_iterator it = mapper_gc_priorities.begin(); it !=
+                    mapper_gc_priorities.end(); it++)
+              {
+                // If the new minimum priority is still the same we're done
+                if (it->second == min_gc_priority)
+                  return RtEvent::NO_RT_EVENT;
+                if (it->second < priority)
+                  priority = it->second;
+              }
+#ifdef DEBUG_LEGION
+              // If we get here then we're increasing the minimum priority
+              assert(min_gc_priority < priority);
+#endif
+            }
+            // Else lowering the minimum priority
+          }
+        }
+        // If we get here then we're changing the minimum priority
+#ifdef DEBUG_LEGION
+        assert(priority != min_gc_priority);
+#endif
+        // Only deal with never collection refs on the owner node where
+        // the ultimate garbage collection decisions are to be made
+        if (is_owner())
+        {
+          if (priority < min_gc_priority)
+          {
+#ifdef DEBUG_LEGION
+            assert(LEGION_GC_NEVER_PRIORITY < min_gc_priority);
+#endif
+            if (priority == LEGION_GC_NEVER_PRIORITY)
+            {
+              add_never_reference = true;
+              // Check the garbage collection state because this is going 
+              // to be like an acquire operation
+              switch (gc_state)
+              {
+                case VALID_GC_STATE:
+                case ACQUIRED_GC_STATE:
+                  {
+                    pending_changes++;
+                    break;
+                  }
+                case COLLECTABLE_GC_STATE:
+                  {
+                    gc_state = ACQUIRED_GC_STATE;
+                    pending_changes++;
+                    break;
+                  }
+                case PENDING_COLLECTED_GC_STATE:
+                  {
+                    // Garbage collector is trying to eat it, save it!
+                    gc_state = ACQUIRED_GC_STATE;
+                    pending_changes++;
+                    break;
+                  }
+                default:
+                  assert(false);
+              }
+            }
+          }
+          else
+          {
+            if (min_gc_priority == LEGION_GC_NEVER_PRIORITY)
+              remove_never_reference = true;
+          }
+        }
+        min_gc_priority = priority;
+        // Make an event for when the priority updates are done
+        wait_on = priority_update_done;
+        done_event = Runtime::create_rt_user_event();
+        priority_update_done = done_event;
+      }
+      // If we make it here then we need to do the update
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Record the priority update
+      const RtEvent updated = update_garbage_collection_priority(priority);
+      LocalReferenceMutator mutator;
+      if (updated.exists())
+        mutator.record_reference_mutation_effect(updated);
+      if (add_never_reference)
+      {
+        add_base_valid_ref(NEVER_GC_REF, &mutator);
+        // Remove our pending change
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(pending_changes > 0);
+        assert(gc_state == VALID_GC_STATE);
+#endif
+        pending_changes--;
+      }
+      if (remove_never_reference && 
+          remove_base_valid_ref(NEVER_GC_REF, &mutator))
+        assert(false); // should never end up deleting ourselves
+      Runtime::trigger_event(done_event, mutator.get_done_event());
+      return done_event;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_priority_update(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      GCPriority priority;
+      derez.deserialize(priority);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->weak_find_distributed_collectable(did));
+
+      if (manager != NULL)
+      {
+        // To avoid collisiions with existing local mappers which could lead
+        // to aliasing of priority updates, we use "invalid" processor IDs
+        // here that will never conflict with existing processor IDs
+        // Note that the NO_PROC is a valid processor ID for mappers in the
+        // case where the mapper handles all the processors in a node. We
+        // therefore always add the owner address space to the source to 
+        // produce a non-zero processor ID. Note that this formulation also
+        // avoid conflicts from different remote sources.
+        const Processor fake_proc = { source + manager->owner_space };
+#ifdef DEBUG_LEGION
+        assert(fake_proc.id != 0);
+#endif
+        Runtime::trigger_event(done, manager->set_garbage_collection_priority(
+                                  0/*default mapper ID*/, fake_proc, priority));
+        if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
     //--------------------------------------------------------------------------
     void PhysicalManager::prune_gc_events(void)
     //--------------------------------------------------------------------------
     {
+      // Must be holding the lock from caller
       // If we have any gc events then launch tasks to actually prune
       // off their references when they are done since we are now eligible
       // for collection by the garbage collector
-      // We can test this without the lock because the race here is with
-      // the shutdown detection code (see find_shutdown_preconditions)
-      // which is also only reading the data structure
       if (gc_events.empty())
         return;
-      // We do need the lock if we're going to be modifying this
-      AutoLock inst(inst_lock);
       for (std::map<CollectableView*,CollectableInfo>::iterator it =
             gc_events.begin(); it != gc_events.end(); it++)
       {
@@ -1390,96 +2411,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndividualManager::IndividualManager(const IndividualManager &rhs)
-      : PhysicalManager(NULL, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, 0, 0, 
-                        ApEvent::NO_AP_EVENT, false),
-        memory_manager(NULL), instance(PhysicalInstance::NO_INST)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     IndividualManager::~IndividualManager(void)
     //--------------------------------------------------------------------------
     {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner())
         memory_manager->unregister_remote_instance(this);
-    }
-
-    //--------------------------------------------------------------------------
-    IndividualManager& IndividualManager::operator=(const IndividualManager &rh)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
-#endif
-      // Will be null for virtual managers
-      if (memory_manager != NULL)
-        memory_manager->activate_instance(this);
-      // If we are not the owner, send a reference
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
-#endif
-      // Will be null for virtual managers
-      if (memory_manager != NULL)
-        memory_manager->deactivate_instance(this);
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
-#endif
-      // Will be null for virtual managers
-      if (memory_manager != NULL)
-        memory_manager->validate_instance(this);
-      // If we are not the owner, send a reference
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert((kind == UNBOUND_INSTANCE_KIND) || instance.exists());
-#endif 
-      prune_gc_events(); 
-      // Will be null for virtual managers
-      if (memory_manager != NULL)
-        memory_manager->invalidate_instance(this);
-      if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1820,9 +2757,9 @@ namespace Legion {
         layout->pack_layout_description(rez, target);
         rez.serialize(redop);
         rez.serialize(kind);
+        pack_garbage_collection_state(rez, target);
       }
       context->runtime->send_instance_manager(target, rez);
-      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1872,6 +2809,9 @@ namespace Legion {
       derez.deserialize(redop);
       InstanceKind kind;
       derez.deserialize(kind);
+      GarbageCollectionState gc_state;
+      derez.deserialize(gc_state);
+
       if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
       {
         const RtEvent precondition = 
@@ -1882,7 +2822,7 @@ namespace Legion {
           DeferIndividualManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, inst_domain, pending, 
               handle, tree_id, layout_id, unique_event, kind,
-              redop, piece_list, piece_list_size);
+              redop, piece_list, piece_list_size, gc_state);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1900,7 +2840,7 @@ namespace Legion {
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, piece_list, piece_list_size, 
                             space_node, tree_id, constraints, unique_event, 
-                            kind, redop);
+                            kind, redop, gc_state);
     }
 
     //--------------------------------------------------------------------------
@@ -1909,12 +2849,12 @@ namespace Legion {
             size_t f, IndexSpaceExpression *lx, 
             const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent u, InstanceKind k, ReductionOpID r,
-            const void *pl, size_t pl_size)
+            const void *pl, size_t pl_size, GarbageCollectionState gc)
       : LgTaskArgs<DeferIndividualManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), pending(p),
             local_expr(lx), handle(h), tree_id(tid), layout_id(l), 
             use_event(u), kind(k), redop(r), piece_list(pl),
-            piece_list_size(pl_size)
+            piece_list_size(pl_size), state(gc)
     //--------------------------------------------------------------------------
     {
       if (local_expr != NULL)
@@ -1925,7 +2865,7 @@ namespace Legion {
     IndividualManager::DeferDeleteIndividualManager
                      ::DeferDeleteIndividualManager(IndividualManager *manager_)
       : LgTaskArgs<DeferDeleteIndividualManager>(implicit_provenance),
-        manager(manager_)
+        manager(manager_), done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
     }
@@ -1947,7 +2887,7 @@ namespace Legion {
       create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
           dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->kind, dargs->redop);
+          dargs->use_event, dargs->kind, dargs->redop, dargs->state);
       // Remove the local expression reference if necessary
       if ((dargs->local_expr != NULL) &&
           dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
@@ -1961,7 +2901,8 @@ namespace Legion {
     {
       const DeferDeleteIndividualManager *dargs =
         (const DeferDeleteIndividualManager*)args;
-      dargs->manager->perform_deletion(RtEvent::NO_RT_EVENT);
+      Runtime::trigger_event(dargs->done,
+          dargs->manager->perform_deletion(runtime->address_space));
     }
 
     //--------------------------------------------------------------------------
@@ -1971,7 +2912,8 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, InstanceKind kind, ReductionOpID redop)
+          ApEvent use_event, InstanceKind kind, ReductionOpID redop,
+          GarbageCollectionState state)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -1996,60 +2938,50 @@ namespace Legion {
                               space_node, tree_id, layout, redop, 
                               false/*reg now*/, inst_footprint, use_event, 
                               kind, op);
+      man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualManager::acquire_instance(ReferenceSource source,
-                                             ReferenceMutator *mutator)
+    RtEvent IndividualManager::perform_deletion(AddressSpaceID source,
+                                                AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Do an atomic operation to check to see if we are already valid
-      // and increment our count if we are, in this case the acquire 
-      // has succeeded and we are done, this should be the common case
-      // since we are likely already holding valid references elsewhere
-      // Note that we cannot do this for external instances as they might
-      // have been detached while still holding valid references so they
-      // have to go through the full path every time
-      if (!is_external_instance() && check_valid_and_increment(source))
-        return true;
-      // If we're not the owner, we're not going to succeed past this
-      // since we aren't on the same node as where the instance lives
-      // which is where the point of serialization is for garbage collection
-      if (!is_owner())
-        return false;
-      // Tell our manager, we're attempting an acquire, if it tells
-      // us false then we are not allowed to proceed
-      if (!memory_manager->attempt_acquire(this))
-        return false;
-      // At this point we're in the clear to add our valid reference
-      add_base_valid_ref(source, mutator);
-      // Complete the handshake with the memory manager
-      memory_manager->complete_acquire(this);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::perform_deletion(RtEvent deferred_event)
-    //--------------------------------------------------------------------------
-    {
-      if (!instance_ready.has_triggered())
+      if (i_lock == NULL)
+      {
+        AutoLock instance_lock(inst_lock);
+        return perform_deletion(source, &instance_lock);
+      }
+      if (instance_ready.exists() && !instance_ready.has_triggered())
       {
         DeferDeleteIndividualManager args(this);
         runtime->issue_runtime_meta_task(
-            args, LG_LOW_PRIORITY,
-            Runtime::merge_events(deferred_event, instance_ready));
-        return;
+            args, LG_LOW_PRIORITY, instance_ready);
+        return args.done;
       }
-
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(kind != UNBOUND_INSTANCE_KIND);
+      assert(source == local_space);
+      assert(!deferred_deletion.exists());
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
+      prune_gc_events();
+      // Grab the set of active contexts to notify
+      std::set<InnerContext*> to_notify;
+      to_notify.swap(active_contexts);
+#ifdef DEBUG_LEGION
+      assert(pending_views.empty());
+#endif
 #ifndef DISABLE_GC
+      // If we're still active that means there are still outstanding
+      // users so make an event for when we are done, not we're holding
+      // the instance lock when this is called
+      if (currently_active)
+        deferred_deletion = Runtime::create_rt_user_event();
+      // Now we can release the lock since we're done with the atomic updates
+      i_lock->release();
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
 
@@ -2060,49 +2992,42 @@ namespace Legion {
         memory_manager->free_external_allocation(
             external_pointer, instance_footprint);
         if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_event);
+          instance.destroy(serdez_fields, deferred_deletion);
         else
-          instance.destroy(deferred_event);
+          instance.destroy(deferred_deletion);
       }
       // If this is an eager allocation, return it back to the eager pool
       else if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, deferred_event);
+        memory_manager->free_eager_instance(instance, deferred_deletion);
       else
 #endif
       {
         if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_event);
+          instance.destroy(serdez_fields, deferred_deletion);
         else
-          instance.destroy(deferred_event);
+          instance.destroy(deferred_deletion);
       }
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
-        memory_manager->free_legion_instance(this, deferred_event);
+        memory_manager->free_legion_instance(this, deferred_deletion);
 #endif
+#else
+      // Release the i_lock since we're done with the atomic updates
+      i_lock->release();
 #endif
       // Notify any contexts of our deletion
-      // Grab a copy of this in case we get any removal calls
-      // while we are doing the deletion. We know that there
-      // will be no more additions because we are being deleted
-      std::set<InnerContext*> copy_active_contexts;
+      if (!to_notify.empty())
       {
-        AutoLock inst(inst_lock);
-        if (active_contexts.empty())
-          return;
-        copy_active_contexts = active_contexts;
-        active_contexts.clear();
-#ifdef DEBUG_LEGION
-        assert(pending_views.empty());
-#endif
-        context_views.clear();
+        for (std::set<InnerContext*>::const_iterator it =
+              to_notify.begin(); it != to_notify.end(); it++)
+        {
+          (*it)->notify_instance_deletion(this);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
       }
-      for (std::set<InnerContext*>::const_iterator it = 
-           copy_active_contexts.begin(); it != copy_active_contexts.end(); it++)
-      {
-        (*it)->notify_instance_deletion(const_cast<IndividualManager*>(this));
-        if ((*it)->remove_reference())
-          delete (*it);
-      }
+      // We issued the deletion to Realm so all our effects are done
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2147,12 +3072,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualManager::set_garbage_collection_priority(MapperID mapper_id,
-                                            Processor proc, GCPriority priority)
+    RtEvent IndividualManager::update_garbage_collection_priority(
+                                                            GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      memory_manager->set_garbage_collection_priority(this, mapper_id,
-                                                      proc, priority);
+      if (!is_owner())
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(priority);
+          rez.serialize(done);
+        }
+        runtime->send_gc_priority_update(owner_space, rez);
+        return done;
+      }
+      else
+      {
+        memory_manager->set_garbage_collection_priority(this, priority);
+        return RtEvent::NO_RT_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2314,30 +3255,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager::CollectiveManager(const CollectiveManager &rhs)
-      : PhysicalManager(rhs), point_space(rhs.point_space)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     CollectiveManager::~CollectiveManager(void)
     //--------------------------------------------------------------------------
     {
       if (point_space->remove_nested_valid_ref(did))
         delete point_space;
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager& CollectiveManager::operator=(
-                                                   const CollectiveManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2395,46 +3317,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (left_space == local_space)
-        activate_collective(mutator);
-      else
-        send_remote_gc_increment(left_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (left_space == local_space)
-        deactivate_collective(mutator);
-      else
-        send_remote_gc_decrement(left_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (left_space == local_space)
-        validate_collective(mutator);
-      else
-        send_remote_valid_increment(left_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (left_space == local_space)
-        invalidate_collective(mutator);
-      else
-        send_remote_valid_decrement(left_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
         CollectiveManager::get_accessor(void) const
@@ -2461,113 +3343,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::activate_collective(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    { 
-      for (std::vector<AddressSpaceID>::const_iterator it = 
-            right_spaces.begin(); it != right_spaces.end(); it++)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(ACTIVATE_MESSAGE);
-          rez.serialize(done_event);
-        }
-        runtime->send_collective_instance_message(*it, rez);
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->activate_instance(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::deactivate_collective(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    { 
-      for (std::vector<AddressSpaceID>::const_iterator it = 
-            right_spaces.begin(); it != right_spaces.end(); it++)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(DEACTIVATE_MESSAGE);
-          rez.serialize(done_event);
-        }
-        runtime->send_collective_instance_message(*it, rez);
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->deactivate_instance(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::validate_collective(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    { 
-      for (std::vector<AddressSpaceID>::const_iterator it = 
-            right_spaces.begin(); it != right_spaces.end(); it++)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(VALIDATE_MESSAGE);
-          rez.serialize(done_event);
-        }
-        runtime->send_collective_instance_message(*it, rez);
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->validate_instance(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::invalidate_collective(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    { 
-      for (std::vector<AddressSpaceID>::const_iterator it = 
-            right_spaces.begin(); it != right_spaces.end(); it++)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(VALIDATE_MESSAGE);
-          rez.serialize(done_event);
-        }
-        runtime->send_collective_instance_message(*it, rez);
-        mutator->record_reference_mutation_effect(done_event);
-      }
-      prune_gc_events();
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->validate_instance(this);
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveManager::acquire_instance(ReferenceSource source, 
-                                             ReferenceMutator *mutator)
+    RtEvent CollectiveManager::perform_deletion(AddressSpaceID source, 
+                                                AutoLock *i_lock /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
       assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::perform_deletion(RtEvent deferred_event)
-    //--------------------------------------------------------------------------
-    {
-      perform_delete(deferred_event, true/*left*/);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2578,11 +3360,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::set_garbage_collection_priority(MapperID mapper_id, 
-                                               Processor p, GCPriority priority)
+    RtEvent CollectiveManager::update_garbage_collection_priority(
+                                                            GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      set_gc_priority(mapper_id, p, priority, true/*left*/);
+      // TODO: implement this
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2796,86 +3580,6 @@ namespace Legion {
               RezCheck z(rez);
               rez.serialize(did);
               rez.serialize(FORCE_DELETE_MESSAGE);
-              rez.serialize(false/*left*/);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::set_gc_priority(MapperID mapper_id, Processor proc, 
-                                            GCPriority priority, bool left)
-    //--------------------------------------------------------------------------
-    {
-      if (left)
-      {
-        if (local_space == left_space)
-        {
-          // See if we can do the update
-          {
-            AutoLock i_lock(inst_lock);
-            if (deleted_or_detached)
-              return;
-          }
-          // If we make it here we are the first ones so so the deletion
-          collective_set_gc_priority(mapper_id, proc, priority);
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(SET_GC_PRIORITY_MESSAGE);
-              rez.serialize(mapper_id);
-              rez.serialize(proc);
-              rez.serialize(priority);
-              rez.serialize<bool>(false/*left*/);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-          }
-        }
-        else
-        {
-          // Forward this on to the left space
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(SET_GC_PRIORITY_MESSAGE);
-            rez.serialize(mapper_id);
-            rez.serialize(proc);
-            rez.serialize(priority);
-            rez.serialize<bool>(true/*left*/);
-          }
-          AutoLock i_lock(inst_lock);
-          if (!deleted_or_detached)
-            runtime->send_collective_instance_message(left_space, rez);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(local_space != left_space);
-#endif
-        // Do the deletion
-        collective_set_gc_priority(mapper_id, proc, priority); 
-        // If we have no right users send back messages
-        if (!right_spaces.empty())
-        {
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(SET_GC_PRIORITY_MESSAGE);
-              rez.serialize(mapper_id);
-              rez.serialize(proc);
-              rez.serialize(priority);
               rez.serialize(false/*left*/);
             }
             runtime->send_collective_instance_message(*it, rez);
@@ -3105,16 +3809,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::collective_set_gc_priority(MapperID mapper_id, 
-                                            Processor proc, GCPriority priority)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->set_garbage_collection_priority(this, mapper_id, proc, priority);
-    }
-
-    //--------------------------------------------------------------------------
     void CollectiveManager::collective_detach(std::set<RtEvent> &detach_events)
     //--------------------------------------------------------------------------
     {
@@ -3201,9 +3895,9 @@ namespace Legion {
         rez.serialize(redop);
         rez.serialize(unique_event);
         layout->pack_layout_description(rez, target);
+        pack_garbage_collection_state(rez, target);
       }
       context->runtime->send_collective_instance_manager(target, rez);
-      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -3252,6 +3946,8 @@ namespace Legion {
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(layout_id, 
                     false/*can fail*/, &layout_ready);
+      GarbageCollectionState state;
+      derez.deserialize(state);
       if (points_ready.exists() || domain_ready.exists() || 
           fs_ready.exists() || layout_ready.exists())
       {
@@ -3270,7 +3966,7 @@ namespace Legion {
           // We need to defer this instance creation
           DeferCollectiveManagerArgs args(did, owner_space, points_handle, 
               inst_footprint, inst_domain, pending, handle, tree_id, layout_id,
-              unique_event, redop, piece_list, piece_list_size, source);
+              unique_event, redop, piece_list, piece_list_size, source, state);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -3289,7 +3985,7 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_collective_manager(runtime, did, owner_space, point_space,
           inst_footprint, inst_domain, piece_list, piece_list_size, space_node,
-          tree_id, constraints, unique_event, redop);
+          tree_id, constraints, unique_event, redop, state);
     }
 
     //--------------------------------------------------------------------------
@@ -3298,11 +3994,12 @@ namespace Legion {
             size_t f, IndexSpaceExpression *lx,
             const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent use, ReductionOpID r,
-            const void *pl, size_t pl_size, AddressSpace src)
+            const void *pl, size_t pl_size, AddressSpace src,
+            GarbageCollectionState gc)
       : LgTaskArgs<DeferCollectiveManagerArgs>(implicit_provenance),
         did(d), owner(own), point_space(points), footprint(f), local_expr(lx),
         pending(p), handle(h), tree_id(tid), layout_id(l), use_event(use),
-        redop(r), piece_list(pl), piece_list_size(pl_size), source(src)
+        redop(r), piece_list(pl), piece_list_size(pl_size),source(src),state(gc)
     //--------------------------------------------------------------------------
     {
       if (local_expr != NULL)
@@ -3327,7 +4024,7 @@ namespace Legion {
       create_collective_manager(runtime, dargs->did, dargs->owner, point_space,
           dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->redop);
+          dargs->use_event, dargs->redop, dargs->state);
       // Remove the local expression reference if necessary
       if ((dargs->local_expr != NULL) &&
           dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
@@ -3341,7 +4038,7 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id,LayoutConstraints *constraints,
-          ApEvent use_event, ReductionOpID redop)
+          ApEvent use_event, ReductionOpID redop, GarbageCollectionState state)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -3364,6 +4061,7 @@ namespace Legion {
                                   piece_list_size, space_node, tree_id, layout,
                                   redop, false/*reg now*/, inst_footprint, 
                                   use_event, external_instance);
+      man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -3382,42 +4080,6 @@ namespace Legion {
       derez.deserialize(kind);
       switch (kind)
       {
-        case ACTIVATE_MESSAGE:
-          {
-            RtUserEvent to_trigger;
-            derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator;
-            manager->activate_collective(&mutator);
-            Runtime::trigger_event(to_trigger, mutator.get_done_event()); 
-            break;
-          }
-        case DEACTIVATE_MESSAGE:
-          {
-            RtUserEvent to_trigger;
-            derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator;
-            manager->deactivate_collective(&mutator);
-            Runtime::trigger_event(to_trigger, mutator.get_done_event());
-            break;
-          }
-        case VALIDATE_MESSAGE:
-          {
-            RtUserEvent to_trigger;
-            derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator;
-            manager->validate_collective(&mutator);
-            Runtime::trigger_event(to_trigger, mutator.get_done_event());
-            break;
-          }
-        case INVALIDATE_MESSAGE:
-          {
-            RtUserEvent to_trigger;
-            derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator;
-            manager->invalidate_collective(&mutator);
-            Runtime::trigger_event(to_trigger, mutator.get_done_event());
-            break;
-          }
         case PERFORM_DELETE_MESSAGE:
           {
             RtEvent deferred_event;
@@ -3432,19 +4094,6 @@ namespace Legion {
             bool left;
             derez.deserialize(left);
             manager->force_delete(left);
-            break;
-          }
-        case SET_GC_PRIORITY_MESSAGE:
-          {
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
-            Processor proc;
-            derez.deserialize(proc);
-            GCPriority priority;
-            derez.deserialize(priority);
-            bool left;
-            derez.deserialize(left);
-            manager->set_gc_priority(mapper_id, proc, priority, left);
             break;
           }
         case DETACH_EXTERNAL_MESSAGE:
@@ -3663,7 +4312,7 @@ namespace Legion {
     PhysicalManager* InstanceBuilder::create_physical_instance(
                 RegionTreeForest *forest, CollectiveManager *collective_inst,
                 DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
-                unsigned *unsat_index, size_t *footprint)
+                unsigned *unsat_index, size_t *footprint, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3737,25 +4386,15 @@ namespace Legion {
       ApEvent ready;
 #ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
-      {
         runtime->profiler->add_inst_request(requests, creator_id);
-        ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, inst_layout, requests));
-        if (instance.exists())
-        {
-          unsigned long long creation_time = 
-            Realm::Clock::current_time_in_nanoseconds();
-          runtime->profiler->record_instance_creation(instance,
-              memory_manager->memory, creator_id, creation_time);
-        }
-      }
-      else
-        ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, inst_layout, requests));
+      ready = ApEvent(PhysicalInstance::create_instance(instance,
+            memory_manager->memory, inst_layout, requests, precondition));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
+      if (precondition.exists() && !precondition.has_triggered())
+        precondition.wait();
       uintptr_t base_ptr = 0;
       if (instance_footprint > 0)
       {
@@ -3778,10 +4417,6 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
       {
-#ifndef LEGION_MALLOC_INSTANCES
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-#endif
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -4027,6 +4662,15 @@ namespace Legion {
         // Destroy the instance first so that Realm can reclaim the ID
         instance.destroy();
         instance = PhysicalInstance::NO_INST;
+        if (runtime->profiler != NULL)
+          runtime->profiler->handle_failed_instance_allocation();
+      }
+      else if (runtime->profiler != NULL)
+      {
+        unsigned long long creation_time = 
+          Realm::Clock::current_time_in_nanoseconds();
+        runtime->profiler->record_instance_creation(instance,
+            memory_manager->memory, creator_id, creation_time);
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);

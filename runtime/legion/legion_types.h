@@ -789,6 +789,7 @@ namespace Legion {
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
+      DISTRIBUTED_RESOURCE_UPDATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
@@ -888,7 +889,15 @@ namespace Legion {
       SEND_EXTERNAL_ATTACH,
       SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
-      SEND_NEVER_GC_RESPONSE,
+      SEND_GC_REQUEST,
+      SEND_GC_RESPONSE,
+      SEND_GC_ACQUIRE,
+      SEND_GC_ACQUIRED,
+      SEND_GC_RELEASE,
+      SEND_GC_VERIFICATION,
+      SEND_GC_VERIFIED,
+      SEND_GC_DEBUG_REQUEST,
+      SEND_GC_DEBUG_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -1001,6 +1010,7 @@ namespace Legion {
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
+        "Distributed Resource Update",                                \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \
@@ -1100,7 +1110,15 @@ namespace Legion {
         "Send External Attach",                                       \
         "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
-        "Send Never GC Response",                                     \
+        "Send GC Request",                                            \
+        "Send GC Response",                                           \
+        "Send GC Acquire Request",                                    \
+        "Send GC Acquire Response",                                   \
+        "Send GC Release",                                            \
+        "Send GC Verification Request",                               \
+        "Send GC Verification Response",                              \
+        "Send GC Debug Request",                                      \
+        "Send GC Debug Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \
@@ -2607,31 +2625,24 @@ namespace Legion {
         if (previous != NULL)
           previous->check_for_reentrant_locks(&local_lock);
 #endif
-        Internal::local_lock_list = this;
       }
     public:
-      inline AutoLock(const AutoLock &rhs)
-        : local_lock(rhs.local_lock), previous(NULL), exclusive(false)
-      {
-        // should never be called
-        assert(false);
-      }
+      AutoLock(const AutoLock &rhs) = delete;
       inline ~AutoLock(void)
       {
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == this);
-#endif
         if (held)
+        {
+#ifdef DEBUG_LEGION
+          assert(Internal::local_lock_list == this);
+#endif
           local_lock.unlock();
-        Internal::local_lock_list = previous;
+          Internal::local_lock_list = previous;
+        }
+        else
+          assert(Internal::local_lock_list == previous);
       }
     public:
-      inline AutoLock& operator=(const AutoLock &rhs)
-      {
-        // should never be called
-        assert(false);
-        return *this;
-      }
+      AutoLock& operator=(const AutoLock &rhs) = delete;
     public:
       inline void release(void) 
       { 
@@ -2715,7 +2726,12 @@ namespace Legion {
         else
           ready = local_lock.rdlock();
         held = !ready.exists();
+        if (held)
+          Internal::local_lock_list = this;
       }
+      AutoTryLock(const AutoTryLock &rhs) = delete;
+    public:
+      AutoTryLock& operator=(const AutoTryLock &rhs) = delete;
     public:
       // Allow an easy test for whether we got the lock or not
       inline bool has_lock(void) const { return held; }
@@ -2767,9 +2783,6 @@ namespace Legion {
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == NULL); 
-#endif
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait
@@ -2843,9 +2856,6 @@ namespace Legion {
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-#ifdef DEBUG_LEGION
-        assert(Internal::local_lock_list == NULL); 
-#endif
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait

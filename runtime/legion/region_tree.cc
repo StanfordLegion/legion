@@ -3723,57 +3723,11 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
-      // This code is very similar to what we see in the memory managers
-      std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
       // Try and do the acquires for any instances that weren't acquired
       for (std::vector<PhysicalManager*>::const_iterator it = 
             unacquired.begin(); it != unacquired.end(); it++)
-      {
         if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
-        {
           acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
-          continue;
-        }
-        // If we failed on the owner node, it will never work
-        // otherwise, we want to try to do a remote acquire
-        // If it is a collective manager and we failed then it never works
-        else if ((*it)->is_collective_manager() || (*it)->is_owner())
-          continue;
-        IndividualManager *manager = (*it)->as_individual_manager();
-        remote_acquires[manager->memory_manager].instances.insert(*it);
-      }
-      if (!remote_acquires.empty())
-      {
-        std::set<RtEvent> done_events;
-        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
-              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-        {
-          RtEvent wait_on = it->first->acquire_instances(it->second.instances,
-                                                         it->second.results);
-          if (wait_on.exists())
-            done_events.insert(wait_on);
-        }
-        if (!done_events.empty())
-        {
-          RtEvent ready = Runtime::merge_events(done_events);
-          ready.wait();
-        }
-        // Now figure out which ones we successfully acquired and which 
-        // ones failed to be acquired
-        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
-              req_it = remote_acquires.begin(); 
-              req_it != remote_acquires.end(); req_it++)
-        {
-          unsigned idx = 0;
-          for (std::set<PhysicalManager*>::const_iterator it = 
-                req_it->second.instances.begin(); it !=
-                req_it->second.instances.end(); it++, idx++)
-          {
-            if (req_it->second.results[idx])
-              acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
-          }
-        }
-      }
     }
 
     //--------------------------------------------------------------------------

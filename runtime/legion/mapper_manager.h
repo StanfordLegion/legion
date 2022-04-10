@@ -453,13 +453,10 @@ namespace Legion {
                                      InstanceManager *manager);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
-      bool perform_local_acquires(MappingCallInfo *info,
-                                  const std::vector<MappingInstance> &instances,
-                       std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                                  std::vector<unsigned> *to_erase,
-                                  const bool filter_acquired_instances = false);
-      bool perform_remote_acquires(MappingCallInfo *info,
-                      std::map<MemoryManager*,AcquireStatus> &acquire_requests);
+      bool perform_acquires(MappingCallInfo *info,
+                            const std::vector<MappingInstance> &instances,
+                            std::vector<unsigned> *to_erase = NULL,
+                            const bool filter_acquired_instances = false);
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
                                     TypeTag type_tag);
