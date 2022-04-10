@@ -9805,7 +9805,6 @@ namespace Legion {
       const RtEvent wait_on = gc_precondition.exchange(gc_event);
       if (!wait_on.has_triggered())
         wait_on.wait();
-      std::map<GCPriority,std::vector<GCEntry> > eligible;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
         for (std::map<RegionTreeID,TreeInstances>::const_iterator cit =
@@ -10528,6 +10527,8 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         lock.reacquire();
+        if (collector->collection_complete())
+          break;
       }
       
 
