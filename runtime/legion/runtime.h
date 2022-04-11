@@ -1350,7 +1350,7 @@ namespace Legion {
       mutable LocalLock mapper_lock;
       // The set of visible memories from this processor
       std::map<Memory,size_t/*bandwidth affinity*/> visible_memories;
-    };
+    }; 
 
     /**
      * \class MemoryManager
@@ -1372,31 +1372,6 @@ namespace Legion {
         FIND_MANY_CONSTRAINTS,
         FIND_MANY_LAYOUT,
       };
-      enum InstanceState {
-        COLLECTABLE_STATE = 0,
-        ACTIVE_STATE = 1,
-        PENDING_COLLECTED_STATE = 2, // sticky
-        VALID_STATE = 3,
-        PENDING_ACQUIRE_STATE = 4,
-      };
-    public:
-      struct InstanceInfo {
-      public:
-        InstanceInfo(void)
-          : current_state(COLLECTABLE_STATE), 
-            deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), pending_acquires(0), min_priority(0),
-            external(false), eager(false) { }
-      public:
-        InstanceState current_state;
-        RtUserEvent deferred_collect;
-        size_t instance_size;
-        unsigned pending_acquires;
-        GCPriority min_priority;
-        bool external;
-        bool eager;
-        std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
-      };
     public:
       struct FreeEagerInstanceArgs : public LgTaskArgs<FreeEagerInstanceArgs> {
       public:
@@ -1409,7 +1384,6 @@ namespace Legion {
         MemoryManager *const manager;
         const PhysicalInstance inst;
       };
-    public:
       class FutureInstanceAllocator : public ProfilingResponseHandler {
       public:
         FutureInstanceAllocator(void);
@@ -1466,10 +1440,10 @@ namespace Legion {
 #endif
     public:
       MemoryManager(Memory mem, Runtime *rt);
-      MemoryManager(const MemoryManager &rhs);
+      MemoryManager(const MemoryManager &rhs) = delete;
       ~MemoryManager(void);
     public:
-      MemoryManager& operator=(const MemoryManager &rhs);
+      MemoryManager& operator=(const MemoryManager &rhs) = delete;
     public:
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       inline Processor get_local_gpu(void) const { return local_gpu; }
@@ -1489,13 +1463,6 @@ namespace Legion {
     public:
       void register_remote_instance(PhysicalManager *manager);
       void unregister_remote_instance(PhysicalManager *manager);
-    public:
-      void activate_instance(PhysicalManager *manager);
-      void deactivate_instance(PhysicalManager *manager);
-      void validate_instance(PhysicalManager *manager);
-      void invalidate_instance(PhysicalManager *manager);
-      bool attempt_acquire(PhysicalManager *manager);
-      void complete_acquire(PhysicalManager *manager);
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1561,14 +1528,10 @@ namespace Legion {
                                     bool remote = false);
       void release_tree_instances(RegionTreeID tid);
       void set_garbage_collection_priority(PhysicalManager *manager,
-                                    MapperID mapper_id, Processor proc,
                                     GCPriority priority);
-      RtEvent acquire_instances(const std::set<PhysicalManager*> &managers,
-                                    std::vector<bool> &results);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
-                                    GCPriority priority, bool remote,
-                                    bool eager = false);
+                                    GCPriority priority, bool remote);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
@@ -1576,8 +1539,6 @@ namespace Legion {
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
-      void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
-      void process_never_gc_response(Deserializer &derez);
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1620,6 +1581,9 @@ namespace Legion {
                                                MapperID mapper_id,
                                                Processor target_proc,
                                                GCPriority priority);
+      void check_instance_deletions(const std::vector<PhysicalManager*> &to_del,
+                                    const std::vector<RtEvent> &ready_events,
+                                    std::vector<RtEvent> &delete_effects);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -1637,10 +1601,6 @@ namespace Legion {
           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
       void release_collective_allocation_privileges(void);
     public:
-      bool delete_by_size_and_state(const size_t needed_size,
-                                    const InstanceState state,
-                                    const bool larger_only,
-                                    const bool eager = false);
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
@@ -1693,9 +1653,11 @@ namespace Legion {
       // Lock for controlling access to the data
       // structures in this memory manager
       mutable LocalLock manager_lock;
+      // Precondition event for performing collections
+      std::atomic<RtEvent> gc_precondition;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
-      typedef LegionMap<PhysicalManager*,InstanceInfo,
+      typedef LegionMap<PhysicalManager*,GCPriority,
                         MEMORY_INSTANCES_ALLOC> TreeInstances;
       std::map<RegionTreeID,TreeInstances> current_instances;
       // Keep track of outstanding requuests for allocations which 
@@ -1718,7 +1680,55 @@ namespace Legion {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       Processor local_gpu;
 #endif
-    };
+    protected:
+      class GarbageCollector {
+      public:
+        // If that didn't work then we need to try to delete instances in order
+        // to make space for performing the allocation. We sort instances on
+        // three dimensions: GC Priority, collectable state, and size. The 
+        // mapper controls GC priority to determine which order we attempt
+        // to delete instances. After that we prefer to delete instances which
+        // are collectable first over ones that still have outstanding users.
+        // Finally, we prefer to delete instances that are closest in size to 
+        // the target instance size, but bigger ones over smaller ones. After
+        // we've succeeded in deleting enough instances with the same total size
+        // as the footprint we'll try to do another allocation. If that doesn't
+        // succeed then we'll continue deleting until we succeed or we exhaust
+        // the set of instances eligible for deletion.
+        struct GCEntry {
+        public:
+          inline GCEntry(void)
+            : manager(NULL), diff(0), abs_diff(0) { }
+          GCEntry(PhysicalManager *man, size_t needed, RtEvent r);
+          bool operator<(const GCEntry &rhs) const;
+        public:
+          PhysicalManager *manager;
+          RtEvent ready;
+          long diff;
+          size_t abs_diff;
+        };
+      public:
+        GarbageCollector(LocalLock &manager_lock, AddressSpaceID local,
+                         size_t needed, std::atomic<RtEvent> &gc_precondition,
+                         std::map<RegionTreeID,TreeInstances> &instances);
+        GarbageCollector(const GarbageCollector &rhs) = delete;
+        ~GarbageCollector(void);
+      public:
+        GarbageCollector& operator=(const GarbageCollector &rhs) = delete;
+      public:
+        RtEvent perform_collection(void);
+        inline bool collection_complete(void) const { return eligible.empty(); }
+      protected:
+        LocalLock &manager_lock;
+        std::map<RegionTreeID,TreeInstances> &current_instances;
+        std::map<GCPriority,std::vector<GCEntry> > eligible;
+        std::vector<PhysicalManager*> deleted;
+        const RtUserEvent gc_event;
+        const AddressSpaceID local_space;
+        const size_t needed_size;
+        bool sorted;
+      };
+    }; 
 
     /**
      * \class VirtualChannel
@@ -3172,6 +3182,8 @@ namespace Legion {
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_resource_update(AddressSpaceID target,
+                                           Serializer &rez);
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
@@ -3354,7 +3366,15 @@ namespace Legion {
       void send_external_attach(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
-      void send_never_gc_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_request(AddressSpaceID target, Serializer &rez);
+      void send_gc_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_acquire(AddressSpaceID target, Serializer &rez);
+      void send_gc_acquired(AddressSpaceID target, Serializer &rez);
+      void send_gc_release(AddressSpaceID target, Serializer &rez);
+      void send_gc_verification(AddressSpaceID target, Serializer &rez);
+      void send_gc_verified(AddressSpaceID target, Serializer &rez);
+      void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
+      void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3503,6 +3523,7 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
+      void handle_did_remote_resource_update(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
@@ -3659,7 +3680,15 @@ namespace Legion {
       void handle_external_attach(Deserializer &derez);
       void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
-      void handle_never_gc_response(Deserializer &derez);
+      void handle_gc_request(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_response(Deserializer &derez);
+      void handle_gc_acquire(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_acquired(Deserializer &derez);
+      void handle_gc_release(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_verified(Deserializer &derez);
+      void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
+      void handle_gc_debug_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -5594,6 +5623,8 @@ namespace Legion {
           return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GC_UPDATE:
           return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_RESOURCE_UPDATE:
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_CREATE_ADD:
           return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_CREATE_REMOVE:
@@ -5814,7 +5845,23 @@ namespace Legion {
           break;
         case SEND_GC_PRIORITY_UPDATE:
           break;
-        case SEND_NEVER_GC_RESPONSE:
+        case SEND_GC_REQUEST:
+          break;
+        case SEND_GC_RESPONSE:
+          break;
+        case SEND_GC_ACQUIRE:
+          break;
+        case SEND_GC_ACQUIRED:
+          break;
+        case SEND_GC_RELEASE:
+          break;
+        case SEND_GC_VERIFICATION:
+          break;
+        case SEND_GC_VERIFIED:
+          break;
+        case SEND_GC_DEBUG_REQUEST:
+          break;
+        case SEND_GC_DEBUG_RESPONSE:
           break;
         case SEND_ACQUIRE_REQUEST:
           break;

@@ -3799,89 +3799,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This code is very similar to what we see in the MapperManager
-      bool acquire_successful = true;
       bool has_collectives = false;
-      DomainPoint collective_point;
       std::vector<MappingInstance> collectives;
-      std::map<AddressSpaceID,std::vector<unsigned> > remote_acquires;
       for (unsigned idx = 0; idx < unacquired.size(); idx++)
       {
         PhysicalManager *manager = unacquired[idx];
         const bool is_collective = manager->is_collective_manager();
         if (is_collective && !has_collectives)
-        {
           has_collectives = true;
-          collective_point = op->get_collective_instance_point();
-        }
-        AddressSpaceID remote_target = runtime->address_space;
-        // Try to add an acquired reference immediately
-        // If we're remote it has to be valid already to be sound, but if
-        // we're local whatever works
-        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, op,
-                                      collective_point, &remote_target))
+        // Try and do the acquires for any instances that weren't acquired
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, op))
         {
           // We already know it wasn't there before
-          acquired[manager] = 1;
+          acquired.insert(std::pair<PhysicalManager*,unsigned>(manager, 1));
           if (is_collective)
             collectives.push_back(MappingInstance(manager));
-          continue;
-        }
-        if (remote_target == runtime->address_space)
-          acquire_successful = false;
-        else // try again on the remote node
-          remote_acquires[remote_target].push_back(idx);
-      }
-      // Next try to do the remote requires
-      if (!remote_acquires.empty() && acquire_successful)
-      {
-        std::set<RtEvent> ready_events;
-        std::map<AddressSpaceID,std::vector<bool> > remote_results;
-        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
-              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-        {
-          std::vector<bool> &results = remote_results[it->first];
-          // Assume everything will fail since we have to send
-          // back references in the success case anyway
-          results.resize(it->second.size(), false);
-          // Send a message to the remote node asking to do the acquires
-          const RtUserEvent ready = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(collective_point);
-            rez.serialize<size_t>(it->second.size());
-            for (unsigned idx = 0; idx < it->second.size(); idx++)
-            {
-              PhysicalManager *manager = unacquired[idx];
-              rez.serialize(manager->did);
-              rez.serialize(manager);
-            }
-            rez.serialize(&results);
-            rez.serialize(ready);
-          }
-          runtime->send_acquire_request(it->first, rez);
-          ready_events.insert(ready);
-        }
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-        // Now we can see which instances were acquired remotely
-        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
-              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-        {
-          const std::vector<bool> &results = remote_results[it->first];
-          for (unsigned idx = 0; idx < results.size(); idx++)
-          {
-            if (!results[idx])
-            {
-              acquire_successful = false;
-              continue;
-            }
-            PhysicalManager *manager = unacquired[it->second[idx]];
-            acquired[manager] = 1;
-            if (manager->is_collective_manager())
-              collectives.push_back(MappingInstance(manager));
-          }
         }
       }
       if (has_collectives)

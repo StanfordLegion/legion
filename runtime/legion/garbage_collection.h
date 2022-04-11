@@ -211,7 +211,7 @@ namespace Legion {
     public:
       RtEvent get_done_event(void);
     private:
-      std::set<RtEvent> mutation_effects;
+      std::vector<RtEvent> mutation_effects;
     };
 
     /**
@@ -300,17 +300,17 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REMOTE_REF_UPDATE_TASK_ID;
       public:
         DeferRemoteReferenceUpdateArgs(DistributedCollectable *d, 
-            AddressSpaceID t, RtUserEvent e, unsigned c, bool v)
+            AddressSpaceID t, RtUserEvent e, unsigned c, ReferenceKind k)
           : LgTaskArgs<DeferRemoteReferenceUpdateArgs>(implicit_provenance),
             did(d->did), target(t), done_event(e), count(c),
-            owner(d->owner_space == t), valid(v) { } 
+            kind(k), owner(d->owner_space == t) { } 
       public:
         const DistributedID did;
         const AddressSpaceID target;
         const RtUserEvent done_event;
         const int count;
+        const ReferenceKind kind;
         const bool owner;
-        const bool valid;
       };
       struct DeferRemoteUnregisterArgs :
         public LgTaskArgs<DeferRemoteUnregisterArgs> {
@@ -458,6 +458,9 @@ namespace Legion {
                                     ReferenceMutator *mutator = NULL,
                                     RtEvent precondition = RtEvent::NO_RT_EVENT,
                                     unsigned count = 1);
+      void send_remote_resource_decrement(AddressSpaceID target,
+                                    RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                    unsigned count = 1);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -472,6 +475,8 @@ namespace Legion {
                                                  Deserializer &derez);
       static void handle_did_remote_gc_update(Runtime *runtime,
                                               Deserializer &derez);
+      static void handle_did_remote_resource_update(Runtime *runtime,
+                                                    Deserializer &derez);
       static void handle_defer_remote_reference_update(Runtime *runtime,
                                                       const void *args);
       static void handle_defer_remote_unregister(Runtime *runtime,

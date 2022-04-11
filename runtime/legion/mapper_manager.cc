@@ -3110,7 +3110,6 @@ namespace Legion {
       // Ignore garbage collection priorities on external instances
       if (!manager->is_external_instance())
       {
-        DomainPoint collective_point;
         if (manager->is_collective_manager())
         {
           if (!ctx->operation->supports_collective_instances())
@@ -3122,9 +3121,9 @@ namespace Legion {
                 get_mapper_call_name(ctx->kind),
                 ctx->operation->get_logging_name(), 
                 ctx->operation->get_unique_op_id(), get_mapper_name())
-          collective_point = ctx->operation->get_collective_instance_point();
           CollectiveManager *collective = manager->as_collective_manager();
-          if (!collective->contains_point(collective_point))
+          if (!collective->contains_point(
+                ctx->operation->get_collective_instance_point()))
             REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_BAD_POINT,
                 "Illegal call to set garbage collection priority on a "
                 "collective instance in mapper call %s for %s (UID %lld) by "
@@ -3134,8 +3133,10 @@ namespace Legion {
                 ctx->operation->get_logging_name(),
                 ctx->operation->get_unique_op_id(), get_mapper_name())
         }
-        manager->set_garbage_collection_priority(mapper_id, processor,
-                                                 priority, collective_point);
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                                        mapper_id, processor, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
       }
       else
         REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
@@ -3556,7 +3557,6 @@ namespace Legion {
         *(info->acquired_instances);
       bool acquire_successful = true;
       DomainPoint collective_point;
-      std::map<AddressSpaceID,std::vector<unsigned> > remote_acquires;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         const MappingInstance &inst = instances[idx];
@@ -3598,12 +3598,10 @@ namespace Legion {
             collectives.push_back(inst);
           continue;
         }
-        AddressSpaceID remote_target = runtime->address_space;
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
-        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation,
-                                      collective_point, &remote_target))
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
@@ -3611,70 +3609,12 @@ namespace Legion {
             collectives.push_back(inst);
           continue;
         }
-        if (remote_target == runtime->address_space)
+        else
         {
           // Unable to record it
           if (unacquired != NULL)
             unacquired->insert(idx);
           acquire_successful = false;
-        }
-        else // try again on the remote node
-          remote_acquires[remote_target].push_back(idx);
-      }
-      if (!remote_acquires.empty() && acquire_successful)
-      {
-        std::set<RtEvent> ready_events;
-        std::map<AddressSpaceID,std::vector<bool> > remote_results;
-        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
-              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-        {
-          std::vector<bool> &results = remote_results[it->first];
-          // Assume everything will fail since we have to send
-          // back references in the success case anyway
-          results.resize(it->second.size(), false);
-          // Send a message to the remote node asking to do the acquires
-          const RtUserEvent ready = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(collective_point);
-            rez.serialize<size_t>(it->second.size());
-            for (unsigned idx = 0; idx < it->second.size(); idx++)
-            {
-              const MappingInstance &inst = instances[it->second[idx]];
-              PhysicalManager *manager = inst.impl->as_physical_manager();
-              rez.serialize(manager->did);
-              rez.serialize(manager);
-            }
-            rez.serialize(&results);
-            rez.serialize(ready);
-          }
-          runtime->send_acquire_request(it->first, rez);
-          ready_events.insert(ready);
-        }
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-        // Now we can see which instances were acquired remotely
-        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
-              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-        {
-          const std::vector<bool> &results = remote_results[it->first];
-          for (unsigned idx = 0; idx < results.size(); idx++)
-          {
-            if (!results[idx])
-            {
-              if (unacquired != NULL)
-                unacquired->insert(it->second[idx]);
-              acquire_successful = false;
-              continue;
-            }
-            const MappingInstance &inst = instances[it->second[idx]];
-            PhysicalManager *manager = inst.impl->as_physical_manager();
-            already_acquired[manager] = 1;
-            if (inst.is_collective_instance())
-              collectives.push_back(inst);
-          }
         }
       }
       return acquire_successful;
