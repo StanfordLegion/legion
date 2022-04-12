@@ -178,7 +178,7 @@ parameters. Below are some of the more commonly used flags:
     directs [logging output](http://legion.stanford.edu/debugging/#logging-infrastructure) to `filename`
   * `-ll:cpu <int>`: CPU processors to create per process
   * `-ll:gpu <int>`: GPU processors to create per process
-  * `-ll:cpu <int>`: utility processors to create per process
+  * `-ll:util <int>`: utility processors to create per process
   * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
   * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)

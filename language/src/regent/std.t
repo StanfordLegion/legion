@@ -4467,7 +4467,7 @@ local function incremental_compile_tasks()
       -- Save to a temporary file first. This is important to avoid race
       -- conditions in case multiple compilations are proceeding concurrently.
       local objtmp = os.tmpname()
-      terralib.saveobj(objtmp, "object", exports)
+      terralib.saveobj(objtmp, "object", exports, nil, nil, base.opt_profile)
 
       -- Now attempt to move the object file into place. Note: This is atomic,
       -- so we don't need to worry about races.
@@ -4557,7 +4557,7 @@ local function compile_tasks_in_parallel(issave)
         exports[variant:wrapper_name()] = variant:make_wrapper()
 
         profile('compile', variant, function()
-          terralib.saveobj(filename, 'object', exports)
+          terralib.saveobj(filename, 'object', exports, nil, nil, base.opt_profile)
         end)()
       end
       slave2master:close_write_end()
@@ -4771,7 +4771,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       -- that was compiled on different processes, so we have to combine all
       -- the object files manually.
       local mainobj = os.tmpname()
-      terralib.saveobj(mainobj, 'object', names)
+      terralib.saveobj(mainobj, 'object', names, nil, nil, base.opt_profile)
       local cmd = os.getenv('CXX') or 'c++'
       cmd = cmd .. ' -Wl,-r'
       cmd = cmd .. ' ' .. mainobj
@@ -4782,7 +4782,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       cmd = cmd .. ' -nostdlib'
       assert(os.execute(cmd) == 0)
     else
-      terralib.saveobj(filename, filetype, names, flags)
+      terralib.saveobj(filename, filetype, names, flags, nil, base.opt_profile)
     end
   end)()
   profile.print_summary()
@@ -4912,9 +4912,9 @@ function std.save_tasks(header_filename, filename, filetype, link_flags, registr
   end
   profile('compile', nil, function()
     if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, flags)
+      terralib.saveobj(filename, filetype, names, flags, nil, base.opt_profile)
     else
-      terralib.saveobj(filename, names, flags)
+      terralib.saveobj(filename, names, flags, nil, base.opt_profile)
     end
   end)()
   profile.print_summary()

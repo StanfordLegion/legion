@@ -70,6 +70,9 @@ local default_options = {
   ["offline"] = not data.is_luajit(),
   ["separate"] = false,
 
+  -- Code generation flags:
+  ["fast-math"] = config.UNSPECIFIED,
+
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
   ["legion-inner"] = true,
