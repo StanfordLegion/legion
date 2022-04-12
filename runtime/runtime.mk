@@ -833,25 +833,12 @@ CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
 endif
 
-# Check for a minimum C++ version and if none is specified then set it
+# Check for a minimum C++ version and if none is specified then set it to c++11
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
-ifeq ($(shell $(CXX) -x c++ -std=c++23 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-  CC_FLAGS += -std=c++23
-else ifeq ($(shell $(CXX) -x c++ -std=c++20 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-  ifeq ($(strip $(APPLECLANG)),1)
-    # Apple compiler claims it supports c++20 but it lies!
-    CC_FLAGS += -std=c++17
-  else
-    CC_FLAGS += -std=c++20
-  endif
-else ifeq ($(shell $(CXX) -x c++ -std=c++17 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-  CC_FLAGS += -std=c++17
-else ifeq ($(shell $(CXX) -x c++ -std=c++14 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-  CC_FLAGS += -std=c++14
-else ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
-  CC_FLAGS += -std=c++11
+ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+CC_FLAGS += -std=c++11
 else
-  $(error Legion requires a C++ compiler that supports at least C++11)
+$(error Legion requires a C++ compiler that supports at least C++11)
 endif
 endif
 
