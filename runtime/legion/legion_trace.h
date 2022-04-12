@@ -767,9 +767,10 @@ namespace Legion {
     protected:
       struct ViewUser {
         ViewUser(const RegionUsage &r, unsigned u, 
-                 IndexSpaceExpression *e, int s)
-          : usage(r), user(u), expr(e), shard(s)
-        {}
+                 IndexSpaceExpression *e, ShardID s);
+        ViewUser(const ViewUser &rhs) = delete;
+        ~ViewUser(void);
+        ViewUser& operator=(const ViewUser &rhs) = delete;
         const RegionUsage usage;
         const unsigned user;
         IndexSpaceExpression *const expr;

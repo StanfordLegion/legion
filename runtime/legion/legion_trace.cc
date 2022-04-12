@@ -6205,6 +6205,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalTemplate::ViewUser::ViewUser(const RegionUsage &r, unsigned u, 
+                                         IndexSpaceExpression *e, ShardID s)
+      : usage(r), user(u), expr(e), shard(s)
+    //--------------------------------------------------------------------------
+    {
+      expr->add_base_expression_reference(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::ViewUser::~ViewUser(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_base_expression_reference(TRACE_REF))
+        delete expr;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::add_view_user(InstanceView *view,
                                          const RegionUsage &usage,
                                          unsigned user_index,
