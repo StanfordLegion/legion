@@ -247,8 +247,14 @@ ifneq (${MARCH},)
     CC_FLAGS += -tp=${MARCH}
     FC_FLAGS += -tp=${MARCH}
   else ifeq ($(strip $(APPLECLANG)),1)
-    CC_FLAGS += -mcpu=${MARCH}
-    FC_FLAGS += -mcpu=${MARCH}
+    # For reasons passing understanding different versions of Apple clang support different arch flags
+    ifeq ($(shell $(CXX) -x c++ -Werror -march=${MARCH} -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+      CC_FLAGS += -march=${MARCH}
+      FC_FLAGS += -march=${MARCH}
+    else
+      CC_FLAGS += -mcpu=${MARCH}
+      FC_FLAGS += -mcpu=${MARCH}
+    endif
   else
     CC_FLAGS += -march=${MARCH}
     FC_FLAGS += -march=${MARCH}
