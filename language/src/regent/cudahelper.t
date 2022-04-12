@@ -377,7 +377,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   kernels:map(function(kernel) module[kernel.name] = kernel.kernel end)
   local version = get_cuda_version()
   local ptx = profile('cuda:ptx_gen', nil, function()
-    return cudalib.toptx(module, nil, version)
+    return cudalib.toptx(module, nil, version, base.gpu_opt_profile)
   end)()
 
   if config["cuda-dump-ptx"] then io.write(ptx) end
