@@ -9747,6 +9747,14 @@ namespace Legion {
           *unsat_index = 0;
         return NULL;
       }
+      // For Legion Spy we need a unique ready event if it doesn't already
+      // exist so we can uniquely identify the instance
+      if (!ready.exists() && runtime->legion_spy_enabled)
+      {
+        ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename_ready);
+        ready = rename_ready;
+      }
 #ifdef LEGION_DEBUG
       assert(!constraints.pointer_constraint.is_valid);
 #endif
@@ -9812,11 +9820,8 @@ namespace Legion {
               true/*register now*/, instance_footprint,
               false/*external*/, pending_collective->multi_instance);
 #ifdef DEBUG_LEGION
-          assert(manager == collectable);
+          assert((manager == collectable) || (collectable == NULL));
 #endif
-          // Then register it for anyone coming later
-          forest->runtime->register_distributed_collectable(
-              pending_collective->did, manager);
         }
         else
         {
@@ -9841,15 +9846,7 @@ namespace Legion {
         // Creating an individual manager
 #ifdef DEBUG_LEGION
         assert(collective_point == NULL);
-#endif
-        // For Legion Spy we need a unique ready event if it doesn't already
-        // exist so we can uniquely identify the instance
-        if (!ready.exists() && runtime->legion_spy_enabled)
-        {
-          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename_ready);
-          ready = rename_ready;
-        }
+#endif 
         DistributedID did = forest->runtime->get_available_distributed_id();
         // Figure out what kind of instance we just made
         switch (constraints.specialized_constraint.get_kind())

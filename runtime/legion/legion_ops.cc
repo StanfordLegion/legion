@@ -2384,7 +2384,7 @@ namespace Legion {
               // Check to see if the constraints and regions are equivalent
               std::vector<LogicalRegion> &previous_regions = 
                 collective_finder->second.regions;
-              if (regions.size() != previous_regions.size())
+              if (regions.size() == previous_regions.size())
               {
                 for (std::vector<LogicalRegion>::const_iterator it =
                       regions.begin(); it != regions.end(); it++)
@@ -2583,12 +2583,6 @@ namespace Legion {
               finder->second.collectives.insert(*pit);
           }
         }
-        if ((bad_index < SIZE_MAX) || bad_regions)
-        {
-          finder->second.bad_kind = bad_kind;
-          finder->second.bad_index = bad_index;
-          finder->second.bad_regions = bad_regions;
-        }
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_points >= points);
 #endif
@@ -2687,7 +2681,8 @@ namespace Legion {
         assert(collective_finder->second.collective == NULL);
 #endif
         collective_finder->second.collective = it->second;
-        it->second->add_reference();
+        if (it->second != NULL)
+          it->second->add_reference();
       }
       finder->second.bad_kind = bad_kind;
       finder->second.bad_index = bad_index;
