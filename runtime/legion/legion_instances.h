@@ -348,7 +348,8 @@ namespace Legion {
                             bool tight_bounds = false) const;
     protected:
       void prune_gc_events(void);
-      void pack_garbage_collection_state(Serializer &rez,AddressSpaceID target);
+      void pack_garbage_collection_state(Serializer &rez,
+                                         AddressSpaceID target, bool need_lock);
       void initialize_remote_gc_state(GarbageCollectionState state);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
