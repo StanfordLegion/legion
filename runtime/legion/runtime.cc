@@ -12088,11 +12088,6 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case SEND_COLLECTIVE_MESSAGE:
-            {
-              runtime->handle_collective_instance_message(derez);
-              break;
-            }
           case SEND_COLLECTIVE_DISTRIBUTE_FILL:
             {
               runtime->handle_collective_distribute_fill(derez,
@@ -12154,6 +12149,21 @@ namespace Legion {
           case SEND_COLLECTIVE_REGISTER_USER:
             {
               runtime->handle_collective_user_registration(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_POINT_REQUEST:
+            {
+              runtime->handle_collective_point_request(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_POINT_RESPONSE:
+            {
+              runtime->handle_collective_point_response(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_DELETION:
+            {
+              runtime->handle_collective_deletion(derez);
               break;
             }
           case SEND_CREATE_TOP_VIEW_REQUEST:
@@ -22071,18 +22081,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_collective_instance_message(AddressSpaceID target,
-                                                   Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // Put all these messages on the reference virtual channel to keep them
-      // all in order and make sure that we never send any of this messages
-      // once the references on the collective instance are removed
-      find_messenger(target)->send_message<SEND_COLLECTIVE_MESSAGE>(rez,
-                                                          true/*flush*/); 
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_collective_distribute_fill(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22179,6 +22177,33 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_COLLECTIVE_REGISTER_USER>(
                                                         rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_point_request(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_POINT_REQUEST>(
+                                                        rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_point_response(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_POINT_RESPONSE>(
+                                      rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_deletion(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_DELETION>(
+                                                  rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24224,13 +24249,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_collective_instance_message(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_collective_message(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_collective_distribute_fill(Deserializer &derez,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24313,6 +24331,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualManager::handle_collective_user_registration(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_point_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_point_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_point_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_point_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_deletion(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_deletion(this, derez);
     }
 
     //--------------------------------------------------------------------------

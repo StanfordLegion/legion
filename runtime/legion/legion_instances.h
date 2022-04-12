@@ -394,12 +394,12 @@ namespace Legion {
       bool try_collection(AddressSpaceID source, RtEvent &ready);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
-      RtEvent set_garbage_collection_priority(MapperID mapper_id,
-                                              Processor p, GCPriority priority);
+      RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
+                                  AddressSpaceID source, GCPriority priority);
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL) = 0;
       virtual void force_deletion(void) = 0;
-      virtual RtEvent update_garbage_collection_priority(
+      virtual RtEvent update_garbage_collection_priority(AddressSpaceID source,
                                                        GCPriority priority) = 0;
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
@@ -705,7 +705,8 @@ namespace Legion {
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL);
       virtual void force_deletion(void);
-      virtual RtEvent update_garbage_collection_priority(GCPriority);
+      virtual RtEvent update_garbage_collection_priority(AddressSpaceID source,
+                                                         GCPriority priority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
@@ -786,14 +787,6 @@ namespace Legion {
               public LegionHeapify<CollectiveManager> {
     public:
       static const AllocationType alloc_type = COLLECTIVE_INST_MANAGER_ALLOC;
-    public:
-      enum MessageKind {
-        COLLECTIVE_PERFORM_DELETE_MESSAGE,
-        COLLECTIVE_FORCE_DELETE_MESSAGE,
-        COLLECTIVE_FINALIZE_MESSAGE,
-        COLLECTIVE_REMOTE_INSTANCE_REQUEST,
-        COLLECTIVE_REMOTE_INSTANCE_RESPONSE,
-      };
     public:
       struct DeferCollectiveManagerArgs : 
         public LgTaskArgs<DeferCollectiveManagerArgs> {
@@ -883,15 +876,12 @@ namespace Legion {
       virtual RtEvent perform_deletion(AddressSpaceID source,
                                        AutoLock *i_lock = NULL);
       virtual void force_deletion(void);
-      virtual RtEvent update_garbage_collection_priority(GCPriority);
+      virtual RtEvent update_garbage_collection_priority(AddressSpaceID source,
+                                                         GCPriority priority);
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
       virtual Memory get_memory(void) const;
-    protected:
-      void perform_delete(RtEvent deferred_event, bool left); 
-      void force_delete(bool left);
-      bool finalize_message(void);
     protected:
       void collective_deletion(RtEvent deferred_event);
       void collective_force(void);
@@ -1140,8 +1130,6 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
       static void handle_defer_manager(const void *args, Runtime *runtime);
-      static void handle_collective_message(Deserializer &derez,
-                                            Runtime *runtime);
       static void handle_distribute_fill(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_point(Runtime *runtime,
@@ -1162,6 +1150,9 @@ namespace Legion {
                                     Deserializer &derez);
       static void handle_register_user_response(Runtime *runtime,
                                     Deserializer &derez);
+      static void handle_point_request(Runtime *runtime, Deserializer &derez);
+      static void handle_point_response(Runtime *runtime, Deserializer &derez);
+      static void handle_deletion(Runtime *runtime, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,
           size_t points, CollectiveMapping *collective_mapping,
@@ -1251,9 +1242,6 @@ namespace Legion {
                 std::map<unsigned,Reservation> > view_reservations;
     protected:
       std::atomic<uint64_t> unique_allreduce_tag;
-      RtEvent detached;
-      unsigned finalize_messages;
-      bool deleted_or_detached;
     public:
       // A boolean flag that says whether this collective instance
       // has multiple instances on every node. This is primarily

@@ -801,7 +801,6 @@ namespace Legion {
       SEND_INSTANCE_MANAGER,
       SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_MANAGER,
-      SEND_COLLECTIVE_MESSAGE,
       SEND_COLLECTIVE_DISTRIBUTE_FILL,
       SEND_COLLECTIVE_DISTRIBUTE_POINT,
       SEND_COLLECTIVE_DISTRIBUTE_POINTWISE,
@@ -813,6 +812,9 @@ namespace Legion {
       SEND_COLLECTIVE_USER_REQUEST,
       SEND_COLLECTIVE_USER_RESPONSE,
       SEND_COLLECTIVE_REGISTER_USER,
+      SEND_COLLECTIVE_POINT_REQUEST,
+      SEND_COLLECTIVE_POINT_RESPONSE,
+      SEND_COLLECTIVE_DELETION,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -1035,7 +1037,6 @@ namespace Legion {
         "Send Instance Manager",                                      \
         "Send Manager Update",                                        \
         "Send Collective Instance Manager",                           \
-        "Send Collective Instance Message",                           \
         "Send Collective Distribute Fill",                            \
         "Send Collective Distribute Point",                           \
         "Send Collective Distribute Pointwise",                       \
@@ -1047,6 +1048,9 @@ namespace Legion {
         "Send Collective User Request",                               \
         "Send Collective User Response",                              \
         "Send Collective Individual Register User",                   \
+        "Send Collective Point Info Request",                         \
+        "Send Collective Point Info Response",                        \
+        "Send Collective Deletion",                                   \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \

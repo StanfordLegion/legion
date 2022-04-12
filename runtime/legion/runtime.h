@@ -3202,8 +3202,6 @@ namespace Legion {
       void send_manager_update(AddressSpaceID target, Serializer &rez);
       void send_collective_instance_manager(AddressSpaceID target, 
                                             Serializer &rez);
-      void send_collective_instance_message(AddressSpaceID target, 
-                                            Serializer &rez);
       void send_collective_distribute_fill(AddressSpaceID target,
                                            Serializer &rez);
       void send_collective_distribute_point(AddressSpaceID target,
@@ -3226,6 +3224,10 @@ namespace Legion {
                                                   Serializer &rez);
       void send_collective_individual_register_user(AddressSpaceID target,
                                                     Serializer &rez);
+      void send_collective_point_request(AddressSpaceID target,Serializer &rez);
+      void send_collective_point_response(AddressSpaceID target,
+                                          Serializer &rez);
+      void send_collective_deletion(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -3543,7 +3545,6 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
-      void handle_collective_instance_message(Deserializer &derez);
       void handle_collective_distribute_fill(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_collective_distribute_point(Deserializer &derez,
@@ -3563,6 +3564,9 @@ namespace Legion {
       void handle_collective_user_request(Deserializer &derez);
       void handle_collective_user_response(Deserializer &derez);
       void handle_collective_user_registration(Deserializer &derez);
+      void handle_collective_point_request(Deserializer &derez);
+      void handle_collective_point_response(Deserializer &derez);
+      void handle_collective_deletion(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -5650,9 +5654,7 @@ namespace Legion {
         case SEND_MANAGER_UPDATE:
           break;
         case SEND_COLLECTIVE_MANAGER:
-          break;
-        case SEND_COLLECTIVE_MESSAGE:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break; 
         case SEND_COLLECTIVE_DISTRIBUTE_FILL:
           break;
         case SEND_COLLECTIVE_DISTRIBUTE_POINT:
@@ -5675,6 +5677,12 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_REGISTER_USER:
           break;
+        case SEND_COLLECTIVE_POINT_REQUEST:
+          break;
+        case SEND_COLLECTIVE_POINT_RESPONSE:
+          break;
+        case SEND_COLLECTIVE_DELETION:
+          return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;
         case SEND_CREATE_TOP_VIEW_RESPONSE:

@@ -3134,7 +3134,7 @@ namespace Legion {
                 ctx->operation->get_unique_op_id(), get_mapper_name())
         }
         const RtEvent ready = manager->set_garbage_collection_priority(
-                                        mapper_id, processor, priority);
+                mapper_id, processor, runtime->address_space, priority);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
       }
