@@ -1649,7 +1649,7 @@ namespace Legion {
         if (finder == mapper_gc_priorities.end())
         {
           mapper_gc_priorities[key] = priority;
-          if (min_gc_priority < priority)
+          if (min_gc_priority <= priority)
             return RtEvent::NO_RT_EVENT;
         }
         else
