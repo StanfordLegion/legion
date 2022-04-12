@@ -629,9 +629,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-      ReductionOpID r, bool no, bool ext, Domain c, size_t pieces, int overhead)
-      : kind(k), redop(r), collective(c), max_pieces(pieces),
-        max_overhead(overhead), no_access(no), exact(ext)
+      ReductionOpID r, bool no, bool ext, bool c, size_t pieces, int overhead)
+      : kind(k), redop(r),  max_pieces(pieces), max_overhead(overhead),
+        collective(c), no_access(no), exact(ext)
     //-------------------------------------------------------------------------
     {
       if (redop != 0)
@@ -714,9 +714,9 @@ namespace Legion {
     {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
-      SWAP_HELPER(Domain, collective)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
+      SWAP_HELPER(bool, collective)
       SWAP_HELPER(bool, no_access)
       SWAP_HELPER(bool, exact)
     }
@@ -735,7 +735,7 @@ namespace Legion {
         rez.serialize(max_pieces);
         rez.serialize(max_overhead);
       }
-      rez.serialize(collective);
+      rez.serialize<bool>(collective);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -754,7 +754,7 @@ namespace Legion {
         derez.deserialize(max_pieces);
         derez.deserialize(max_overhead);
       }
-      derez.deserialize(collective);
+      derez.deserialize<bool>(collective);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }

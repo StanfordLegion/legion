@@ -9762,7 +9762,6 @@ namespace Legion {
       constraints.ordering_constraint.contiguous = true;
       constraints.memory_constraint = MemoryConstraint(
                                         memory_manager->memory.kind());
-      constraints.specialized_constraint.collective = Domain();
       const unsigned num_dims = instance_domain->get_num_dims();
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = field_space_node->find_layout_description(
