@@ -2017,33 +2017,40 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::pack_garbage_collection_state(Serializer &rez,
-                                                        AddressSpaceID target)
+                                          AddressSpaceID target, bool need_lock)
     //--------------------------------------------------------------------------
     {
       // We have to atomically get the current collection state and 
       // update the set of remote instances, note that it can be read-only
       // since we're just reading the state and the `update-remote_instaces'
       // call will take its own exclusive lock
-      AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-      switch (gc_state)
+      if (need_lock)
       {
-        case VALID_GC_STATE:
-        case ACQUIRED_GC_STATE:
-        case COLLECTABLE_GC_STATE:
-          {
-            rez.serialize(COLLECTABLE_GC_STATE);
-            break;
-          }
-        case PENDING_COLLECTED_GC_STATE:
-        case COLLECTED_GC_STATE:
-          {
-            rez.serialize(gc_state);
-            break;
-          }
-        default:
-          assert(false);
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        pack_garbage_collection_state(rez, target, false/*need lock*/);
       }
-      update_remote_instances(target);
+      else
+      {
+        switch (gc_state)
+        {
+          case VALID_GC_STATE:
+          case ACQUIRED_GC_STATE:
+          case COLLECTABLE_GC_STATE:
+            {
+              rez.serialize(COLLECTABLE_GC_STATE);
+              break;
+            }
+          case PENDING_COLLECTED_GC_STATE:
+          case COLLECTED_GC_STATE:
+            {
+              rez.serialize(gc_state);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        update_remote_instances(target);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3741,7 +3748,7 @@ namespace Legion {
         layout->pack_layout_description(rez, target);
         rez.serialize(redop);
         rez.serialize(kind);
-        pack_garbage_collection_state(rez, target);
+        pack_garbage_collection_state(rez, target, false/*need lock*/);
       }
       context->runtime->send_instance_manager(target, rez);
     }
@@ -9156,7 +9163,7 @@ namespace Legion {
         rez.serialize(redop);
         rez.serialize<bool>(multi_instance);
         layout->pack_layout_description(rez, target);
-        pack_garbage_collection_state(rez, target);
+        pack_garbage_collection_state(rez, target, true/*need lock*/);
       }
       context->runtime->send_collective_instance_manager(target, rez);
     }
