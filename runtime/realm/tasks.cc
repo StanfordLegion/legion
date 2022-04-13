@@ -707,7 +707,7 @@ namespace Realm {
 
   void ThreadedTaskScheduler::add_task_queue(TaskQueue *queue)
   {
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     task_queues.push_back(queue);
 
@@ -717,7 +717,7 @@ namespace Realm {
 
   void ThreadedTaskScheduler::remove_task_queue(TaskQueue *queue)
   {
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
     for (std::vector<TaskQueue *>::iterator it = task_queues.begin(); it != task_queues.end();++it) {
       if (*it == queue) {
         //found; we erase and exit
@@ -732,7 +732,7 @@ namespace Realm {
 
   void ThreadedTaskScheduler::add_task_context(const TaskContextManager *_manager)
   {
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     context_managers.push_back(_manager);
   }
@@ -783,7 +783,7 @@ namespace Realm {
   {
     // there's a potential race between a thread blocking and being reawakened,
     //  so take the scheduler lock and THEN try to mark the thread as blocked
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     bool really_blocked = try_update_thread_state(thread,
 						  Thread::STATE_BLOCKING,
@@ -928,7 +928,7 @@ namespace Realm {
 
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     // if this was a spinning thread, remove it from the list and poke the
     //  work counter in cases its execution resource is napping
@@ -973,7 +973,7 @@ namespace Realm {
     int old_priority;
 
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
       std::map<Thread *, int>::iterator it = worker_priorities.find(thread);
       assert(it != worker_priorities.end());
       old_priority = it->second;
@@ -1202,7 +1202,7 @@ namespace Realm {
   // an entry point that takes the scheduler lock explicitly
   void ThreadedTaskScheduler::scheduler_loop_wlock(void)
   {
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
     scheduler_loop();
   }
 
@@ -1267,7 +1267,7 @@ namespace Realm {
   {
     // fire up the minimum number of workers
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
 
       update_worker_count(cfg_min_active_workers, cfg_min_active_workers);
 
@@ -1285,7 +1285,7 @@ namespace Realm {
 
     // wait for all workers to finish
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
 
       while(!all_workers.empty() || !terminating_workers.empty())
 	shutdown_condvar.wait();
@@ -1300,11 +1300,11 @@ namespace Realm {
 
     // see if we're supposed to be active yet
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
 
       if(active_workers.count(thread) == 0) {
 	// nope, sleep on a CV until we are
-        Mutex::CondVar my_cv(lock);
+        FIFOMutex::CondVar my_cv(lock);
 	sleeping_threads[thread] = &my_cv;
 
 	while(active_workers.count(thread) == 0)
@@ -1319,7 +1319,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler worker terminating: sched=" << this << " worker=" << thread;
 
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     // if the thread is still in our all_workers list, this was unexpected
     if(all_workers.count(thread) > 0) {
@@ -1391,7 +1391,7 @@ namespace Realm {
       active_workers.erase(Thread::self());
     assert(count == 1);
 
-    Mutex::CondVar my_cv(lock);
+    FIFOMutex::CondVar my_cv(lock);
     sleeping_threads[Thread::self()] = &my_cv;
 
     // with kernel threads, sleeping and waking are separable actions
@@ -1413,7 +1413,7 @@ namespace Realm {
     active_workers.insert(to_wake);
 
     // if they have a CV (they might not yet), poke that
-    std::map<Thread *, Mutex::CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    std::map<Thread *, FIFOMutex::CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
     if(it != sleeping_threads.end())
       it->second->signal();
   }
@@ -1506,7 +1506,7 @@ namespace Realm {
 
     // fire up the host threads (which will fire up initial workers)
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
 
       update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
 
@@ -1530,7 +1530,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     // make sure everybody actually started before we tell them to shut down
     while(host_startups_remaining > 0) {
@@ -1578,7 +1578,7 @@ namespace Realm {
   void UserThreadTaskScheduler::host_thread_loop(void)
   {
     log_sched.debug() << "host thread started: sched=" << this << " thread=" << Thread::self();
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
 
     // create a user worker thread - it won't start right away
     Thread *worker = worker_create(false);
