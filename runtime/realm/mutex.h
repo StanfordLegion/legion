@@ -26,10 +26,12 @@
 #include <stdint.h>
 
 // if enabled, we count how many times a doorbell is passed over and
-//  print warnings if it seems like a lot
-#ifdef DEBUG_REALM
-  #define REALM_ENABLE_STARVATION_CHECKS
-#endif
+//  print warnings if it seems like a lot - this has known false positives
+//  (e.g. an UnfairCondVar used to wake up any one of a pool of sleeping
+//  threads or an UnfairMutex under heavy contention), so do not enable
+//  by default
+// TODO: control with command-line switch?
+//define REALM_ENABLE_STARVATION_CHECKS
 
 namespace Realm {
 
