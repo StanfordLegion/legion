@@ -87,15 +87,14 @@ struct RWLockImpl {
 #include <assert.h>
 #include <new>
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#include <unistd.h>
+#endif
+
 #if defined(REALM_ON_LINUX) && !defined(REALM_NO_USE_FUTEX)
 #include <linux/futex.h>
 #include <sys/time.h>
-#include <unistd.h>
 #include <sys/syscall.h>
-#endif
-
-#ifdef REALM_ON_MACOS
-#include <unistd.h>
 #endif
 
 #ifdef __SSE2__
