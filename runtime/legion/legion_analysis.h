@@ -1144,7 +1144,7 @@ namespace Legion {
       void remove_valid_reference(ReferenceSource source,
                                   ReferenceMutator *mutator) const;
     public:
-      Memory get_memory(void) const;
+      Memory get_memory(const DomainPoint &point) const;
       PhysicalManager* get_physical_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;

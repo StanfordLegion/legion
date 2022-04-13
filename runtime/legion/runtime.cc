@@ -4684,7 +4684,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::set_reference(const InstanceRef &ref, bool safe)
+    void PhysicalRegionImpl::set_reference(const InstanceRef &ref,
+                                           const DomainPoint &point, bool safe)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4692,6 +4693,7 @@ namespace Legion {
       assert(references.empty());
       assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
+      collective_point = point;
       references.add_instance(ref);
       if (!replaying)
       {
@@ -4703,7 +4705,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::set_references(const InstanceSet &refs, bool safe)
+    void PhysicalRegionImpl::set_references(const InstanceSet &refs,
+                                            const DomainPoint &point, bool safe)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4711,6 +4714,7 @@ namespace Legion {
       assert(safe || (mapped_event.exists() && !mapped_event.has_triggered()));
 #endif
       references = refs;
+      collective_point= point;
       if (!references.empty() && !replaying)
       {
         if (leaf_region)
@@ -4759,7 +4763,7 @@ namespace Legion {
       }
       const InstanceSet &instances = references;
       for (unsigned idx = 0; idx < instances.size(); idx++)
-        memories.insert(instances[idx].get_memory());
+        memories.insert(instances[idx].get_memory(collective_point));
     }
 
     //--------------------------------------------------------------------------
@@ -5020,7 +5024,7 @@ namespace Legion {
                             fid, field_size, actual_size, 
                             context->get_task_name(), context->get_unique_id()) 
           }
-          return manager->get_instance(context->owner_task->index_point);
+          return manager->get_instance(collective_point);
         }
       }
       // should never get here at worst there should have been an
@@ -10174,11 +10178,22 @@ namespace Legion {
       {
         AutoLock m_lock(manager_lock);
         TreeInstances &insts = current_instances[manager->tree_id];
-#ifdef DEBUG_LEGION
-        assert(insts.find(manager) == insts.end());
-#endif
-        insts[manager] = priority;
+        // Look for duplicates with collective instances that have
+        // multiple copies in the same memory
+        if (insts.find(manager) == insts.end())
+        {
+          insts[manager] = priority;
+          return;
+        }
       }
+      // If we get here then we've got duplicate instances
+#ifdef DEBUG_LEGION
+      assert(manager->is_collective_manager());
+#endif
+      // Remove the duplicate references
+      if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
+        manager->remove_base_valid_ref(NEVER_GC_REF);
+      manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
     }
 
     //--------------------------------------------------------------------------

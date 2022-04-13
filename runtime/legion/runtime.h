@@ -800,8 +800,10 @@ namespace Legion {
       void unmap_region(void);
       ApEvent remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &references, bool safe = false);
-      void set_references(const InstanceSet &instances, bool safe = false);
+      void set_reference(const InstanceRef &references, 
+                         const DomainPoint &collective_point,bool safe = false);
+      void set_references(const InstanceSet &instances,
+                         const DomainPoint &collective_point,bool safe = false);
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories, 
@@ -866,6 +868,8 @@ namespace Legion {
       // written by the "mapping stage" code of whatever operation made this
       // can be accessed in "application" side code after 'mapped' triggers
       InstanceSet references;
+      // Local collective point for indexing into references
+      DomainPoint collective_point;
       // "appliciation side" state
       // whether it is currently mapped
       bool mapped; 

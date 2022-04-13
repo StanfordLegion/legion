@@ -4651,7 +4651,8 @@ namespace Legion {
           }
         }
         // First mapping so set the references now
-        region.impl->set_references(mapped_instances);
+        const DomainPoint shard_point = get_shard_point();
+        region.impl->set_references(mapped_instances, shard_point);
       }
       else
         region.impl->get_references(mapped_instances);
@@ -5239,9 +5240,10 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         std::set<Memory> visible_memories;
         runtime->find_visible_memories(exec_proc, visible_memories);
+        const DomainPoint shard_point = get_shard_point();
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          const Memory mem = chosen_instances[idx].get_memory();
+          const Memory mem = chosen_instances[idx].get_memory(shard_point);
           if (visible_memories.find(mem) == visible_memories.end())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
@@ -21031,7 +21033,8 @@ namespace Legion {
       if (mapping)
         external_instances[0].set_ready_event(attach_event);
       // This operation is ready once the file is attached
-      region.impl->set_reference(external_instances[0]);
+      const DomainPoint dummy_point;
+      region.impl->set_reference(external_instances[0], dummy_point);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

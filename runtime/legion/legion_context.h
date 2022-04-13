@@ -373,7 +373,8 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances) = 0;
+          bool virtual_mapped, const InstanceSet &physical_instances,
+          const DomainPoint &collective_point) = 0;
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs) = 0;
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -1240,7 +1241,8 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances);
+          bool virtual_mapped, const InstanceSet &physical_instances,
+          const DomainPoint &collective_point);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -3057,7 +3059,8 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances);
+          bool virtual_mapped, const InstanceSet &physical_instances,
+          const DomainPoint &collective_point);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,

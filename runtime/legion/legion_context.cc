@@ -6265,7 +6265,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances)
+          bool virtual_mapped, const InstanceSet &physical_instances,
+          const DomainPoint &collective_point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6279,7 +6280,7 @@ namespace Legion {
           mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
-        impl->set_references(physical_instances, true/*safe*/); 
+        impl->set_references(physical_instances, collective_point,true/*safe*/);
     }
 
     //--------------------------------------------------------------------------
@@ -22444,7 +22445,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances)
+          bool virtual_mapped, const InstanceSet &physical_instances,
+          const DomainPoint &collective_point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22456,7 +22458,7 @@ namespace Legion {
           true/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (mapped)
-        impl->set_references(physical_instances, true/*safe*/);
+        impl->set_references(physical_instances, collective_point,true/*safe*/);
     }
 
     //--------------------------------------------------------------------------

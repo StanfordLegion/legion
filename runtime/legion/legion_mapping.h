@@ -53,8 +53,8 @@ namespace Legion {
       bool operator!=(const PhysicalInstance &rhs) const;
     public:
       // Get the location of this physical instance
-      Memory get_location(void) const;
-      unsigned long get_instance_id(void) const;
+      Memory get_location(const DomainPoint *point = NULL) const;
+      unsigned long get_instance_id(const DomainPoint *point = NULL) const;
       size_t get_instance_size(void) const;
       Domain get_instance_domain(void) const;
       // Adds all fields that exist in instance to 'fields', unless

@@ -7263,7 +7263,8 @@ namespace Legion {
                   parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         // First mapping so set the references now
-        region.impl->set_references(mapped_instances);
+        const DomainPoint shard_point = get_shard_point();
+        region.impl->set_references(mapped_instances, shard_point);
       }
       else
       {
@@ -7788,7 +7789,8 @@ namespace Legion {
       if (mapping)
         external_instance.set_ready_event(attach_event);
       // This operation is ready once the file is attached
-      region.impl->set_reference(external_instance);
+      const DomainPoint shard_point(repl_ctx->owner_shard->shard_id);
+      region.impl->set_reference(external_instance, shard_point);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,

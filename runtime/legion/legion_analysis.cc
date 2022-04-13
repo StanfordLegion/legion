@@ -11070,12 +11070,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
       assert(replicated_owner_state == NULL);
 #endif
       replicated_owner_state = new ReplicatedOwnerState(local_space);
       if (mapping != NULL)
       {
+        if (is_logical_owner())
+        {
+          replicated_owner_state->nodes.insert(local_space);
+          Runtime::trigger_event(replicated_owner_state->ready);
+          return;
+        }
         // Check to see if we're the origin of the mapping or not
         const AddressSpaceID origin = mapping->get_origin();
         if (local_space != origin)
@@ -11105,6 +11110,9 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(!is_logical_owner());
+#endif
         // Send the request on to whomever we thought was the previous owner
         Serializer rez;
         {
@@ -19112,7 +19120,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Memory InstanceRef::get_memory(void) const
+    Memory InstanceRef::get_memory(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19120,7 +19128,7 @@ namespace Legion {
 #endif
       if (!manager->is_physical_manager())
         return Memory::NO_MEMORY;
-      return manager->as_physical_manager()->get_memory();
+      return manager->as_physical_manager()->get_memory(point);
     }
 
     //--------------------------------------------------------------------------

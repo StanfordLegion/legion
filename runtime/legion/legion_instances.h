@@ -326,6 +326,8 @@ namespace Legion {
       virtual PhysicalInstance get_instance(const DomainPoint &point) const = 0;
       virtual PointerConstraint 
                      get_pointer_constraint(const DomainPoint &point) const = 0;
+      inline Memory get_memory(const DomainPoint &point) const
+        { return get_instance(point).get_location(); }
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -404,7 +406,6 @@ namespace Legion {
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
-      virtual Memory get_memory(void) const = 0; 
       size_t get_instance_size(void) const;
       void update_instance_footprint(size_t footprint)
         { instance_footprint = footprint; }
@@ -604,6 +605,8 @@ namespace Legion {
     public:
       IndividualManager& operator=(const IndividualManager &rhs) = delete;
     public:
+      inline Memory get_memory(void) const { return memory_manager->memory; }
+    public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_accessor(void) const;
@@ -711,7 +714,6 @@ namespace Legion {
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
-      virtual Memory get_memory(void) const;
     public:
       inline bool is_unbound() const 
         { return kind == UNBOUND_INSTANCE_KIND; }
@@ -882,7 +884,6 @@ namespace Legion {
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
-      virtual Memory get_memory(void) const;
     protected:
       void collective_deletion(RtEvent deferred_event);
       void collective_force(void);

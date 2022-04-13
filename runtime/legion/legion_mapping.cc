@@ -98,21 +98,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Memory PhysicalInstance::get_location(void) const
+    Memory PhysicalInstance::get_location(const DomainPoint *point) const
     //--------------------------------------------------------------------------
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
-      return impl->as_physical_manager()->get_memory();
+      if (point == NULL)
+      {
+        if (impl->is_collective_manager())
+          return Memory::NO_MEMORY;
+        const DomainPoint dummy_point;
+        return impl->as_physical_manager()->get_memory(dummy_point);
+      }
+      return impl->as_physical_manager()->get_memory(*point);
     }
 
     //--------------------------------------------------------------------------
-    unsigned long PhysicalInstance::get_instance_id(void) const
+    unsigned long PhysicalInstance::get_instance_id(const DomainPoint *p) const
     //--------------------------------------------------------------------------
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
-      return impl->as_physical_manager()->get_instance(DomainPoint()).id;
+      if (p == NULL)
+      {
+        if (impl->is_collective_manager())
+          return 0;
+        const DomainPoint dummy_point;
+        return impl->as_physical_manager()->get_instance(dummy_point).id;
+      }
+      return impl->as_physical_manager()->get_instance(*p).id;
     }
 
     //--------------------------------------------------------------------------

@@ -3265,7 +3265,7 @@ namespace Legion {
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
-              const Memory mem = result[idx2].get_memory();
+              const Memory mem = result[idx2].get_memory(index_point);
               if (visible_memories.find(mem) == visible_memories.end())
                 // Not visible from all target processors
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -4628,7 +4628,7 @@ namespace Legion {
             localize_region_requirement(clone_requirements[idx]);
             execution_context->add_physical_region(clone_requirements[idx],
                 false/*mapped*/, map_id, tag, unmap_events[idx],
-                true/*virtual mapped*/, physical_instances[idx]);
+                true/*virtual mapped*/, physical_instances[idx], index_point);
             // For virtual mappings, there are two approaches here
             // 1. For read-write privileges we can do copy-in/copy-out
             // on the equivalence sets since we know that we're the 
@@ -4656,8 +4656,8 @@ namespace Legion {
             if (!IS_REDUCE(regions[idx]))
               clone_requirements[idx].privilege = LEGION_READ_WRITE;
             execution_context->add_physical_region(clone_requirements[idx],
-                    false/*mapped*/, map_id, tag, unmap_events[idx],
-                    false/*virtual mapped*/, physical_instances[idx]);
+                false/*mapped*/, map_id, tag, unmap_events[idx],
+                false/*virtual mapped*/, physical_instances[idx], index_point);
 #ifdef DEBUG_LEGION
             assert(unmap_events[idx].exists());
 #endif
@@ -4678,8 +4678,8 @@ namespace Legion {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             execution_context->add_physical_region(clone_requirements[idx],
-                    true/*mapped*/, map_id, tag, unmap_events[idx],
-                    false/*virtual mapped*/, physical_instances[idx]);
+                true/*mapped*/, map_id, tag, unmap_events[idx],
+                false/*virtual mapped*/, physical_instances[idx], index_point);
             if (!is_leaf_variant)
               equivalence_sets[idx] = create_initial_equivalence_set(idx);
             // We reset the reference below after we've

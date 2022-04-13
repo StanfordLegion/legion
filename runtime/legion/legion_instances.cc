@@ -4124,13 +4124,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Memory IndividualManager::get_memory(void) const
-    //--------------------------------------------------------------------------
-    {
-      return memory_manager->memory;
-    }
-
-    //--------------------------------------------------------------------------
     bool IndividualManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
                                                   InstanceKind new_kind,
@@ -4357,6 +4350,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(point.get_dim() > 0);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
@@ -4409,6 +4403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(point.get_dim() > 0);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
@@ -4613,6 +4608,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(point.get_dim() > 0);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
@@ -4668,6 +4664,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(p.get_dim() > 0);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
@@ -5045,15 +5042,6 @@ namespace Legion {
         if (mems.find((*it)->memory) != mems.end())
           return true;
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    Memory CollectiveManager::get_memory(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return Memory::NO_MEMORY;
     }
 
     //--------------------------------------------------------------------------
