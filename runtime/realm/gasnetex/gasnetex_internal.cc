@@ -2792,6 +2792,11 @@ namespace Realm {
   {
     ThreadLocal::gex_work_until = &work_until;
 
+    // we're going to try to be frugal about acquiring mutexes here, so peek
+    //  ahead in the critical xpair list to avoid the extra mutex acquire that
+    //  would observe an empty list
+    bool have_crit_xpairs = false;
+
     // first go through all(?) the pending events to see if any have
     //  finished
     {
@@ -2799,9 +2804,12 @@ namespace Realm {
 
       // atomically grab all the known ones so that we don't have to hold the
       //  mutex while we're testing the events
-      {
-	AutoLock<> al(mutex);
+      // don't wait on contention though - we'll get to events and critical
+      //  xpairs next time
+      if(mutex.trylock()) {
 	to_check.swap(pending_events);
+        have_crit_xpairs = !critical_xpairs.empty();
+        mutex.unlock();
       }
 
       // go through events in order, either trigger or move to 'still_pending'
@@ -2851,12 +2859,18 @@ namespace Realm {
 
     // try to push packets for any xmit pairs that are critical (i.e. cannot
     //  use immediate mode)
-    while(true) {
+    while(have_crit_xpairs) {
       XmitSrcDestPair *xpair = nullptr;
-      {
-	AutoLock<> al(mutex);
-	if(!critical_xpairs.empty())
-	  xpair = critical_xpairs.pop_front();
+
+      // don't wait on contention for the mutex - just skip and get it
+      //  next time around
+      if(mutex.trylock()) {
+#ifdef DEBUG_REALM
+        assert(!critical_xpairs.empty());
+#endif
+        xpair = critical_xpairs.pop_front();
+        have_crit_xpairs = !critical_xpairs.empty();
+        mutex.unlock();
       }
       if(!xpair) break;
 

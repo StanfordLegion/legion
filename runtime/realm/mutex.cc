@@ -87,15 +87,14 @@ struct RWLockImpl {
 #include <assert.h>
 #include <new>
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#include <unistd.h>
+#endif
+
 #if defined(REALM_ON_LINUX) && !defined(REALM_NO_USE_FUTEX)
 #include <linux/futex.h>
 #include <sys/time.h>
-#include <unistd.h>
 #include <sys/syscall.h>
-#endif
-
-#ifdef REALM_ON_MACOS
-#include <unistd.h>
 #endif
 
 #ifdef __SSE2__
@@ -438,10 +437,6 @@ namespace Realm {
 
   Doorbell *DoorbellList::extract_oldest(bool prefer_spinning, bool allow_extra)
   {
-#ifdef DEBUG_REALM
-    MutexChecker::CheckedScope cs(mutex_check, "extract_oldest");
-#endif
-
     uintptr_t hoc = head_or_count.load_acquire();
     while((hoc == 0) || ((hoc & 1) != 0)) {
       // list appears to be empty
@@ -459,6 +454,14 @@ namespace Realm {
         // failure, but we re-read hoc and will try again
       }
     }
+
+#ifdef DEBUG_REALM
+    // would like to guard code above as well, but a successful cmpxchg
+    //  immediately enables another thread to enter that code, and we can't
+    //  disable the mutex checker fast enough, so we wait until here to
+    //  look for illegal concurrence
+    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
+#endif
 
     // if we get here, we know 'hoc' points at a valid doorbell, and even if
     //  other doorbells get added concurrently, we have exclusive ownership of
@@ -536,10 +539,6 @@ namespace Realm {
 
   Doorbell *DoorbellList::extract_newest(bool prefer_spinning, bool allow_extra)
   {
-#ifdef DEBUG_REALM
-    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
-#endif
-
     uintptr_t hoc = head_or_count.load_acquire();
     while((hoc == 0) || ((hoc & 1) != 0)) {
       // list appears to be empty
@@ -557,6 +556,14 @@ namespace Realm {
         // failure, but we re-read hoc and will try again
       }
     }
+
+#ifdef DEBUG_REALM
+    // would like to guard code above as well, but a successful cmpxchg
+    //  immediately enables another thread to enter that code, and we can't
+    //  disable the mutex checker fast enough, so we wait until here to
+    //  look for illegal concurrence
+    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
+#endif
 
     // if we get here, we know 'hoc' points at a valid doorbell, and even if
     //  other doorbells get added concurrently, we have exclusive ownership of
