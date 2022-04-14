@@ -972,7 +972,8 @@ namespace Legion {
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
-        remaining_collection_guards(0), currently_active(false)
+        remaining_collection_guards(0), currently_active(false),
+        min_gc_priority(0)
     //--------------------------------------------------------------------------
     {
     }
