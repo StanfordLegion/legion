@@ -6122,6 +6122,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(on_heap);
       assert(target_instances.size() == target_views.size());
 #endif
       // If we're tracing then Record ourselves with any collective managers
@@ -6131,9 +6132,7 @@ namespace Legion {
         if (!manager->is_collective_manager())
           continue;
         CollectiveManager *collective = manager->as_collective_manager();
-        collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
         InstanceView *view = target_views[idx];
-        view->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
         collective->register_collective_analysis(view->did, this);
       }
     }
@@ -6157,6 +6156,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(on_heap);
       assert(target_instances.size() == target_views.size());
 #endif
       // If we're tracing then Record ourselves with any collective managers
@@ -6166,30 +6166,8 @@ namespace Legion {
         if (!manager->is_collective_manager())
           continue;
         CollectiveManager *collective = manager->as_collective_manager();
-        collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
         InstanceView *view = target_views[idx];
-        view->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
         collective->register_collective_analysis(view->did, this);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveCopyFillAnalysis::~CollectiveCopyFillAnalysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // Unregister ourselves with any collective instances
-      for (unsigned idx = 0; idx < target_instances.size(); idx++)
-      {
-        InstanceManager *manager = target_instances[idx].get_manager();
-        if (!manager->is_collective_manager())
-          continue;
-        CollectiveManager *collective = manager->as_collective_manager();
-        InstanceView *view = target_views[idx];
-        collective->unregister_collective_analysis(view->did, this);
-        if (collective->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
-          delete collective;
-        if (view->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
-          delete view;
       }
     }
 
@@ -7661,7 +7639,7 @@ namespace Legion {
                                      const PhysicalTraceInfo &t_info,
                                      CollectiveMapping *mapping,
                                      const bool first, const DomainPoint &p)
-      : CollectiveCopyFillAnalysis(rt, o, idx, expr, false/*on heap*/,
+      : CollectiveCopyFillAnalysis(rt, o, idx, expr, true/*on heap*/,
                                    target_insts, target_vws, source_vws,
                                    t_info, mapping, first, p,true/*exclusive*/),
         precondition(pre), target_analysis(this), release_aggregator(NULL)

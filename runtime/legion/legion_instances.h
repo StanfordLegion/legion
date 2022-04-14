@@ -306,6 +306,30 @@ namespace Legion {
         COLLECTED_GC_STATE,
       };
     public:
+      // This structure acts as a key for performing rendezvous
+      // between collective user registrations
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void)
+          : view_did(0), op_context_index(0), index(0) { }
+        RendezvousKey(DistributedID did, size_t ctx, unsigned idx)
+          : view_did(did), op_context_index(ctx), index(idx) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (view_did < rhs.view_did) return true;
+          if (view_did > rhs.view_did) return false;
+          if (op_context_index < rhs.op_context_index) return true;
+          if (op_context_index > rhs.op_context_index) return false;
+          return (index < rhs.index);
+        }
+
+      public:
+        DistributedID view_did; // uniquely names context
+        size_t op_context_index; // unique name operation in context
+        unsigned index; // uniquely name analysis for op by region req index
+      };
+    public:
       PhysicalManager(RegionTreeForest *ctx, LayoutDescription *layout, 
                       DistributedID did, AddressSpaceID owner_space, 
                       const size_t footprint, ReductionOpID redop_id, 
@@ -368,8 +392,8 @@ namespace Legion {
                                 RtEvent collect_event,
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
+                                Operation *local_collective_op,
                                 const PhysicalTraceInfo &trace_info,
-                                const bool collective_per_space,
                                 const bool symbolic) = 0;
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
@@ -661,8 +685,8 @@ namespace Legion {
                                 RtEvent collect_event,
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
+                                Operation *local_collective_op,
                                 const PhysicalTraceInfo &trace_info,
-                                const bool collective_per_space,
                                 const bool symbolic);
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
@@ -676,7 +700,8 @@ namespace Legion {
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete);
     public:
-      void process_collective_user_registration(const size_t op_ctx_index,
+      void process_collective_user_registration(const DistributedID view_did,
+                                            const size_t op_ctx_index,
                                             const unsigned index,
                                             const AddressSpaceID origin,
                                             const CollectiveMapping *mapping,
@@ -752,7 +777,7 @@ namespace Legion {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
             view(NULL), mask(NULL), expr(NULL), op_id(0), trace_info(NULL),
-            symbolic(false) { }
+            symbolic(false), local_initialized(false) { }
         // event for when local instances can be used
         ApUserEvent ready_event; 
         // remote ready events to trigger
@@ -775,8 +800,9 @@ namespace Legion {
         RtEvent collect_event;
         PhysicalTraceInfo *trace_info;
         bool symbolic;
+        bool local_initialized;
       };
-      std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     };
 
     /**
@@ -932,8 +958,8 @@ namespace Legion {
                                 RtEvent collect_event,
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
+                                Operation *local_collective_op,
                                 const PhysicalTraceInfo &trace_info,
-                                const bool collective_per_space,
                                 const bool symbolic);
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
@@ -950,9 +976,8 @@ namespace Legion {
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
       void register_collective_analysis(DistributedID view_did,
                                         CollectiveCopyFillAnalysis *analysis);
-      void unregister_collective_analysis(DistributedID view_did,
-                                          CollectiveCopyFillAnalysis *analysis);
-      RtEvent find_collective_analyses(DistributedID v_did,size_t context_index,
+      RtEvent find_collective_analyses(DistributedID view_did,
+                                       size_t context_index, unsigned index,
                      const std::vector<CollectiveCopyFillAnalysis*> *&analyses);
       void perform_collective_fill(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -1106,11 +1131,12 @@ namespace Legion {
                                 const ApEvent src_precondition,
                                 ApUserEvent src_postcondition,
                                 ApBarrier src_barrier, ShardID bar_shard);
-      void process_register_user_request(const size_t op_ctx_index,
-                                const unsigned index, const RtEvent registered,
-                                const bool collective_per_space);
-      void process_register_user_response(const size_t op_ctx_index,
-                                const unsigned index, const RtEvent registered);
+      void process_register_user_request(const DistributedID view_did,
+                                const size_t op_ctx_index, const unsigned index,
+                                const RtEvent registered);
+      void process_register_user_response(const DistributedID view_did,
+                                const size_t op_ctx_index, const unsigned index,
+                                const RtEvent registered);
       void finalize_collective_user(InstanceView *view,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -1124,6 +1150,7 @@ namespace Legion {
                                 ApUserEvent ready_event,
                                 ApEvent term_event,
                                 const PhysicalTraceInfo &trace_info,
+                                std::vector<CollectiveCopyFillAnalysis*> &ses,
                                 const bool symbolic) const;
     public:
       virtual void send_manager(AddressSpaceID target);
@@ -1181,14 +1208,18 @@ namespace Legion {
       struct UserRendezvous {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
-            view(NULL), mask(NULL), expr(NULL), op_id(0), trace_info(NULL),
-            symbolic(false) { }
+            valid_analyses(0), view(NULL), mask(NULL), expr(NULL), op_id(0),
+            trace_info(NULL), symbolic(false), local_initialized(false) { }
         // event for when local instances can be used
         ApUserEvent ready_event; 
         // all the local term events
         std::vector<ApEvent> local_term_events;
         // events from remote nodes indicating they are registered
         std::vector<RtEvent> remote_registered;
+        // the local set of analyses
+        std::vector<CollectiveCopyFillAnalysis*> analyses;
+        // event for when the analyses are all registered
+        RtUserEvent analyses_ready;
         // event to trigger when local registration is done
         RtUserEvent local_registered; 
         // event that marks when all registrations are done
@@ -1196,6 +1227,7 @@ namespace Legion {
         // Counts of remaining notficiations before registration
         unsigned remaining_local_arrivals;
         unsigned remaining_remote_arrivals;
+        unsigned valid_analyses;
         // Arguments for performing the local registration
         InstanceView *view;
         RegionUsage usage;
@@ -1205,18 +1237,9 @@ namespace Legion {
         RtEvent collect_event;
         PhysicalTraceInfo *trace_info;
         bool symbolic;
+        bool local_initialized;
       };
-      std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
-    protected:
-      struct CollectiveAnalyses {
-        std::vector<CollectiveCopyFillAnalysis*> analyses;
-        RtUserEvent pending;
-        unsigned valid_count;
-      };
-      // The distributed ID from the view for this manager provides context
-      // scoping for context indexes to prevent collisions
-      std::map<std::pair<DistributedID,size_t>,
-               CollectiveAnalyses> collective_analyses;
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     protected:
       struct AllReduceCopy {
         std::vector<CopySrcDstField> src_fields;

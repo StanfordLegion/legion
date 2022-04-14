@@ -1766,7 +1766,6 @@ namespace Legion {
                                  CollectiveMapping *collective_mapping,
                                  bool first_local, const DomainPoint &point,
                                  bool exclusive);
-      virtual ~CollectiveCopyFillAnalysis(void);
     public:
       const DomainPoint collective_point;
       const size_t context_index;

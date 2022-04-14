@@ -1176,6 +1176,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t Operation::get_collective_local_arrivals(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for derived types
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     bool Operation::finalize_pending_collective_instance(MappingCallKind call,
                                unsigned total_calls, bool succes, size_t points)
     //--------------------------------------------------------------------------
@@ -13030,10 +13039,10 @@ namespace Legion {
                                    acquire_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint no_point;
+        const DomainPoint point = get_collective_instance_point();
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances, no_point);
+                                              restricted_instances, point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         completion_event);
@@ -13065,7 +13074,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       if (!request_early_complete(acquire_complete))
         complete_execution(Runtime::protect_event(acquire_complete));
       else
@@ -13959,10 +13968,10 @@ namespace Legion {
                             release_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint no_point;
+        const DomainPoint point = get_collective_instance_point();
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances, no_point);
+                                              restricted_instances, point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         completion_event);
@@ -13994,7 +14003,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       if (!request_early_complete(release_complete))
         complete_execution(Runtime::protect_event(release_complete));
       else
@@ -19570,9 +19579,7 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info, 
                                        init_precondition, true_guard,
-                                       trace_info, map_applied_conditions,
-                                       get_collective_mapping(),
-                                       is_collective_first_local_shard());
+                                       trace_info, map_applied_conditions);
         if (runtime->legion_spy_enabled)
         {
 #ifdef LEGION_SPY
@@ -19657,9 +19664,7 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info,
                                        init_precondition, true_guard,
-                                       trace_info, map_applied_conditions,
-                                       get_collective_mapping(),
-                                       is_collective_first_local_shard());
+                                       trace_info, map_applied_conditions);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
                                       completion_event);
@@ -21023,7 +21028,6 @@ namespace Legion {
                                                           completion_event,
                                                         version_info,
                                                         trace_info,
-                                                        NULL/*not collective*/,
                                                         map_applied_conditions,
                                                         restricted);
         // Signal to any other point tasks that we performed the attach for them
@@ -21037,9 +21041,10 @@ namespace Legion {
       region.impl->set_reference(external_instances[0], dummy_point);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
       if (!request_early_complete(attach_event))
         complete_execution(Runtime::protect_event(attach_event));
       else
@@ -22557,9 +22562,10 @@ namespace Legion {
       if (detached_event.exists())
         map_applied_conditions.insert(detached_event);
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping(); 
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
       if (!request_early_complete(detach_event))
         complete_execution(Runtime::protect_event(detach_event));
       else

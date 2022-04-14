@@ -3357,33 +3357,33 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndividualManager::register_collective_user(InstanceView *view, 
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            IndexSpaceNode *expr,
-                                            const UniqueID op_id,
-                                            const size_t op_ctx_index,
-                                            const unsigned index,
-                                            ApEvent term_event,
-                                            RtEvent collect_event,
-                                            std::set<RtEvent> &applied_events,
-                                            const CollectiveMapping *mapping,
-                                            const PhysicalTraceInfo &trace_info,
-                                            const bool collective_per_space,
-                                            const bool symbolic)
+                                         const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *expr,
+                                         const UniqueID op_id,
+                                         const size_t op_ctx_index,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         RtEvent collect_event,
+                                         std::set<RtEvent> &applied_events,
+                                         const CollectiveMapping *mapping,
+                                         Operation *local_collective_op,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const bool symbolic)
     //--------------------------------------------------------------------------
     {
       // Somewhat strangely we can still get calls to this method in cases
       // with control replication for things like acquire/release on individual
       // managers that represent file instances. In this case we'll just have
       // a single node perform the view analysis and then we broadcast out the
-      // resulting event out to all the participants. This should always happen
-      // in the mode of collective_per_space meaning we're only going to see 
-      // one call to register_collective_user for each space in the mapping.
+      // resulting event out to all the participants. 
 #ifdef DEBUG_LEGION
-      assert(collective_per_space);
       assert(mapping != NULL);
       assert(mapping->contains(local_space));
+      assert(local_collective_op != NULL);
 #endif
+      const size_t local_collective_arrivals =
+        local_collective_op->get_collective_local_arrivals();
       // First we need to decide which node is going to be the owner node
       // We'll prefer it to be the logical view owner since that is where
       // the event will be produced, otherwise, we'll just pick whichever
@@ -3393,32 +3393,33 @@ namespace Legion {
       ApUserEvent result;
       RtUserEvent registered;
       std::vector<ApEvent> term_events;
-      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      const RendezvousKey key(view->did, op_ctx_index, index);
       {
         AutoLock i_lock(inst_lock);
         // Check to see if we're the first one to arrive on this node
-        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
-          finder = rendezvous_users.find(tag);
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
         if (finder == rendezvous_users.end())
         {
           // If we are then make the record for knowing when we've seen
           // all the expected arrivals
           finder = rendezvous_users.insert(
-              std::make_pair(tag,UserRendezvous())).first; 
+              std::make_pair(key,UserRendezvous())).first; 
           UserRendezvous &rendezvous = finder->second;
-          rendezvous.remaining_local_arrivals = 0;
+          rendezvous.remaining_local_arrivals = local_collective_arrivals;
+          rendezvous.local_initialized = true;
           rendezvous.remaining_remote_arrivals =
             mapping->count_children(origin, local_space);
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.registered = Runtime::create_rt_user_event();
         }
-        else
+        else if (!finder->second.local_initialized)
         {
 #ifdef DEBUG_LEGION
-          assert(finder->second.remaining_local_arrivals == 1);
           assert(!finder->second.ready_event.exists());
 #endif
-          finder->second.remaining_local_arrivals = 0;
+          // First local arrival
+          finder->second.remaining_local_arrivals = local_collective_arrivals;
           finder->second.ready_event =
             Runtime::create_ap_user_event(&trace_info);
           if (!finder->second.remote_ready_events.empty())
@@ -3439,30 +3440,42 @@ namespace Legion {
         applied_events.insert(registered);
         if (term_event.exists())
           finder->second.term_events.push_back(term_event);
-        // If we're still expecting remote arrivals then nothing to do yet
-        if (finder->second.remaining_remote_arrivals > 0)
+#ifdef DEBUG_LEGION
+        assert(finder->second.local_initialized);
+        assert(finder->second.remaining_local_arrivals > 0);
+#endif
+        // If we're still expecting arrivals then nothing to do yet
+        if ((--finder->second.remaining_local_arrivals > 0) ||
+            (finder->second.remaining_remote_arrivals > 0))
         {
           // We need to save the trace info no matter what
-#ifdef DEBUG_LEGION
-          assert(finder->second.trace_info = NULL);
-#endif
-          finder->second.trace_info = new PhysicalTraceInfo(trace_info);
-          if (local_space == origin)
+          if (finder->second.trace_info == NULL)
           {
-            // Save our state for performing the registration later
-            finder->second.view = view;
-            finder->second.usage = usage;
-            finder->second.mask = new FieldMask(user_mask);
-            finder->second.expr = expr;
-            WrapperReferenceMutator mutator(applied_events);
-            expr->add_nested_expression_reference(did, &mutator);
-            finder->second.op_id = op_id;
-            finder->second.collect_event = collect_event;
-            finder->second.symbolic = symbolic;
+            finder->second.trace_info = new PhysicalTraceInfo(trace_info);
+            if (local_space == origin)
+            {
+              // Save our state for performing the registration later
+              finder->second.view = view;
+              finder->second.usage = usage;
+              finder->second.mask = new FieldMask(user_mask);
+              finder->second.expr = expr;
+              WrapperReferenceMutator mutator(applied_events);
+              expr->add_nested_expression_reference(did, &mutator);
+              finder->second.op_id = op_id;
+              finder->second.collect_event = collect_event;
+              finder->second.symbolic = symbolic;
+            }
+            else
+            {
+              finder->second.applied = Runtime::create_rt_user_event();
+              applied_events.insert(finder->second.applied);
+            }
           }
-          else
+          else if (local_space != origin)
           {
-            finder->second.applied = Runtime::create_rt_user_event();
+#ifdef DEBUG_LEGION
+            assert(finder->second.applied.exists());
+#endif
             applied_events.insert(finder->second.applied);
           }
           return result;
@@ -3484,6 +3497,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(view->did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
           rez.serialize(origin);
@@ -3500,8 +3514,8 @@ namespace Legion {
         std::set<RtEvent> registered_events; 
         const ApEvent ready = view->register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, term_event, collect_event, registered_events,
-            NULL/*collective mapping*/, trace_info, runtime->address_space,
-            false/*no-op*/, symbolic);      
+            NULL/*collective mapping*/, 0/*no local arrivals*/, trace_info,
+            runtime->address_space, symbolic);      
         Runtime::trigger_event(&trace_info, result, ready);
         if (!registered_events.empty())
           Runtime::trigger_event(registered,
@@ -3514,6 +3528,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::process_collective_user_registration(
+                                            const DistributedID view_did,
                                             const size_t op_ctx_index,
                                             const unsigned index,
                                             const AddressSpaceID origin,
@@ -3525,20 +3540,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       UserRendezvous to_perform;
-      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      const RendezvousKey key(view_did, op_ctx_index, index);
       {
         AutoLock i_lock(inst_lock);
         // Check to see if we're the first one to arrive on this node
-        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
-          finder = rendezvous_users.find(tag);
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
         if (finder == rendezvous_users.end())
         {
           // If we are then make the record for knowing when we've seen
           // all the expected arrivals
           finder = rendezvous_users.insert(
-              std::make_pair(tag,UserRendezvous())).first; 
+              std::make_pair(key,UserRendezvous())).first; 
           UserRendezvous &rendezvous = finder->second;
-          rendezvous.remaining_local_arrivals = 1;
+          rendezvous.local_initialized = false;
           rendezvous.remaining_remote_arrivals =
             mapping->count_children(origin, local_space);
           // Don't make the ready event, that needs to be done with a
@@ -3559,6 +3574,7 @@ namespace Legion {
 #endif
         // Check to see if we've done all the arrivals
         if ((--finder->second.remaining_remote_arrivals > 0) ||
+            !finder->second.local_initialized ||
             (finder->second.remaining_local_arrivals > 0))
           return;
 #ifdef DEBUG_LEGION
@@ -3586,6 +3602,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(view_did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
           rez.serialize(origin);
@@ -3611,8 +3628,8 @@ namespace Legion {
         const ApEvent ready = to_perform.view->register_user(to_perform.usage,
             *to_perform.mask, to_perform.expr, to_perform.op_id, op_ctx_index,
             index, term_event, to_perform.collect_event, registered_events,
-            NULL/*mapping*/, *to_perform.trace_info, runtime->address_space,
-            false/*no-op*/, to_perform.symbolic);
+            NULL/*mapping*/, 0/*no local arrivals*/, *to_perform.trace_info,
+            runtime->address_space, to_perform.symbolic);
         Runtime::trigger_event(to_perform.trace_info, 
                       to_perform.ready_event, ready);
         if (!registered_events.empty())
@@ -3638,6 +3655,8 @@ namespace Legion {
       RtEvent ready;
       IndividualManager *manager = static_cast<IndividualManager*>(
               runtime->find_or_request_instance_manager(did, ready));
+      DistributedID view_did;
+      derez.deserialize(view_did);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       unsigned index;
@@ -3663,8 +3682,8 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 
-      manager->process_collective_user_registration(op_ctx_index, index, origin,
-          mapping, trace_info, term_event, ready_event, registered_event);
+      manager->process_collective_user_registration(view_did,op_ctx_index,index,
+        origin, mapping, trace_info, term_event, ready_event, registered_event);
       if (mapping->remove_reference())
         delete mapping;
     }
@@ -5282,7 +5301,7 @@ namespace Legion {
         // then we should be able to find our local analyses to use for 
         // performing operations
         analyses_ready = find_collective_analyses(dst_view->did,
-                              op_context_index, local_analyses);
+                          op_context_index, index, local_analyses);
 #ifdef DEBUG_LEGION
         assert(local_analyses != NULL);
 #endif
@@ -6239,7 +6258,7 @@ namespace Legion {
         // then we should be able to find our local analyses to use for 
         // performing operations
         analyses_ready = find_collective_analyses(dst_view->did,
-                                  op_ctx_index, local_analyses);
+                            op_ctx_index, index, local_analyses);
 #ifdef DEBUG_LEGION
         assert(local_analyses != NULL);
 #endif
@@ -7509,7 +7528,7 @@ namespace Legion {
         // then we should be able to find our local analyses to use for 
         // performing operations
         analyses_ready = find_collective_analyses(dst_view->did,
-                                  op_ctx_index, local_analyses);
+                            op_ctx_index, index, local_analyses);
 #ifdef DEBUG_LEGION
         assert(local_analyses != NULL);
 #endif
@@ -8419,19 +8438,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveManager::register_collective_user(InstanceView *view, 
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            IndexSpaceNode *expr,
-                                            const UniqueID op_id,
-                                            const size_t op_ctx_index,
-                                            const unsigned index,
-                                            ApEvent term_event,
-                                            RtEvent collect_event,
-                                            std::set<RtEvent> &applied_events,
-                                            const CollectiveMapping *mapping,
-                                            const PhysicalTraceInfo &trace_info,
-                                            const bool collective_per_space,
-                                            const bool symbolic)
+                                         const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *expr,
+                                         const UniqueID op_id,
+                                         const size_t op_ctx_index,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         RtEvent collect_event,
+                                         std::set<RtEvent> &applied_events,
+                                         const CollectiveMapping *mapping,
+                                         Operation *local_collective_op,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8471,34 +8490,34 @@ namespace Legion {
       RtUserEvent local_registered, global_registered;
       std::vector<RtEvent> remote_registered;
       std::vector<ApEvent> local_term_events;
-      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      std::vector<CollectiveCopyFillAnalysis*> analyses;
+      const RendezvousKey key(view->did, op_ctx_index, index);
       {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(!instances.empty());
 #endif
         // Check to see if we're the first one to arrive on this node
-        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
-          finder = rendezvous_users.find(tag);
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
         if (finder == rendezvous_users.end())
         {
           // If we are then make the record for knowing when we've seen
           // all the expected arrivals
           finder = rendezvous_users.insert(
-              std::make_pair(tag,UserRendezvous())).first; 
+              std::make_pair(key,UserRendezvous())).first; 
           UserRendezvous &rendezvous = finder->second;
           // Count how many expected arrivals we have
           // If we're doing collective per space 
-          rendezvous.remaining_local_arrivals = 
-            (collective_per_space ? 1 : instances.size());
+          rendezvous.remaining_local_arrivals = instances.size();
+          rendezvous.local_initialized = true;
           rendezvous.remaining_remote_arrivals =
             mapping->count_children(owner_space, local_space);
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.local_registered = Runtime::create_rt_user_event();
           rendezvous.global_registered = Runtime::create_rt_user_event();
         }
-        else if (finder->second.remaining_local_arrivals == 
-                  (collective_per_space ? 1 : instances.size()))
+        else if (!finder->second.local_initialized)
         {
           // First local arrival, but rendezvous was made by a remote
           // arrival so we need to make the ready event
@@ -8507,6 +8526,8 @@ namespace Legion {
 #endif
           finder->second.ready_event =
             Runtime::create_ap_user_event(&trace_info);
+          finder->second.remaining_local_arrivals = instances.size();
+          finder->second.local_initialized = true;
         }
         if (term_event.exists())
           finder->second.local_term_events.push_back(term_event);
@@ -8515,6 +8536,7 @@ namespace Legion {
         // The result will be the ready event
         result = finder->second.ready_event;
 #ifdef DEBUG_LEGION
+        assert(finder->second.local_initialized);
         assert(finder->second.remaining_local_arrivals > 0);
 #endif
         // See if we've seen all the arrivals
@@ -8556,10 +8578,10 @@ namespace Legion {
               {
                 RezCheck z(rez);
                 rez.serialize(did);
+                rez.serialize(view->did);
                 rez.serialize(op_ctx_index);
                 rez.serialize(index);
                 rez.serialize(registered);
-                rez.serialize<bool>(collective_per_space);
               }
               runtime->send_collective_register_user_request(parent, rez);
               return result;
@@ -8572,6 +8594,7 @@ namespace Legion {
               local_registered = finder->second.local_registered;
               global_registered = finder->second.global_registered;
               local_term_events.swap(finder->second.local_term_events);
+              analyses.swap(finder->second.analyses);
               // We can erase this from the data structure now
               rendezvous_users.erase(finder);
             }
@@ -8589,8 +8612,8 @@ namespace Legion {
       if (!local_term_events.empty())
         local_term = Runtime::merge_events(&trace_info, local_term_events);
       finalize_collective_user(view, usage, user_mask, expr, op_id,
-          op_ctx_index, index, collect_event, local_registered,
-          global_registered, result, local_term, trace_info, symbolic);
+         op_ctx_index, index, collect_event, local_registered,
+         global_registered, result, local_term, trace_info, analyses, symbolic);
       RtEvent all_registered = local_registered;
       if (!remote_registered.empty())
       {
@@ -8603,30 +8626,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::process_register_user_request(
-                            const size_t op_ctx_index, const unsigned index,
-                            RtEvent registered, const bool collective_per_space)
+                        const DistributedID view_did, const size_t op_ctx_index,
+                        const unsigned index, RtEvent registered)
     //--------------------------------------------------------------------------
     {
       UserRendezvous to_perform;
-      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      const RendezvousKey key(view_did, op_ctx_index, index);
       {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(!instances.empty());
 #endif
         // Check to see if we're the first one to arrive on this node
-        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
-          finder = rendezvous_users.find(tag);
+        std::map<RendezvousKey,UserRendezvous>::iterator
+          finder = rendezvous_users.find(key);
         if (finder == rendezvous_users.end())
         {
           // If we are then make the record for knowing when we've seen
           // all the expected arrivals
           finder = rendezvous_users.insert(
-              std::make_pair(tag,UserRendezvous())).first; 
+              std::make_pair(key,UserRendezvous())).first; 
           UserRendezvous &rendezvous = finder->second;
-          // Count how many expected arrivals we have
-          rendezvous.remaining_local_arrivals = 
-            (collective_per_space ? 1 : instances.size());
+          rendezvous.local_initialized = false;
           rendezvous.remaining_remote_arrivals =
             collective_mapping->count_children(owner_space, local_space);
           rendezvous.local_registered = Runtime::create_rt_user_event();
@@ -8638,6 +8659,7 @@ namespace Legion {
 #endif
         // If we're not the last arrival then we're done
         if ((--finder->second.remaining_remote_arrivals > 0) ||
+            !finder->second.local_initialized ||
             (finder->second.remaining_local_arrivals > 0))
           return;
         if (!is_owner())
@@ -8656,10 +8678,10 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
+            rez.serialize(view_did);
             rez.serialize(op_ctx_index);
             rez.serialize(index);
             rez.serialize(registered);
-            rez.serialize<bool>(collective_per_space);
           }
           runtime->send_collective_register_user_request(parent, rez);
           return;
@@ -8682,7 +8704,7 @@ namespace Legion {
           op_ctx_index, index, to_perform.collect_event,
           to_perform.local_registered, to_perform.global_registered,
           to_perform.ready_event, local_term, *(to_perform.trace_info),
-          to_perform.symbolic);
+          to_perform.analyses, to_perform.symbolic);
       RtEvent all_registered = to_perform.local_registered;
       if (!to_perform.remote_registered.empty())
       {
@@ -8707,39 +8729,40 @@ namespace Legion {
       RtEvent ready;
       CollectiveManager *manager = static_cast<CollectiveManager*>(
               runtime->find_or_request_instance_manager(did, ready));
+      DistributedID view_did;
+      derez.deserialize(view_did);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
       RtEvent registered;
       derez.deserialize(registered);
-      bool collective_per_space;
-      derez.deserialize(collective_per_space);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      manager->process_register_user_request(op_ctx_index, index, 
-                                             registered, collective_per_space);
+      manager->process_register_user_request(view_did, op_ctx_index, 
+                                             index, registered);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::process_register_user_response(
-            const size_t op_ctx_index, const unsigned index, RtEvent registered)
+                        const DistributedID view_did, const size_t op_ctx_index,
+                        const unsigned index, RtEvent registered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
 #endif
       UserRendezvous to_perform;
-      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      const RendezvousKey key(view_did, op_ctx_index, index);
       {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(!instances.empty());
 #endif
         // Check to see if we're the first one to arrive on this node
-        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
-          finder = rendezvous_users.find(tag);
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != rendezvous_users.end());
 #endif
@@ -8757,7 +8780,7 @@ namespace Legion {
           op_ctx_index, index, to_perform.collect_event,
           to_perform.local_registered, to_perform.global_registered,
           to_perform.ready_event, local_term, *(to_perform.trace_info),
-          to_perform.symbolic);
+          to_perform.analyses, to_perform.symbolic);
       Runtime::trigger_event(to_perform.global_registered, registered);
       if (to_perform.expr->remove_nested_expression_reference(did))
         delete to_perform.expr;
@@ -8776,6 +8799,8 @@ namespace Legion {
       RtEvent ready;
       CollectiveManager *manager = static_cast<CollectiveManager*>(
               runtime->find_or_request_instance_manager(did, ready));
+      DistributedID view_did;
+      derez.deserialize(view_did);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       unsigned index;
@@ -8785,7 +8810,8 @@ namespace Legion {
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      manager->process_register_user_response(op_ctx_index, index, registered);
+      manager->process_register_user_response(view_did, op_ctx_index,
+                                              index, registered);
     }
 
     //--------------------------------------------------------------------------
@@ -8825,117 +8851,89 @@ namespace Legion {
       }
       if (index < 0)
         return;
-      const std::pair<DistributedID,size_t> key(view_did,
-                                analysis->context_index);
+      const RendezvousKey key(view_did,analysis->context_index,analysis->index);
       AutoLock i_lock(inst_lock);
-      std::map<std::pair<DistributedID,size_t>,CollectiveAnalyses>::iterator
-        finder = collective_analyses.find(key);
-      if (finder == collective_analyses.end())
+      std::map<RendezvousKey,UserRendezvous>::iterator finder =
+        rendezvous_users.find(key);
+      if (finder == rendezvous_users.end())
       {
-        CollectiveAnalyses &entry = collective_analyses[key];
-        entry.analyses.resize(instances.size(), NULL);
-        entry.analyses[index] = analysis;
-        entry.valid_count = 1;
+        finder = rendezvous_users.insert(
+            std::make_pair(key,UserRendezvous())).first; 
+        UserRendezvous &rendezvous = finder->second;
+        // Count how many expected arrivals we have
+        rendezvous.local_initialized = false;
+        rendezvous.remaining_remote_arrivals =
+          collective_mapping->count_children(owner_space, local_space);
+        rendezvous.local_registered = Runtime::create_rt_user_event();
+        rendezvous.global_registered = Runtime::create_rt_user_event();
       }
-      else
-      {
+      // Perform the registration
+      if (finder->second.analyses.empty())
+        finder->second.analyses.resize(instances.size(), NULL);
 #ifdef DEBUG_LEGION
-        assert(finder->second.analyses[index] == NULL);
-        assert(finder->second.valid_count < instances.size());
+      assert(unsigned(index) < finder->second.analyses.size());
+      assert(finder->second.analyses[index] == NULL);
+      assert(finder->second.valid_analyses < instances.size());
 #endif
-        finder->second.analyses[index] = analysis;
-        if ((++finder->second.valid_count == instances.size()) &&
-            finder->second.pending.exists())
-          Runtime::trigger_event(finder->second.pending);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::unregister_collective_analysis(
-                   DistributedID view_did, CollectiveCopyFillAnalysis *analysis)
-    //--------------------------------------------------------------------------
-    {
-      int index = -1;
-      // Figure out which index we are, if we are not local we can ignore it
-      for (unsigned idx = 0; idx < instance_points.size(); idx++)
-      {
-        if (instance_points[idx] != analysis->collective_point)
-          continue;
-        index = idx;
-        break;
-      }
-      if (index < 0)
-        return;
-      const std::pair<DistributedID,size_t> key(view_did,
-                                analysis->context_index);
-      AutoLock i_lock(inst_lock);
-      std::map<std::pair<DistributedID,size_t>,CollectiveAnalyses>::iterator
-        finder = collective_analyses.find(key);
-#ifdef DEBUG_LEGION
-      assert(finder != collective_analyses.end());
-      assert(finder->second.valid_count > 0);
-      assert(finder->second.analyses[index] == analysis);
-      finder->second.analyses[index] = NULL;
-#endif
-      if ((--finder->second.valid_count) == 0)
-        collective_analyses.erase(finder);
+      finder->second.analyses[index] = analysis;
+      analysis->add_reference();
+      if ((++finder->second.valid_analyses == instances.size()) &&
+          finder->second.analyses_ready.exists())
+        Runtime::trigger_event(finder->second.analyses_ready);
     }
 
     //--------------------------------------------------------------------------
     RtEvent CollectiveManager::find_collective_analyses(DistributedID view_did,
-      size_t ctx_idx, const std::vector<CollectiveCopyFillAnalysis*> *&analyses)
+                      size_t context_index, unsigned index, 
+                      const std::vector<CollectiveCopyFillAnalysis*> *&analyses)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!instances.empty());
       assert(collective_mapping != NULL);
 #endif
-      const std::pair<DistributedID,size_t> key(view_did, ctx_idx);
+      const RendezvousKey key(view_did, context_index, index);
       AutoLock i_lock(inst_lock);
-      std::map<std::pair<DistributedID,size_t>,CollectiveAnalyses>::iterator
-        finder = collective_analyses.find(key);
-      if (finder == collective_analyses.end())
+      std::map<RendezvousKey,UserRendezvous>::iterator finder =
+        rendezvous_users.find(key);
+      if (finder == rendezvous_users.end())
       {
-        CollectiveAnalyses &entry = collective_analyses[key];
-        entry.analyses.resize(instances.size(), NULL);
-        entry.valid_count = 0;
-        entry.pending = Runtime::create_rt_user_event();
-        analyses = &entry.analyses;
-        return entry.pending;  
+        finder = rendezvous_users.insert(
+            std::make_pair(key,UserRendezvous())).first; 
+        UserRendezvous &rendezvous = finder->second;
+        rendezvous.local_initialized = false;
+        rendezvous.remaining_remote_arrivals =
+          collective_mapping->count_children(owner_space, local_space);
+        rendezvous.local_registered = Runtime::create_rt_user_event();
+        rendezvous.global_registered = Runtime::create_rt_user_event();
       }
-      else
-      {
+      analyses = &finder->second.analyses;
 #ifdef DEBUG_LEGION
-        assert(finder->second.valid_count <= instances.size());
+      assert(finder->second.valid_analyses <= instances.size());
 #endif
-        analyses = &finder->second.analyses;
-        if (finder->second.valid_count < instances.size())
-        {
-          if (!finder->second.pending.exists())
-            finder->second.pending = Runtime::create_rt_user_event();
-          return finder->second.pending;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
-      }
+      if ((finder->second.valid_analyses < instances.size()) &&
+          !finder->second.analyses_ready.exists())
+        finder->second.analyses_ready = Runtime::create_rt_user_event();
+      return finder->second.analyses_ready;
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::finalize_collective_user(
-                                          InstanceView *view, 
-                                          const RegionUsage &usage,
-                                          const FieldMask &user_mask,
-                                          IndexSpaceNode *expr,
-                                          const UniqueID op_id,
-                                          const size_t op_ctx_index,
-                                          const unsigned index,
-                                          RtEvent collect_event,
-                                          RtUserEvent local_registered,
-                                          RtEvent global_registered,
-                                          ApUserEvent ready_event,
-                                          ApEvent term_event,
-                                          const PhysicalTraceInfo &trace_info,
-                                          const bool symbolic) const
+                            InstanceView *view, 
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask,
+                            IndexSpaceNode *expr,
+                            const UniqueID op_id,
+                            const size_t op_ctx_index,
+                            const unsigned index,
+                            RtEvent collect_event,
+                            RtUserEvent local_registered,
+                            RtEvent global_registered,
+                            ApUserEvent ready_event,
+                            ApEvent term_event,
+                            const PhysicalTraceInfo &trace_info,
+                            std::vector<CollectiveCopyFillAnalysis*> &analyses,
+                            const bool symbolic) const
     //--------------------------------------------------------------------------
     {
       // First send out any messages to the children so they can start
@@ -8948,6 +8946,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(view->did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
           rez.serialize(global_registered);
@@ -8960,14 +8959,19 @@ namespace Legion {
       std::set<RtEvent> registered_events;
       const ApEvent ready = view->register_user(usage, user_mask, expr, op_id,
           op_ctx_index, index, term_event, collect_event, registered_events,
-          NULL/*collective mapping*/, trace_info, runtime->address_space,
-          false/*no-op*/, symbolic);
+          NULL/*collective mapping*/, 0/*no local arrivals*/, trace_info,
+          runtime->address_space, symbolic);
       Runtime::trigger_event(&trace_info, ready_event, ready);
       if (!registered_events.empty())
         Runtime::trigger_event(local_registered,
             Runtime::merge_events(registered_events));
       else
         Runtime::trigger_event(local_registered);
+      // Remove any references on the analyses
+      for (std::vector<CollectiveCopyFillAnalysis*>::const_iterator it =
+            analyses.begin(); it != analyses.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------

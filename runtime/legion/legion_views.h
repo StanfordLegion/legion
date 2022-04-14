@@ -146,9 +146,9 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     CollectiveMapping *collective_mapping,
+                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    const bool collective_per_space,
                                     const bool symbolic = false) = 0;
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,              
@@ -568,9 +568,9 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     CollectiveMapping *collective_mapping,
+                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    const bool collective_per_space,
                                     const bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
@@ -740,9 +740,9 @@ namespace Legion {
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     CollectiveMapping *collective_mapping,
+                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    const bool collective_per_space,
                                     const bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,

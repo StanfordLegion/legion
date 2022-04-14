@@ -661,9 +661,7 @@ namespace Legion {
                           VersionInfo &version_info, ApEvent precondition,
                           PredEvent true_guard,
                           const PhysicalTraceInfo &trace_info,
-                          std::set<RtEvent> &map_applied_events,
-                          CollectiveMapping *collective_mapping,
-                          const bool collective_first_local);
+                          std::set<RtEvent> &map_applied_events);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
@@ -673,7 +671,6 @@ namespace Legion {
                               const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
-                              CollectiveMapping *collective_mapping,
                               std::set<RtEvent> &map_applied_events,
                               const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
@@ -681,7 +678,6 @@ namespace Legion {
                               InstanceView *local_view,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
-                              CollectiveMapping *collective_mapping,
                               LogicalView *registration_view = NULL);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,

@@ -2257,6 +2257,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual size_t get_collective_local_arrivals(void) const;
     public:
       virtual PhysicalManager* create_manager(RegionNode *node,
                                    const std::vector<FieldID> &field_set,
@@ -2264,6 +2265,10 @@ namespace Legion {
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<CustomSerdezID> &serez,
                                               const FieldMask &external_mask);
+      virtual CollectiveMapping* get_collective_mapping(void);
+      virtual bool is_collective_first_local_shard(void) const
+        { return is_first_local_shard; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
     protected:
       IndexSpace shard_space;
       IndexSpace point_space;
@@ -2340,12 +2345,16 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual void select_sources(const unsigned index,
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual size_t get_collective_local_arrivals(void) const;
+      virtual CollectiveMapping* get_collective_mapping(void);
+      virtual bool is_collective_first_local_shard(void) const
+        { return is_first_local_shard; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
     public:
       // Help for unordered detachments
       void record_unordered_kind(
@@ -2399,12 +2408,13 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
       virtual bool is_collective_first_local_shard(void) const 
         { return is_first_local_shard; }
+      virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual size_t get_collective_local_arrivals(void) const;
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2427,12 +2437,13 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual size_t get_collective_local_arrivals(void) const;
       virtual bool is_collective_first_local_shard(void) const 
         { return is_first_local_shard; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     public:
       virtual void activate(void);
@@ -2767,6 +2778,8 @@ namespace Legion {
         { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
         { return local_shards[0]->get_shard_execution_context(); }
+      inline size_t local_shard_count(void) const
+        { return local_shards.size(); }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);

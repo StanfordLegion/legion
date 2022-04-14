@@ -486,6 +486,7 @@ namespace Legion {
       // Collective instance support
       virtual bool supports_collective_instances(void) const { return false; }
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual size_t get_collective_local_arrivals(void) const;
       virtual RtEvent acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   Memory target);
@@ -2424,6 +2425,9 @@ namespace Legion {
       // These are helper methods for ReplAcquireOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
       virtual bool is_collective_first_local_shard(void) const { return true; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual DomainPoint get_collective_instance_point(void) const 
+        { return DomainPoint(); }
     protected:
       void activate_acquire(void);
       void deactivate_acquire(void);
@@ -2543,7 +2547,10 @@ namespace Legion {
     public:
       // These are helper methods for ReplReleaseOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
-      virtual bool is_collective_first_local_shard(void) const { return false; }
+      virtual bool is_collective_first_local_shard(void) const { return true; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual DomainPoint get_collective_instance_point(void) const 
+        { return DomainPoint(); }
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     protected:
       void activate_release(void);
@@ -3792,7 +3799,7 @@ namespace Legion {
     public:
       // These are helper methods for ReplFillOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
-      virtual bool is_collective_first_local_shard(void) const { return false; }
+      virtual bool is_collective_first_local_shard(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
@@ -3994,6 +4001,11 @@ namespace Legion {
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<CustomSerdezID> &serez,
                                               const FieldMask &external_mask);
+      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual bool is_collective_first_local_shard(void) const { return true; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual DomainPoint get_collective_instance_point(void) const 
+        { return DomainPoint(); }
     protected:
       void activate_attach_op(void);
       void deactivate_attach_op(void);
@@ -4156,6 +4168,9 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual bool is_collective_first_local_shard(void) const { return true; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       void activate_detach_op(void);
       void deactivate_detach_op(void);

@@ -202,7 +202,8 @@ namespace Legion {
                                              term_event, collect_event, 
                                              applied_events, 
                                              NULL/*no collective mapping*/,
-                                             trace_info, source,false/*no-op*/);
+                                             NULL/*local collective op*/,
+                                             trace_info, source);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
       if (!applied_events.empty())
@@ -2338,19 +2339,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent MaterializedView::register_user(const RegionUsage &usage,
-                                          const FieldMask &user_mask,
-                                          IndexSpaceNode *user_expr,
-                                          const UniqueID op_id,
-                                          const size_t op_ctx_index,
-                                          const unsigned index,
-                                          ApEvent term_event,
-                                          RtEvent collect_event,
-                                          std::set<RtEvent> &applied_events,
-                                          CollectiveMapping *collective_mapping,
-                                          const PhysicalTraceInfo &trace_info,
-                                          const AddressSpaceID source,
-                                          const bool collective_per_space,
-                                          const bool symbolic /*=false*/)
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *user_expr,
+                                         const UniqueID op_id,
+                                         const size_t op_ctx_index,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         RtEvent collect_event,
+                                         std::set<RtEvent> &applied_events,
+                                         CollectiveMapping *collective_mapping,
+                                         Operation *local_collective_op,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const AddressSpaceID source,
+                                         const bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // Quick test for empty index space expressions
@@ -2362,8 +2363,8 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info,
-            collective_per_space, symbolic);
+            applied_events, collective_mapping, local_collective_op,
+            trace_info, symbolic);
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
@@ -4173,9 +4174,9 @@ namespace Legion {
                                          RtEvent collect_event,
                                          std::set<RtEvent> &applied_events,
                                          CollectiveMapping *collective_mapping,
+                                         Operation *local_collective_op,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
-                                         const bool collective_per_space,
                                          const bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -4191,8 +4192,8 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info,
-            collective_per_space, symbolic);
+            applied_events, collective_mapping, local_collective_op,
+            trace_info, symbolic);
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION

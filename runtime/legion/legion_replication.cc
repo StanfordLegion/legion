@@ -3133,41 +3133,18 @@ namespace Legion {
 #endif
       // Signal that all of our mapping dependences are satisfied
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      // Only the first local shard on each node should actually go through
-      // and do the physical analysis for satisfying the collective mapping
-      if (!is_first_local_shard)
-      {
-        // Make sure we register ourselves for tracing if we are doing that
-        const PhysicalTraceInfo trace_info(this, 0/*index*/,true/*initialize*/);
-#ifdef LEGION_SPY
-        // Still have to do this for legion spy
-        LegionSpy::log_operation_events(unique_op_id, 
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-        // Arrive on both generations of the barrier since we're using them
-        Runtime::advance_barrier(collective_map_barrier);
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-        complete_mapping(collective_map_barrier);
-#ifdef DEBUG_LEGION
-        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-#endif
-        complete_execution();
-      }
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
+      if (!collective_map_barrier.has_triggered())
+        preconditions.insert(collective_map_barrier);
+      Runtime::advance_barrier(collective_map_barrier);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-      {
-        std::set<RtEvent> preconditions;
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     version_info,
-                                                     preconditions);
-        if (!collective_map_barrier.has_triggered())
-          preconditions.insert(collective_map_barrier);
-        Runtime::advance_barrier(collective_map_barrier);
-        if (!preconditions.empty())
-          enqueue_ready_operation(Runtime::merge_events(preconditions));
-        else
-          enqueue_ready_operation();
-      }
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7684,12 +7661,10 @@ namespace Legion {
 #endif
       // Signal that all our mapping dependences are met
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      // Only the first local shard will need the equivalence sets
-      if (is_first_local_shard)
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     version_info,
-                                                     preconditions);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -7703,37 +7678,11 @@ namespace Legion {
     void ReplAttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      ShardManager *shard_manager = repl_ctx->shard_manager;
-      InstanceRef external_instance;
-      switch (resource)
-      {
-        case LEGION_EXTERNAL_POSIX_FILE:
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement, 
-                                              requirement.instance_fields);
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement,
-                        layout_constraint_set.field_constraint.field_set);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      // Create the external instance
+      create_external_instance();
       // Register this instance with the memory manager
       PhysicalManager *external_manager = 
-        external_instance.get_physical_manager();
+        external_instances[0].get_physical_manager();
       if (external_manager->is_collective_manager())
       {
         if (is_first_local_shard)
@@ -7754,57 +7703,19 @@ namespace Legion {
       // Make sure the attaches are done across all shards before continuing
       if (!resource_barrier.has_triggered())
         resource_barrier.wait();
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-      ApEvent attach_event;
-      if (is_first_local_shard)
-      {
-        InstanceSet external(1);
-        external[0] = external_instance;
-        InnerContext *context = find_physical_context(0/*index*/);
-        CollectiveMapping *mapping = &shard_manager->get_collective_mapping();
-        std::vector<InstanceView*> external_views;
-        context->convert_target_views(external, external_views, mapping);
+      // Now perform the base call
+      AttachOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplAttachOp::finalize_complete_mapping(RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-        assert(external_views.size() == 1);
+      assert(collective_map_barrier.exists());
 #endif
-        attach_event = runtime->forest->attach_external(this, 0/*idx*/,
-                                                         requirement,
-                                                         external_views,
-                                                         mapping ?
-                                                           termination_event :
-                                                           completion_event,
-                                                         version_info,
-                                                         trace_info, mapping,
-                                                         map_applied_conditions,
-                                                         restricted);
-        shard_manager->exchange_shard_local_op_data(context_index,
-                                  exchange_index++, attach_event);
-      }
-      else
-        attach_event = shard_manager->find_shard_local_op_data<ApEvent>(
-            context_index, exchange_index++);
-#ifdef DEBUG_LEGION
-      assert(external_instance.has_ref());
-#endif
-      if (mapping)
-        external_instance.set_ready_event(attach_event);
-      // This operation is ready once the file is attached
-      const DomainPoint shard_point(repl_ctx->owner_shard->shard_id);
-      region.impl->set_reference(external_instance, shard_point);
-      // Once we have created the instance, then we are done
-      if (!map_applied_conditions.empty())
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
-                          Runtime::merge_events(map_applied_conditions));
-      else
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      complete_mapping(collective_map_barrier);
-#ifdef DEBUG_LEGION
-      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-#endif
-      if (!request_early_complete(attach_event))
-        complete_execution(Runtime::protect_event(attach_event));
-      else
-        complete_execution();
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      return collective_map_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -7821,6 +7732,32 @@ namespace Legion {
       result.dim = 1;
       result[0] = repl_ctx->owner_shard->shard_id;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplAttachOp::get_collective_local_arrivals(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->shard_manager->local_shard_count();
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* ReplAttachOp::get_collective_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return &(repl_ctx->shard_manager->get_collective_mapping()); 
     }
 
     //--------------------------------------------------------------------------
@@ -8276,11 +8213,10 @@ namespace Legion {
 #endif
       // Signal that all our mapping dependences are met
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      if (is_first_local_shard)
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     version_info,
-                                                     preconditions);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -8291,134 +8227,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::trigger_mapping(void)
+    RtEvent ReplDetachOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      // Logical dependence analysis should guarantee that we are valid
-      // by the time we get here because the inline mapping/attach op
-      // that made the physical region should have mapped before us
-#ifdef DEBGU_LEGION
-      assert(region.impl->get_mapped_event().has_triggered());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      ShardManager *shard_manager = repl_ctx->shard_manager;
-      // Now we can get the reference we need for the detach operation
-      InstanceSet references;
-      region.impl->get_references(references);
-#ifdef DEBUG_LEGION
-      assert(references.size() == 1);
-#endif
-      const InstanceRef &reference = references[0]; 
-      // Add a valid reference to the instances to act as an acquire to keep
-      // them valid through the end of mapping them, we'll release the valid
-      // references when we are done mapping
-      WrapperReferenceMutator mutator(map_applied_conditions);
-      PhysicalManager *manager = reference.get_physical_manager();
-      if (!manager->is_external_instance())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
-                      "Illegal detach operation (ID %lld) performed in "
-                      "task %s (ID %lld). Detach was performed on an region "
-                      "that had not previously been attached.",
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
-#ifdef DEBUG_LEGION
-      assert(!manager->is_reduction_manager()); 
-      assert(manager->is_collective_manager());
-      CollectiveManager *collective = manager->as_collective_manager();
-      assert(collective->contains_point(get_collective_instance_point()));
-      assert(collective->point_space->get_volume() ==
-              shard_manager->total_shards);
-#endif
-      // Add a reference that will be removed in trigger_commit
-      // after we are done mapping
-      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-      ApEvent detach_event;
-      if (is_first_local_shard)
-      {
-        ApEvent effects_done;
-        if (flush)
-        {
-          requirement.privilege = LEGION_READ_ONLY;
-          std::vector<PhysicalManager*> dummy_sources;
-          effects_done = 
-            runtime->forest->physical_perform_updates_and_registration(
-                                                    requirement, version_info,
-                                                    this, 0/*idx*/, 
-                                                    ApEvent::NO_AP_EVENT, 
-                                                    ApEvent::NO_AP_EVENT,
-                                                    references, dummy_sources,
-                                                    trace_info,
-                                                    map_applied_conditions,
-#ifdef DEBUG_LEGION
-                                                    get_logging_name(),
-                                                    unique_op_id,
-#endif
-                                                    false/*record valid*/,
-                                                    false/*check initialized*/);
-          requirement.privilege = LEGION_READ_WRITE;
-        }
-        InnerContext *context = find_physical_context(0/*index*/);
-        CollectiveMapping *mapping = &shard_manager->get_collective_mapping(); 
-        std::vector<InstanceView*> external_views;
-        context->convert_target_views(references, external_views, mapping);
-#ifdef DEBUG_LEGION
-        assert(external_views.size() == 1);
-#endif
-        InstanceView *ext_view = external_views[0];
-        detach_event = runtime->forest->detach_external(requirement, this,
-                                          0/*idx*/, version_info, ext_view, 
-                                          trace_info, map_applied_conditions,
-                                          mapping);
-        if (detach_event.exists() && effects_done.exists())
-          detach_event = 
-            Runtime::merge_events(&trace_info, detach_event, effects_done);
-        else if (effects_done.exists())
-          detach_event = effects_done;
-        shard_manager->exchange_shard_local_op_data(context_index, 0/*first*/,
-                                                    detach_event);
-        // Also tell the runtime to detach the external instance from memory
-        // This has to be done before we can consider this mapped
-        const RtEvent detached_event = manager->detach_external_instance();
-        shard_manager->exchange_shard_local_op_data(context_index, 1/*second*/,
-                                                    detached_event);
-        if (detached_event.exists())
-          map_applied_conditions.insert(detached_event);
-      }
-      else
-      {
-        detach_event = shard_manager->find_shard_local_op_data<ApEvent>(
-            context_index, 0/*first*/);
-      }
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references,
-                                              get_collective_instance_point());
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, detach_event,
-                                        completion_event);
-#endif
-      }
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      if (!map_applied_conditions.empty())
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
-                          Runtime::merge_events(map_applied_conditions));
-      else
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      complete_mapping(collective_map_barrier); 
-#ifdef DEBUG_LEGION
-      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-#endif
-      if (!request_early_complete(detach_event))
-        complete_execution(Runtime::protect_event(detach_event));
-      else
-        complete_execution();
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      return collective_map_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -8435,6 +8251,32 @@ namespace Legion {
       result.dim = 1;
       result[0] = repl_ctx->owner_shard->shard_id;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplDetachOp::get_collective_local_arrivals(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->shard_manager->local_shard_count();
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* ReplDetachOp::get_collective_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return &(repl_ctx->shard_manager->get_collective_mapping()); 
     }
 
     //--------------------------------------------------------------------------
@@ -8876,12 +8718,10 @@ namespace Legion {
       // Signal that all of our mapping dependences are satisfied
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
-      // Only the first local shard will need the equivalence sets
-      if (is_first_local_shard)
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     version_info,
-                                                     preconditions);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -8892,110 +8732,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAcquireOp::trigger_mapping(void)
+    RtEvent ReplAcquireOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
-#ifdef DEBGU_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      ShardManager *shard_manager = repl_ctx->shard_manager;
-      // Invoke the mapper before doing anything else 
-      invoke_mapper();
-      ApEvent acquire_complete;
-      if (is_first_local_shard)
-      {
-        InstanceSet restricted_instances;
-        acquire_complete = 
-          runtime->forest->acquire_restrictions(requirement, version_info,
-                                                this, 0/*idx*/,
-                                                completion_event,
-                                                restricted_instances,
-                                                trace_info, 
-                                                map_applied_conditions
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-#ifdef DEBUG_LEGION
-        dump_physical_state(&requirement, 0);
-#endif
-        shard_manager->exchange_shard_local_op_data(context_index, 0/*first*/,
-                                                    acquire_complete); 
-        ApEvent init_precondition = compute_init_precondition(trace_info);
-        if (init_precondition.exists())
-          acquire_complete = Runtime::merge_events(&trace_info, 
-                                     acquire_complete, init_precondition);
-        if (runtime->legion_spy_enabled)
-        {
-          shard_manager->exchange_shard_local_op_data(context_index,
-                                1/*second*/, &restricted_instances);
-          const DomainPoint shard_point = get_collective_instance_point();
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                0/*idx*/, requirement,
-                                                restricted_instances,
-                                                shard_point);
-#ifdef LEGION_SPY
-          LegionSpy::log_operation_events(unique_op_id, acquire_complete,
-                                          completion_event);
-#endif
-          // Make sure everyone is done reading our instances
-          shard_manager->barrier_shard_local(context_index, 2/*third*/);
-        }
-      }
-      else
-      {
-        acquire_complete = shard_manager->find_shard_local_op_data<ApEvent>(
-                                                  context_index, 0/*first*/);
-        ApEvent init_precondition = compute_init_precondition(trace_info);
-        if (init_precondition.exists())
-          acquire_complete = Runtime::merge_events(&trace_info, 
-                                     acquire_complete, init_precondition);
-        if (runtime->legion_spy_enabled)
-        {
-          const DomainPoint shard_point = get_collective_instance_point();
-          const InstanceSet *restricted_instances =
-            shard_manager->find_shard_local_op_data<const InstanceSet*>(
-                                              context_index, 1/*second*/);
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                0/*idx*/, requirement,
-                                                *restricted_instances,
-                                                shard_point);
-#ifdef LEGION_SPY
-          LegionSpy::log_operation_events(unique_op_id, acquire_complete,
-                                          completion_event);
-#endif
-          // Inform the first local shard that we're done reading
-          shard_manager->barrier_shard_local(context_index, 2/*third*/);
-        }
-      }
-      // Remove profiling our guard and trigger the profiling event if necessary
-      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(acquire_complete); 
-      // Mark that we completed mapping
-      RtEvent mapping_applied;
-      if (!map_applied_conditions.empty())
-        mapping_applied = Runtime::merge_events(map_applied_conditions);
-      if (!acquired_instances.empty())
-        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
-                                                          acquired_instances);
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
-                                    mapping_applied);
-      complete_mapping(collective_map_barrier);
-      if (!request_early_complete(acquire_complete))
-        complete_execution(Runtime::protect_event(acquire_complete));
-      else
-        complete_execution();
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      return collective_map_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -9037,6 +8781,19 @@ namespace Legion {
       result.dim = 1;
       result[0] = repl_ctx->owner_shard->shard_id;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplAcquireOp::get_collective_local_arrivals(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->shard_manager->local_shard_count();
     }
 
     /////////////////////////////////////////////////////////////
@@ -9155,12 +8912,10 @@ namespace Legion {
       // Signal that all of our mapping dependences are satisfied
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
-      // Only the first local shard will need the equivalence sets
-      if (is_first_local_shard)
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     version_info,
-                                                     preconditions);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
       if (!collective_map_barrier.has_triggered())
         preconditions.insert(collective_map_barrier);
       Runtime::advance_barrier(collective_map_barrier);
@@ -9171,107 +8926,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplReleaseOp::trigger_mapping(void)
+    RtEvent ReplReleaseOp::finalize_complete_mapping(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
-#ifdef DEBGU_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      ShardManager *shard_manager = repl_ctx->shard_manager;
-      // Invoke the mapper before doing anything else 
-      std::vector<PhysicalManager*> source_instances;
-      invoke_mapper(source_instances);
-      ApEvent release_complete;
-      if (is_first_local_shard)
-      {
-        InstanceSet restricted_instances;
-        if (restricted_region.impl != NULL)
-          restricted_region.impl->get_references(restricted_instances);
-        ApEvent init_precondition = compute_init_precondition(trace_info); 
-        release_complete = 
-          runtime->forest->release_restrictions(requirement, version_info,
-                                                this, 0/*idx*/, 
-                                                init_precondition,
-                                                completion_event,
-                                                restricted_instances, 
-                                                source_instances, trace_info,
-                                                map_applied_conditions
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-#ifdef DEBUG_LEGION
-        dump_physical_state(&requirement, 0);
-#endif
-        shard_manager->exchange_shard_local_op_data(context_index, 0/*first*/,
-                                                    release_complete); 
-        if (runtime->legion_spy_enabled)
-        {
-          shard_manager->exchange_shard_local_op_data(context_index,
-                                1/*second*/, &restricted_instances);
-          const DomainPoint shard_point = get_collective_instance_point();
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                0/*idx*/, requirement,
-                                                restricted_instances,
-                                                shard_point);
-#ifdef LEGION_SPY
-          LegionSpy::log_operation_events(unique_op_id, release_complete,
-                                          completion_event);
-#endif
-          // Make sure everyone is done reading our instances
-          shard_manager->barrier_shard_local(context_index, 2/*third*/);
-        }
-      }
-      else
-      {
-        release_complete = shard_manager->find_shard_local_op_data<ApEvent>(
-                                                  context_index, 0/*first*/);
-        if (runtime->legion_spy_enabled)
-        {
-          const DomainPoint shard_point = get_collective_instance_point();
-          const InstanceSet *restricted_instances =
-            shard_manager->find_shard_local_op_data<const InstanceSet*>(
-                                              context_index, 1/*second*/);
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                0/*idx*/, requirement,
-                                                *restricted_instances,
-                                                shard_point);
-#ifdef LEGION_SPY
-          LegionSpy::log_operation_events(unique_op_id, release_complete,
-                                          completion_event);
-#endif
-          // Inform the first local shard that we're done reading
-          shard_manager->barrier_shard_local(context_index, 2/*third*/);
-        }
-      }
-      // Remove profiling our guard and trigger the profiling event if necessary
-      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(release_complete);
-      // Mark that we completed mapping
-      RtEvent mapping_applied;
-      if (!map_applied_conditions.empty())
-        mapping_applied = Runtime::merge_events(map_applied_conditions);
-      if (!acquired_instances.empty())
-        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
-                                                          acquired_instances);
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
-                                    mapping_applied);
-      complete_mapping(collective_map_barrier);
-      if (!request_early_complete(release_complete))
-        complete_execution(Runtime::protect_event(release_complete));
-      else
-        complete_execution();
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      return collective_map_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -9313,6 +8975,19 @@ namespace Legion {
       result.dim = 1;
       result[0] = repl_ctx->owner_shard->shard_id;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplReleaseOp::get_collective_local_arrivals(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->shard_manager->local_shard_count();
     }
 
     //--------------------------------------------------------------------------

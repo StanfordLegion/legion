@@ -2207,8 +2207,8 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
-                user_applied, analysis->collective_mapping, trace_info,
-                local_space, false/*collective per space*/, symbolic);
+                user_applied, analysis->collective_mapping, analysis->op,
+                trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2232,8 +2232,8 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
-                map_applied_events, analysis->collective_mapping, trace_info,
-                local_space, false/*collective per space*/, symbolic);
+                map_applied_events, analysis->collective_mapping, analysis->op,
+                trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2405,7 +2405,7 @@ namespace Legion {
         ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, op_ctx_index, index, term_event,
             collect_event, map_applied_events, collective_mapping,
-            trace_info, runtime->address_space, true/*collective per space*/);
+            op, trace_info, runtime->address_space);
         if (ready.exists())
           acquired_events.insert(ready);
       }
@@ -2462,23 +2462,24 @@ namespace Legion {
       if (collective_mapping != NULL)
         collective_point = op->get_collective_instance_point();
       const bool collective_first_local = op->is_collective_first_local_shard();
-      ReleaseAnalysis analysis(runtime, op, index, precondition, local_expr,
-                       restricted_instances, target_views, source_views,
-                       trace_info, collective_mapping, collective_first_local,
-                       collective_point);
+      ReleaseAnalysis *analysis =
+        new ReleaseAnalysis(runtime, op, index, precondition, local_expr, 
+            restricted_instances, target_views,source_views, trace_info,
+            collective_mapping, collective_first_local, collective_point);
+      analysis->add_reference();
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events);
+        analysis->traverse(it->first, it->second, deferral_events,
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
-      if (traversal_done.exists() || analysis.has_remote_sets())
+      if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
-          analysis.perform_remote(traversal_done, map_applied_events);
+          analysis->perform_remote(traversal_done, map_applied_events);
       // Issue any release copies/fills that need to be done
       const RtEvent updates_done = 
-        analysis.perform_updates(traversal_done, map_applied_events);
+        analysis->perform_updates(traversal_done, map_applied_events);
       // There are two cases here: one where we have the target intances
       // already from the operation and we know where to put the users
       // and the second case where we need to wait for the analysis to
@@ -2502,7 +2503,7 @@ namespace Legion {
           ApEvent ready = target_views[idx]->register_user(usage, mask,
               local_expr, op_id, op_ctx_index, index, term_event,
               collect_event, map_applied_events, collective_mapping,
-              trace_info, runtime->address_space, true/*collective per space*/);
+              op, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
@@ -2514,7 +2515,7 @@ namespace Legion {
         if (remote_ready.exists() && !remote_ready.has_triggered())
           remote_ready.wait();
         FieldMaskSet<LogicalView> instances;
-        analysis.report_instances(instances);
+        analysis->report_instances(instances);
         // Now we can register our users
         restricted_instances.resize(instances.size());
         unsigned inst_index = 0;
@@ -2533,11 +2534,13 @@ namespace Legion {
           ApEvent ready = inst_view->register_user(usage, it->second,
               local_expr, op_id, op_ctx_index, index, term_event,
               collect_event, map_applied_events, collective_mapping,
-              trace_info, runtime->address_space, true/*collective per space*/);
+              op, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
       }
+      if (analysis->remove_reference())
+        delete analysis;
       if (!released_events.empty())
         return Runtime::merge_events(&trace_info, released_events);
       return ApEvent::NO_AP_EVENT;
@@ -3327,9 +3330,7 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent true_guard, 
                                           const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events,
-                                          CollectiveMapping *collective_mapping,
-                                          const bool collective_first_local)
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3339,11 +3340,12 @@ namespace Legion {
       RegionNode *region_node = get_node(req.region);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
+      CollectiveMapping *collective_mapping = op->get_collective_mapping();
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
           eq_sets.get_valid_mask(), trace_info, collective_mapping,precondition,
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/,
-          false/*add restriction*/, collective_first_local);
+          false/*add restriction*/, op->is_collective_first_local_shard());
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3389,7 +3391,6 @@ namespace Legion {
                                         const ApEvent termination_event,
                                         VersionInfo &version_info,
                                         const PhysicalTraceInfo &trace_info,
-                                        CollectiveMapping *collective_mapping,
                                         std::set<RtEvent> &map_applied_events,
                                         const bool restricted)
     //--------------------------------------------------------------------------
@@ -3407,6 +3408,8 @@ namespace Legion {
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
       const size_t op_ctx_index = attach_op->get_ctx_index();
+      CollectiveMapping *collective_mapping = 
+        attach_op->get_collective_mapping();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> ready_events;
       FieldMaskSet<LogicalView> registration_views;
@@ -3417,8 +3420,8 @@ namespace Legion {
         const ApEvent ready = (*it)->register_user(usage, ext_mask,
                     region_node->row_source, op_id, op_ctx_index, index,
                     termination_event, collect_event, registration_applied,
-                    collective_mapping, trace_info, runtime->address_space,
-                    true/*collective per space*/);
+                    collective_mapping, attach_op, trace_info, 
+                    runtime->address_space);
         if (ready.exists())
           ready_events.push_back(ready);
       }
@@ -3433,7 +3436,8 @@ namespace Legion {
             index, RegionUsage(req), region_node->row_source,
             registration_views, trace_info, collective_mapping,
             ApEvent::NO_AP_EVENT, guard_event, PredEvent::NO_PRED_EVENT,
-            false/*track effects*/, restricted, true/*collective first local*/);
+            false/*track effects*/, restricted, 
+            attach_op->is_collective_first_local_shard());
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3461,7 +3465,6 @@ namespace Legion {
                                           InstanceView *local_view,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                          CollectiveMapping *collective_mapping,
                                           LogicalView *registration_view)
     //--------------------------------------------------------------------------
     {
@@ -3477,20 +3480,21 @@ namespace Legion {
       const ApEvent term_event = detach_op->get_completion_event();
       const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
+      CollectiveMapping *collective_mapping =
+        detach_op->get_collective_mapping();
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                   region_node->row_source,
                                                   op_id, op_ctx_index, index,
                                                   term_event, collect_event, 
                                                   map_applied_events, 
                                                   collective_mapping,
-                                                  trace_info,
-                                                  runtime->address_space,
-                                                  true/*collective per space*/);
+                                                  detach_op, trace_info,
+                                                  runtime->address_space);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
                                   collective_mapping, region_node->row_source,
                                   local_view, registration_view,
                                   true/*remove restriction*/,
-                                  true/*collective first local*/);
+                                  detach_op->is_collective_first_local_shard());
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
