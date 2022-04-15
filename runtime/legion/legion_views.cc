@@ -4242,8 +4242,8 @@ namespace Legion {
             usage.redop);
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(reduce_usage, user_mask, user_expr,
-                                      op_id, wait_on_events);
+          find_reducing_preconditions(reduce_usage, user_mask,
+                                      user_expr, wait_on_events);
         }
         // Add our local user
         const bool issue_collect = add_user(reduce_usage, user_expr,
@@ -4309,7 +4309,7 @@ namespace Legion {
         if (reading)
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reading_preconditions(copy_mask, copy_expr, op_id,preconditions);
+          find_reading_preconditions(copy_mask, copy_expr, preconditions);
         }
         else if (redop > 0)
         {
@@ -4319,14 +4319,13 @@ namespace Legion {
           // With bulk reduction copies we're always doing atomic reductions
           const RegionUsage usage(LEGION_REDUCE, LEGION_ATOMIC, redop);
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(usage, copy_mask, copy_expr,
-                                      op_id, preconditions);
+          find_reducing_preconditions(usage, copy_mask,
+                                      copy_expr, preconditions);
         }
         else
         {
           AutoLock v_lock(view_lock);
-          find_initializing_preconditions(copy_mask, copy_expr, 
-                                          op_id, preconditions);
+          find_writing_preconditions(copy_mask, copy_expr, preconditions);
         }
         // Return any preconditions we found to the aggregator
         if (preconditions.empty())
@@ -4400,33 +4399,12 @@ namespace Legion {
     void ReductionView::find_reducing_preconditions(const RegionUsage &usage,
                                                const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
                                                std::set<ApEvent> &wait_on) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      // we know that fills are always done between readers and reducers so
-      // we just need to check the initialization users and not readers
-      for (EventFieldUsers::const_iterator uit = initialization_users.begin();
-            uit != initialization_users.end(); uit++)
-      {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-        if (!event_mask)
-          continue;
-        for (EventUsers::const_iterator it = uit->second.begin();
-              it != uit->second.end(); it++)
-        {
-          const FieldMask overlap = event_mask & it->second;
-          if (!overlap)
-            continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
-          if (expr_overlap->is_empty())
-            continue;
-          wait_on.insert(uit->first);
-          break;
-        }
-      }
+      find_dependences(writing_users, user_expr, user_mask, wait_on);
+      find_dependences(reading_users, user_expr, user_mask, wait_on);
       // check for coherence dependences on previous reduction users
       for (EventFieldUsers::const_iterator uit = reduction_users.begin();
             uit != reduction_users.end(); uit++)
@@ -4463,147 +4441,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::find_initializing_preconditions(
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
-                                               std::set<ApEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // lock must be held by caller
-      // we know that reduces dominate earlier fills so we don't need to check
-      // those, but we do need to check both reducers and readers since it is
-      // possible there were no readers of reduction instance
-      for (EventFieldUsers::iterator uit = reduction_users.begin();
-            uit != reduction_users.end(); /*nothing*/)
-      {
-        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-        if (!event_mask)
-        {
-          uit++;
-          continue;
-        }
-        std::vector<PhysicalUser*> to_delete;
-        for (EventUsers::iterator it = uit->second.begin();
-              it != uit->second.end(); it++)
-        {
-          const FieldMask overlap = event_mask & it->second;
-          if (!overlap)
-            continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
-          if (expr_overlap->is_empty())
-            continue;
-          // Have a precondition so we need to record it
-          preconditions.insert(uit->first);
-          // See if we can prune out this user because it is dominated
-          if (expr_overlap->get_volume() == it->first->expr->get_volume())
-          {
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          // If we've captured a dependence on this event for every
-          // field then we can exit out early
-          event_mask -= overlap;
-          if (!event_mask)
-            break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<PhysicalUser*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            uit->second.erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-          if (uit->second.empty())
-          {
-            EventFieldUsers::iterator to_erase = uit++;
-            reduction_users.erase(to_erase);
-          }
-          else
-          {
-            uit->second.tighten_valid_mask();
-            uit++;
-          }
-        }
-        else
-          uit++;
-      }
-      for (EventFieldUsers::iterator uit = reading_users.begin();
-            uit != reading_users.end(); /*nothing*/)
-      {
-        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-        if (!event_mask)
-        {
-          uit++;
-          continue;
-        }
-        std::vector<PhysicalUser*> to_delete;
-        for (EventUsers::iterator it = uit->second.begin();
-              it != uit->second.end(); it++)
-        {
-          const FieldMask overlap = event_mask & it->second;
-          if (!overlap)
-            continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
-          if (expr_overlap->is_empty())
-            continue;
-          // Have a precondition so we need to record it
-          preconditions.insert(uit->first);
-          // See if we can prune out this user because it is dominated
-          if (expr_overlap->get_volume() == it->first->expr->get_volume())
-          {
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          // If we've captured a dependence on this event for every
-          // field then we can exit out early
-          event_mask -= overlap;
-          if (!event_mask)
-            break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<PhysicalUser*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            uit->second.erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-          if (uit->second.empty())
-          {
-            EventFieldUsers::iterator to_erase = uit++;
-            reading_users.erase(to_erase);
-          }
-          else
-          {
-            uit->second.tighten_valid_mask();
-            uit++;
-          }
-        }
-        else
-          uit++;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
+    void ReductionView::find_dependences(const EventFieldUsers &users,
                                          IndexSpaceExpression *user_expr,
-                                         UniqueID op_id,
-                                         std::set<ApEvent> &preconditions) const
+                                         const FieldMask &user_mask,
+                                         std::set<ApEvent> &wait_on) const
     //--------------------------------------------------------------------------
     {
-      // lock must be held by caller
-      // readers only need to check reducers because we know that the only way
-      // to get an initialization is for there to be a reducer that dominates
-      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
-            uit != reduction_users.end(); uit++)
+      for (EventFieldUsers::const_iterator uit =
+            users.begin(); uit != users.end(); uit++)
       {
         const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
@@ -4618,10 +4463,101 @@ namespace Legion {
             context->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
-          preconditions.insert(uit->first);
+          wait_on.insert(uit->first);
           break;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_writing_preconditions(
+                                                const FieldMask &user_mask,
+                                                IndexSpaceExpression *user_expr,
+                                                std::set<ApEvent> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      find_dependences_and_filter(writing_users, user_expr, user_mask, wait_on); 
+      find_dependences_and_filter(reduction_users, user_expr,user_mask,wait_on);
+      find_dependences_and_filter(reading_users, user_expr, user_mask, wait_on);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_dependences_and_filter(EventFieldUsers &users,
+                                                IndexSpaceExpression *user_expr,
+                                                const FieldMask &user_mask,
+                                                std::set<ApEvent> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      for (EventFieldUsers::iterator uit = users.begin();
+            uit != users.end(); /*nothing*/)
+      {
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+        {
+          uit++;
+          continue;
+        }
+        std::vector<PhysicalUser*> to_delete;
+        for (EventUsers::iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          wait_on.insert(uit->first);
+          // See if we can prune out this user because it is dominated
+          if (expr_overlap->get_volume() == it->first->expr->get_volume())
+          {
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<PhysicalUser*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            uit->second.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
+          if (uit->second.empty())
+          {
+            EventFieldUsers::iterator to_erase = uit++;
+            users.erase(to_erase);
+          }
+          else
+          {
+            uit->second.tighten_valid_mask();
+            uit++;
+          }
+        }
+        else
+          uit++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
+                                               std::set<ApEvent> &wait_on) const
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      find_dependences(writing_users, user_expr, user_mask, wait_on);
+      find_dependences(reduction_users, user_expr, user_mask, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -4668,7 +4604,7 @@ namespace Legion {
       // Better already be holding the lock
       EventUsers &event_users = reading ? reading_users[term_event] : 
                  IS_REDUCE(user->usage) ? reduction_users[term_event] : 
-                                          initialization_users[term_event];
+                                          writing_users[term_event];
 #ifdef DEBUG_LEGION
       assert(event_users.find(user) == event_users.end());
 #endif
@@ -4687,14 +4623,14 @@ namespace Legion {
       if (event_finder != outstanding_gc_events.end())
       {
         EventFieldUsers::iterator finder = 
-          initialization_users.find(term_event);
-        if (finder != initialization_users.end())
+          writing_users.find(term_event);
+        if (finder != writing_users.end())
         {
           for (EventUsers::const_iterator it = finder->second.begin();
                 it != finder->second.end(); it++)
             if (it->first->remove_reference())
               delete it->first;
-          initialization_users.erase(finder);
+          writing_users.erase(finder);
         }
         finder = reduction_users.find(term_event);
         if (finder != reduction_users.end())

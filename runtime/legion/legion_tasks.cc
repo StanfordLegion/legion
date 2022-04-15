@@ -12194,7 +12194,7 @@ namespace Legion {
       }
       else
         index_owner->release_collective_allocation_privileges(mapper_call,
-                                                              index);
+                                                    index, points.size());
     }
     
     //--------------------------------------------------------------------------

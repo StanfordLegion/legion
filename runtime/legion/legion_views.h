@@ -763,15 +763,12 @@ namespace Legion {
       void find_reducing_preconditions(const RegionUsage &usage,
                                        const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
-                                       UniqueID op_id,
                                        std::set<ApEvent> &wait_on) const;
-      void find_initializing_preconditions(const FieldMask &user_mask,
-                                           IndexSpaceExpression *user_expr,
-                                           UniqueID op_id,
-                                           std::set<ApEvent> &preconditions);
+      void find_writing_preconditions(const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      std::set<ApEvent> &preconditions);
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
-                                      UniqueID op_id,
                                       std::set<ApEvent> &preconditions) const;
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
@@ -801,6 +798,14 @@ namespace Legion {
       void add_physical_user(PhysicalUser *user, bool reading,
                              ApEvent term_event, const FieldMask &user_mask);
       void filter_local_users(ApEvent term_event);
+      void find_dependences(const EventFieldUsers &users,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            std::set<ApEvent> &wait_on) const;
+      void find_dependences_and_filter(EventFieldUsers &users,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            std::set<ApEvent> &wait_on);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
@@ -815,7 +820,7 @@ namespace Legion {
     public:
       FillView *const fill_view; // fill view for this reduction value
     protected:
-      EventFieldUsers initialization_users;
+      EventFieldUsers writing_users;
       EventFieldUsers reduction_users;
       EventFieldUsers reading_users;
       std::set<ApEvent> outstanding_gc_events;

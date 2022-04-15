@@ -999,6 +999,7 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const Memory location,
+                                const DomainPoint &dst_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);

@@ -2555,7 +2555,7 @@ namespace Legion {
                 // Check to see if the constraints and regions are equivalent
                 std::vector<LogicalRegion> &previous_regions = 
                   collective_finder->second.regions;
-                if (pit->second.regions.size() != previous_regions.size())
+                if (pit->second.regions.size() == previous_regions.size())
                 {
                   for (std::vector<LogicalRegion>::const_iterator it =
                         pit->second.regions.begin(); it !=
@@ -2573,6 +2573,7 @@ namespace Legion {
                     {
                       previous_regions.clear();
                       finder->second.bad_regions = true;   
+                      break;
                     }
                   }
                   if (!previous_regions.empty() &&

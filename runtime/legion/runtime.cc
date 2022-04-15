@@ -8788,8 +8788,6 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
-            DistributedID collective_did;
-            derez.deserialize(collective_did);
             DomainPoint point;
             PendingCollectiveManager *collective = 
               PendingCollectiveManager::unpack(derez);
@@ -8861,8 +8859,6 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
-            DistributedID collective_did;
-            derez.deserialize(collective_did);
             PendingCollectiveManager *collective =
               PendingCollectiveManager::unpack(derez);
             DomainPoint point;
@@ -17531,7 +17527,8 @@ namespace Legion {
             free(it->buffer.get_ptr());
         }
         log_run.info("Finished execution of registration callbacks");
-        registration_callbacks.clear();
+        if (!separate_runtime_instances)
+          registration_callbacks.clear();
       }
     }
 
@@ -19536,7 +19533,7 @@ namespace Legion {
           own = false;
         }
       }
-      else if (proc.address_space() == address_space)
+      else if (local_procs.find(proc) != local_procs.end())
       {
 #ifdef DEBUG_LEGION
         assert(proc_managers.find(proc) != proc_managers.end());
