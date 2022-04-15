@@ -914,7 +914,9 @@ namespace Legion {
       void collective_deletion(RtEvent deferred_event);
       void collective_force(void);
       void collective_detach(std::set<RtEvent> &detach_events);
-      void find_or_forward_physical_instance(AddressSpaceID origin,
+      RtEvent broadcast_point_request(const DomainPoint &point) const;
+      void find_or_forward_physical_instance(
+            AddressSpaceID source, AddressSpaceID origin,
             std::set<DomainPoint> &points, RtUserEvent to_trigger);
       void record_remote_physical_instances(
             const std::map<DomainPoint,RemoteInstInfo> &instances);
