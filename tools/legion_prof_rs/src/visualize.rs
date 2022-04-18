@@ -372,15 +372,18 @@ impl fmt::Display for MemKindShort {
 }
 
 #[derive(Debug)]
-pub struct MemShort<'a>(pub &'a Mem, pub &'a MemProcAffinity, pub &'a State);
+pub struct MemShort<'a>(
+    pub MemKind,
+    pub Option<&'a Mem>,
+    pub Option<&'a MemProcAffinity>,
+    pub &'a State,
+);
 
 impl fmt::Display for MemShort<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (mem, affinity, state) = (self.0, self.1, self.2);
+        let (mem_kind, mem, affinity, state) = (self.0, self.1, self.2, self.3);
 
-        let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
-
-        match mem.kind {
+        match mem_kind {
             MemKind::NoMemKind | MemKind::Global => write!(f, "[all n]"),
             MemKind::System
             | MemKind::Registered
@@ -391,27 +394,36 @@ impl fmt::Display for MemShort<'_> {
             | MemKind::File
             | MemKind::L3Cache
             | MemKind::GPUManaged => {
+                let mem = mem.unwrap();
                 write!(
                     f,
                     "[n{}] {}",
                     mem.mem_id.node_id().0,
-                    MemKindShort(mem.kind)
+                    MemKindShort(mem_kind)
                 )
             }
-            MemKind::Framebuffer | MemKind::GPUDynamic => write!(
-                f,
-                "[n{}][gpu{}] {}",
-                proc.proc_id.node_id().0,
-                proc.proc_id.proc_in_node(),
-                MemKindShort(mem.kind)
-            ),
-            MemKind::L2Cache | MemKind::L1Cache => write!(
-                f,
-                "[n{}][cpu{}] {}",
-                proc.proc_id.node_id().0,
-                proc.proc_id.proc_in_node(),
-                MemKindShort(mem.kind)
-            ),
+            MemKind::Framebuffer | MemKind::GPUDynamic => {
+                let affinity = affinity.unwrap();
+                let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
+                write!(
+                    f,
+                    "[n{}][gpu{}] {}",
+                    proc.proc_id.node_id().0,
+                    proc.proc_id.proc_in_node(),
+                    MemKindShort(mem_kind)
+                )
+            }
+            MemKind::L2Cache | MemKind::L1Cache => {
+                let affinity = affinity.unwrap();
+                let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
+                write!(
+                    f,
+                    "[n{}][cpu{}] {}",
+                    proc.proc_id.node_id().0,
+                    proc.proc_id.proc_in_node(),
+                    MemKindShort(mem_kind)
+                )
+            }
         }
     }
 }
@@ -478,7 +490,12 @@ impl Chan {
     }
 
     fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
-        let mem_kind = |mem_id: MemID| state.mems.get(&mem_id).unwrap().kind;
+        let mem_kind = |mem_id: MemID| {
+            state
+                .mems
+                .get(&mem_id)
+                .map_or(MemKind::NoMemKind, |mem| mem.kind)
+        };
         let slug = match (self.chan_id.src, self.chan_id.dst) {
             (Some(src), Some(dst)) => format!(
                 "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
@@ -509,21 +526,24 @@ impl Chan {
             (Some(src), Some(dst)) => format!(
                 "{} to {}",
                 MemShort(
-                    state.mems.get(&src).unwrap(),
-                    state.mem_proc_affinity.get(&src).unwrap(),
+                    mem_kind(src),
+                    state.mems.get(&src),
+                    state.mem_proc_affinity.get(&src),
                     state
                 ),
                 MemShort(
-                    state.mems.get(&dst).unwrap(),
-                    state.mem_proc_affinity.get(&dst).unwrap(),
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
                     state
                 )
             ),
             (None, Some(dst)) => format!(
                 "{}",
                 MemShort(
-                    state.mems.get(&dst).unwrap(),
-                    state.mem_proc_affinity.get(&dst).unwrap(),
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
                     state
                 )
             ),
@@ -826,8 +846,9 @@ impl Mem {
         let short_name = format!(
             "{}",
             MemShort(
-                self,
-                state.mem_proc_affinity.get(&self.mem_id).unwrap(),
+                self.kind,
+                Some(self),
+                state.mem_proc_affinity.get(&self.mem_id),
                 state
             )
         );

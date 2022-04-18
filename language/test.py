@@ -374,6 +374,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
          )),
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'cuda', 'run_pass'),
+          os.path.join('tests', 'cuda', 'examples'),
          )),
     ]
     python = [
