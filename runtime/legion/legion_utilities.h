@@ -109,6 +109,7 @@ namespace Legion {
       inline void serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void serialize(const Domain &domain);
       inline void serialize(const DomainPoint &dp);
+      inline void serialize(const Internal::CopySrcDstField &field);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -192,6 +193,7 @@ namespace Legion {
       inline void deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void deserialize(Domain &domain);
       inline void deserialize(DomainPoint &dp);
+      inline void deserialize(Internal::CopySrcDstField &field);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -923,6 +925,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      serialize(field.inst);
+      serialize(field.field_id);
+      serialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        serialize<bool>(field.red_fold);
+        serialize<bool>(field.red_exclusive);
+      }
+      serialize(field.serdez_id);
+      serialize(field.subfield_offset);
+      serialize(field.indirect_index);
+      serialize(field.size);
+      if (field.size > 0)
+      {
+        if (field.size <= Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+          serialize(field.fill_data.direct, field.size);
+        else
+          serialize(field.fill_data.indirect, field.size);
+      }
+#ifdef LEGION_SPY
+      serialize(field.inst_event);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -1143,6 +1173,42 @@ namespace Legion {
         for (int idx = 0; idx < dp.dim; idx++)
           deserialize(dp.point_data[idx]);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(field.inst);
+      deserialize(field.field_id);
+      deserialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        deserialize<bool>(field.red_fold);
+        deserialize<bool>(field.red_exclusive);
+      }
+      deserialize(field.serdez_id);
+      deserialize(field.subfield_offset);
+      deserialize(field.indirect_index);
+      if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+      {
+        free(field.fill_data.indirect);
+        field.fill_data.indirect = NULL;
+      }
+      deserialize(field.size);
+      if (field.size > 0)
+      {
+        if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+        {
+          field.fill_data.indirect = malloc(field.size);
+          deserialize(field.fill_data.indirect, field.size);
+        }
+        else
+          deserialize(field.fill_data.direct, field.size);
+      }
+#ifdef LEGION_SPY
+      deserialize(field.inst_event);
+#endif
     }
       
     //--------------------------------------------------------------------------

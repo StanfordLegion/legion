@@ -5611,7 +5611,8 @@ namespace Legion {
             if (machine.has_affinity(location,
                   instances[idx].get_location(), &details))
             {
-              if ((best_bandwidth < 0) || (details.bandwidth > best_bandwidth))
+              if ((best_bandwidth < 0) || 
+                  (int(details.bandwidth) > best_bandwidth))
               {
                 best_bandwidth = details.bandwidth;
                 instance_index = idx;
@@ -6794,7 +6795,7 @@ namespace Legion {
           for (int offset = 0; offset < 2; offset++)
           {
             const int rank = nonpart_index + offset;
-            if (rank >= collective_mapping->size())
+            if (rank >= int(collective_mapping->size()))
               break;
             expected_ranks.push_back(rank);
           }
@@ -6922,7 +6923,7 @@ namespace Legion {
           for (int offset = 0; offset < 2; offset++)
           {
             const int target_index = nonpart_index + offset;
-            if (target_index >= collective_mapping->size())
+            if (target_index >= int(collective_mapping->size()))
               break;
             targets.push_back((*collective_mapping)[target_index]);
           }
@@ -6969,7 +6970,7 @@ namespace Legion {
         // Then convert back to the appropriate index
         const int target_index = 2 * target_rank;
 #ifdef DEBUG_LEGION
-        assert(target_index < collective_mapping->size());
+        assert(target_index < int(collective_mapping->size()));
 #endif
         const AddressSpaceID target = (*collective_mapping)[target_index];
         std::vector<ApEvent> src_events;
