@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,11 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [
---   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "stencil", "-foverride-demand-cuda", "1"]
--- ]
+-- [["-ll:gpu", "1", "-fcuda", "1", "-foverride-demand-cuda", "1"]]
 
-package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../language/examples/?.rg"
+package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../examples/?.rg"
 
-stencil_use_python_main = true
 require("stencil_fast")
