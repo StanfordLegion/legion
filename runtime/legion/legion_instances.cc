@@ -1153,7 +1153,7 @@ namespace Legion {
         result = construct_top_view((mapping == NULL) ? logical_owner :
             owner_space, view_did, own_ctx->get_context_uid(), mapping);
       }
-      else if (mapping != NULL)
+      else if ((mapping != NULL) && mapping->contains(local_space))
       {
         // If we're collectively making this view then we're just going to
         // do that and use the owner node as the logical owner for the view
@@ -4670,7 +4670,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(point.get_dim() > 0);
       assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
 #endif
       // Check the local points first since they are read-only at this point
       for (unsigned idx = 0; idx < instance_points.size(); idx++)
@@ -4703,7 +4702,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(p.get_dim() > 0);
       assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
 #endif
       // Check the local points first since they are read-only at this point
       for (unsigned idx = 0; idx < instance_points.size(); idx++)
@@ -8459,6 +8457,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_remote_registration(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      CollectiveManager *manager = static_cast<CollectiveManager*>(
+                          runtime->find_distributed_collectable(did));
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      RtEvent ready;
+      InstanceView *view = static_cast<InstanceView*>(
+          runtime->find_or_request_logical_view(view_did, ready));
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *expr = runtime->forest->get_node(handle);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
+      unsigned index;
+      derez.deserialize(index);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      RtEvent collect_event;
+      derez.deserialize(collect_event);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      const PhysicalTraceInfo trace_info =
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+      bool symbolic;
+      derez.deserialize(symbolic);
+      ApUserEvent result;
+      derez.deserialize(result);
+
+      std::set<RtEvent> applied_events;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      Runtime::trigger_event(&trace_info, result,
+          manager->register_collective_user(view, usage, user_mask, expr,
+            op_id, op_ctx_index, index, term_event, collect_event,
+            applied_events, manager->collective_mapping, NULL/*no op*/,
+            trace_info, symbolic));
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent CollectiveManager::register_collective_user(InstanceView *view, 
                                          const RegionUsage &usage,
                                          const FieldMask &user_mask,
@@ -8478,12 +8531,59 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapping != NULL);
       assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
       // CollectiveMapping for the analyses should all align with 
       // the CollectiveMapping for the collective manager
       assert((mapping == collective_mapping) ||
           ((*mapping) == (*collective_mapping)));
       assert(term_event.exists());
+#endif
+      // Check to make sure we're on the right node for this point
+      if (local_collective_op != NULL)
+      {
+        bool local = false;
+        const DomainPoint point =
+          local_collective_op->get_collective_instance_point();
+        for (unsigned idx = 0; instance_points.size(); idx++)
+        {
+          if (instance_points[idx] != point)
+            continue;
+          local = true;
+          break;
+        }
+        if (!local)
+        {
+          // Figure out which node is local
+          const PhysicalInstance inst = get_instance(point);
+          const AddressSpaceID target = inst.address_space();
+#ifdef DEBUG_LEGION
+          assert(collective_mapping->contains(target));
+#endif
+          const ApUserEvent result = Runtime::create_ap_user_event(&trace_info);
+          const RtUserEvent applied = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(view->did);
+            rez.serialize(usage);
+            rez.serialize(user_mask);
+            rez.serialize(expr->handle);
+            rez.serialize(op_id);
+            rez.serialize(op_ctx_index);
+            rez.serialize(index);
+            rez.serialize(term_event);
+            rez.serialize(collect_event);
+            rez.serialize(applied);
+            trace_info.pack_trace_info(rez, applied_events);
+            rez.serialize<bool>(symbolic);
+            rez.serialize(result);
+          }
+          runtime->send_collective_remote_registration(target, rez);
+          return result;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(collective_mapping->contains(local_space));
 #endif
       // We performing a collective analysis, this function performs a 
       // parallel rendezvous to ensure several important invariants.
@@ -9116,9 +9216,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(point.get_dim() > 0);
       assert((point_space == NULL) || point_space->contains_point(point));
-      // This should be a local point
-      assert(std::find(instance_points.begin(), instance_points.end(), point) !=
-              instance_points.end());
 #endif
       const std::pair<DistributedID,DomainPoint> key(view_did, point);
       AutoLock i_lock(inst_lock);

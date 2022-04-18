@@ -1184,6 +1184,8 @@ namespace Legion {
                                     Deserializer &derez);
       static void handle_point_request(Runtime *runtime, Deserializer &derez);
       static void handle_point_response(Runtime *runtime, Deserializer &derez);
+      static void handle_remote_registration(Runtime *runtime,
+                                             Deserializer &derez);
       static void handle_deletion(Runtime *runtime, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,

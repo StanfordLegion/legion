@@ -814,6 +814,7 @@ namespace Legion {
       SEND_COLLECTIVE_REGISTER_USER,
       SEND_COLLECTIVE_POINT_REQUEST,
       SEND_COLLECTIVE_POINT_RESPONSE,
+      SEND_COLLECTIVE_REMOTE_REGISTRATION,
       SEND_COLLECTIVE_DELETION,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
@@ -1050,6 +1051,7 @@ namespace Legion {
         "Send Collective Individual Register User",                   \
         "Send Collective Point Info Request",                         \
         "Send Collective Point Info Response",                        \
+        "Send Collective Remote Registration",                        \
         "Send Collective Deletion",                                   \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \

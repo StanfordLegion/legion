@@ -1875,6 +1875,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_mapping != NULL);
 #endif
+      if (!collective_mapping->contains(local_space))
+        return;
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(owner_space, local_space, children);
       for (std::vector<AddressSpaceID>::const_iterator it =

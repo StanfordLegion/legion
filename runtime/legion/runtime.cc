@@ -12172,6 +12172,11 @@ namespace Legion {
               runtime->handle_collective_point_response(derez);
               break;
             }
+          case SEND_COLLECTIVE_REMOTE_REGISTRATION:
+            {
+              runtime->handle_collective_remote_registration(derez);
+              break;
+            }
           case SEND_COLLECTIVE_DELETION:
             {
               runtime->handle_collective_deletion(derez);
@@ -22210,6 +22215,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_remote_registration(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_REMOTE_REGISTRATION>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_deletion(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24357,6 +24371,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_point_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_remote_registration(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_remote_registration(this, derez);
     }
 
     //--------------------------------------------------------------------------
