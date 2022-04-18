@@ -11694,6 +11694,10 @@ namespace Legion {
         return;
       std::set<Processor::Kind> proc_kinds;
       Machine::ProcessorQuery all_procs(machine);
+#define COUNTER(X,Y) +1
+      constexpr size_t num_procs = REALM_PROCESSOR_KINDS(COUNTER);
+      static_assert(num_procs == 9, "Add new processor kinds"); 
+#undef COUNTER
       // Log processors
       for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
@@ -11758,6 +11762,10 @@ namespace Legion {
       // Log memories
       std::set<Memory::Kind> mem_kinds;
       Machine::MemoryQuery all_mems(machine);
+#define COUNTER(X,Y) +1
+      constexpr size_t num_mems = REALM_MEMORY_KINDS(COUNTER);
+      static_assert(num_mems == 15, "Add new memory kinds"); 
+#undef COUNTER
       for (Machine::MemoryQuery::iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
@@ -11824,6 +11832,16 @@ namespace Legion {
 	    case Memory::LEVEL1_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L1");
+                break;
+              }
+            case Memory::GPU_MANAGED_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "UVM");
+                break;
+              }
+            case Memory::GPU_DYNAMIC_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Dynamic Framebuffer");
                 break;
               }
             default:
