@@ -2206,7 +2206,8 @@ namespace Legion {
         if (finder == pending_privileges.end())
         {
           to_trigger = Runtime::create_rt_user_event();
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points = 
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2226,7 +2227,7 @@ namespace Legion {
           // Reset this back to the total points so that we can remove
           // it when we do the release calls
           finder->second.remaining_points = 
-            get_total_collective_instance_points();
+            get_total_collective_instance_points(true/*holding lock*/);
         }
         else
           return finder->second.to_trigger;
@@ -2261,7 +2262,8 @@ namespace Legion {
         if (finder == pending_privileges.end())
         {
           to_trigger = Runtime::create_rt_user_event();
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2287,7 +2289,7 @@ namespace Legion {
           // Reset this back to the total points so that we can remove
           // it when we do the release calls
           finder->second.remaining_points = 
-            get_total_collective_instance_points();
+            get_total_collective_instance_points(true/*holding lock*/);
         }
         else
           return finder->second.to_trigger;
@@ -2358,7 +2360,8 @@ namespace Legion {
           pending_collectives.find(key);
         if (finder == pending_collectives.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2514,7 +2517,8 @@ namespace Legion {
           pending_collectives.find(key);
         if (finder == pending_collectives.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2697,7 +2701,8 @@ namespace Legion {
       finder->second.bad_kind = bad_kind;
       finder->second.bad_index = bad_index;
       finder->second.bad_regions = bad_regions;
-      finder->second.remaining_points = get_total_collective_instance_points();
+      finder->second.remaining_points = 
+        get_total_collective_instance_points(true/*holding lock*/);
       Runtime::trigger_event(finder->second.ready_event);
     }
 
@@ -2720,7 +2725,8 @@ namespace Legion {
           pending_matches.find(key);
         if (finder == pending_matches.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2842,7 +2848,8 @@ namespace Legion {
           pending_matches.find(key);
         if (finder == pending_matches.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -2951,7 +2958,8 @@ namespace Legion {
       assert(!finder->second.ready_event.has_triggered());
 #endif
       finder->second.instances.swap(instances);
-      finder->second.remaining_points = get_total_collective_instance_points();
+      finder->second.remaining_points =
+        get_total_collective_instance_points(true/*holding lock*/);
       Runtime::trigger_event(finder->second.ready_event); 
     }
 
@@ -2976,7 +2984,8 @@ namespace Legion {
           pending_finalizes.find(key);
         if (finder == pending_finalizes.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -3039,7 +3048,8 @@ namespace Legion {
       assert(!finder->second.ready_event.has_triggered());
 #endif
       finder->second.success = success;
-      finder->second.remaining_points = get_total_collective_instance_points();
+      finder->second.remaining_points =
+        get_total_collective_instance_points(true/*holding lock*/);
       Runtime::trigger_event(finder->second.ready_event);
     }
 
@@ -3063,7 +3073,8 @@ namespace Legion {
         {
           // First one here does the verification
           perform_verification = true;
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(points <= total_points);
 #endif
@@ -3160,7 +3171,8 @@ namespace Legion {
           pending_counts.find(index);
         if (finder == pending_counts.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -3235,7 +3247,8 @@ namespace Legion {
           pending_counts.find(index);
         if (finder == pending_counts.end())
         {
-          const size_t total_points = get_total_collective_instance_points();
+          const size_t total_points =
+            get_total_collective_instance_points(true/*holding lock*/);
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
@@ -3316,7 +3329,8 @@ namespace Legion {
       assert(!finder->second.ready_event.has_triggered());
 #endif
       finder->second.counts.swap(counts);
-      finder->second.remaining_points = get_total_collective_instance_points();
+      finder->second.remaining_points =
+        get_total_collective_instance_points(true/*holding lock*/);
       Runtime::trigger_event(finder->second.ready_event);
     }
 
@@ -3367,7 +3381,8 @@ namespace Legion {
       else
       {
         IndexSpace total_point_space = IndexSpace::NO_SPACE;
-        const size_t total_points = get_total_collective_instance_points();
+        const size_t total_points =
+          get_total_collective_instance_points(false/*holding lock*/);
         for (typename std::map<size_t,PendingCollective>::const_iterator it =
               instances.begin(); it != instances.end(); it++)
         {

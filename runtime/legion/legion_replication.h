@@ -1405,7 +1405,7 @@ namespace Legion {
       // with the replicated context as a handler of messages coming
       // from other shards in the broadcast and reduction trees of
       // the sharded mapping
-      virtual size_t get_total_collective_instance_points(void);
+      virtual size_t get_total_collective_instance_points(bool holding_lock);
       virtual void handle_collective_instance_message(Deserializer &derez);
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;

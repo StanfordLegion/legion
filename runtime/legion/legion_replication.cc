@@ -431,7 +431,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     size_t ReplCollectiveInstanceCreator<OP>::
-                                      get_total_collective_instance_points(void)
+                         get_total_collective_instance_points(bool holding_lock)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -454,18 +454,30 @@ namespace Legion {
         // We should be included in this if we've received this call
         assert(mapping->contains(repl_ctx->owner_shard->shard_id));
 #endif
-        AutoLock o_lock(this->op_lock);
-        if (shard_mapping.load() == NULL)
+        if (!holding_lock)
         {
-          // Reference comes with this the mapping
-          shard_mapping.store(mapping);
-          register_with_manager = true;
+          AutoLock o_lock(this->op_lock);
+          if (shard_mapping.load() == NULL)
+          {
+            // Reference comes with this the mapping
+            shard_mapping.store(mapping);
+            register_with_manager = true;
+          }
+          else
+          {
+            if (mapping->remove_reference())
+              delete mapping;
+            mapping = shard_mapping.load();
+          }
         }
         else
         {
-          if (mapping->remove_reference())
-            delete mapping;
-          mapping = shard_mapping.load();
+#ifdef DEBUG_LEGION
+          // shouldn't have changed since we have the lock
+          assert(shard_mapping.load() == NULL);
+#endif
+          shard_mapping.store(mapping);
+          register_with_manager = true;
         }
       }
       if (register_with_manager)
@@ -474,7 +486,7 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       // Figure out how many local points we have plus how ever
       // many messages we are expecting from "children" shards
-      return OP::get_total_collective_instance_points() +
+      return OP::get_total_collective_instance_points(holding_lock) +
                 mapping->count_children(origin_shard,
                           repl_ctx->owner_shard->shard_id);
     }
@@ -2263,8 +2275,12 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      return sharding_function->find_sharded_mapping(launch_space,
-          sharding_space, repl_ctx->get_shard_collective_radix());
+      if (sharding_space.exists())
+        return sharding_function->find_sharded_mapping(launch_space,
+            sharding_space, repl_ctx->get_shard_collective_radix());
+      else
+        return sharding_function->find_sharded_mapping(launch_space,
+            launch_space->handle, repl_ctx->get_shard_collective_radix());
     }
 
     /////////////////////////////////////////////////////////////
