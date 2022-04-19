@@ -972,7 +972,6 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
