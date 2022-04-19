@@ -382,6 +382,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       shard_mapping.store(NULL);
+      first_entry.store(true);
     }
 
     //--------------------------------------------------------------------------
@@ -402,6 +403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       shard_mapping.store(NULL);
+      first_entry.store(true);
     }
 
     //--------------------------------------------------------------------------
@@ -410,8 +412,7 @@ namespace Legion {
                                deactivate_repl_collective_instance_creator(void)
     //--------------------------------------------------------------------------
     {
-      ShardedMapping *map = shard_mapping.load();
-      if (map != NULL)
+      if (!this->first_entry.load())
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -423,15 +424,13 @@ namespace Legion {
 #endif
         repl_ctx->unregister_collective_instance_handler(
                               this->get_context_index());
-        if (map->remove_reference())
-          delete map;
       }
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
     size_t ReplCollectiveInstanceCreator<OP>::
-                         get_total_collective_instance_points(bool holding_lock)
+                                      get_total_collective_instance_points(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -442,10 +441,6 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we've already received got our sharded mapping
-      // If not then we need to get it and register ourselves so that we
-      // can receive any incoming messages
-      bool register_with_manager = false;
       ShardedMapping *mapping = shard_mapping.load(); 
       if (mapping == NULL)
       {
@@ -454,41 +449,187 @@ namespace Legion {
         // We should be included in this if we've received this call
         assert(mapping->contains(repl_ctx->owner_shard->shard_id));
 #endif
-        if (!holding_lock)
+        // Try to write it and see if we lost the race
+        ShardedMapping *previous = NULL;
+        if (!shard_mapping.compare_exchange_strong(previous, mapping))
         {
-          AutoLock o_lock(this->op_lock);
-          if (shard_mapping.load() == NULL)
-          {
-            // Reference comes with this the mapping
-            shard_mapping.store(mapping);
-            register_with_manager = true;
-          }
-          else
-          {
-            if (mapping->remove_reference())
-              delete mapping;
-            mapping = shard_mapping.load();
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          // shouldn't have changed since we have the lock
-          assert(shard_mapping.load() == NULL);
-#endif
-          shard_mapping.store(mapping);
-          register_with_manager = true;
+          // We lost the race
+          if (mapping->remove_reference())
+            delete mapping;
+          mapping = previous;
         }
       }
-      if (register_with_manager)
-        repl_ctx->register_collective_instance_handler(
-                        this->get_context_index(), this);
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       // Figure out how many local points we have plus how ever
       // many messages we are expecting from "children" shards
-      return OP::get_total_collective_instance_points(holding_lock) +
+      return OP::get_total_collective_instance_points() +
                 mapping->count_children(origin_shard,
                           repl_ctx->owner_shard->shard_id);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::register_handler(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      repl_ctx->register_collective_instance_handler(
+                      this->get_context_index(), this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent 
+    ReplCollectiveInstanceCreator<OP>::acquire_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::acquire_collective_allocation_privileges(mapper_call,
+                                                          index, target);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent 
+    ReplCollectiveInstanceCreator<OP>::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::acquire_collective_allocation_privileges(mapper_call, index,
+                                                          targets, points);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void 
+    ReplCollectiveInstanceCreator<OP>::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      OP::release_collective_allocation_privileges(mapper_call, index, points);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    PendingCollectiveManager* 
+        ReplCollectiveInstanceCreator<OP>::create_pending_collective_manager(
+                 MappingCallKind mapper_call, unsigned index,
+                 size_t collective_tag, const LayoutConstraintSet &constraints,
+                 const std::vector<LogicalRegion> &regions,
+                 AddressSpaceID memory_space,
+                 LayoutConstraintKind &bad_constraint,
+                 size_t &bad_index, bool &bad_regions)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::create_pending_collective_manager(mapper_call, index,
+          collective_tag, constraints, regions, memory_space, 
+          bad_constraint, bad_index, bad_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::create_pending_collective_managers(
+         MappingCallKind mapper_call, unsigned index,
+         const std::map<size_t,typename OP::PendingCollective> &instances,
+         std::map<size_t,PendingCollectiveManager*> &collectives, size_t points,
+         LayoutConstraintKind &bad_kind, size_t &bad_index, bool &bad_regions)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      OP::create_pending_collective_managers(mapper_call, index, instances,
+          collectives, points, bad_kind, bad_index, bad_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::match_collective_instances(
+             MappingCallKind mapper_call, unsigned index, size_t collective_tag,
+             std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      OP::match_collective_instances(mapper_call, index,
+                                     collective_tag, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::match_collective_instances(
+       MappingCallKind mapper_call, unsigned index,
+       std::map<size_t,std::vector<DistributedID> > &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      OP::match_collective_instances(mapper_call, index, instances, points);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool 
+      ReplCollectiveInstanceCreator<OP>::finalize_pending_collective_instance(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    bool success, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::finalize_pending_collective_instance(mapper_call, index,
+                                                      success, points);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    unsigned 
+     ReplCollectiveInstanceCreator<OP>::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points) 
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::verify_total_collective_instance_calls(mapper_call,
+                                                        total_calls, points);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    size_t
+      ReplCollectiveInstanceCreator<OP>::count_collective_region_occurrences(
+                   unsigned index, LogicalRegion region, DistributedID inst_did)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      return OP::count_collective_region_occurrences(index, region, inst_did);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::count_collective_region_occurrences(
+                    unsigned index, RegionInstanceCounts &counts, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (first_entry.exchange(false))
+        register_handler();
+      OP::count_collective_region_occurrences(index, counts, points);
     }
 
     //--------------------------------------------------------------------------

@@ -1246,7 +1246,7 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
+      virtual size_t get_total_collective_instance_points(void)
         { return total_points; }
     public:
       void enumerate_futures(const Domain &domain);
@@ -1444,7 +1444,7 @@ namespace Legion {
       // For collective instance creation
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
+      virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
       // Special invocations of these methods to forward on the
       // results to the index owner

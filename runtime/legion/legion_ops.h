@@ -841,8 +841,7 @@ namespace Legion {
       // the default implementation to return a single point, which is the
       // case for ReplMapOp. All other classes override this method and 
       // therefore will never actually hit this implementation
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
-        { return 1; }
+      virtual size_t get_total_collective_instance_points(void) { return 1; }
     public:
       // For collective instances
       virtual RtEvent acquire_collective_allocation_privileges(
@@ -1634,7 +1633,7 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
+      virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
       void enumerate_points(bool replaying);
@@ -3568,7 +3567,7 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
+      virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
       // For collective instances
@@ -3875,7 +3874,7 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
-      virtual size_t get_total_collective_instance_points(bool holding_lock)
+      virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
       void perform_base_dependence_analysis(void);

@@ -1405,11 +1405,60 @@ namespace Legion {
       // with the replicated context as a handler of messages coming
       // from other shards in the broadcast and reduction trees of
       // the sharded mapping
-      virtual size_t get_total_collective_instance_points(bool holding_lock);
+      virtual size_t get_total_collective_instance_points(void);
       virtual void handle_collective_instance_message(Deserializer &derez);
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;
+      void register_handler(void);
     public:
+      // hook all entry points so we can register ourselves on the first call 
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  Memory target);
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual PendingCollectiveManager* create_pending_collective_manager(
+                                  MappingCallKind mapper_call,
+                                  unsigned index, size_t collective_tag,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  AddressSpaceID memory_space,
+                                  LayoutConstraintKind &bad_constraint,
+                                  size_t &bad_index, bool &bad_regions);
+      virtual void create_pending_collective_managers(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::map<size_t,
+                                   typename OP::PendingCollective> &instances,
+                                  std::map<size_t,PendingCollectiveManager*> 
+                                    &collectives, size_t points,
+                                  LayoutConstraintKind &bad_constraint,
+                                  size_t &bad_index, bool &bad_regions);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call,
+                                  unsigned index, size_t collective_tag,
+                                  std::vector<MappingInstance> &instances);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::map<size_t,
+                                     std::vector<DistributedID> > &instances,
+                                  size_t points);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call, unsigned total_calls,
+                                  size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
+      virtual void count_collective_region_occurrences(unsigned index,
+                                  RegionInstanceCounts &counts,
+                                  size_t points);
       // invoked when all the local points have been seen
       virtual void perform_acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
@@ -1439,6 +1488,7 @@ namespace Legion {
                                            DistributedID>,size_t> &counts);
     protected:
       std::atomic<ShardedMapping*> shard_mapping;
+      std::atomic<bool> first_entry;
     };
 
     /**
