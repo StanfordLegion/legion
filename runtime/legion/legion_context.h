@@ -2484,6 +2484,8 @@ namespace Legion {
                                       ReplCollectiveInstanceHandler *handler);
       void unregister_collective_instance_handler(size_t context_index);
       void handle_collective_instance_message(Deserializer &derez);
+      ReplCollectiveInstanceHandler* find_collective_instance_handler(
+                                                  size_t context_index);
     public:
       void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
                        const Future &future, const char *description) const;
@@ -2637,12 +2639,14 @@ namespace Legion {
       public:
         PendingCollectiveInstanceMessage(void)
           : LgTaskArgs<PendingCollectiveInstanceMessage>(0),
-            context(NULL), ptr(NULL), size(0) { }
-        PendingCollectiveInstanceMessage(ReplicateContext *c, void *p, size_t s)
+            context(NULL), context_index(0), ptr(NULL), size(0) { }
+        PendingCollectiveInstanceMessage(ReplicateContext *c, size_t index,
+                                         void *p, size_t s)
           : LgTaskArgs<PendingCollectiveInstanceMessage>(implicit_provenance),
-            context(c), ptr(p), size(s) { }
+            context(c), context_index(index), ptr(p), size(s) { }
       public:
         ReplicateContext *const context;
+        const size_t context_index;
         void *const ptr;
         const size_t size;
       };

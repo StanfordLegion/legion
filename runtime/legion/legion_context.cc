@@ -11873,9 +11873,26 @@ namespace Legion {
     {
       const PendingCollectiveInstanceMessage *message =
         (const PendingCollectiveInstanceMessage*)args;
+      ReplCollectiveInstanceHandler *handler = 
+        message->context->find_collective_instance_handler(
+            message->context_index);
       Deserializer derez(message->ptr, message->size);
-      message->context->handle_collective_instance_message(derez);
+      handler->handle_collective_instance_message(derez);
       free(message->ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplCollectiveInstanceHandler* 
+        ReplicateContext::find_collective_instance_handler(size_t context_index)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(replication_lock,1,false/*exclusive*/);
+      std::map<size_t,ReplCollectiveInstanceHandler*>::const_iterator finder =
+        collective_inst_handlers.find(context_index);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_inst_handlers.end());
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -11910,7 +11927,8 @@ namespace Legion {
           memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
           derez.advance_pointer(remaining_bytes);
           pending_collective_instance_messages[context_index].emplace_back(
-              PendingCollectiveInstanceMessage(this, buffer, remaining_bytes));
+              PendingCollectiveInstanceMessage(this, context_index, 
+                                               buffer, remaining_bytes));
           return;
         }
         else
