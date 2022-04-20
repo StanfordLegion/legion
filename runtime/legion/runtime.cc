@@ -32146,6 +32146,11 @@ namespace Legion {
                                                                       args);
             break;
           }
+        case LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID:
+          {
+            ReplicateContext::handle_defer_collective_message(args);
+            break;
+          }
         case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:
           {
             PendingEquivalenceSet::handle_defer_finalize(args);

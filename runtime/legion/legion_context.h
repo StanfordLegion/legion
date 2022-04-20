@@ -2372,6 +2372,7 @@ namespace Legion {
                                                     Runtime *runtime);
       static void handle_defer_disjoint_complete_response(Runtime *runtime,
                                                           const void *args);
+      static void handle_defer_collective_message(const void *args);
       static void finalize_disjoint_complete_response(Runtime *runtime,
             UniqueID opid, VersionManager *target, AddressSpaceID target_space,
             VersionInfo *version_info, RtUserEvent done_event);
@@ -2629,15 +2630,21 @@ namespace Legion {
         std::vector<PendingTemplateUpdate> > pending_template_updates;
       size_t next_physical_template_index;
     protected:
-      struct PendingCollectiveInstanceMessage {
+      struct PendingCollectiveInstanceMessage :
+        public LgTaskArgs<PendingCollectiveInstanceMessage> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID;
       public:
         PendingCollectiveInstanceMessage(void)
-          : ptr(NULL), size(0) { }
-        PendingCollectiveInstanceMessage(void *p, size_t s)
-          : ptr(p), size(s) { }
+          : LgTaskArgs<PendingCollectiveInstanceMessage>(0),
+            context(NULL), ptr(NULL), size(0) { }
+        PendingCollectiveInstanceMessage(ReplicateContext *c, void *p, size_t s)
+          : LgTaskArgs<PendingCollectiveInstanceMessage>(implicit_provenance),
+            context(c), ptr(p), size(s) { }
       public:
-        void *ptr;
-        size_t size;
+        ReplicateContext *const context;
+        void *const ptr;
+        const size_t size;
       };
       std::map<size_t,std::vector<PendingCollectiveInstanceMessage> > 
                                           pending_collective_instance_messages;

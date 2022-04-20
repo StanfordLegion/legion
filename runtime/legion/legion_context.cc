@@ -11854,21 +11854,28 @@ namespace Legion {
         std::map<size_t,
           std::vector<PendingCollectiveInstanceMessage> >::iterator finder =
             pending_collective_instance_messages.find(context_index);
-        if (finder != pending_collective_instance_messages.end())
-        {
-          to_handle.swap(finder->second);
-          pending_collective_instance_messages.erase(finder);
-        }
-        else
+        if (finder == pending_collective_instance_messages.end())
           return;
+        to_handle.swap(finder->second);
+        pending_collective_instance_messages.erase(finder);
       }
+      // We always need to dispatch these on to separate meta tasks
+      // because they are likely to depend on each other
       for (std::vector<PendingCollectiveInstanceMessage>::const_iterator it =
             to_handle.begin(); it != to_handle.end(); it++)
-      {
-        Deserializer derez(it->ptr, it->size);
-        handler->handle_collective_instance_message(derez);
-        free(it->ptr);
-      }
+        runtime->issue_runtime_meta_task(*it, LG_LATENCY_DEFERRED_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::handle_defer_collective_message(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const PendingCollectiveInstanceMessage *message =
+        (const PendingCollectiveInstanceMessage*)args;
+      Deserializer derez(message->ptr, message->size);
+      message->context->handle_collective_instance_message(derez);
+      free(message->ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -11903,7 +11910,7 @@ namespace Legion {
           memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
           derez.advance_pointer(remaining_bytes);
           pending_collective_instance_messages[context_index].emplace_back(
-              PendingCollectiveInstanceMessage(buffer, remaining_bytes));
+              PendingCollectiveInstanceMessage(this, buffer, remaining_bytes));
           return;
         }
         else

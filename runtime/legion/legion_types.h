@@ -404,6 +404,7 @@ namespace Legion {
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
+      LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
       LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
@@ -529,6 +530,7 @@ namespace Legion {
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
         "Defer Disjoint Complete Response",                       \
+        "Defer Collective Instance Message",                      \
         "Defer Finalize Pending Equivalence Set",                 \
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
