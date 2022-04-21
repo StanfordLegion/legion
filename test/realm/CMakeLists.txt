@@ -42,6 +42,7 @@ list(APPEND REALM_TESTS
   subgraphs
   large_tls
   memspeed
+  memmodel
   coverings
   alltoall
   simple_reduce
