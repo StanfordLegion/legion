@@ -62,6 +62,7 @@ TESTS += alltoall
 TESTS += simple_reduce
 TESTS += realm_reinit
 TESTS += sparse_construct
+TESTS += memmodel
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000

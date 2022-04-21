@@ -15776,8 +15776,13 @@ namespace Legion {
     {
       // If we are not a participating stage then we already contributed our
       // data into the output so we clear ourself to avoid double counting
-      if ((stage == -1) && !participating)
+      if (!participating)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
         index_counts.clear();
+      }
       size_t num_counts;
       derez.deserialize(num_counts);
       for (unsigned idx = 0; idx < num_counts; idx++)
@@ -16015,8 +16020,11 @@ namespace Legion {
     {
       // If we are not a participating stage then we already contributed our
       // data into the output so we clear ourself to avoid double counting
-      if ((stage == -1) && !participating)
+      if (!participating)
       {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
         index_space_counts.clear();
         index_partition_counts.clear();
         field_space_counts.clear();
@@ -16212,20 +16220,38 @@ namespace Legion {
     {
       size_t num_elements;
       derez.deserialize(num_elements);
-      for (unsigned idx = 0; idx < num_elements; idx++)
+      if (!participating)
       {
-        T element;
-        derez.deserialize(element);
-        typename std::map<T,size_t>::iterator finder = 
-          element_counts.find(element);
-        if (finder != element_counts.end())
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
+        // Edge case at the end of a match
+        // Just overwrite since our data comes back
+        for (unsigned idx = 0; idx < num_elements; idx++)
         {
-          size_t count;
-          derez.deserialize(count);
-          finder->second += count;
-        }
-        else
+          T element;
+          derez.deserialize(element);
           derez.deserialize(element_counts[element]);
+        }
+      }
+      else
+      {
+        // Common case
+        for (unsigned idx = 0; idx < num_elements; idx++)
+        {
+          T element;
+          derez.deserialize(element);
+          typename std::map<T,size_t>::iterator finder = 
+            element_counts.find(element);
+          if (finder != element_counts.end())
+          {
+            size_t count;
+            derez.deserialize(count);
+            finder->second += count;
+          }
+          else
+            derez.deserialize(element_counts[element]);
+        }
       }
     }
 

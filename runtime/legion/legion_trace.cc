@@ -7462,13 +7462,12 @@ namespace Legion {
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                     source, pending, expr_ready);
-            if ((view_ready.exists() && !view_ready.has_triggered()) ||
-                (expr_ready.exists() && !expr_ready.has_triggered()))
+            if (view_ready.exists() || expr_ready.exists())
             {
               if (user_expr != NULL)
               {
 #ifdef DEBUG_LEGION
-                assert(!expr_ready.exists() || expr_ready.has_triggered());
+                assert(!expr_ready.exists());
 #endif
                 DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
                 runtime->issue_runtime_meta_task(args, 
@@ -7518,13 +7517,12 @@ namespace Legion {
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                                 source, pending, expr_ready); 
-            if ((view_ready.exists() && !view_ready.has_triggered()) ||
-                (expr_ready.exists() && !expr_ready.has_triggered()))
+            if (view_ready.exists() || expr_ready.exists())
             {
               if (user_expr != NULL)
               {
 #ifdef DEBUG_LEGION
-                assert(!expr_ready.exists() || expr_ready.has_triggered());
+                assert(!expr_ready.exists());
 #endif
                 DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
                 runtime->issue_runtime_meta_task(args, 

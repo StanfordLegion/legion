@@ -178,8 +178,6 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (is_owner() && registered_with_runtime)
-        unregister_with_runtime();
       if ((collective_mapping != NULL) && 
           collective_mapping->remove_reference())
         delete collective_mapping;
@@ -342,7 +340,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -495,7 +495,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 #endif // not defined DEBUG_LEGION_GC
 
@@ -816,19 +818,23 @@ namespace Legion {
     bool DistributedCollectable::remove_resource_reference(int cnt)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
-      int previous = resource_references.fetch_sub(cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-      assert(has_resource_references);
-#endif
-      if (previous == cnt)
       {
-        has_resource_references = false;
-        return can_delete();
+        AutoLock gc(gc_lock);
+        int previous = resource_references.fetch_sub(cnt);
+#ifdef DEBUG_LEGION
+        assert(previous >= cnt);
+        assert(has_resource_references);
+#endif
+        if (previous == cnt)
+        {
+          has_resource_references = false;
+          if (!can_delete())
+            return false;
+        }
+        else
+          return false;
       }
-      else
-        return false;
+      return try_unregister();
     }
 #endif
 
@@ -920,7 +926,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1009,7 +1017,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 #endif // USE_REMOTE_REFERENCES
 
@@ -1088,13 +1098,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      if (do_deletion)
-      {
-        // If we get here it is probably a race in reference counting
-        // scheme above, so mark it is as such
-        assert(false);
-        delete this;
-      }
+      // If we get here it is probably a race in reference counting
+      // scheme above, so mark it is as such
+      assert(!do_deletion);
     }
 
     //--------------------------------------------------------------------------
@@ -1171,13 +1177,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      if (do_deletion)
-      {
-        // If we get here it is probably a race in reference counting
-        // scheme above, so mark it is as such
-        assert(false);
-        delete this;
-      }
+      // If we get here it is probably a race in reference counting
+      // scheme above, so mark it is as such
+      assert(!do_deletion);
     }
 
     //--------------------------------------------------------------------------
@@ -1254,7 +1256,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1333,7 +1337,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1410,12 +1416,8 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
+      // This probably indicates a race in reference counting algorithm
+      assert(!do_deletion);
     }
 
     //--------------------------------------------------------------------------
@@ -1492,12 +1494,8 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      if (do_deletion)
-      {
-        // This probably indicates a race in reference counting algorithm
-        assert(false);
-        delete this;
-      }
+      // This probably indicates a race in reference counting algorithm
+      assert(!do_deletion);
     }
 
     //--------------------------------------------------------------------------
@@ -1576,7 +1574,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1655,7 +1655,9 @@ namespace Legion {
         done = update_state(need_activate, need_validate,
                             need_invalidate, need_deactivate, do_deletion);
       }
-      return do_deletion;
+      if (do_deletion)
+        return try_unregister();
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1705,23 +1707,27 @@ namespace Legion {
                                                 ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
+      {
+        AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(resource_references >= cnt);
-      assert(has_resource_references);
+        assert(resource_references >= cnt);
+        assert(has_resource_references);
 #endif
-      resource_references--;
-      std::map<ReferenceSource,int>::iterator finder = 
-        detailed_base_resource_references.find(source);
-      assert(finder != detailed_base_resource_references.end());
-      assert(finder->second >= cnt);
-      finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_base_resource_references.erase(finder);
-      if (resource_references > 0)
-        return false;
-      has_resource_references = false;
-      return can_delete();
+        resource_references--;
+        std::map<ReferenceSource,int>::iterator finder = 
+          detailed_base_resource_references.find(source);
+        assert(finder != detailed_base_resource_references.end());
+        assert(finder->second >= cnt);
+        finder->second -= cnt;
+        if (finder->second == 0)
+          detailed_base_resource_references.erase(finder);
+        if (resource_references > 0)
+          return false;
+        has_resource_references = false;
+        if (!can_delete())
+          return false;
+      }
+      return try_unregister();
     }
 
     //--------------------------------------------------------------------------
@@ -1729,23 +1735,27 @@ namespace Legion {
                                                      DistributedID did, int cnt)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
+      {
+        AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(resource_references >= cnt);
-      assert(has_resource_references);
+        assert(resource_references >= cnt);
+        assert(has_resource_references);
 #endif
-      resource_references -= cnt;
-      std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(did);
-      assert(finder != detailed_nested_resource_references.end());
-      assert(finder->second >= cnt);
-      finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_nested_resource_references.erase(finder);
-      if (resource_references > 0)
-        return false;
-      has_resource_references = false;
-      return can_delete();
+        resource_references -= cnt;
+        std::map<DistributedID,int>::iterator finder = 
+          detailed_nested_resource_references.find(did);
+        assert(finder != detailed_nested_resource_references.end());
+        assert(finder->second >= cnt);
+        finder->second -= cnt;
+        if (finder->second == 0)
+          detailed_nested_resource_references.erase(finder);
+        if (resource_references > 0)
+          return false;
+        has_resource_references = false;
+        if (!can_delete())
+          return false;
+      }
+      return try_unregister();
     }
 #endif // DEBUG_LEGION_GC
 
@@ -1801,43 +1811,76 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_with_runtime(void) const
+    bool DistributedCollectable::try_unregister(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!registered_with_runtime)
+      {
+        if ((collective_mapping != NULL) &&
+            (collective_mapping->contains(local_space)))
+          send_unregister_mapping();
+        // If we were never registered with the runtime then we're done
+        AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+        assert(can_delete());
+#endif
+        current_state = DELETED_STATE;
+        return true;
+      }
+      else 
+        return unregister_with_runtime();
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::unregister_with_runtime(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
       assert(registered_with_runtime);
 #endif
-      runtime->unregister_distributed_collectable(did);
-      if (!remote_instances.empty() || (collective_mapping != NULL))
-        runtime->recycle_distributed_id(did, send_unregister_messages());
+      if (runtime->unregister_distributed_collectable(did))
+      {
+        // Only need to send these messages from the owner node
+        if (is_owner() && !remote_instances.empty())
+          send_unregister_messages();
+        if ((collective_mapping != NULL) &&
+            (collective_mapping->contains(local_space)))
+          send_unregister_mapping();
+        return true;
+      }
       else
-        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::confirm_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (!can_delete())
+        return false;
+      current_state = DELETED_STATE;
+      return true;
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::UnregisterFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      rez.serialize(did);
-      rez.serialize(done_event); 
       runtime->send_did_remote_unregister(target, rez);
-      done_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
     DistributedCollectable::DeferRemoteUnregisterArgs::
       DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &n)
       : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
-        done(Runtime::create_rt_user_event()), did(id), nodes(new NodeSet(n))
+        did(id), nodes(new NodeSet(n))
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_unregister_messages(void) const
+    void DistributedCollectable::send_unregister_messages(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1853,56 +1896,34 @@ namespace Legion {
         DeferRemoteUnregisterArgs args(did, remote_instances);
         runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, reentrant_event);
-        return args.done;
+        return;
       }
-      std::set<RtEvent> done_events;
-      if (collective_mapping != NULL)
-        send_unregister_mapping(done_events);
-      if (!remote_instances.empty())
-      {
-        UnregisterFunctor functor(runtime, did, done_events); 
-        // No need for the lock since we're being destroyed
-        remote_instances.map(functor);
-      }
-      return Runtime::merge_events(done_events);
+      Serializer rez;
+      rez.serialize(did);
+      UnregisterFunctor functor(runtime, rez);
+      // No need for the lock since we're being destroyed
+      remote_instances.map(functor);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_unregister_mapping(
-                                           std::set<RtEvent> &done_events) const
+    void DistributedCollectable::send_unregister_mapping(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(collective_mapping != NULL);
+      assert(collective_mapping->contains(local_space));
 #endif
       if (!collective_mapping->contains(local_space))
         return;
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(owner_space, local_space, children);
+      if (children.empty())
+        return;
+      Serializer rez;
+      rez.serialize(did);
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
-      {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        rez.serialize(did);
-        rez.serialize(done_event); 
         runtime->send_did_remote_unregister(*it, rez);
-        done_events.insert(done_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_collectable(
-                                                 std::set<RtEvent> &done_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(registered_with_runtime);
-#endif
-      if (collective_mapping != NULL)
-        send_unregister_mapping(done_events);
-      runtime->unregister_distributed_collectable(did);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,15 +1933,7 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-      std::set<RtEvent> done_events;
-      dc->unregister_collectable(done_events);
-      if (!done_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
-      else
-        Runtime::trigger_event(done_event);
       // Now remove the resource reference we were holding
       if (dc->remove_base_resource_ref(REMOTE_DID_REF))
         delete dc;
@@ -2375,13 +2388,10 @@ namespace Legion {
     {
       const DeferRemoteUnregisterArgs *dargs = 
         (const DeferRemoteUnregisterArgs*)args;
-      std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, dargs->did, done_events);
+      Serializer rez;
+      rez.serialize(dargs->did);
+      UnregisterFunctor functor(runtime, rez);
       dargs->nodes->map(functor);
-      if (!done_events.empty())
-        Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
-      else
-        Runtime::trigger_event(dargs->done);
       delete dargs->nodes;
     }
 

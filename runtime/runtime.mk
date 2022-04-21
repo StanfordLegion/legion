@@ -1202,7 +1202,7 @@ ifndef NO_BUILD_ALL
 all: $(OUTFILE)
 endif
 # Provide support for installing legion with the make build system
-.PHONY: install
+.PHONY: install COPY_FILES_AFTER_BUILD
 ifdef PREFIX
 INSTALL_BIN_FILES += $(OUTFILE)
 INSTALL_INC_FILES += legion_defines.h realm_defines.h
@@ -1211,17 +1211,19 @@ TARGET_HEADERS := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_HEADERS))
 TARGET_BIN_FILES := $(addprefix $(strip $(PREFIX))/bin/,$(INSTALL_BIN_FILES))
 TARGET_INC_FILES := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_INC_FILES))
 TARGET_LIB_FILES := $(addprefix $(strip $(PREFIX))/lib/,$(INSTALL_LIB_FILES))
-install: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
-$(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/% $(OUTFILE)
+install: $(OUTFILE)
+	$(MAKE) COPY_FILES_AFTER_BUILD
+COPY_FILES_AFTER_BUILD: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
+$(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : % $(OUTFILE)
+$(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : % $(OUTFILE)
+$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : % $(OUTFILE)
+$(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
 else
