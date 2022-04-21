@@ -11201,7 +11201,7 @@ namespace Legion {
           const ISBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_index_space(value.space_id);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -11222,7 +11222,7 @@ namespace Legion {
           const IPBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_partition(value.pid);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -11243,7 +11243,7 @@ namespace Legion {
           const FSBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_field_space(value.space_id);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -11277,7 +11277,7 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -18237,7 +18237,7 @@ namespace Legion {
           const ISBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_index_space(value.space_id);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -18258,7 +18258,7 @@ namespace Legion {
           const IPBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_partition(value.pid);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -18279,7 +18279,7 @@ namespace Legion {
           const FSBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_field_space(value.space_id);
           runtime->revoke_pending_distributed_collectable(value.did);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
@@ -18313,7 +18313,7 @@ namespace Legion {
         {
           const LRBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_region_tree(value.tid);
-          runtime->free_distributed_id(value.did);
+          // Throw away distributed ID
         }
         else
         {
