@@ -19337,62 +19337,12 @@ namespace Legion {
     DistributedID Runtime::get_available_distributed_id(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock d_lock(distributed_id_lock);
-      if (!available_distributed_ids.empty())
-      {
-        DistributedID result = available_distributed_ids.front();
-        available_distributed_ids.pop_front();
-        return result;
-      }
-      DistributedID result = unique_distributed_id;
-      unique_distributed_id += runtime_stride;
+      DistributedID result = unique_distributed_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
+      // Check for overflow
       assert(result < LEGION_DISTRIBUTED_ID_MASK);
 #endif
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_distributed_id(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
-#ifndef LEGION_GC
-#ifndef LEGION_SPY
-      AutoLock d_lock(distributed_id_lock);
-      available_distributed_ids.push_back(did);
-#endif
-#endif
-#ifdef DEBUG_LEGION
-      AutoLock dist_lock(distributed_collectable_lock,1,false/*exclusive*/);
-      assert(dist_collectables.find(did) == dist_collectables.end());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent Runtime::recycle_distributed_id(DistributedID did,
-                                            RtEvent recycle_event)
-    //--------------------------------------------------------------------------
-    {
-      // Special case for did 0 on shutdown
-      if (did == 0)
-        return RtEvent::NO_RT_EVENT;
-      did &= LEGION_DISTRIBUTED_ID_MASK;
-#ifdef DEBUG_LEGION
-      // Should only be getting back our own DIDs
-      assert(determine_owner(did) == address_space);
-#endif
-      if (!recycle_event.has_triggered())
-      {
-        DeferredRecycleArgs deferred_recycle_args(did);
-        return issue_runtime_meta_task(deferred_recycle_args, 
-                LG_THROUGHPUT_WORK_PRIORITY, recycle_event);
-      }
-      else
-      {
-        free_distributed_id(did);
-        return RtEvent::NO_RT_EVENT;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -19434,15 +19384,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::unregister_distributed_collectable(DistributedID did)
+    bool Runtime::unregister_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::iterator finder =
+        dist_collectables.find(did);
 #ifdef DEBUG_LEGION
-      assert(dist_collectables.find(did) != dist_collectables.end());
+      assert(finder != dist_collectables.end());
 #endif
-      dist_collectables.erase(did);
+      if (!finder->second->confirm_deletion())
+        return false;
+      dist_collectables.erase(finder);
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -24100,13 +24055,6 @@ namespace Legion {
         case LG_DEFER_MAPPER_SCHEDULER_TASK_ID:
           {
             ProcessorManager::handle_defer_mapper(args);
-            break;
-          }
-        case LG_DEFERRED_RECYCLE_ID:
-          {
-            const DeferredRecycleArgs *deferred_recycle_args = 
-              (const DeferredRecycleArgs*)args;
-            runtime->free_distributed_id(deferred_recycle_args->did);
             break;
           }
         case LG_MUST_INDIV_ID:
