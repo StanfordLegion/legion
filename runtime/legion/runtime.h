@@ -1704,15 +1704,6 @@ namespace Legion {
         void configure_collective_settings(int total_spaces) const;
       };
     public:
-      struct DeferredRecycleArgs : public LgTaskArgs<DeferredRecycleArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_RECYCLE_ID;
-      public:
-        DeferredRecycleArgs(DistributedID id)
-          : LgTaskArgs<DeferredRecycleArgs>(implicit_provenance), did(id) { }
-      public:
-        const DistributedID did;
-      }; 
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
@@ -2773,13 +2764,11 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       DistributedID get_available_distributed_id(void); 
-      void free_distributed_id(DistributedID did);
-      RtEvent recycle_distributed_id(DistributedID did, RtEvent recycle_event);
       AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc);
-      void unregister_distributed_collectable(DistributedID did);
+      bool unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did,
@@ -3204,10 +3193,7 @@ namespace Legion {
       mutable LocalLock processor_mapping_lock;
       std::map<Processor,unsigned> processor_mapping;
     protected:
-      mutable LocalLock distributed_id_lock;
-      DistributedID unique_distributed_id;
-      LegionDeque<DistributedID,
-          RUNTIME_DISTRIBUTED_ALLOC> available_distributed_ids;
+      std::atomic<DistributedID> unique_distributed_id;
     protected:
       mutable LocalLock distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
