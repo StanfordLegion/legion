@@ -11017,7 +11017,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(utility_group.exists());
 #endif
-      Machine::ProcessorQuery all_procs(machine); 
       // For each of the processors in our local set construct a manager
       for (std::set<Processor>::const_iterator it = local_procs.begin();
             it != local_procs.end(); it++)
