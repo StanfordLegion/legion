@@ -888,6 +888,9 @@ namespace Legion {
       void record_point_instance(const DomainPoint &point,
                                  PhysicalInstance instance,
                                  ApEvent ready_event);
+      bool finalize_point_instance(const DomainPoint &point,
+                                   bool success, bool acquire, 
+                                   GCPriority priority, bool remote = false);
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual ApEvent get_unique_event(const DomainPoint &point) const;
@@ -1161,6 +1164,8 @@ namespace Legion {
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
+      static void handle_instance_creation(Runtime *runtime, 
+                                           Deserializer &derez);
       static void handle_defer_manager(const void *args, Runtime *runtime);
       static void handle_distribute_fill(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);

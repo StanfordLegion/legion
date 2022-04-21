@@ -803,6 +803,7 @@ namespace Legion {
       SEND_INSTANCE_MANAGER,
       SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_MANAGER,
+      SEND_COLLECTIVE_CREATION,
       SEND_COLLECTIVE_DISTRIBUTE_FILL,
       SEND_COLLECTIVE_DISTRIBUTE_POINT,
       SEND_COLLECTIVE_DISTRIBUTE_POINTWISE,
@@ -1040,6 +1041,7 @@ namespace Legion {
         "Send Instance Manager",                                      \
         "Send Manager Update",                                        \
         "Send Collective Instance Manager",                           \
+        "Send Collective Instance Creation",                          \
         "Send Collective Distribute Fill",                            \
         "Send Collective Distribute Point",                           \
         "Send Collective Distribute Pointwise",                       \

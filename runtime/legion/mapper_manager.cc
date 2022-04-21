@@ -2163,21 +2163,30 @@ namespace Legion {
                 get_mapper_name())
       }
       bool success = runtime->create_physical_instance(target_memory, 
-        constraints, regions, result, mapper_id, processor, acquire, priority,
-        tight_region_bounds, unsat, footprint, (ctx->operation == NULL) ? 
+        constraints, regions, result, processor, 
+        acquire && (collective == NULL), priority, tight_region_bounds, 
+        unsat, footprint, (ctx->operation == NULL) ? 
           0 : ctx->operation->get_unique_op_id(), collective, 
           (collective == NULL) ? NULL : &point);
       if (collective != NULL)
       {
         success = ctx->operation->finalize_pending_collective_instance(
           ctx->kind, ctx->collective_count - 1, success);
-        if (!success)
-          result = MappingInstance();
+        finalize_collective_point(result, collective->did, point, success,
+                                  target_memory, priority, acquire);
         if (collective->remove_reference())
           delete collective;
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
+      if (success && (priority != 0))
+      {
+        PhysicalManager *manager = result.impl->as_physical_manager();
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                mapper_id, processor, runtime->address_space, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2300,7 +2309,8 @@ namespace Legion {
                 get_mapper_name())
       }
       bool success = runtime->create_physical_instance(target_memory, cons,
-                      regions, result, mapper_id, processor, acquire, priority,
+                      regions, result, processor,
+                      acquire && (collective == NULL), priority,
                       tight_region_bounds, unsat, footprint,
                       (ctx->operation == NULL) ? 0 : 
                         ctx->operation->get_unique_op_id(), collective,
@@ -2309,13 +2319,21 @@ namespace Legion {
       {
         success = ctx->operation->finalize_pending_collective_instance(
           ctx->kind, ctx->collective_count - 1, success);
-        if (!success)
-          result = MappingInstance();
+        finalize_collective_point(result, collective->did, point, success,
+                                  target_memory, priority, acquire);
         if (collective->remove_reference())
           delete collective;
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
+      if (success && (priority != 0))
+      {
+        PhysicalManager *manager = result.impl->as_physical_manager();
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                mapper_id, processor, runtime->address_space, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2459,19 +2477,17 @@ namespace Legion {
                   ctx->operation->get_unique_op_id(), get_mapper_name())
           }
           success = runtime->create_physical_instance(target_memory, 
-            constraints, regions, result, mapper_id, processor, acquire,
-            priority, tight_region_bounds, unsat, footprint,
+            constraints, regions, result, processor, 
+            false/*acquire*/, priority, tight_region_bounds, unsat, footprint,
             (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id(),
-            collective, (collective == NULL) ? NULL : &collective_point);
-          if (collective != NULL)
-          {
-            success = ctx->operation->finalize_pending_collective_instance(
-                      ctx->kind, collective_index, success);
-            if (collective->remove_reference())
-              delete collective;
-          }
-          if (!success)
-            result = MappingInstance();  
+            collective, &collective_point);
+          success = ctx->operation->finalize_pending_collective_instance(
+                    ctx->kind, collective_index, success);
+          finalize_collective_point(result, collective->did, collective_point,
+                                    success, target_memory, priority, acquire);
+          created = success;
+          if (collective->remove_reference())
+            delete collective;
         }
         else
         {
@@ -2479,6 +2495,7 @@ namespace Legion {
           success = true;
           // We already recorded that we acquired this
           acquire = false;
+          created = false;
         }
         // Release the allocation privileges that we found earlier
         ctx->operation->release_collective_allocation_privileges(
@@ -2509,13 +2526,21 @@ namespace Legion {
                 get_mapper_name())
         }
         success = runtime->find_or_create_physical_instance(target_memory,
-                  constraints, regions, result, created, mapper_id, processor, 
+                  constraints, regions, result, created, processor, 
                   acquire, priority, tight_region_bounds, unsat, footprint,
                   (ctx->operation == NULL) ? 0 :
                    ctx->operation->get_unique_op_id());
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
+      if (success && created && (priority != 0))
+      {
+        PhysicalManager *manager = result.impl->as_physical_manager();
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                mapper_id, processor, runtime->address_space, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2658,20 +2683,18 @@ namespace Legion {
                   ctx->operation->get_unique_op_id(), get_mapper_name())
           }
           success = runtime->create_physical_instance(target_memory, cons,
-                        regions, result, mapper_id, processor, acquire, 
+                        regions, result, processor, false/*acquire*/,
                         priority, tight_region_bounds, unsat, footprint,
                         (ctx->operation == NULL) ? 0 : 
-                          ctx->operation->get_unique_op_id(), collective,
-                          (collective == NULL) ? NULL : &collective_point);
-          if (collective != NULL)
-          {
-            success = ctx->operation->finalize_pending_collective_instance(
-                      ctx->kind, collective_index, success);
-            if (collective->remove_reference())
-              delete collective;
-          }
-          if (!success)
-            result = MappingInstance();
+                          ctx->operation->get_unique_op_id(), 
+                        collective, &collective_point);
+          success = ctx->operation->finalize_pending_collective_instance(
+                    ctx->kind, collective_index, success);
+          finalize_collective_point(result, collective->did, collective_point,
+                                    success, target_memory, priority, acquire);
+          created = success;
+          if (collective->remove_reference())
+            delete collective;
         }
         else
         {
@@ -2679,6 +2702,8 @@ namespace Legion {
           success = true;
           // We already recorded that we acquired this
           acquire = false;
+          // This was not created
+          created = false;
         }
         // Release the allocation privileges that we found earlier
         ctx->operation->release_collective_allocation_privileges(
@@ -2709,13 +2734,21 @@ namespace Legion {
                 get_mapper_name())
         }
         success = runtime->find_or_create_physical_instance(target_memory,
-                   cons, regions, result, created, mapper_id, processor,
+                   cons, regions, result, created, processor,
                    acquire, priority, tight_region_bounds, unsat, footprint,
                    (ctx->operation == NULL) ? 0 : 
                     ctx->operation->get_unique_op_id());
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
+      if (success && created && (priority != 0))
+      {
+        PhysicalManager *manager = result.impl->as_physical_manager();
+        const RtEvent ready = manager->set_garbage_collection_priority(
+                mapper_id, processor, runtime->address_space, priority);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -3746,6 +3779,67 @@ namespace Legion {
       manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
                                      finder->second);
       acquired.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::finalize_collective_point(MappingInstance &result,
+                                    DistributedID did, const DomainPoint &point,
+                                    bool success, Memory target_memory,
+                                    GCPriority priority, bool acquire)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we're remote or not
+      if (result.impl == NULL)
+      {
+        // Remote from the memory where the point instance was made
+        // Send the message to the right node
+        const AddressSpaceID target = target_memory.address_space();
+        RtUserEvent done;
+        if (success)
+          done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(point);
+          rez.serialize<bool>(success);
+          rez.serialize<bool>(acquire);
+          rez.serialize(priority);
+          rez.serialize(done);
+        }
+        runtime->send_collective_instance_creation(target, rez);
+        if (success)
+        {
+          // Now we get the name for the manager and add the right references
+          RtEvent ready;
+          PhysicalManager *manager =
+            runtime->find_or_request_instance_manager(did, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          result = MappingInstance(manager);
+          if (acquire)
+          {
+            LocalReferenceMutator mutator;
+            manager->acquire_instance(MAPPING_ACQUIRE_REF, &mutator);
+            if (!done.has_triggered())
+              mutator.record_reference_mutation_effect(done);
+            manager->send_remote_valid_decrement(target, NULL, 
+                                    mutator.get_done_event());
+          }
+          else
+            manager->send_remote_resource_decrement(target, done);
+        }
+      }
+      else
+      {
+        // Local to the memory where the point instance was made
+        // We can do the call directly here
+        CollectiveManager *manager = result.impl->as_collective_manager();
+        if (manager->finalize_point_instance(point, success, acquire, priority))
+          delete manager;
+        if (!success)
+          result = MappingInstance();
+      }
     }
 
     //--------------------------------------------------------------------------

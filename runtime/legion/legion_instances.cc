@@ -4657,6 +4657,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool CollectiveManager::finalize_point_instance(const DomainPoint &point,
+                   bool success, bool acquire, GCPriority priority, bool remote)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_external_instance());
+#endif
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+      {
+        if (instance_points[idx] != point)
+          continue;
+        if (!success)
+        {
+          // Destroy the instance since we didn't succeed in making all
+          // the instances for the collective instance
+          std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+          layout->compute_destroyed_fields(serdez_fields);
+          if (!serdez_fields.empty())
+            instances[idx].destroy(serdez_fields);
+          else
+            instances[idx].destroy();
+#ifdef LEGION_MALLOC_INSTANCES
+          memories[idx]->free_legion_instance(instances[idx],
+                                              RtEvent::NO_RT_EVENT);
+#endif
+        }
+        else
+          memories[idx]->record_created_instance(this,acquire,priority,remote);
+        break;
+      }
+      return remove_base_resource_ref(MAPPING_ACQUIRE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_instance_creation(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // This comes from the MapperManager that sends it at the end
+      // of making a collective instance when the point instance it
+      // made was remote from the local node
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      CollectiveManager *manager = static_cast<CollectiveManager*>(
+                          runtime->find_distributed_collectable(did));
+      DomainPoint point;
+      derez.deserialize(point);
+      bool success, acquire;
+      derez.deserialize<bool>(success);
+      derez.deserialize<bool>(acquire);
+      GCPriority priority;
+      derez.deserialize(priority);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      if (manager->finalize_point_instance(point, success, acquire,
+                                           priority, true/*remote*/))
+        delete manager;
+      if (done.exists())
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent CollectiveManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {

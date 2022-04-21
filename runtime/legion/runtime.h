@@ -1470,7 +1470,7 @@ namespace Legion {
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, MapperID mapper_id,
+                                    MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
@@ -1480,7 +1480,7 @@ namespace Legion {
                                     bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, MapperID mapper_id,
+                                    MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
@@ -1492,7 +1492,7 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, Processor processor,
+                                    Processor processor,
                                     bool acquire, GCPriority priority, 
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind, 
@@ -1502,7 +1502,7 @@ namespace Legion {
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, Processor processor,
+                                    Processor processor,
                                     bool acquire, GCPriority priority, 
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind,
@@ -1534,7 +1534,6 @@ namespace Legion {
       void set_garbage_collection_priority(PhysicalManager *manager,
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
-                                    MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
@@ -3206,6 +3205,8 @@ namespace Legion {
       void send_manager_update(AddressSpaceID target, Serializer &rez);
       void send_collective_instance_manager(AddressSpaceID target, 
                                             Serializer &rez);
+      void send_collective_instance_creation(AddressSpaceID target,
+                                             Serializer &rez);
       void send_collective_distribute_fill(AddressSpaceID target,
                                            Serializer &rez);
       void send_collective_distribute_point(AddressSpaceID target,
@@ -3551,6 +3552,7 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
+      void handle_collective_instance_creation(Deserializer &derez);
       void handle_collective_distribute_fill(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_collective_distribute_point(Deserializer &derez,
@@ -3776,7 +3778,7 @@ namespace Legion {
       bool create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, MapperID mapper_id,
+                                    MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
@@ -3786,7 +3788,7 @@ namespace Legion {
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, MapperID mapper_id,
+                                    MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
@@ -3797,7 +3799,7 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, Processor processor,
+                                    Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
@@ -3806,7 +3808,7 @@ namespace Legion {
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, Processor processor,
+                                    Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
@@ -5662,6 +5664,8 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_MANAGER:
           break; 
+        case SEND_COLLECTIVE_CREATION:
+          break;
         case SEND_COLLECTIVE_DISTRIBUTE_FILL:
           break;
         case SEND_COLLECTIVE_DISTRIBUTE_POINT:

@@ -7939,7 +7939,7 @@ namespace Legion {
     bool MemoryManager::create_physical_instance(
                                 const LayoutConstraintSet &constraints,
                                 const std::vector<LogicalRegion> &regions,
-                                MappingInstance &result, MapperID mapper_id, 
+                                MappingInstance &result,
                                 Processor processor, bool acquire, 
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
@@ -7949,10 +7949,17 @@ namespace Legion {
                                 bool remote)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should never be doing the acquire here if we're building a collective
+      // instance as that will need to happen at a higher level once we know
+      // that the full collective instance has been made
+      assert(!acquire || (target == NULL));
+#endif
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
         Serializer rez;
+        std::atomic<bool> success(false);
         std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
@@ -7975,7 +7982,6 @@ namespace Legion {
           else
             rez.serialize<DistributedID>(0);
           constraints.serialize(rez);
-          rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_bounds);
@@ -7984,22 +7990,27 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
+          rez.serialize(&success);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         PhysicalManager *manager = remote_manager.load();
         if (manager != NULL)
         {
+#ifdef DEBUG_LEGION
+          // It's not safe to get a manager back in the collective case
+          assert(target == NULL);
+#endif
           result = MappingInstance(manager);
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-            const bool success =
+            const bool acquired =
 #endif
             manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
+            assert(acquired);
 #else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
 #endif
@@ -8010,8 +8021,7 @@ namespace Legion {
             manager->send_remote_resource_decrement(owner_space);
           return true;
         }
-        else
-          return false;
+        return success.load();
       }
       else
       {
@@ -8043,8 +8053,15 @@ namespace Legion {
           }
           // Do this first to add a resource reference
           result = MappingInstance(manager);
-          record_created_instance(manager, acquire, mapper_id, processor,
-                                  priority, remote);
+          // Only record this now if it is not a collective instance
+          // since we don't know if the whoel collective instance was
+          // successfully created yet or not
+          if (target == NULL)
+            record_created_instance(manager, acquire, priority, remote);
+          else
+            // add a reference to keep this alive until we get the
+            // CollectiveManager::finalize_point_instance call
+            manager->add_base_resource_ref(MAPPING_ACQUIRE_REF);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8056,7 +8073,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
-                                     MappingInstance &result,MapperID mapper_id,
+                                     MappingInstance &result,
                                      Processor processor, bool acquire, 
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
@@ -8066,10 +8083,17 @@ namespace Legion {
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should never be doing the acquire here if we're building a collective
+      // instance as that will need to happen at a higher level once we know
+      // that the full collective instance has been made
+      assert(!acquire || (target == NULL));
+#endif
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
         Serializer rez;
+        std::atomic<bool> success(false);
         std::atomic<PhysicalManager*> remote_manager(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
@@ -8092,7 +8116,6 @@ namespace Legion {
           else
             rez.serialize<DistributedID>(0);
           rez.serialize(constraints->layout_id);
-          rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_bounds);
@@ -8101,22 +8124,27 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
+          rez.serialize(&success);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         PhysicalManager *manager = remote_manager.load();
         if (manager != NULL)
         {
+#ifdef DEBUG_LEGION
+          // Not safe to get back a collective manager yet
+          assert(target == NULL);
+#endif
           result = MappingInstance(manager);
           if (acquire)
           {
             LocalReferenceMutator local_mutator;
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-            const bool success =
+            const bool acquired =
 #endif
             manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
+            assert(acquired);
 #else
             manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
 #endif
@@ -8125,10 +8153,8 @@ namespace Legion {
           }
           else
             manager->send_remote_resource_decrement(owner_space);
-          return true;
         }
-        else
-          return false;
+        return success.load();
       }
       else
       {
@@ -8160,8 +8186,15 @@ namespace Legion {
           }
           // Do this first to add a resource reference
           result = MappingInstance(manager);
-          record_created_instance(manager, acquire, mapper_id, processor,
-                                  priority, remote);
+          // Only record this now if it is not a collective instance
+          // since we don't know if the whoel collective instance was
+          // successfully created yet or not
+          if (target == NULL)
+            record_created_instance(manager, acquire, priority, remote);
+          else
+            // add a reference to keep this alive until we get the
+            // CollectiveManager::finalize_point_instance call
+            manager->add_base_resource_ref(MAPPING_ACQUIRE_REF);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8175,7 +8208,7 @@ namespace Legion {
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
                                   MappingInstance &result, bool &created, 
-                                  MapperID mapper_id, Processor processor,
+                                  Processor processor,
                                   bool acquire, GCPriority priority,
                                   bool tight_region_bounds, 
                                   LayoutConstraintKind *unsat_kind,
@@ -8214,7 +8247,6 @@ namespace Legion {
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
           constraints.serialize(rez);
-          rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_region_bounds);
@@ -8283,8 +8315,7 @@ namespace Legion {
                                              regions, dummy_point);
             // Do this first to add a resource reference
             result = MappingInstance(manager);
-            record_created_instance(manager, acquire, mapper_id, processor,
-                                    priority, remote);
+            record_created_instance(manager, acquire, priority, remote);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -8302,7 +8333,7 @@ namespace Legion {
                                 LayoutConstraints *constraints, 
                                 const std::vector<LogicalRegion> &regions,
                                 MappingInstance &result, bool &created,
-                                MapperID mapper_id, Processor processor,
+                                Processor processor,
                                 bool acquire, GCPriority priority, 
                                 bool tight_region_bounds, 
                                 LayoutConstraintKind *unsat_kind,
@@ -8340,7 +8371,6 @@ namespace Legion {
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
-          rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_region_bounds);
@@ -8410,8 +8440,7 @@ namespace Legion {
                                              regions, dummy_point);
             // Do this first to add a resource reference
             result = MappingInstance(manager);
-            record_created_instance(manager, acquire, mapper_id, processor,
-                                    priority, remote);
+            record_created_instance(manager, acquire, priority, remote);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -8798,8 +8827,6 @@ namespace Legion {
             }
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
             Processor processor;
             derez.deserialize(processor);
             GCPriority priority;
@@ -8816,12 +8843,14 @@ namespace Legion {
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
             MappingInstance result;
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, mapper_id, processor, acquire, 
+                                 result, processor, acquire, 
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  collective, &point, creator_id,true/*remote*/);
@@ -8834,14 +8863,19 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(success);
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  rez.serialize(manager->did);
+                  // Not safe to send back collective managers yet
+                  if (collective == NULL)
+                    rez.serialize(manager->did);
+                  else
+                    rez.serialize<DistributedID>(0);
                   rez.serialize(remote_target);
+                  rez.serialize(remote_success);
                 }
-                rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -8869,8 +8903,6 @@ namespace Legion {
             }
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
             Processor processor;
             derez.deserialize(processor);
             GCPriority priority;
@@ -8887,6 +8919,8 @@ namespace Legion {
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
             derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
             MappingInstance result;
@@ -8894,7 +8928,7 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, mapper_id, processor, acquire, 
+                                 result, processor, acquire, 
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  collective, &point, creator_id,true/*remote*/);
@@ -8906,14 +8940,19 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(success);
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  rez.serialize(manager->did);
+                  // Not safe to send back collective managers yet
+                  if (collective == NULL)
+                    rez.serialize(manager->did);
+                  else
+                    rez.serialize<DistributedID>(0);
                   rez.serialize(remote_target);
+                  rez.serialize(remote_success);
                 }
-                rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -8933,8 +8972,6 @@ namespace Legion {
           {
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
             Processor processor;
             derez.deserialize(processor);
             GCPriority priority;
@@ -8959,7 +8996,7 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                regions, result, created, mapper_id, 
+                                regions, result, created,
                                 processor, acquire, priority, tight_bounds,
                                 &local_kind, &local_index,
                                 &local_footprint, creator_id, true/*remote*/);
@@ -8971,18 +9008,16 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(success);
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
-                  rez.serialize(kind);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
                 }
-                else
-                  rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -9000,8 +9035,6 @@ namespace Legion {
           {
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
             Processor processor;
             derez.deserialize(processor);
             GCPriority priority;
@@ -9028,7 +9061,7 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                 regions, result, created, mapper_id, 
+                                 regions, result, created,
                                  processor, acquire, priority, tight_bounds,
                                  &local_kind, &local_index,
                                  &local_footprint, creator_id, true/*remote*/);
@@ -9040,18 +9073,16 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(success);
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
-                  rez.serialize(kind);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
                 }
-                else
-                  rez.serialize(kind);
                 rez.serialize(remote_kind);
                 rez.serialize(local_kind);
                 rez.serialize(remote_index);
@@ -9086,10 +9117,10 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
-                rez.serialize(kind);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
                 rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
@@ -9127,10 +9158,10 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize(kind);
                 rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
-                rez.serialize(kind);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
                 rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
@@ -9165,8 +9196,8 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize<bool>(false); // success
                 rez.serialize(kind);
+                rez.serialize<bool>(false); // success
                 rez.serialize(remote_target);
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
@@ -9210,8 +9241,8 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize<bool>(false); // success
                 rez.serialize(kind);
+                rez.serialize<bool>(false); // success
                 rez.serialize(remote_target);
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
@@ -9245,6 +9276,8 @@ namespace Legion {
     {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      RequestKind kind;
+      derez.deserialize(kind);
       bool success;
       derez.deserialize<bool>(success);
       std::vector<RtEvent> preconditions;
@@ -9254,21 +9287,29 @@ namespace Legion {
         derez.deserialize(did);
         std::atomic<PhysicalManager*> *target;
         derez.deserialize(target);
-        RequestKind kind;
-        derez.deserialize(kind);
 #ifdef DEBUG_LEGION
         assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
                (kind <= FIND_ONLY_LAYOUT));
 #endif
-        RtEvent manager_ready = RtEvent::NO_RT_EVENT;
-        PhysicalManager *manager = 
-          runtime->find_or_request_instance_manager(did, manager_ready);
-        // If the manager isn't ready yet, then we need to wait for it
-        if (manager_ready.exists())
-          preconditions.push_back(manager_ready);
-        target->store(manager);
-        if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
-            (kind == FIND_OR_CREATE_LAYOUT))
+        if (did > 0)
+        {
+          RtEvent manager_ready = RtEvent::NO_RT_EVENT;
+          PhysicalManager *manager = 
+            runtime->find_or_request_instance_manager(did, manager_ready);
+          // If the manager isn't ready yet, then we need to wait for it
+          if (manager_ready.exists())
+            preconditions.push_back(manager_ready);
+          target->store(manager);
+        }
+        if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
+            (kind == CREATE_INSTANCE_LAYOUT))
+        {
+          std::atomic<bool> *remote_success;
+          derez.deserialize(remote_success);
+          remote_success->store(true);
+        }
+        else if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
+                 (kind == FIND_OR_CREATE_LAYOUT))
         {
           std::atomic<bool> *created_ptr;
           derez.deserialize(created_ptr);
@@ -9279,8 +9320,6 @@ namespace Legion {
       }
       else
       {
-        RequestKind kind;
-        derez.deserialize(kind);
         if ((kind == FIND_MANY_CONSTRAINTS) || (kind == FIND_MANY_LAYOUT))
         {
           std::atomic<std::vector<PhysicalManager*>*> *target;
@@ -9308,10 +9347,10 @@ namespace Legion {
       // Unpack the constraint responses
       LayoutConstraintKind *local_kind;
       derez.deserialize(local_kind);
-      LayoutConstraintKind kind;
-      derez.deserialize(kind);
+      LayoutConstraintKind constraint_kind;
+      derez.deserialize(constraint_kind);
       if (local_kind != NULL)
-        *local_kind = kind;
+        *local_kind = constraint_kind;
       unsigned *local_index;
       derez.deserialize(local_index);
       unsigned index;
@@ -9797,8 +9836,6 @@ namespace Legion {
       // Register the instance to make it visible to downstream tasks
       record_created_instance(manager,
                               true/*acquire*/,
-                              mapper_id,
-                              target_proc,
                               priority,
                               false/*remote*/);
       return manager;
@@ -9976,7 +10013,7 @@ namespace Legion {
         {
           // Sort the managers here so the ones we most want to start with 
           // are at the end of the vector and we can pop them off the back
-          std::sort(eit->second.begin(), eit->second.end(), std::less<GCEntry>());
+          std::sort(eit->second.begin(),eit->second.end(),std::less<GCEntry>());
           sorted = true;
         }
         // Pop the next one off the back
@@ -10141,8 +10178,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::record_created_instance(PhysicalManager *manager,
-                           bool acquire, MapperID mapper_id, Processor p,
-                           GCPriority priority, bool remote)
+                                 bool acquire, GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10169,7 +10205,7 @@ namespace Legion {
       // If we're setting the priority to min priority and this is the
       // owner then add the reference for the manager
       if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
-        manager->add_base_valid_ref(NEVER_GC_REF);
+        manager->acquire_instance(NEVER_GC_REF, NULL/*mutator*/);
       // Record the manager here as being eligible for collection
       {
         AutoLock m_lock(manager_lock);
@@ -12097,6 +12133,11 @@ namespace Legion {
             {
               runtime->handle_collective_instance_manager(derez,
                                                           remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_CREATION:
+            {
+              runtime->handle_collective_instance_creation(derez);
               break;
             }
           case SEND_COLLECTIVE_DISTRIBUTE_FILL:
@@ -22116,6 +22157,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_instance_creation(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_CREATION>(
+                                 rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_distribute_fill(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24293,6 +24343,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_collective_instance_creation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_instance_creation(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_collective_distribute_fill(Deserializer &derez,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25782,7 +25839,7 @@ namespace Legion {
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,
-                                     MapperID mapper_id, Processor processor, 
+                                     Processor processor, 
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
@@ -25797,7 +25854,7 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
-                         mapper_id, processor, acquire, priority, tight_bounds,
+                         processor, acquire, priority, tight_bounds,
                          &unsat_kind, &unsat_index, footprint, target, point,
                          creator_id))
         {
@@ -25809,7 +25866,7 @@ namespace Legion {
       }
       else
         return manager->create_physical_instance(constraints, regions, result,
-                         mapper_id, processor, acquire, priority, tight_bounds,
+                         processor, acquire, priority, tight_bounds,
                          NULL, NULL, footprint, target, point, creator_id);
     }
 
@@ -25818,7 +25875,7 @@ namespace Legion {
                                      LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,
-                                     MapperID mapper_id, Processor processor,
+                                     Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
@@ -25833,7 +25890,7 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
-                         mapper_id, processor, acquire, priority, tight_bounds,
+                         processor, acquire, priority, tight_bounds,
                          &unsat_kind, &unsat_index, footprint, target, point,
                          creator_id))
         {
@@ -25845,7 +25902,7 @@ namespace Legion {
       }
       else
         return manager->create_physical_instance(constraints, regions, result,
-                         mapper_id, processor, acquire, priority, tight_bounds,
+                         processor, acquire, priority, tight_bounds,
                          NULL, NULL, footprint, target, point, creator_id);
     }
 
@@ -25854,7 +25911,7 @@ namespace Legion {
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result, bool &created, 
-                                     MapperID mapper_id, Processor processor,
+                                     Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
@@ -25867,7 +25924,7 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, mapper_id, processor, acquire, 
+                         result, created, processor, acquire, 
                          priority, tight_bounds, &unsat_kind, &unsat_index,
                          footprint, creator_id))
         {
@@ -25879,7 +25936,7 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, mapper_id, processor, acquire, 
+                         result, created, processor, acquire, 
                          priority, tight_bounds,NULL,NULL,footprint,creator_id);
     }
 
@@ -25888,7 +25945,7 @@ namespace Legion {
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, Processor processor,
+                                    Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
@@ -25901,7 +25958,7 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
-                           result, created, mapper_id, processor, acquire, 
+                           result, created, processor, acquire, 
                            priority, tight_bounds, &unsat_kind, &unsat_index,
                            footprint, creator_id))
         {
@@ -25913,7 +25970,7 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions,
-                     result, created, mapper_id, processor, acquire, 
+                     result, created, processor, acquire, 
                      priority, tight_bounds, NULL, NULL, footprint, creator_id);
     }
 

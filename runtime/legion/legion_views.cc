@@ -4111,6 +4111,7 @@ namespace Legion {
           filter_local_users(*it);
       }
 #if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(DEBUG_LEGION)
+      assert(writing_users.empty());
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -4622,8 +4623,7 @@ namespace Legion {
         outstanding_gc_events.find(term_event);
       if (event_finder != outstanding_gc_events.end())
       {
-        EventFieldUsers::iterator finder = 
-          writing_users.find(term_event);
+        EventFieldUsers::iterator finder = writing_users.find(term_event);
         if (finder != writing_users.end())
         {
           for (EventUsers::const_iterator it = finder->second.begin();
