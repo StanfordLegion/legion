@@ -1004,7 +1004,12 @@ class Channel(object):
             if self.src.affinity is not None and self.dst.affinity is not None:
                 return self.src.affinity.get_short_text() + " to " + self.dst.affinity.get_short_text()
             else:
-                return "Mem to Mem Channel"
+                if self.src.affinity is not None:
+                    return self.src.affinity.get_short_text() + " to n[all] "
+                elif self.dst.affinity is not None:
+                    return "[all n] to " + self.dst.affinity.get_short_text()
+                else:
+                    return "[all n] to [all n] "
         elif self.dst is not None:
             if self.dst.affinity is not None:
                 return self.dst.affinity.get_short_text()
@@ -2821,6 +2826,7 @@ class State(object):
             self.memories[mem_id] = Memory(mem_id, kind, capacity)
         else:
             self.memories[mem_id].kind = kind
+            self.memories[mem_id].capacity = capacity
 
     def log_mem_proc_affinity_desc(self, mem_id, proc_id):
         if mem_id not in self.mem_proc_affinity:

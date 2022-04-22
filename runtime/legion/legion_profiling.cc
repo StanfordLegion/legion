@@ -1427,6 +1427,7 @@ namespace Legion {
       }
       // Log all the processors and memories
       Machine::ProcessorQuery all_procs(machine);
+      all_procs.local_address_space();
       for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
@@ -1436,6 +1437,7 @@ namespace Legion {
         serializer->serialize(proc_desc);
       }
       Machine::MemoryQuery all_mems(machine);
+      all_mems.local_address_space();
       for (Machine::MemoryQuery::iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
@@ -1444,8 +1446,9 @@ namespace Legion {
         mem_desc.kind = it->kind();
         mem_desc.capacity = it->capacity();
         serializer->serialize(mem_desc);
-	Machine::ProcessorQuery pq(machine);
-	pq.best_affinity_to(*it);
+        Machine::ProcessorQuery pq(machine);
+        pq.local_address_space();
+        pq.best_affinity_to(*it);
         if (pq.count() > 0)
           {
             for(Machine::ProcessorQuery::iterator it2 = pq.begin();
