@@ -155,7 +155,12 @@ namespace Legion {
         add_base_resource_ref(REMOTE_DID_REF);
       }
       if (collective_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_mapping->contains(owner_space));
+#endif
         collective_mapping->add_reference();
+      }
     }
 
     //--------------------------------------------------------------------------

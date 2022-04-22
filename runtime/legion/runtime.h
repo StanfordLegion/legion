@@ -3853,6 +3853,10 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       DistributedID get_available_distributed_id(void); 
+      DistributedID get_remote_distributed_id(AddressSpaceID from);
+      void handle_remote_distributed_id_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_remote_distributed_id_response(Deserializer &derez);
       AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,
@@ -5949,6 +5953,10 @@ namespace Legion {
         case SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES:
           break;
         case SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES:
+          break;
+        case SEND_REMOTE_DISTRIBUTED_ID_REQUEST:
+          break;
+        case SEND_REMOTE_DISTRIBUTED_ID_RESPONSE:
           break;
         case SEND_SHUTDOWN_NOTIFICATION:
           return THROUGHPUT_VIRTUAL_CHANNEL;

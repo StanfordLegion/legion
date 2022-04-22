@@ -12943,6 +12943,17 @@ namespace Legion {
               runtime->handle_release_collective_allocation_privileges(derez);
               break;
             }
+          case SEND_REMOTE_DISTRIBUTED_ID_REQUEST:
+            {
+              runtime->handle_remote_distributed_id_request(derez,
+                                            remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_DISTRIBUTED_ID_RESPONSE:
+            {
+              runtime->handle_remote_distributed_id_response(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
 #ifdef DEBUG_LEGION
@@ -26213,6 +26224,58 @@ namespace Legion {
       assert(result < LEGION_DISTRIBUTED_ID_MASK);
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedID Runtime::get_remote_distributed_id(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      std::atomic<DistributedID> result(0);
+      const RtUserEvent done = Runtime::create_rt_user_event();
+      Serializer rez;
+      rez.serialize(&result);
+      rez.serialize(done);
+      find_messenger(target)->send_message<SEND_REMOTE_DISTRIBUTED_ID_REQUEST>(
+                                                            rez, true/*flush*/);
+      if (!done.has_triggered())
+        done.wait();
+#ifdef DEBUG_LEGION
+      assert(result.load() != 0);
+#endif
+      return result.load();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_distributed_id_request(Deserializer &derez,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      std::atomic<DistributedID> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const DistributedID did = get_available_distributed_id();
+      Serializer rez;
+      rez.serialize(did);
+      rez.serialize(target);
+      rez.serialize(done);
+      find_messenger(source)->send_message<SEND_REMOTE_DISTRIBUTED_ID_RESPONSE>(
+                                          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_distributed_id_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      std::atomic<DistributedID> *target;
+      derez.deserialize(target);
+      target->store(did);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------

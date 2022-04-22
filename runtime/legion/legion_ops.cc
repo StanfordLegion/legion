@@ -3377,8 +3377,6 @@ namespace Legion {
           // ended up in the other branch
           assert(!it->second.regions.empty());
 #endif
-          const DistributedID did = 
-            this->runtime->get_available_distributed_id();
           // We can only use the collective space as the point space if
           // we know that it containes all the points
           IndexSpace point_space = IndexSpace::NO_SPACE;
@@ -3400,11 +3398,20 @@ namespace Legion {
               multi_instance = false;
           }
           // the PendingCollectiveManager takes ownership of this allocation
-          CollectiveMapping *collective_manager = new CollectiveMapping(
+          CollectiveMapping *collective_mapping = new CollectiveMapping(
             unique_spaces, this->runtime->legion_collective_radix);
+          // Check to see if our address space is in the set of unique
+          // spaces. If not then we need to get a distributed ID from 
+          // one of the spaces where an instance will actually exists
+          DistributedID did;
+          if (collective_mapping->contains(this->runtime->address_space))
+            did = this->runtime->get_available_distributed_id();
+          else
+            did = this->runtime->get_remote_distributed_id(
+                collective_mapping->find_nearest(this->runtime->address_space));
           managers[it->first] = new PendingCollectiveManager(did,
               it->second.total_points, point_space,
-              collective_manager, multi_instance);
+              collective_mapping, multi_instance);
         }
       }
       return_create_pending_collective_managers(mapper_call, index, managers,

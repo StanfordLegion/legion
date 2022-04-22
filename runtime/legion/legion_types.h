@@ -951,6 +951,8 @@ namespace Legion {
       SEND_FREE_FUTURE_INSTANCE,
       SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES,
       SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES,
+      SEND_REMOTE_DISTRIBUTED_ID_REQUEST,
+      SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1189,6 +1191,8 @@ namespace Legion {
         "Send Free Future Instance",                                  \
         "Send Acquire Collective Instance Privileges",                \
         "Send Release Collective Instance Privileges",                \
+        "Send Remote Distributed ID Request",                         \
+        "Send Remote Distributed ID Response",                        \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
