@@ -4917,16 +4917,20 @@ namespace Legion {
         if (runtime->dump_physical_traces)
           dump_template();
       }
-      fence_completion = completion;
       if (recurrent)
+      {
+        fence_completion = ApEvent::NO_AP_EVENT;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
+      }
       else
+      {
+        fence_completion = completion;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = completion;
-
+      }
       events[fence_completion_id] = fence_completion;
 
       for (std::map<unsigned, unsigned>::iterator it =
