@@ -2265,11 +2265,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
-          if (total_points == 1)
-          {
-            all_targets = &targets;
-            break;
-          }
           finder = pending_privileges.insert(
               std::pair<InstanceKey,PendingPrivilege>(key,
                 PendingPrivilege(targets, total_points, to_trigger))).first;
@@ -2309,7 +2304,6 @@ namespace Legion {
       assert(points > 0);
 #endif
       std::set<Memory> targets;
-      do
       {
         const InstanceKey key(mapper_call, index);
         AutoLock o_lock(this->op_lock);
@@ -2329,7 +2323,7 @@ namespace Legion {
         }
         else
           return;
-      } while (false);
+      }
       perform_release_collective_allocation_privileges(mapper_call, index,
                                                        targets);
     }
