@@ -972,7 +972,7 @@ namespace Legion {
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
-        remaining_collection_guards(0), currently_active(false),
+        failed_collection_count(0), currently_active(false),
         min_gc_priority(0)
     //--------------------------------------------------------------------------
     {
@@ -1076,10 +1076,6 @@ namespace Legion {
                                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // We should only have a collective mapping if we're a collective instance
-      assert((mapping != NULL) == is_collective_manager());
-#endif
       ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
       // If we're a replicate context then we want to ignore the specific
       // context UID since there might be several shards on this node
@@ -1441,7 +1437,12 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize<bool>(false/*acquired*/);
         }
-        runtime->send_gc_debug_request(owner_space, rez);
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          runtime->send_gc_debug_request(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        else
+          runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
           done.wait();
         assert(result.load());
@@ -1459,7 +1460,12 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize<bool>(true/*acquired*/);
         }
-        runtime->send_gc_debug_request(owner_space, rez);
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          runtime->send_gc_debug_request(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        else
+          runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
           done.wait();
         assert(result.load());
@@ -1552,7 +1558,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(gc_state == VALID_GC_STATE);
       if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          send_remote_valid_decrement(
+              collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
 #endif
       if (pending_changes == 0)
       {
@@ -1648,7 +1661,12 @@ namespace Legion {
           rez.serialize(&result);
           rez.serialize(ready);
         }
-        runtime->send_acquire_request(owner_space, rez);
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          runtime->send_acquire_request(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        else
+          runtime->send_acquire_request(owner_space, rez);
         ready.wait();
         if (result.load())
           return true;
@@ -1742,7 +1760,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::try_collection(AddressSpaceID source, RtEvent &ready)
+    bool PhysicalManager::try_collection(AddressSpaceID source, RtEvent &ready,
+                                         std::atomic<unsigned> *target/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
@@ -1754,6 +1773,9 @@ namespace Legion {
         return true;
       if (is_owner())
       {
+#ifdef DEBUG_LEGION
+        assert(target == NULL);
+#endif
         // Check to see if anyone is already performing a deletion
         // on this manager, if so then deduplicate
         if (gc_state == COLLECTABLE_GC_STATE)
@@ -1762,14 +1784,39 @@ namespace Legion {
           assert(pending_changes == 0);
 #endif
           gc_state = PENDING_COLLECTED_GC_STATE;
+          failed_collection_count.store(0);
+          std::vector<RtEvent> ready_events;
+          if (collective_mapping != NULL)
+          {
+#ifdef DEBUG_LEGION
+            // We're the owner so it should contain ourselves
+            assert(collective_mapping->contains(local_space));
+#endif
+            std::vector<AddressSpaceID> children;
+            collective_mapping->get_children(owner_space, local_space,children);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+            {
+              const RtUserEvent ready_event = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(&failed_collection_count);
+                rez.serialize(ready_event);
+              }
+              runtime->send_gc_acquire(*it, rez);
+              ready_events.push_back(ready_event);
+            }
+          }
           const size_t needed_guards = count_remote_instances();
           if (needed_guards > 0)
           {
-            remaining_collection_guards.store(needed_guards);
             struct AcquireFunctor {
               AcquireFunctor(DistributedID d, Runtime *rt, 
+                             std::vector<RtEvent> &r,
                              std::atomic<unsigned> *c)
-                : did(d), runtime(rt), count(c) { }
+                : did(d), runtime(rt), ready_events(r), count(c) { }
               inline void apply(AddressSpaceID target)
               {
                 if (target == runtime->address_space)
@@ -1787,13 +1834,15 @@ namespace Legion {
               }
               const DistributedID did;
               Runtime *const runtime;
+              std::vector<RtEvent> &ready_events;
               std::atomic<unsigned> *const count;
-              std::vector<RtEvent> ready_events;
             };
-            AcquireFunctor functor(did, runtime, &remaining_collection_guards);
+            AcquireFunctor functor(did, runtime, ready_events,
+                                   &failed_collection_count);
             map_over_remote_instances(functor);
-            collection_ready = Runtime::merge_events(functor.ready_events);
           }
+          if (!ready_events.empty())
+            collection_ready = Runtime::merge_events(ready_events);
         }
         else
         {
@@ -1808,7 +1857,42 @@ namespace Legion {
       }
       else
       {
-        if (source != owner_space)
+#ifdef DEBUG_LEGION
+        assert(target != NULL);
+#endif
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space) &&
+            (source == collective_mapping->get_parent(owner_space,local_space)))
+        {
+          // We can setup the guard now
+#ifdef DEBUG_LEGION
+          assert((gc_state == COLLECTABLE_GC_STATE) ||
+                  (gc_state == PENDING_COLLECTED_GC_STATE));
+#endif
+          gc_state = PENDING_COLLECTED_GC_STATE;
+          // Send messages out to any of our children too
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            std::vector<RtEvent> ready_events(children.size());
+            for (unsigned idx = 0; idx < children.size(); idx++)
+            {
+              const RtUserEvent ready_event = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(target);
+                rez.serialize(ready_event);
+              }
+              runtime->send_gc_acquire(children[idx], rez);
+              ready_events[idx] = ready_event;
+            }
+            ready = Runtime::merge_events(ready_events);
+          }
+        }
+        else if (source != owner_space)
         {
           // No longer need the lock here since we're just sending a message
           i_lock.release();
@@ -1920,23 +2004,28 @@ namespace Legion {
         runtime->find_or_request_instance_manager(did, ready);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-
-      if (manager->try_collection(source, ready))
+#ifdef DEBUG_LEGION
+      ready = RtEvent::NO_RT_EVENT;
+#endif
+      if (!manager->try_collection(source, ready, target))
       {
+#ifdef DEBUG_LEGION
+        assert(!ready.exists());
+#endif
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(done);
         }
-        runtime->send_gc_acquired(source, rez);
+        runtime->send_gc_failed(source, rez);
       }
       else
-        Runtime::trigger_event(done);
+        Runtime::trigger_event(done, ready);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_acquired(
+    /*static*/ void PhysicalManager::handle_garbage_collection_failed(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -1946,15 +2035,7 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
 
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const unsigned prev =
-#endif
-#endif
-      target->fetch_sub(1);
-#ifdef DEBUG_LEGION
-      assert(prev > 0);
-#endif
+      target->fetch_add(1);
       Runtime::trigger_event(done);
     }
 
@@ -2109,7 +2190,7 @@ namespace Legion {
 #endif
               // Check to see if there were any collection guards we
               // were unable to acquire on remote nodes
-              if (remaining_collection_guards.load() > 0)
+              if (failed_collection_count.load() > 0)
               {
                 // See if we're the last release, if not then we
                 // keep it in this state

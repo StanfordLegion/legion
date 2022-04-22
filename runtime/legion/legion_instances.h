@@ -417,7 +417,8 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
-      bool try_collection(AddressSpaceID source, RtEvent &ready);
+      bool try_collection(AddressSpaceID source, RtEvent &ready,
+                          std::atomic<unsigned> *target = NULL);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
@@ -476,7 +477,7 @@ namespace Legion {
       static void handle_garbage_collection_response(Deserializer &derez);
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_acquired(Deserializer &derez);
+      static void handle_garbage_collection_failed(Deserializer &derez);
       static void handle_garbage_collection_release(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_verification(Runtime *runtime,
@@ -509,7 +510,7 @@ namespace Legion {
       // Stuff for garbage collection
       GarbageCollectionState gc_state; 
       unsigned pending_changes;
-      std::atomic<unsigned> remaining_collection_guards;
+      std::atomic<unsigned> failed_collection_count;
       RtEvent collection_ready;
       RtUserEvent deferred_deletion;
       bool currently_active;

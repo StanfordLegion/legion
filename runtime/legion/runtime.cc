@@ -12708,9 +12708,9 @@ namespace Legion {
               runtime->handle_gc_acquire(derez, remote_address_space);
               break;
             }
-          case SEND_GC_ACQUIRED:
+          case SEND_GC_FAILED:
             {
-              runtime->handle_gc_acquired(derez);
+              runtime->handle_gc_failed(derez);
               break;
             }
           case SEND_GC_RELEASE:
@@ -23078,10 +23078,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_gc_acquired(AddressSpaceID target, Serializer &rez)
+    void Runtime::send_gc_failed(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message<SEND_GC_ACQUIRED>(rez,
+      find_messenger(target)->send_message<SEND_GC_FAILED>(rez,
                                 true/*flush*/, true/*response*/);
     }
 
@@ -25227,10 +25227,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_gc_acquired(Deserializer &derez)
+    void Runtime::handle_gc_failed(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_garbage_collection_acquired(derez);
+      PhysicalManager::handle_garbage_collection_failed(derez);
     }
 
     //--------------------------------------------------------------------------
