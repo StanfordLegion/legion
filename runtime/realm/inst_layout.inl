@@ -1339,6 +1339,10 @@ namespace Realm {
             if (bounds.lo[j] != bounds.hi[j])
               return false;
             used_mask |= (1 << j);
+            if (++i == N) {
+              found = true;
+              break;
+            }
           }
           continue;
         }
@@ -1379,7 +1383,7 @@ namespace Realm {
     for (int i = 0; i < N; i++) {
       if (strides[i] != exp_offset) {
         // Special case for stride of zero for unit dimension
-        if ((strides[i] == 0) && (bounds.hi[i] == bounds.lo[i]))
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
           continue;
         return false;
       }
@@ -1396,7 +1400,7 @@ namespace Realm {
     for (int i = N-1; i >= 0; i--) {
       if (strides[i] != exp_offset) { 
         // Special case for stride of zero for unit dimension
-        if ((strides[i] == 0) && (bounds.hi[i] == bounds.lo[i]))
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
           continue;
         return false;
       }
