@@ -6560,11 +6560,11 @@ namespace Legion {
             rez.serialize(source->did);
             rez.serialize(src_view->did);
             rez.serialize<size_t>(dst_fields.size());
-            for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-              rez.serialize(dst_fields[idx]);
+            for (unsigned idx2 = 0; idx2 < dst_fields.size(); idx2++)
+              rez.serialize(dst_fields[idx2]);
             rez.serialize<size_t>(reservations.size());
-            for (unsigned idx = 0; idx < reservations.size(); idx++)
-              rez.serialize(reservations[idx]);
+            for (unsigned idx2 = 0; idx2 < reservations.size(); idx2++)
+              rez.serialize(reservations[idx2]);
             rez.serialize(precondition);
             rez.serialize(predicate_guard);
             copy_expression->pack_expression(rez, src);
