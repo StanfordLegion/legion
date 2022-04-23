@@ -805,9 +805,17 @@ namespace Legion {
        * issued by filling in the 'profiling_requests' set. The mapper can 
        * control the priority with which this profiling information is 
        * returned to the mapper with 'profiling priority'.
+       *
+       * In the case that an inline mapping operation is being mapped in
+       * the context of a control replicated task, the runtime will set
+       * the 'require_replicated_collective' flag in the input to 'true' 
+       * indicating that only collective instances can be used to satisfy
+       * the mapping to ensure the proper replication of data across all 
+       * the shards of the replicated parent task.
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        bool                                    require_replicated_collective;
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;

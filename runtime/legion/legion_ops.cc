@@ -5108,10 +5108,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapOp::invoke_mapper(InstanceSet &chosen_instances,
-                              std::vector<PhysicalManager*> &source_instances)
+                              std::vector<PhysicalManager*> &source_instances,
+                              const bool collective_instances_only)
     //--------------------------------------------------------------------------
     {
       Mapper::MapInlineInput input;
+      input.require_replicated_collective = collective_instances_only;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY; 
       output.track_valid_region = true;
@@ -5136,6 +5138,19 @@ namespace Legion {
         }
         else
           prepare_for_mapping(valid_instances, input.valid_instances);
+        if (collective_instances_only)
+        {
+          for (std::vector<MappingInstance>::iterator it = 
+                input.valid_instances.begin(); it != 
+                input.valid_instances.end(); /*nothing*/)
+          {
+            InstanceManager *manager = it->impl; 
+            if (!manager->is_collective_manager())
+              it = input.valid_instances.erase(it);
+            else
+              it++;
+          }
+        }
       }
       mapper->invoke_map_inline(this, &input, &output);
       if (!output.source_instances.empty())

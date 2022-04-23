@@ -7319,7 +7319,8 @@ namespace Legion {
       if (!remap_region)
       {
         // Now we've got the valid instances so invoke the mapper
-        record_valid = invoke_mapper(mapped_instances, source_instances);
+        record_valid = invoke_mapper(mapped_instances, source_instances, 
+                                     true/*collective only*/);
         if (!runtime->unsafe_mapper)
         {
           // Check that all the produced mappings are collective instances
