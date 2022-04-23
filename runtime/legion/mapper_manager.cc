@@ -66,13 +66,6 @@ namespace Legion {
     {
       // We can now delete our mapper
       delete mapper;
-      // Free all the available MappingCallInfo's we were keeping around
-      for (std::vector<MappingCallInfo*>::iterator
-	     it = available_infos.begin(); it != available_infos.end(); it++)
-      {
-	delete *it;
-      }
-      available_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -4699,37 +4692,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
-                                                  Operation *op, bool need_lock)
+                                                       Operation *op)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock m_lock(mapper_lock);
-        return allocate_call_info(kind, op, false/*need lock*/);
-      }
-      if (!available_infos.empty())
-      {
-        MappingCallInfo *result = available_infos.back();
-        available_infos.pop_back();
-        result->kind = kind;
-        result->operation = op;
-        if (op != NULL)
-          result->acquired_instances = op->get_acquired_instances_ref();
-        return result;
-      }
       return new MappingCallInfo(this, kind, op);
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::free_call_info(MappingCallInfo *info, bool need_lock)
+    void MapperManager::free_call_info(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock m_lock(mapper_lock);
-        free_call_info(info, false/*need lock*/);
-        return;
-      }
       if (profile_mapper)
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
@@ -4751,15 +4723,7 @@ namespace Legion {
             info->operation->get_logging_name(),
             info->operation->get_unique_op_id(), actual_count);
       }
-      info->resume = RtUserEvent::NO_RT_USER_EVENT;
-      info->operation = NULL;
-      info->acquired_instances = NULL;
-      info->start_time = 0;
-      info->stop_time = 0;
-      info->collective_count = 0;
-      info->reentrant_disabled = false;
-      info->supports_collectives = false;
-      available_infos.push_back(info);
+      delete info;
     }
 
     //--------------------------------------------------------------------------
@@ -4998,10 +4962,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
-      MappingCallInfo *result = NULL;
+      MappingCallInfo *result = allocate_call_info(kind, op);
       {
         AutoLock m_lock(mapper_lock);
-        result = allocate_call_info(kind, op,false/*need lock*/);
         // See if there is a pending call for us to handle
         if (pending_pause_call.load())
           to_trigger = complete_pending_pause_mapper_call();
@@ -5128,12 +5091,11 @@ namespace Legion {
         // We've got the lock, see if we won the race to the flag
         if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();  
-        // Return our call info
-        free_call_info(info, false/*need lock*/);
       }
       // Wake up the next task if necessary
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------
@@ -5368,7 +5330,7 @@ namespace Legion {
                           Operation *op, RtEvent &precondition, bool prioritize)
     //--------------------------------------------------------------------------
     {
-      MappingCallInfo *result = allocate_call_info(kind, op, true/*need lock*/);
+      MappingCallInfo *result = allocate_call_info(kind, op);
       // Record our mapper start time when we're ready to run
       if (profile_mapper)
       {
@@ -5412,7 +5374,6 @@ namespace Legion {
           current_holders.erase(finder);
           release_lock(to_trigger);
         }
-        free_call_info(info, false/*need lock*/);
       }
       if (!to_trigger.empty())
       {
@@ -5420,6 +5381,7 @@ namespace Legion {
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it);
       }
+      free_call_info(info);
     }
 
     //--------------------------------------------------------------------------
