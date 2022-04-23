@@ -3457,9 +3457,12 @@ namespace Legion {
       return_count_collective_region_occurrences(index, counts);
     }
 
-    // Explicit instantiations for classes in other translation units
-    template class CollectiveInstanceCreator<TaskOp>;
+    // Explicit instantiations
+    template class CollectiveInstanceCreator<Operation>;
     template class CollectiveInstanceCreator<MapOp>;
+    template class CollectiveInstanceCreator<CopyOp>;
+    template class CollectiveInstanceCreator<FillOp>;
+    template class CollectiveInstanceCreator<TaskOp>;
 
     ///////////////////////////////////////////////////////////// 
     // External Op 
