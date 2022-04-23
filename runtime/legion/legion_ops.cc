@@ -5113,7 +5113,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Mapper::MapInlineInput input;
-      input.require_replicated_collective = collective_instances_only;
+      input.require_collective_instances = collective_instances_only;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY; 
       output.track_valid_region = true;

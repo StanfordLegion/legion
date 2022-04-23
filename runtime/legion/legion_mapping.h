@@ -808,14 +808,14 @@ namespace Legion {
        *
        * In the case that an inline mapping operation is being mapped in
        * the context of a control replicated task, the runtime will set
-       * the 'require_replicated_collective' flag in the input to 'true' 
+       * the 'require_collective_instances' flag in the input to 'true' 
        * indicating that only collective instances can be used to satisfy
        * the mapping to ensure the proper replication of data across all 
        * the shards of the replicated parent task.
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
-        bool                                    require_replicated_collective;
+        bool                                    require_collective_instances;
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;

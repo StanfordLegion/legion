@@ -2623,6 +2623,9 @@ namespace Legion {
         creation_constraints.add_constraint(
             FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
       }
+      // Check for the case where we need to use collective instances
+      if (input.require_collective_instances)
+        creation_constraints.specialized_constraint.collective = true;
       output.chosen_instances.resize(output.chosen_instances.size()+1);
       size_t footprint;
       if (!default_make_instance(ctx, target_memory, creation_constraints,
