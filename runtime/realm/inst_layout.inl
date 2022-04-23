@@ -1333,11 +1333,23 @@ namespace Realm {
       bool found = false;
       for (int j = 0; j < N; j++) {
         if ((used_mask >> j) & 1) continue;
-        if (strides[j] != exp_offset) continue;
+        if (strides[j] != exp_offset) { 
+          // Mask off any dimensions with stride 0
+          if (strides[j] == 0) {
+            if (bounds.lo[j] != bounds.hi[j])
+              return false;
+            used_mask |= (1 << j);
+            if (++i == N) {
+              found = true;
+              break;
+            }
+          }
+          continue;
+        }
         found = true;
         // It's possible other dimensions can have the same strides if
         // there are multiple dimensions with extents of size 1. At most
-        // one dimension can have an extent >1 though
+        // one dimension must have an extent >1 though
         int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
         for (int k = j+1; k < N; k++) {
           if ((used_mask >> k) & 1) continue;
@@ -1369,7 +1381,12 @@ namespace Realm {
   {
     size_t exp_offset = sizeof(FT);
     for (int i = 0; i < N; i++) {
-      if (strides[i] != exp_offset) return false;
+      if (strides[i] != exp_offset) {
+        // Special case for stride of zero for unit dimension
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
+          continue;
+        return false;
+      }
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
     }
     return true;
@@ -1381,7 +1398,12 @@ namespace Realm {
   {
     size_t exp_offset = sizeof(FT);
     for (int i = N-1; i >= 0; i--) {
-      if (strides[i] != exp_offset) return false;
+      if (strides[i] != exp_offset) { 
+        // Special case for stride of zero for unit dimension
+        if ((strides[i] == 0) && (bounds.lo[i] == bounds.hi[i]))
+          continue;
+        return false;
+      }
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
     }
     return true;
