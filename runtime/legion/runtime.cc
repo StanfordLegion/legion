@@ -8853,7 +8853,8 @@ namespace Legion {
                                  result, processor, acquire, 
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
-                                 collective, &point, creator_id,true/*remote*/);
+                                 collective, (collective == NULL) ? NULL :
+                                  &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) || 
                 (remote_kind != NULL) || (remote_index != NULL))
             {
@@ -8931,7 +8932,8 @@ namespace Legion {
                                  result, processor, acquire, 
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
-                                 collective, &point, creator_id,true/*remote*/);
+                                 collective, (collective == NULL) ? NULL : 
+                                  &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) ||
                 (remote_kind != NULL) || (remote_index != NULL))
             {

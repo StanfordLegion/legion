@@ -7236,24 +7236,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::trigger_prepipeline_stage(void)
+    void ReplMapOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      MapOp::trigger_prepipeline_stage(); 
+      if (runtime->check_privileges)
+        check_privilege();
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       // Now promote the region requirement up to projection requirement
       requirement.handle_type = LEGION_REGION_PROJECTION;
       requirement.projection = 0; // identity
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMapOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->check_privileges)
-        check_privilege();
       IndexSpaceNode *shard_space_node = runtime->forest->get_node(shard_space);
       ProjectionInfo projection_info(runtime, requirement,
                                      shard_space_node, shard_fn);
