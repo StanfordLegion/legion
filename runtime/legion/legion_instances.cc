@@ -6046,6 +6046,9 @@ namespace Legion {
           reduce_events.push_back(precondition);
         precondition = Runtime::merge_events(&trace_info, reduce_events);
       }
+      // Set the redops back to 0
+      for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        local_fields[idx].set_redop(0, false/*fold*/);
       // Perform the reduction to the destination
       const ApEvent reduce_post = copy_expression->issue_copy(
           op, trace_info, dst_fields, local_fields, reservations,
