@@ -1875,8 +1875,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
-      : runtime(rt), logical_trace(lt), previous_replay(NULL),
-        current_template(NULL), nonreplayable_count(0), new_template_count(0),
+      : runtime(rt), logical_trace(lt), perform_fence_elision(
+          !(runtime->no_trace_optimization || runtime->no_fence_elision)),
+        previous_replay(NULL), current_template(NULL),
+        nonreplayable_count(0), new_template_count(0), 
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT),
         intermediate_execution_fence(false)
@@ -1896,18 +1898,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
-      : runtime(NULL), logical_trace(NULL), previous_replay(NULL),
-        current_template(NULL), nonreplayable_count(0), new_template_count(0),
-        previous_template_completion(ApEvent::NO_AP_EVENT),
-        execution_fence_event(ApEvent::NO_AP_EVENT)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
@@ -1915,15 +1905,6 @@ namespace Legion {
            templates.begin(); it != templates.end(); ++it)
         delete (*it);
       templates.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTrace& PhysicalTrace::operator=(const PhysicalTrace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *(new PhysicalTrace(NULL,NULL));
     }
 
     //--------------------------------------------------------------------------
@@ -2071,8 +2052,10 @@ namespace Legion {
 #endif
       // If we had an intermeidate execution fence between replays then
       // we should no longer be considered recurrent when we replay the trace
+      // We're also not going to be considered recurrent here if we didn't
+      // do fence elision since since we'll still need to track the fence
       current_template->initialize_replay(fence_completion, 
-                                   recurrent && !intermediate_execution_fence);
+          recurrent && perform_fence_elision && !intermediate_execution_fence);
       // Reset this for the next replay
       intermediate_execution_fence = false;
     }
@@ -2759,8 +2742,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> gen;
-      if (!(trace->runtime->no_trace_optimization ||
-            trace->runtime->no_fence_elision))
+      if (trace->perform_fence_elision)
         elide_fences(gen);
       else
       {
@@ -4917,16 +4899,20 @@ namespace Legion {
         if (runtime->dump_physical_traces)
           dump_template();
       }
-      fence_completion = completion;
       if (recurrent)
+      {
+        fence_completion = ApEvent::NO_AP_EVENT;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
+      }
       else
+      {
+        fence_completion = completion;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = completion;
-
+      }
       events[fence_completion_id] = fence_completion;
 
       for (std::map<unsigned, unsigned>::iterator it =
