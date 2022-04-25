@@ -3497,6 +3497,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      // Check to see if this is a replicated view, if the target
+      // is in the replicated set, then there's nothing we need to do
+      // We can just ignore this and the registration will be done later
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
       Serializer rez;
       {
         RezCheck z(rez);
@@ -3692,6 +3697,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(collective_mapping == NULL);
 #endif
       Serializer rez;
       {
@@ -3983,6 +3989,10 @@ namespace Legion {
     void PhiView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(collective_mapping == NULL);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);
@@ -4779,6 +4789,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      // Check to see if this is a replicated view, if the target
+      // is in the replicated set, then there's nothing we need to do
+      // We can just ignore this and the registration will be done later
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
       {

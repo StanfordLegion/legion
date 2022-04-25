@@ -650,7 +650,7 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we ware the owner shard or not
+      // Check to see if we are the owner shard or not
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -802,7 +802,7 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we ware the owner shard or not
+      // Check to see if we are the owner shard or not
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -851,7 +851,7 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we ware the owner shard or not
+      // Check to see if we are the owner shard or not
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -892,7 +892,7 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we ware the owner shard or not
+      // Check to see if we are the owner shard or not
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -932,7 +932,7 @@ namespace Legion {
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
 #endif
-      // Check to see if we ware the owner shard or not
+      // Check to see if we are the owner shard or not
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {

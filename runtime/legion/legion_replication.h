@@ -2268,6 +2268,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual bool supports_collective_instances(void) const { return true; }
       // From collective instance creator
       virtual IndexSpaceNode* get_collective_space(void) const;
     protected:

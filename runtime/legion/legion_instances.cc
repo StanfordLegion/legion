@@ -1062,11 +1062,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (redop > 0)
-        return new ReductionView(context, view_did, owner_space,
-            logical_owner, this, uid, true/*register now*/, mapping);
-      else
-        return new MaterializedView(context, view_did, owner_space, 
+      {
+        if (mapping != NULL)
+        {
+          // Handle the case where we already requested this view on this
+          // node from an unrelated meta-task execution
+          void *location = runtime->find_or_create_pending_collectable_location(
+              view_did, sizeof(ReductionView));
+          return new (location) ReductionView(context, view_did, owner_space,
               logical_owner, this, uid, true/*register now*/, mapping);
+        }
+        else
+          return new ReductionView(context, view_did, owner_space,
+              logical_owner, this, uid, true/*register now*/, mapping);
+      }
+      else
+      {
+        if (mapping != NULL)
+        {
+          // Handle the case where we already requested this view on this
+          // node from an unrelated meta-task execution
+          void *location = runtime->find_or_create_pending_collectable_location(
+              view_did, sizeof(MaterializedView));
+          return new (location) MaterializedView(context, view_did, owner_space,
+                logical_owner, this, uid, true/*register now*/, mapping);
+        }
+        else
+          return new MaterializedView(context, view_did, owner_space, 
+                logical_owner, this, uid, true/*register now*/, mapping);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3827,6 +3851,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert((collective_mapping == NULL) ||
+          !collective_mapping->contains(target));
 #endif
       Serializer rez;
       {
@@ -5621,8 +5647,6 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       if (fill_restricted)
         op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
-      UniqueID op_id;
-      derez.deserialize(op_id);
       unsigned index;
       derez.deserialize(index);
       size_t op_ctx_index;
@@ -9400,6 +9424,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert((collective_mapping == NULL) ||
+          !collective_mapping->contains(target));
 #endif
       Serializer rez;
       {

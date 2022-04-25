@@ -26451,6 +26451,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void* Runtime::find_or_create_pending_collectable_location(
+                                                 DistributedID did, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(dist_collectables.find(did) == dist_collectables.end());
+#endif
+      std::map<DistributedID,std::pair<DistributedCollectable*,RtUserEvent> >::
+        const_iterator finder = pending_collectables.find(did);
+      if (finder == pending_collectables.end())
+      {
+        void *result = malloc(size);
+        pending_collectables[did] = 
+          std::pair<DistributedCollectable*,RtUserEvent>(
+              (DistributedCollectable*)result, RtUserEvent::NO_RT_USER_EVENT);
+        return result;
+      }
+      else
+        return finder->second.first;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::record_pending_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {

@@ -350,8 +350,7 @@ namespace Legion {
       virtual PhysicalInstance get_instance(const DomainPoint &point) const = 0;
       virtual PointerConstraint 
                      get_pointer_constraint(const DomainPoint &point) const = 0;
-      inline Memory get_memory(const DomainPoint &point) const
-        { return get_instance(point).get_location(); }
+      virtual Memory get_memory(const DomainPoint &point) const = 0;
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -630,8 +629,6 @@ namespace Legion {
     public:
       IndividualManager& operator=(const IndividualManager &rhs) = delete;
     public:
-      inline Memory get_memory(void) const { return memory_manager->memory; }
-    public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_accessor(void) const;
@@ -646,6 +643,9 @@ namespace Legion {
         { return unique_event; }
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
+      virtual Memory get_memory(const DomainPoint &point) const
+        { return memory_manager->memory; }
+      inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -898,6 +898,8 @@ namespace Legion {
       virtual PhysicalInstance get_instance(const DomainPoint &point) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const; 
+      virtual Memory get_memory(const DomainPoint &point) const
+        { return get_instance(point).get_location(); }
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>

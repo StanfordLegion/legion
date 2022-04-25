@@ -3055,8 +3055,6 @@ namespace Legion {
           finder = pending_verifications.find(mapper_call);
         if (finder == pending_verifications.end())
         {
-          // First one here does the verification
-          perform_verification = true;
           const size_t total_points = get_total_collective_instance_points();
 #ifdef DEBUG_LEGION
           assert(points <= total_points);
@@ -3064,37 +3062,44 @@ namespace Legion {
           const RtUserEvent ready_event = Runtime::create_rt_user_event();
           finder = pending_verifications.insert(
             std::pair<MappingCallKind,PendingVerification>(mapper_call,
-              PendingVerification(total_calls,total_points,ready_event))).first;
+              PendingVerification(total_calls,
+                total_points - points, ready_event))).first;
           // Handle the case where we definitely have a mismatch
+          // we return early since we're know we're going to die
+          // and so that we don't end up deadlocking
           if (total_calls < upper_bound_index)
           {
 #ifdef DEBUG_LEGION
             // There should be other points out there that are
             // responsible for the additional collective calls
-            assert(finder->second.remaining_points > points); 
+            assert(finder->second.remaining_points > 0); 
 #endif
-            finder->second.remaining_points -= points;
             return upper_bound_index;
           }
           wait_on = ready_event;
         }
         else
         {
-          if (total_calls != finder->second.total_calls)
-          {
-            const unsigned result = finder->second.total_calls;
 #ifdef DEBUG_LEGION
-            assert(finder->second.remaining_points >= points); 
+          assert(points <= finder->second.remaining_points);
 #endif
-            finder->second.remaining_points -= points;
-            if (!finder->second.ready_event.exists() &&
-                (finder->second.remaining_points == 0))
-              pending_verifications.erase(finder);
-            return result;
+          finder->second.remaining_points -= points;
+          // Handle the case where we definitely have a mismatch
+          // we return early since we're know we're going to die
+          // and so that we don't end up deadlocking
+          if (total_calls < upper_bound_index)
+          {
+#ifdef DEBUG_LEGION
+            // There should be other points out there that are
+            // responsible for the additional collective calls
+            assert(finder->second.remaining_points > 0); 
+#endif
+            return upper_bound_index;
           }
-          else
-            wait_on = finder->second.ready_event;
+          wait_on = finder->second.ready_event;
         }
+        if (finder->second.remaining_points == 0)
+          perform_verification = true;
       }
       if (perform_verification)
         perform_verify_total_collective_instance_calls(mapper_call,total_calls);
@@ -3107,6 +3112,7 @@ namespace Legion {
       assert(finder != pending_verifications.end());
       assert(finder->second.remaining_points >= points);
       assert(!finder->second.ready_event.exists());
+      assert(points <= finder->second.remaining_points);
 #endif
       const unsigned result = finder->second.total_calls;
       finder->second.remaining_points -= points;
@@ -3129,13 +3135,14 @@ namespace Legion {
       assert(finder != pending_verifications.end());
       assert(finder->second.ready_event.exists());
       assert(!finder->second.ready_event.has_triggered());
+      assert(finder->second.remaining_points == 0);
 #endif
       finder->second.total_calls = total_calls;
+      finder->second.remaining_points = get_total_collective_instance_points();
       Runtime::trigger_event(finder->second.ready_event);
-      if (finder->second.remaining_points == 0)
-        pending_verifications.erase(finder);
-      else
-        finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
+#ifdef DEBUG_LEGION
+      finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
