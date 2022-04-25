@@ -7807,7 +7807,6 @@ namespace Legion {
           rez.serialize<bool>(copy_restricted);
           if (copy_restricted)
             op->pack_remote_operation(rez, *it, applied_events);
-          rez.serialize(op_id);
           rez.serialize(index);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
