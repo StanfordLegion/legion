@@ -6720,18 +6720,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate::ShardedPhysicalTemplate(
-                                             const ShardedPhysicalTemplate &rhs)
-      : PhysicalTemplate(rhs), repl_ctx(rhs.repl_ctx), 
-        local_shard(rhs.local_shard), total_shards(rhs.total_shards), 
-        template_index(rhs.template_index)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {

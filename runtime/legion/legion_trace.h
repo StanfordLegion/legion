@@ -511,8 +511,8 @@ namespace Legion {
     public:
       Runtime * const runtime;
       const LegionTrace *logical_trace;
-      ReplicateContext *const repl_ctx;
       const bool perform_fence_elision;
+      ReplicateContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
       FenceOp *previous_replay;
@@ -1225,7 +1225,7 @@ namespace Legion {
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                               TaskTreeCoordinates &&coordinates,
                               ReplicateContext *repl_ctx);
-      ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs);
+      ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs) = delete;
       virtual ~ShardedPhysicalTemplate(void);
     public:
       // Have to provide explicit overrides of operator new and 
