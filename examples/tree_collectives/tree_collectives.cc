@@ -214,6 +214,13 @@ int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
 
+  LayoutConstraintID collective_layout;
+  {
+    LayoutConstraintRegistrar registrar;
+    registrar.layout_constraints.specialized_constraint.collective = true;
+    collective_layout = Runtime::preregister_layout(registrar);
+  }
+
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
@@ -239,6 +246,7 @@ int main(int argc, char **argv)
     TaskVariantRegistrar registrar(READ_FIELD_TASK_ID, "read_field");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
+    registrar.layout_constraints.layouts.insert(std::make_pair(0, collective_layout));
     Runtime::preregister_task_variant<read_field_task>(registrar, "read_field");
   }
 
