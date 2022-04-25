@@ -4644,31 +4644,14 @@ namespace Legion {
       bool record_valid = true;
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
+      const DomainPoint shard_point = get_shard_point();
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       if (!remap_region)
       {
         // Now we've got the valid instances so invoke the mapper
         record_valid = invoke_mapper(mapped_instances, source_instances);
-        if (!runtime->unsafe_mapper)
-        {
-          // Check to make sure that we don't have any collective instances
-          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-          {
-            InstanceManager *manager = mapped_instances[idx].get_manager();
-            if (manager->is_collective_manager())
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected a collective instance "
-                  "for mapping an inline mapping in a non-control-replicated "
-                  "parent task %s (UID %lld). All inline mappings in "
-                  "unreplicated tasks must be individual instances.",
-                  mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                  parent_ctx->get_unique_id())
-          }
-        }
         // First mapping so set the references now
-        const DomainPoint shard_point = get_shard_point();
         region.impl->set_references(mapped_instances, shard_point);
       }
       else
@@ -4708,10 +4691,9 @@ namespace Legion {
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances, no_point);
+                                              mapped_instances, shard_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
@@ -4751,7 +4733,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -5115,10 +5097,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapOp::invoke_mapper(InstanceSet &chosen_instances,
-                              std::vector<PhysicalManager*> &source_instances,
-                              const bool collective_instances_only)
+                              std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
+      const DomainPoint shard_point = get_shard_point();
+      const bool collective_instances_only = (shard_point.get_dim() > 0); 
       Mapper::MapInlineInput input;
       input.require_collective_instances = collective_instances_only;
       Mapper::MapInlineOutput output;
@@ -5272,7 +5255,6 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         std::set<Memory> visible_memories;
         runtime->find_visible_memories(exec_proc, visible_memories);
-        const DomainPoint shard_point = get_shard_point();
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
           const Memory mem = chosen_instances[idx].get_memory(shard_point);
@@ -5353,6 +5335,23 @@ namespace Legion {
                           mapper->get_mapper_name(), get_unique_op_id(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id())
+        }
+      }
+      if (!collective_instances_only)
+      {
+        // Check to make sure that we don't have any collective instances
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          InstanceManager *manager = chosen_instances[idx].get_manager();
+          if (manager->is_collective_manager())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected a collective instance "
+                "for mapping an inline mapping in a non-control-replicated "
+                "parent task %s (UID %lld). All inline mappings in "
+                "unreplicated tasks must be individual instances.",
+                mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
         }
       }
       return output.track_valid_region;

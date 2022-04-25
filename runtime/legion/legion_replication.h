@@ -2265,10 +2265,12 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
+      virtual bool invoke_mapper(InstanceSet &mapped_instances,
+              std::vector<PhysicalManager*> &source_instances);
       virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual bool supports_collective_instances(void) const { return true; }
+      virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       // From collective instance creator
       virtual IndexSpaceNode* get_collective_space(void) const;
     protected:

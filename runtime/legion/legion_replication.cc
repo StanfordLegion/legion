@@ -7233,6 +7233,23 @@ namespace Legion {
             "non-canonical Legion features such as arrive phase barriers are "
             "not permitted with control replication.",
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+#ifdef DEBUG_LEGION
+      if (remap_region)
+      {
+        InstanceSet mapped_instances;
+        region.impl->get_references(mapped_instances);
+        // These should all be collective instances
+        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        {
+          InstanceManager *manager = mapped_instances[idx].get_manager();
+          assert(manager->is_collective_manager());
+          CollectiveManager *collective = manager->as_collective_manager();
+          assert(collective->contains_point(get_shard_point()));
+          assert(collective->point_space->get_volume() ==
+                  ctx->shard_manager->total_shards);
+        }
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7276,17 +7293,15 @@ namespace Legion {
     void ReplMapOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;
       // Signal that all our mapping dependences have been met
       if (collective_map_barrier.exists())
         Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-      // Only need to do versioning computation if we're the first local shard
-      if (is_first_local_shard)
-        // Compute the version numbers for this mapping operation
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement, 
-                                                     version_info,
-                                                     preconditions);
+      std::set<RtEvent> preconditions;
+      // Compute the version numbers for this mapping operation
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement, 
+                                                   version_info,
+                                                   preconditions);
       if (collective_map_barrier.exists())
       {
         if (!collective_map_barrier.has_triggered())
@@ -7300,212 +7315,106 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::trigger_mapping(void)
+    bool ReplMapOp::invoke_mapper(InstanceSet &mapped_instances,
+                                std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+      const bool result = 
+        MapOp::invoke_mapper(mapped_instances, source_instances);
+      if (!runtime->unsafe_mapper)
+      {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
+        ReplicateContext *repl_ctx =
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      ShardManager *shard_manager = repl_ctx->shard_manager;
-      bool record_valid = true;
-      InstanceSet mapped_instances;
-      std::vector<PhysicalManager*> source_instances;
-      // If we are remapping then we know the answer
-      // so we don't need to do any premapping
-      if (!remap_region)
-      {
-        // Now we've got the valid instances so invoke the mapper
-        record_valid = invoke_mapper(mapped_instances, source_instances, 
-                                     true/*collective only*/);
-        if (!runtime->unsafe_mapper)
-        {
-          // Check that all the produced mappings are collective instances
-          FieldMaskSet<CollectiveManager> collective_instances;
-          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-          {
-            InstanceManager *manager = mapped_instances[idx].get_manager();
-            if (!manager->is_collective_manager())
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected a non-collective instance "
-                  "for mapping an inline mapping in control-replicated "
-                  "parent task %s (UID %lld). All inline mappings in "
-                  "control-replicated parent tasks must select created or "
-                  "select a collective instance for mapping.",
-                  mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                  parent_ctx->get_unique_id())
-            CollectiveManager *collective = manager->as_collective_manager();
-            if (!collective->contains_point(get_shard_point()))
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected a collective instance "
-                  "for mapping an inline mapping in control-replicated "
-                  "parent task %s (UID %lld) that does not contain an entry "
-                  "for shard %lld. All inline mappings must select collective "
-                  "instances that have entries for all points in the parent "
-                  "task's sharding space.", mapper->get_mapper_name(),
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                  get_shard_point()[0])
-            if (collective->point_space->get_volume() !=
-                shard_manager->total_shards)
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected a collective instance "
-                  "for mapping an inline mapping in control-replicated "
-                  "parent task %s (UID %lld) that contains more points than "
-                  "shards. All inline mappings must select collective "
-                  "instances that have exactly one point in the parent task's "
-                  "sharding space and no more.", mapper->get_mapper_name(),
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-            collective_instances.insert(collective,
-                mapped_instances[idx].get_valid_fields());
-          }
-          // Then check that all the mappers agreed on the mapping
-          CheckCollectiveMapping mapping_collective(repl_ctx, mapping_check);
-          if (!mapping_collective.verify(collective_instances))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected different collective "
-                  "instances on shard 0 and shard %d when "
-                  "mapping an inline mapping in control-replicated "
-                  "parent task %s (UID %lld). Each inline mapping in a "
-                  "control-replicated parent task must map to the same "
-                  "collective instances across all shards.",
-                  mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id()) 
-          CheckCollectiveSources sources_collective(repl_ctx, sources_check);
-          if (!sources_collective.verify(source_instances))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                  "Invalid mapper output from invocation of 'map_inline' "
-                  "by mapper %s. Mapper selected different 'source_instances' "
-                  "on shard 0 and shard %d when mapping an inline mapping in "
-                  "control-replicated parent task %s (UID %lld). Each inline "
-                  "mapping in a control-replicated parent task must provide "
-                  "same 'source_instances' across all shards.",
-                  mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        }
-        // First mapping so set the references now
-        const DomainPoint shard_point = get_shard_point();
-        region.impl->set_references(mapped_instances, shard_point);
-      }
-      else
-      {
-        region.impl->get_references(mapped_instances);
-#ifdef DEBUG_LEGION
-        // These should all be collective instances
+        // Check that all the produced mappings are collective instances
+        FieldMaskSet<CollectiveManager> collective_instances;
         for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         {
           InstanceManager *manager = mapped_instances[idx].get_manager();
-          assert(manager->is_collective_manager());
+          if (!manager->is_collective_manager())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected a non-collective instance "
+                "for mapping an inline mapping in control-replicated "
+                "parent task %s (UID %lld). All inline mappings in "
+                "control-replicated parent tasks must select created or "
+                "select a collective instance for mapping.",
+                mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
           CollectiveManager *collective = manager->as_collective_manager();
-          assert(collective->contains_point(get_shard_point()));
-          assert(collective->point_space->get_volume() ==
-                  shard_manager->total_shards);
+          if (!collective->contains_point(get_shard_point()))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected a collective instance "
+                "for mapping an inline mapping in control-replicated "
+                "parent task %s (UID %lld) that does not contain an entry "
+                "for shard %lld. All inline mappings must select collective "
+                "instances that have entries for all points in the parent "
+                "task's sharding space.", mapper->get_mapper_name(),
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                get_shard_point()[0])
+          if (collective->point_space->get_volume() !=
+              repl_ctx->shard_manager->total_shards)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected a collective instance "
+                "for mapping an inline mapping in control-replicated "
+                "parent task %s (UID %lld) that contains more points than "
+                "shards. All inline mappings must select collective "
+                "instances that have exactly one point in the parent task's "
+                "sharding space and no more.", mapper->get_mapper_name(),
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+          collective_instances.insert(collective,
+              mapped_instances[idx].get_valid_fields());
         }
-#endif
+        // Then check that all the mappers agreed on the mapping
+        CheckCollectiveMapping mapping_collective(repl_ctx, mapping_check);
+        if (!mapping_collective.verify(collective_instances))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected different collective "
+                "instances on shard 0 and shard %d when "
+                "mapping an inline mapping in control-replicated "
+                "parent task %s (UID %lld). Each inline mapping in a "
+                "control-replicated parent task must map to the same "
+                "collective instances across all shards.",
+                mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id()) 
+        CheckCollectiveSources sources_collective(repl_ctx, sources_check);
+        if (!sources_collective.verify(source_instances))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Invalid mapper output from invocation of 'map_inline' "
+                "by mapper %s. Mapper selected different 'source_instances' "
+                "on shard 0 and shard %d when mapping an inline mapping in "
+                "control-replicated parent task %s (UID %lld). Each inline "
+                "mapping in a control-replicated parent task must provide "
+                "same 'source_instances' across all shards.",
+                mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
-      ApEvent map_complete_event, effects_done;
-      if (is_first_local_shard)
-      {
-        ApEvent init_precondition = execution_fence_event;
-        // Then we can register our mapped instances
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
-                                                requirement, version_info,
-                                                this, 0/*idx*/,
-                                                init_precondition,
-                                                termination_event, 
-                                                mapped_instances,
-                                                source_instances,
-                                                trace_info,
-                                                map_applied_conditions,
-#ifdef DEBUG_LEGION
-                                                get_logging_name(),
-                                                unique_op_id,
-#endif
-                                                record_valid);
-#ifdef DEBUG_LEGION
-        if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
-        {
-          assert(!mapped_instances.empty());
-          dump_physical_state(&requirement, 0);
-        } 
-#endif
-        if (mapped_instances.size() > 1)
-        {
-          std::set<ApEvent> mapped_events;
-          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-            mapped_events.insert(mapped_instances[idx].get_ready_event());
-          map_complete_event = Runtime::merge_events(&trace_info,mapped_events);
-        }
-        else if (!mapped_instances.empty())
-          map_complete_event = mapped_instances[0].get_ready_event();
-        // Bounce the map complete event off the shard manager so that
-        // any other local shards can also get it
-        shard_manager->exchange_shard_local_op_data(context_index, 0/*first*/,
-                                                    map_complete_event);
-      }
-      else
-        map_complete_event =
-          shard_manager->find_shard_local_op_data<ApEvent>(context_index,
-                                                           0/*first*/);
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              mapped_instances,
-                                              get_shard_point());
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
-                                        termination_event);
-#endif
-      }
-      if (!effects_done.exists())
-        effects_done = termination_event; 
-      // We can trigger the ready event now that we know its precondition
-      Runtime::trigger_event(NULL, ready_event, map_complete_event);
-      // Now we can trigger the mapping event and indicate
-      // to all our mapping dependences that we are mapped.
-      RtEvent mapping_applied;
-      if (!map_applied_conditions.empty())
-        mapping_applied = Runtime::merge_events(map_applied_conditions);
-      if (!acquired_instances.empty())
-        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
-                                                          acquired_instances);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplMapOp::finalize_complete_mapping(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
       if (collective_map_barrier.exists())
       {
         Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
-                                      mapping_applied);
-        complete_mapping(collective_map_barrier);
+                                      precondition);
+        const RtEvent result = collective_map_barrier;
 #ifdef DEBUG_LEGION
         collective_map_barrier = RtBarrier::NO_RT_BARRIER;
 #endif
+        return result;
       }
       else
-        complete_mapping(mapping_applied);
-      // Note that completing mapping and execution should
-      // be enough to trigger the completion operation call
-      // Trigger an early commit of this operation
-      // Note that a mapping operation terminates as soon as it
-      // is done mapping reflecting that after this happens, information
-      // has flowed back out into the application task's execution.
-      // Therefore mapping operations cannot be restarted because we
-      // cannot track how the application task uses their data.
-      // This means that any attempts to restart an inline mapping
-      // will result in the entire task needing to be restarted.
-      request_early_commit();
-      // If we have any copy-out effects from this inline mapping, we'll
-      // need to keep it around long enough for the parent task in case
-      // it decides that it needs to
-      if (!request_early_complete(effects_done))
-        complete_execution(Runtime::protect_event(effects_done));
-      else
-        complete_execution();
+        return precondition;
     }
 
     //--------------------------------------------------------------------------

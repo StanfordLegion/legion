@@ -1337,9 +1337,8 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      bool invoke_mapper(InstanceSet &mapped_instances,
-                         std::vector<PhysicalManager*> &source_instances,
-                         const bool collective_instances_only = false);
+      virtual bool invoke_mapper(InstanceSet &mapped_instances,
+                               std::vector<PhysicalManager*> &source_instances);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1349,6 +1348,7 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual DomainPoint get_shard_point(void) const;
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       bool remap_region;
       ApUserEvent ready_event;
