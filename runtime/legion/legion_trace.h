@@ -469,10 +469,10 @@ namespace Legion {
     class PhysicalTrace {
     public:
       PhysicalTrace(Runtime *runtime, LegionTrace *logical_trace);
-      PhysicalTrace(const PhysicalTrace &rhs);
+      PhysicalTrace(const PhysicalTrace &rhs) = delete;
       ~PhysicalTrace(void);
     public:
-      PhysicalTrace& operator=(const PhysicalTrace &rhs);
+      PhysicalTrace& operator=(const PhysicalTrace &rhs) = delete;
     public:
       void clear_cached_template(void) { current_template = NULL; }
       void check_template_preconditions(TraceReplayOp *op,
@@ -512,6 +512,7 @@ namespace Legion {
       Runtime * const runtime;
       const LegionTrace *logical_trace;
       ReplicateContext *const repl_ctx;
+      const bool perform_fence_elision;
     private:
       mutable LocalLock trace_lock;
       FenceOp *previous_replay;
