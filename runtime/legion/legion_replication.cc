@@ -7497,6 +7497,7 @@ namespace Legion {
     {
       MapOp::activate();
       activate_collective_instance_creator();
+      activate_repl_collective_instance_creator();
       mapping_check = 0;
       sources_check = 0;
       shard_space = IndexSpace::NO_SPACE;
@@ -7513,6 +7514,7 @@ namespace Legion {
       // Make sure that we consumed this if we had one
       assert(!collective_map_barrier.exists());
 #endif
+      deactivate_repl_collective_instance_creator();
       deactivate_collective_instance_creator();
       deactivate_map_op();
       runtime->free_repl_map_op(this);
