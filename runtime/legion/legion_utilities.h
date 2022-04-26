@@ -940,7 +940,8 @@ namespace Legion {
       serialize(field.subfield_offset);
       serialize(field.indirect_index);
       serialize(field.size);
-      if (field.size > 0)
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
       {
         if (field.size <= Internal::CopySrcDstField::MAX_DIRECT_SIZE)
           serialize(field.fill_data.direct, field.size);
@@ -1196,7 +1197,8 @@ namespace Legion {
         field.fill_data.indirect = NULL;
       }
       deserialize(field.size);
-      if (field.size > 0)
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
       {
         if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
         {
