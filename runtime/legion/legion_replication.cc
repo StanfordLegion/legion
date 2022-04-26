@@ -2022,6 +2022,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t ReplIndexTask::get_total_collective_instance_points(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call first
+      size_t result = ReplCollectiveInstanceCreator<IndexTask>::
+                          get_total_collective_instance_points();
+      if (must_epoch != NULL)
+      {
+#ifdef DEBUG_LEGION
+        ReplMustEpochOp *repl_must = dynamic_cast<ReplMustEpochOp*>(must_epoch);
+        assert(repl_must != NULL);
+#else
+        ReplMustEpochOp *repl_must = static_cast<ReplMustEpochOp*>(must_epoch);
+#endif
+        // For must epoch operations we have to do an adjustment because we
+        // don't eagerly prune out our non-local points
+        const size_t local = repl_must->count_shard_local_points(launch_space);
+#ifdef DEBUG_LEGION
+        assert(local <= total_points);
+#endif
+        const size_t nonlocal = total_points - local;
+#ifdef DEBUG_LEGION
+        assert(nonlocal < result);
+#endif
+        result -= nonlocal;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::create_future_instances(
                                            std::vector<Memory> &target_memories)
     //--------------------------------------------------------------------------
@@ -6471,6 +6501,20 @@ namespace Legion {
       }
       else
         return launch_domain;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplMustEpochOp::count_shard_local_points(IndexSpaceNode *domain)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here, the shard_single_tasks shouldn't be
+      // changing anymore when we get here
+      size_t result = 0;
+      for (std::set<SingleTask*>::const_iterator it =
+            shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
+        if (domain->contains_point((*it)->index_point))
+          result++;
+      return result;
     }
 
     /////////////////////////////////////////////////////////////

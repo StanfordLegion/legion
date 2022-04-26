@@ -1558,6 +1558,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
+      virtual size_t get_total_collective_instance_points(void);
     protected:
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void finish_index_task_reduction(void);
@@ -2115,6 +2116,7 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
+      size_t count_shard_local_points(IndexSpaceNode *launch_domain);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
