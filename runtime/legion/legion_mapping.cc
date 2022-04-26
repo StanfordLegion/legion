@@ -826,6 +826,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::match_collective_instances(MapperContext ctx,
+            std::vector<PhysicalInstance> &matches, size_t collective_tag) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->match_collective_instances(ctx, matches, 
+                                                      collective_tag);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::set_garbage_collection_priority(MapperContext ctx,
                     const PhysicalInstance &instance, GCPriority priority) const
     //--------------------------------------------------------------------------
@@ -835,49 +844,45 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instance(MapperContext ctx, 
-                                         const PhysicalInstance &instance,
-                                         size_t collective_tag) const
+                                         const PhysicalInstance &instance) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instance(ctx, instance, collective_tag);
+      return ctx->manager->acquire_instance(ctx, instance);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instances(MapperContext ctx,
-                          const std::vector<PhysicalInstance> &instances,
-                          size_t collective_tag) const
+                          const std::vector<PhysicalInstance> &instances) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instances(ctx, instances, collective_tag);
+      return ctx->manager->acquire_instances(ctx, instances);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
-           std::vector<PhysicalInstance> &instances,
-           bool filter_acquired, size_t collective_tag) const
+           std::vector<PhysicalInstance> &instances, bool filter_acquired) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->acquire_and_filter_instances(ctx, instances,
-                                      filter_acquired, collective_tag);
+                                                        filter_acquired);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instances(MapperContext ctx,
-            const std::vector<std::vector<PhysicalInstance> > &instances,
-            size_t collective_tag) const
+            const std::vector<std::vector<PhysicalInstance> > &instances) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instances(ctx, instances, collective_tag);
+      return ctx->manager->acquire_instances(ctx, instances);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances,
-                  bool filter_acquired_instances, size_t collective_tag) const
+                  bool filter_acquired_instances) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->acquire_and_filter_instances(ctx, instances,
-                            filter_acquired_instances, collective_tag);
+                                            filter_acquired_instances);
     }
 
     //--------------------------------------------------------------------------

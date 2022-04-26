@@ -1948,6 +1948,22 @@ namespace Legion {
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
             InstanceManager *manager = it->impl;
+            if (manager->is_collective_manager())
+            {
+              CollectiveManager *collective = manager->as_collective_manager();
+              // If this operation doesn't support collectives then it's no good
+              if (!ctx->operation->supports_collective_instances())
+              {
+                it = instances.erase(it);
+                continue;
+              }
+              // See if it we have a point in the collective instance
+              if (!collective->contains_point(task.index_point))
+              {
+                it = instances.erase(it);
+                continue;
+              }
+            }
             if (manager->conflicts(constraints, DomainPoint(), NULL))
               it = instances.erase(it);
             else if (constraints->specialized_constraint.is_exact() && 
@@ -2007,6 +2023,22 @@ namespace Legion {
               instances.begin(); it != instances.end(); /*nothing*/)
         {
           InstanceManager *manager = it->impl;
+          if (manager->is_collective_manager())
+          {
+            CollectiveManager *collective = manager->as_collective_manager();
+            // If this operation doesn't support collectives then it's no good
+            if (!ctx->operation->supports_collective_instances())
+            {
+              it = instances.erase(it);
+              continue;
+            }
+            // See if it we have a point in the collective instance
+            if (!collective->contains_point(task.index_point))
+            {
+              it = instances.erase(it);
+              continue;
+            }
+          }
           if (manager->conflicts(constraints, DomainPoint(), NULL))
             it = instances.erase(it);
           else if (constraints->specialized_constraint.is_exact() &&
@@ -3124,6 +3156,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::match_collective_instances(MappingCallInfo *ctx,
+                   std::vector<MappingInstance> &matches, size_t collective_tag)
+    //--------------------------------------------------------------------------
+    {
+      if (!ctx->operation->supports_collective_instances())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+            "Ignoring call to match collective instances in mapper "
+            "call %s for %s (UID %lld) by mapper %s. Collective instances "
+            "can only be matched by index space tasks/operations.",
+            get_mapper_call_name(ctx->kind),
+            ctx->operation->get_logging_name(), 
+            ctx->operation->get_unique_op_id(), get_mapper_name())
+        return true;
+      }
+      if (!ctx->supports_collectives)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+              "Ignoring call to match collective instances for the %d-"
+              "st/nd/rd/th call to create instance in mapper call %s in "
+              "mapper %s because this kind of mapper call does not "
+              "support the matching of collective instances.",
+              ctx->collective_count++, get_mapper_call_name(ctx->kind),
+              get_mapper_name())
+        return true;
+      }
+      if (mapper->get_mapper_sync_model() ==
+          Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
+        REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
+            "Illegal request to match collective instances in mapper call "
+            "%s for %s (UID %lld) by mapper %s. This mapper was configured "
+            "to use the SERIALIZED_NON_REENTRANT synchronization model which "
+            "is incompatible with the matching of collective instances. "
+            "Please select a different mapper synchronization model in order "
+            "to support the matching of collective instances.",
+            get_mapper_call_name(ctx->kind), 
+            ctx->operation->get_logging_name(),
+            ctx->operation->get_unique_op_id(), get_mapper_name())
+      pause_mapper_call(ctx);
+      const size_t oldsize = matches.size();
+      ctx->operation->match_collective_instances(ctx->kind,
+          ctx->collective_count++, collective_tag, matches);
+#ifdef DEBUG_LEGION
+      assert(matches.size() <= oldsize);
+#endif
+      resume_mapper_call(ctx);
+      return (oldsize == matches.size());
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::set_garbage_collection_priority(MappingCallInfo *ctx,
                            const MappingInstance &instance, GCPriority priority)
     //--------------------------------------------------------------------------
@@ -3136,29 +3218,6 @@ namespace Legion {
       // Ignore garbage collection priorities on external instances
       if (!manager->is_external_instance())
       {
-        if (manager->is_collective_manager())
-        {
-          if (!ctx->operation->supports_collective_instances())
-            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
-                "Illegal call to set garbage collection priority for a "
-                "collective instance in mapper call %s for %s (UID %lld) by "
-                "mapper %s. Collective instances can only have their garbage "
-                "collection priority set by index space tasks/operations.",
-                get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(), 
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-          CollectiveManager *collective = manager->as_collective_manager();
-          if (!collective->contains_point(
-                ctx->operation->get_collective_instance_point()))
-            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_BAD_POINT,
-                "Illegal call to set garbage collection priority on a "
-                "collective instance in mapper call %s for %s (UID %lld) by "
-                "mapper %s because the collective instance does not contain "
-                "the index point for the operation.",
-                get_mapper_call_name(ctx->kind),
-                ctx->operation->get_logging_name(),
-                ctx->operation->get_unique_op_id(), get_mapper_name())
-        }
         const RtEvent ready = manager->set_garbage_collection_priority(
                 mapper_id, processor, runtime->address_space, priority);
         if (ready.exists() && !ready.has_triggered())
@@ -3173,7 +3232,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instance(MappingCallInfo *ctx,
-                         const MappingInstance &instance, size_t collective_tag)
+                                         const MappingInstance &instance)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3185,73 +3244,31 @@ namespace Legion {
         return false;
       }
       InstanceManager *man = instance.impl;
-      if (man == NULL)
-        return false;
       // virtual instances are easy
       if (man->is_virtual_manager())
         return true;
       PhysicalManager *manager = man->as_physical_manager();
-      const bool is_collective = manager->is_collective_manager();
-      const bool already_acquired = (ctx->acquired_instances->find(manager) !=
-                                      ctx->acquired_instances->end());
       // See if we already acquired it
-      if (already_acquired && !is_collective)
+      if (ctx->acquired_instances->find(manager) !=
+          ctx->acquired_instances->end())
         return true;
       pause_mapper_call(ctx);
-      std::vector<MappingInstance> collectives;
-      std::vector<MappingInstance> instances(1, instance);
-      // Perform the local acquire if we haven't already done so
-      bool success = true, has_collectives = false;
-      if (!already_acquired)
-        success = perform_acquires(ctx, instances, collectives,has_collectives);
-      if (has_collectives)
+      if (manager->acquire_instance(MAPPING_ACQUIRE_REF, ctx->operation))
       {
-        if (!ctx->operation->supports_collective_instances())
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
-              "Illegal call to acquire a collective instance in mapper "
-              "call %s for %s (UID %lld) by mapper %s. Collective instances "
-              "can only be acquired by index space tasks/operations.",
-              get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to acquire a collective instance for the %d-"
-                "st/nd/rd/th call to acquire instance in mapper call %s in "
-                "mapper %s because this kind of mapper call does not "
-                "support the acquiring of collective instances.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        if (mapper->get_mapper_sync_model() ==
-            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
-              "Illegal request to acquire a collective instance in "
-              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
-              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
-              "model which is incompatible with the acquiring of "
-              "collective instances. Please select a different mapper "
-              "synchronization model to support acquiring collective "
-              "instances.", get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!success)
-          collectives.clear();
-        // Perform the match to confirm that all participants acquired
-        ctx->operation->match_collective_instances(
-            ctx->kind, ctx->collective_count++, collective_tag, collectives);
-        success = !collectives.empty();
+        record_acquired_instance(ctx, manager, false/*created*/);
+        resume_mapper_call(ctx);
+        return true;
       }
-      resume_mapper_call(ctx);
-      return success;
+      else
+      {
+        resume_mapper_call(ctx);
+        return false;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instances(MappingCallInfo *ctx,
-           const std::vector<MappingInstance> &instances, size_t collective_tag)
+                                  const std::vector<MappingInstance> &instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3262,68 +3279,19 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      if (instances.empty())
-        return true;
       // Quick fast path
       if (instances.size() == 1)
-        return acquire_instance(ctx, instances[0], collective_tag);
+        return acquire_instance(ctx, instances[0]);
       pause_mapper_call(ctx);
-      std::vector<MappingInstance> collectives;
-      bool has_collectives = false;
-      bool success =
-        perform_acquires(ctx, instances, collectives, has_collectives);
-      if (has_collectives)
-      {
-        if (!ctx->operation->supports_collective_instances())
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
-              "Illegal call to acquire collective instances in mapper "
-              "call %s for %s (UID %lld) by mapper %s. Collective instances "
-              "can only be acquired by index space tasks/operations.",
-              get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to acquire collective instances for the %d-"
-                "st/nd/rd/th call to acquire instance in mapper call %s in "
-                "mapper %s because this kind of mapper call does not "
-                "support the acquiring of collective instances.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        if (mapper->get_mapper_sync_model() ==
-            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
-              "Illegal request to acquire collective instances in "
-              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
-              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
-              "model which is incompatible with the acquiring of "
-              "collective instances. Please select a different mapper "
-              "synchronization model to support acquiring collective "
-              "instances.", get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!success)
-          collectives.clear();
-        const size_t previous_size = collectives.size();
-        // Do the match
-        ctx->operation->match_collective_instances(
-            ctx->kind, ctx->collective_count++, collective_tag, collectives);
-        if (success)
-          success = (previous_size == collectives.size());
-      }
+      const bool all_acquired = perform_acquires(ctx, instances);
       resume_mapper_call(ctx);
-      return success;
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
                                         std::vector<MappingInstance> &instances,
-                                        const bool filter_acquired_instances,
-                                        size_t collective_tag)
+                                        const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3334,12 +3302,10 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      if (instances.empty())
-        return true;
       // Quick fast path
       if (instances.size() == 1)
       {
-        bool result = acquire_instance(ctx, instances[0], collective_tag);
+        bool result = acquire_instance(ctx, instances[0]);
         if (result)
         {
           if (filter_acquired_instances)
@@ -3352,112 +3318,27 @@ namespace Legion {
         }
         return result;
       }
-      pause_mapper_call(ctx); 
-      std::set<unsigned> unacquired;
-      std::vector<MappingInstance> collectives;
-      bool has_collectives = false;
-      bool success = perform_acquires(ctx, instances, collectives,
-                                      has_collectives, &unacquired);
-      if (has_collectives)
+      pause_mapper_call(ctx);
+      // Figure out which instances we need to acquire and sort by memories
+      std::vector<unsigned> to_erase;
+      const bool all_acquired =
+        perform_acquires(ctx, instances, &to_erase, filter_acquired_instances);
+      // Filter any invalid local instances
+      if (!to_erase.empty())
       {
-        if (!ctx->operation->supports_collective_instances())
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
-              "Illegal call to acquire collective instances in mapper "
-              "call %s for %s (UID %lld) by mapper %s. Collective instances "
-              "can only be acquired by index space tasks/operations.",
-              get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!ctx->supports_collectives)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-                "Ignoring call to acquire collective instances for the %d-"
-                "st/nd/rd/th call to acquire instance in mapper call %s in "
-                "mapper %s because this kind of mapper call does not "
-                "support the acquiring of collective instances.",
-                ctx->collective_count++, get_mapper_call_name(ctx->kind),
-                get_mapper_name())
-          resume_mapper_call(ctx);
-          return false;
-        }
-        if (mapper->get_mapper_sync_model() ==
-            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
-          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
-              "Illegal request to acquire collective instances in "
-              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
-              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
-              "model which is incompatible with the acquiring of "
-              "collective instances. Please select a different mapper "
-              "synchronization model to support acquiring collective "
-              "instances.", get_mapper_call_name(ctx->kind),
-              ctx->operation->get_logging_name(), 
-              ctx->operation->get_unique_op_id(), get_mapper_name())
-        if (!success)
-          collectives.clear();
-        const size_t previous_size = collectives.size();
-        // Perform the match
-        ctx->operation->match_collective_instances(
-            ctx->kind, ctx->collective_count++, collective_tag, collectives);
-        if (success)
-          success = (previous_size == collectives.size());
-        if (!success)
-        {
-          // See which collectives were not matched
-          for (unsigned idx = 0; idx < instances.size(); idx++)
-          {
-            if (unacquired.find(idx) != unacquired.end())
-              continue;
-            if (!instances[idx].is_collective_instance())
-              continue;
-            bool found = false;
-            const MappingInstance &inst = instances[idx];
-            for (std::vector<MappingInstance>::const_iterator it =
-                  collectives.begin(); it != collectives.end(); it++)
-            {
-              if (inst != (*it))
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              unacquired.insert(idx);
-          }
-        }
-      }
-      if (filter_acquired_instances)
-      {
-        if (!unacquired.empty())
-        {
-          std::vector<MappingInstance> unacquired_instances(unacquired.size());
-          unsigned offset = 0;
-          for (std::set<unsigned>::const_iterator it =
-                unacquired.begin(); it != unacquired.end(); it++)
-            unacquired_instances[offset++] = instances[*it];
-          instances.swap(unacquired_instances);
-        }
-        else
-          instances.clear();
-      }
-      else
-      {
-        if (unacquired.size() < instances.size())
-        {
-          // Erase from the back
-          for (std::set<unsigned>::const_reverse_iterator it = 
-                unacquired.rbegin(); it != unacquired.rend(); it++)
-            instances.erase(instances.begin()+(*it));
-        }
-        else
-          instances.clear();
+        // Erase from the back
+        for (std::vector<unsigned>::const_reverse_iterator it =
+              to_erase.rbegin(); it != to_erase.rend(); it++)
+          instances.erase(instances.begin()+(*it));
+        to_erase.clear();
       }
       resume_mapper_call(ctx);
-      return success;
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instances(MappingCallInfo *ctx,
-                    const std::vector<std::vector<MappingInstance> > &instances,
-                    size_t collective_tag)
+                    const std::vector<std::vector<MappingInstance> > &instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3468,25 +3349,23 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      // This is just a convenience method
-      size_t total_instances = 0;
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-        total_instances += instances[idx].size();
-      std::vector<MappingInstance> linearized;
-      linearized.reserve(total_instances);
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-        for (std::vector<MappingInstance>::const_iterator it =
-              instances[idx].begin(); it != instances[idx].end(); it++)
-          if (!it->is_virtual_instance())
-            linearized.push_back(*it);
-      return acquire_instances(ctx, linearized, collective_tag);
+      pause_mapper_call(ctx); 
+      // Figure out which instances we need to acquire and sort by memories
+      bool all_acquired = true;
+      for (std::vector<std::vector<MappingInstance> >::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        if (!perform_acquires(ctx, *it))
+          all_acquired = false;
+      }
+      resume_mapper_call(ctx);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
                           std::vector<std::vector<MappingInstance> > &instances,
-                          const bool filter_acquired_instances,
-                          size_t collective_tag)
+                          const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3497,92 +3376,37 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      // This is another convenience method, so figure out the unique
-      // set of instances that we need and ask for the acquired set
-      std::map<unsigned long,std::pair<unsigned,unsigned> > unique;
-      for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
-        for (unsigned idx2 = 0; idx2 < instances[idx1].size(); idx2++)
-        {
-          const MappingInstance &inst = instances[idx1][idx2];
-          if (inst.is_virtual_instance())
-            continue;
-          const unsigned long inst_id = instances[idx1][idx2].get_instance_id();
-          if (unique.find(inst_id) != unique.end())
-            continue;
-          unique[inst_id] = std::make_pair(idx1, idx2);
-        }
-      std::vector<MappingInstance> unique_instances;
-      unique_instances.reserve(unique.size());
-      for (std::map<unsigned long,std::pair<unsigned,unsigned> >::const_iterator
-            it = unique.begin(); it != unique.end(); it++)
-        unique_instances.push_back(
-            instances[it->second.first][it->second.second]);
-      bool success = acquire_and_filter_instances(ctx, unique_instances,
-                              false/*filter acquired*/, collective_tag);
-      // Now we need to do the filtering
-      if (filter_acquired_instances)
+      pause_mapper_call(ctx);
+      // Figure out which instances we need to acquire and sort by memories
+      bool all_acquired = true;
+      std::vector<unsigned> to_erase;
+      for (std::vector<std::vector<MappingInstance> >::iterator it = 
+            instances.begin(); it != instances.end(); it++)
       {
-        if (!unique_instances.empty())
+        if (!perform_acquires(ctx, *it, &to_erase, filter_acquired_instances))
         {
-          for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
-          {
-            for (std::vector<MappingInstance>::iterator it =
-                  instances[idx1].begin(); it != 
-                  instances[idx1].end(); /*nothing*/)
-            {
-              bool found = false;
-              for (unsigned idx2 = 0; idx2 < unique_instances.size(); idx2++)
-              {
-                if ((*it) != unique_instances[idx2])
-                  continue;
-                found = true;
-                break;
-              }
-              if (found)
-                it = unique_instances.erase(it);
-              else
-                it++;
-            }
-          }
+          all_acquired = false;
+          // Erase from the back
+          for (std::vector<unsigned>::const_reverse_iterator rit = 
+                to_erase.rbegin(); rit != to_erase.rend(); rit++)
+            it->erase(it->begin()+(*rit));
+          to_erase.clear();
         }
       }
-      else if (!success)
-      {
-        for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
-        {
-          for (std::vector<MappingInstance>::iterator it =
-                instances[idx1].begin(); it != 
-                instances[idx1].end(); /*nothing*/)
-          {
-            bool found = false;
-            for (unsigned idx2 = 0; idx2 < unique_instances.size(); idx2++)
-            {
-              if ((*it) != unique_instances[idx2])
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              it = unique_instances.erase(it);
-            else
-              it++;
-          }
-        }
-      }
-      return success;
+      resume_mapper_call(ctx);
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::perform_acquires(MappingCallInfo *info,
-                          const std::vector<MappingInstance> &instances,
-                          std::vector<MappingInstance> &collectives,
-                          bool &has_collectives, std::set<unsigned> *unacquired)
+                                  const std::vector<MappingInstance> &instances,
+                                  std::vector<unsigned> *to_erase,
+                                  const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalManager*,unsigned> &already_acquired = 
+      std::map<PhysicalManager*,unsigned> &already_acquired =
         *(info->acquired_instances);
-      bool acquire_successful = true;
-      DomainPoint collective_point;
+      bool all_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         const MappingInstance &inst = instances[idx];
@@ -3592,36 +3416,10 @@ namespace Legion {
         if (man->is_virtual_manager())
           continue;
         PhysicalManager *manager = man->as_physical_manager();
-        const bool is_collective = manager->is_collective_manager();
-        if (is_collective)
-        {
-          if (!has_collectives)
-          {
-            if (!info->operation->supports_collective_instances())
-              REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
-                  "Illegal call to acquire a collective instance in mapper "
-                  "call %s for %s (UID %lld) by mapper %s. Collective instances "
-                  "can only be acquired by index space tasks/operations.",
-                  get_mapper_call_name(info->kind),
-                  info->operation->get_logging_name(), 
-                  info->operation->get_unique_op_id(), get_mapper_name())
-            collective_point = info->operation->get_collective_instance_point();
-            has_collectives = true;
-          }
-          CollectiveManager *collective = manager->as_collective_manager();
-          if (!collective->contains_point(collective_point))
-            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_BAD_POINT,
-                "Illegal call to acquire a collective instance in mapper call "
-                "%s for %s (UID %lld) by mapper %s because the collective "
-                "instance does not contain the index point for the operation.",
-                get_mapper_call_name(info->kind),
-                info->operation->get_logging_name(),
-                info->operation->get_unique_op_id(), get_mapper_name())
-        }
         if (already_acquired.find(manager) != already_acquired.end())
         {
-          if (is_collective)
-            collectives.push_back(inst);
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
           continue;
         }
         // Try to add an acquired reference immediately
@@ -3631,19 +3429,17 @@ namespace Legion {
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
-          if (is_collective)
-            collectives.push_back(inst);
-          continue;
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
         }
         else
         {
-          // Unable to record it
-          if (unacquired != NULL)
-            unacquired->insert(idx);
-          acquire_successful = false;
+          all_acquired = false;
+          if ((to_erase != NULL) && !filter_acquired_instances)
+            to_erase->push_back(idx);
         }
       }
-      return acquire_successful;
+      return all_acquired;
     }
 
     //--------------------------------------------------------------------------
