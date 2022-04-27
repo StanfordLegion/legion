@@ -3370,7 +3370,9 @@ namespace Legion {
           return true;
         if (index > rhs.index)
           return false;
-        return start < rhs.start;
+        // Note that this intentionally reversed to
+        // make sure starts always come before ends
+        return start > rhs.start;
       }
       inline bool operator==(const KDLine &rhs) const
       {
