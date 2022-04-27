@@ -6227,7 +6227,10 @@ namespace Legion {
         }
         std::vector<CopySrcDstField> src_fields;
         source->compute_copy_offsets(copy_mask, src_fields);
-        const AddressSpaceID origin = select_source_space(source->owner_space);
+        // We have to follow the tree for other kinds of operations here
+        const AddressSpaceID origin = 
+          collective_mapping->contains(local_space) ? local_space :
+          collective_mapping->find_nearest(local_space);
         ApUserEvent copy_done = Runtime::create_ap_user_event(&trace_info);
         // Record the copy done event on the source view
         src_view->add_copy_user(true/*reading*/, 0/*redop*/, copy_done,
