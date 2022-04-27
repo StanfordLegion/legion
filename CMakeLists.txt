@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.7)
-project(Legion)
+project(Legion VERSION 22.05.00)
 
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
@@ -383,7 +383,7 @@ if(Legion_USE_HIP)
     if(BUILD_SHARED_LIBS)
       set(HIPCC_FLAGS "${HIPCC_FLAGS} -fPIC")
     endif()
-    
+
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
@@ -702,6 +702,8 @@ endforeach()
 #------------------------------------------------------------------------------#
 # Build-tree package generation
 #------------------------------------------------------------------------------#
+include(CMakePackageConfigHelpers)
+
 export(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE ${Legion_BINARY_DIR}/LegionTargets.cmake
@@ -726,6 +728,11 @@ configure_file(
   ${Legion_BINARY_DIR}/LegionConfig.cmake
   @ONLY
 )
+
+write_basic_package_version_file(
+  ${Legion_BINARY_DIR}/LegionConfig-version.cmake
+  VERSION ${Legion_VERSION}
+  COMPATIBILITY ExactVersion)
 
 install(FILES cmake/LegionConfig-install.cmake
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
