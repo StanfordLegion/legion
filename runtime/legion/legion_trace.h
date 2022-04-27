@@ -469,10 +469,10 @@ namespace Legion {
     class PhysicalTrace {
     public:
       PhysicalTrace(Runtime *runtime, LegionTrace *logical_trace);
-      PhysicalTrace(const PhysicalTrace &rhs);
+      PhysicalTrace(const PhysicalTrace &rhs) = delete;
       ~PhysicalTrace(void);
     public:
-      PhysicalTrace& operator=(const PhysicalTrace &rhs);
+      PhysicalTrace& operator=(const PhysicalTrace &rhs) = delete;
     public:
       void clear_cached_template(void) { current_template = NULL; }
       void check_template_preconditions(TraceReplayOp *op,
@@ -511,6 +511,7 @@ namespace Legion {
     public:
       Runtime * const runtime;
       const LegionTrace *logical_trace;
+      const bool perform_fence_elision;
       ReplicateContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
@@ -1236,7 +1237,7 @@ namespace Legion {
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                               TaskTreeCoordinates &&coordinates,
                               ReplicateContext *repl_ctx);
-      ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs);
+      ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs) = delete;
       virtual ~ShardedPhysicalTemplate(void);
     public:
       // Have to provide explicit overrides of operator new and 

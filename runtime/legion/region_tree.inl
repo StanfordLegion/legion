@@ -6675,19 +6675,20 @@ namespace Legion {
         // Try to compute a splitting plane for this dimension
         // Sort the start and end of each equivalence set bounding rectangle
         // along the splitting dimension
-        std::set<KDLine> lines;
+        std::vector<KDLine> lines(2*subrects.size());
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx];
-          lines.insert(KDLine(subset_bounds.lo[d], idx, true));
-          lines.insert(KDLine(subset_bounds.hi[d], idx, false));
+          lines[2*idx] = KDLine(subset_bounds.lo[d], idx, true);
+          lines[2*idx+1] = KDLine(subset_bounds.hi[d], idx, false);
         }
+        std::sort(lines.begin(), lines.end());
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
         std::map<coord_t,unsigned> left_exclusive, right_exclusive;
         unsigned count = 0;
-        for (typename std::set<KDLine>::const_iterator it =
+        for (typename std::vector<KDLine>::const_iterator it =
               lines.begin(); it != lines.end(); it++)
         {
           // Always record the count for all splits
@@ -6701,7 +6702,7 @@ namespace Legion {
         if (left_exclusive.size() == 1)
           continue;
         count = 0;
-        for (typename std::set<KDLine>::const_reverse_iterator it =
+        for (typename std::vector<KDLine>::const_reverse_iterator it =
               lines.rbegin(); it != lines.rend(); it++)
         {
           // Always record the count for all splits
