@@ -3210,6 +3210,8 @@ namespace Legion {
                                                 Serializer &rez);
       void send_collective_distribute_reducecast(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_collective_distribute_hourglass(AddressSpaceID target,
+                                                Serializer &rez);
       void send_collective_distribute_allreduce(AddressSpaceID target,
                                                 Serializer &rez);
       void send_collective_hammer_reduction(AddressSpaceID target,
@@ -3556,6 +3558,8 @@ namespace Legion {
                                                   AddressSpaceID source);
       void handle_collective_distribute_reducecast(Deserializer &derez,
                                                    AddressSpaceID source);
+      void handle_collective_distribute_hourglass(Deserializer &derez,
+                                                  AddressSpaceID source);
       void handle_collective_distribute_allreduce(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_collective_hammer_reduction(Deserializer &derez,
@@ -5658,22 +5662,29 @@ namespace Legion {
           break; 
         case SEND_COLLECTIVE_CREATION:
           break;
+        // Only collective operations apply to destinations need to be
+        // on the ordered virtual channel since they need to be ordered
+        // with respect to the same CopyFillAggregator, there's no need
+        // to do the same thing read-only collectives since they can 
+        // never be read more than once by each CopyFillAggregator
         case SEND_COLLECTIVE_DISTRIBUTE_FILL:
-          break;
+          return COLLECTIVE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DISTRIBUTE_POINT:
-          break;
+          break; // read-only
         case SEND_COLLECTIVE_DISTRIBUTE_POINTWISE:
-          break;
+          return COLLECTIVE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DISTRIBUTE_REDUCTION:
-          break;
+          break; // read-only
         case SEND_COLLECTIVE_DISTRIBUTE_BROADCAST:
-          break;
+          return COLLECTIVE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST:
-          break;
+          return COLLECTIVE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_DISTRIBUTE_HOURGLASS:
+          return COLLECTIVE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE:
-          break;
+          break; // no views involved so effectively read-only
         case SEND_COLLECTIVE_HAMMER_REDUCTION:
-          break;
+          break; // read-only
         case SEND_COLLECTIVE_USER_REQUEST:
           break;
         case SEND_COLLECTIVE_USER_RESPONSE:

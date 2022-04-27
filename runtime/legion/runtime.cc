@@ -12178,6 +12178,12 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_DISTRIBUTE_HOURGLASS:
+            {
+              runtime->handle_collective_distribute_hourglass(derez,
+                                                          remote_address_space);
+              break;
+            }
           case SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE:
             {
               runtime->handle_collective_distribute_allreduce(derez,
@@ -22232,6 +22238,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_hourglass(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_HOURGLASS>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_distribute_allreduce(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24407,6 +24422,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_distribute_reducecast(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_hourglass(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_hourglass(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

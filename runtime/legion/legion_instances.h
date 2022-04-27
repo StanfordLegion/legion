@@ -751,6 +751,8 @@ namespace Legion {
       static void handle_send_manager_update(Runtime *runtime,
                                              AddressSpaceID source,
                                              Deserializer &derez);
+      void pack_fields(Serializer &rez, 
+                       const std::vector<CopySrcDstField> &fields) const;
     public:
       MemoryManager *const memory_manager;
       // Unique identifier event that is common across nodes
@@ -1054,7 +1056,23 @@ namespace Legion {
                                 ApBarrier all_bar, ShardID owner_shard,
                                 AddressSpaceID origin,
                                 const bool copy_restricted);
-      void perform_collective_reducecast(CollectiveManager *source,
+      void perform_collective_reducecast(IndividualManager *source,
+                                InstanceView *dst_view,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent copy_done,
+                                ApBarrier all_bar, ShardID owner_shard,
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
+      void perform_collective_hourglass(CollectiveManager *source,
                                 InstanceView *src_view, InstanceView *dst_view,
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
@@ -1161,6 +1179,21 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 std::vector<CollectiveCopyFillAnalysis*> &ses,
                                 const bool symbolic) const;
+      inline void set_redop(std::vector<CopySrcDstField> &fields) const
+      {
+#ifdef DEBUG_LEGION
+        assert(redop > 0);
+#endif
+        for (std::vector<CopySrcDstField>::iterator it =
+              fields.begin(); it != fields.end(); it++)
+          it->set_redop(redop, true/*fold*/, true/*exclusive*/);
+      }
+      inline void clear_redop(std::vector<CopySrcDstField> &fields) const 
+      {
+        for (std::vector<CopySrcDstField>::iterator it =
+              fields.begin(); it != fields.end(); it++)
+          it->set_redop(0/*redop*/, false/*fold*/);
+      }
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
@@ -1181,6 +1214,8 @@ namespace Legion {
       static void handle_distribute_broadcast(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_reducecast(Runtime *runtime,
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_hourglass(Runtime *runtime,
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_allreduce(Runtime *runtime,
                                     AddressSpaceID source, Deserializer &derez);
@@ -1203,8 +1238,16 @@ namespace Legion {
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
           LayoutConstraints *constraints, ReductionOpID redop, 
           GarbageCollectionState state, bool multi_instance);
+      void pack_fields(Serializer &rez, 
+                       const std::vector<CopySrcDstField> &fields) const;
+      void log_remote_point_instances(
+                       const std::vector<CopySrcDstField> &fields,
+                       const std::vector<unsigned> &indexes,
+                       const std::vector<DomainPoint> &points,
+                       const std::vector<ApEvent> &events);
       static void unpack_fields(std::vector<CopySrcDstField> &fields,
-          Deserializer &derez, std::set<RtEvent> &ready_events);
+          Deserializer &derez, std::set<RtEvent> &ready_events,
+          CollectiveManager *manager, RtEvent man_ready, Runtime *runtime);
     public:
       const size_t total_points;
       // This can be NULL if the point set is implicit

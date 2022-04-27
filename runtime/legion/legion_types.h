@@ -711,7 +711,7 @@ namespace Legion {
       REFERENCE_VIRTUAL_CHANNEL = 6,
       UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
       SUBSET_VIRTUAL_CHANNEL = 8,
-      //CONTEXT_VIRTUAL_CHANNEL = 9,
+      COLLECTIVE_VIRTUAL_CHANNEL = 9,
       LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 10,
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
@@ -808,6 +808,7 @@ namespace Legion {
       SEND_COLLECTIVE_DISTRIBUTE_REDUCTION,
       SEND_COLLECTIVE_DISTRIBUTE_BROADCAST,
       SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST,
+      SEND_COLLECTIVE_DISTRIBUTE_HOURGLASS,
       SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE,
       SEND_COLLECTIVE_HAMMER_REDUCTION,
       SEND_COLLECTIVE_USER_REQUEST,
@@ -1048,6 +1049,7 @@ namespace Legion {
         "Send Collective Distribute Reduction",                       \
         "Send Collective Distribute Broadcast",                       \
         "Send Collective Distribute Reducecast",                      \
+        "Send Collective Distribute Hourglass",                       \
         "Send Collective Distribute Allreduce",                       \
         "Send Collective Hammer Reduction",                           \
         "Send Collective User Request",                               \

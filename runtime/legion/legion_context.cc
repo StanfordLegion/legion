@@ -10353,9 +10353,8 @@ namespace Legion {
         AutoLock inst_lock(instance_view_lock);
         std::map<PhysicalManager*,InstanceView*>::iterator finder =  
           instance_top_views.find(deleted);
-#ifdef DEBUG_LEGION
-        assert(finder != instance_top_views.end());
-#endif
+        if (finder == instance_top_views.end())
+          return;
         removed = finder->second;
         instance_top_views.erase(finder);
       }
@@ -10367,7 +10366,7 @@ namespace Legion {
     bool InnerContext::attempt_children_complete(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock chil_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
       if (task_executed && executing_children.empty() && 
           executed_children.empty() && !children_complete_invoked)
       {
