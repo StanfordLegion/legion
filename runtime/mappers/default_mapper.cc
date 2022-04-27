@@ -1982,6 +1982,8 @@ namespace Legion {
           if (constraint_fields.empty())
           {
             LayoutConstraintSet creation_constraints = index_constraints;
+            default_policy_select_constraints(ctx, creation_constraints,
+                                              target_memory, req);
             creation_constraints.add_constraint(
                 FieldConstraint(overlapping_fields,
                   index_constraints.field_constraint.contiguous,
