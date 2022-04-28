@@ -2188,7 +2188,22 @@ namespace Legion {
                                    bool acquire = false,
                                    bool tight_region_bounds = false,
                                    size_t collective_tag = 0) const;
+      // Match this set of physical instances against sets provided by
+      // the other points in the same index space launch
+      // Is a no-op if the operation is not an index space launch
+      // Returns 'true' if all the instances matched
       bool match_collective_instances(
+                                   MapperContext ctx,
+                                   std::vector<PhysicalInstance> &matches,
+                                   size_t collective_tag = 0) const;
+      // Filter any collective instances that cannot be used by the
+      // operation that performing this mapper call. If the operation
+      // does not support collective instances then all collective
+      // instances will be filtered. If the operation does support
+      // collective instances then only collective instances that
+      // can be used by the operation will be kept.
+      // Returns 'true' if any instances are filtered
+      bool filter_collective_instances(
                                    MapperContext ctx,
                                    std::vector<PhysicalInstance> &matches,
                                    size_t collective_tag = 0) const;

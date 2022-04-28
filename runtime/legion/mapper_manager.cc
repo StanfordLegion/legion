@@ -3160,17 +3160,6 @@ namespace Legion {
                    std::vector<MappingInstance> &matches, size_t collective_tag)
     //--------------------------------------------------------------------------
     {
-      if (!ctx->operation->supports_collective_instances())
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
-            "Ignoring call to match collective instances in mapper "
-            "call %s for %s (UID %lld) by mapper %s. Collective instances "
-            "can only be matched by index space tasks/operations.",
-            get_mapper_call_name(ctx->kind),
-            ctx->operation->get_logging_name(), 
-            ctx->operation->get_unique_op_id(), get_mapper_name())
-        return true;
-      }
       if (!ctx->supports_collectives)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
@@ -3180,6 +3169,20 @@ namespace Legion {
               "support the matching of collective instances.",
               ctx->collective_count++, get_mapper_call_name(ctx->kind),
               get_mapper_name())
+        return true;
+      }
+#ifdef DEBUG_LEGION
+      assert(ctx->operation != NULL);
+#endif
+      if (!ctx->operation->supports_collective_instances())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+            "Ignoring call to match collective instances in mapper "
+            "call %s for %s (UID %lld) by mapper %s. Collective instances "
+            "can only be matched by index space tasks/operations.",
+            get_mapper_call_name(ctx->kind),
+            ctx->operation->get_logging_name(),
+            ctx->operation->get_unique_op_id(), get_mapper_name())
         return true;
       }
       if (mapper->get_mapper_sync_model() ==
