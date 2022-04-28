@@ -20,6 +20,35 @@ cd legion/language
 ./regent.py examples/circuit_sparse.rg
 ```
 
+## Quickstart for macOS
+
+```bash
+# install XCode command-line tools
+sudo xcode-select --install
+
+# download CMake
+curl -L -O https://github.com/Kitware/CMake/releases/download/v3.22.2/cmake-3.22.2-macos-universal.tar.gz
+tar xfz cmake-3.22.2-macos-universal.tar.gz
+export PATH="$PATH:$PWD/cmake-3.22.2-macos-universal/CMake.app/Contents/bin"
+
+# download LLVM
+curl -L -O https://github.com/terralang/llvm-build/releases/download/llvm-13.0.0/clang+llvm-13.0.0-x86_64-apple-darwin.tar.xz
+tar xfJ clang+llvm-13.0.0-x86_64-apple-darwin.tar.xz
+export CMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH:$PWD/clang+llvm-13.0.0-x86_64-apple-darwin"
+
+# environment variables needed to build/run Regent
+export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+export CXXFLAGS="-std=c++11"
+
+# download and build Regent
+git clone -b master https://github.com/StanfordLegion/legion.git
+cd legion/language
+./install.py --debug --rdir=auto
+
+# run Regent example
+./regent.py examples/circuit_sparse.rg
+```
+
 ## Prerequisites
 
 Regent requires:
