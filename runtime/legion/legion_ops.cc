@@ -4239,7 +4239,7 @@ namespace Legion {
           src_requirements[idx].parent.get_field_space();
         const FieldSpace dst_space =
           dst_requirements[idx].parent.get_field_space();
-        for (unsigned fidx = 0; src_fields.size(); idx++)
+        for (unsigned fidx = 0; fidx < src_fields.size(); fidx++)
         {
           const size_t src_size = 
             runtime->forest->get_field_size(src_space, src_fields[fidx]);
