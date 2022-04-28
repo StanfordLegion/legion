@@ -333,7 +333,8 @@ namespace Realm {
       bool get_result(gen_t result_gen, void *value, size_t value_size);
 
     public: //protected:
-      gen_t generation, gen_subscribed;
+      atomic<gen_t> generation; // can be read without holding mutex
+      atomic<gen_t> gen_subscribed;
       gen_t first_generation;
       BarrierImpl *next_free;
 

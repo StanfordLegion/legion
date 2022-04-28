@@ -257,8 +257,8 @@ namespace Realm {
 	if (b->generations.empty())
 	  continue;
 
-	os << "Barrier " << b->me << ": gen=" << b->generation
-	   << " subscr=" << b->gen_subscribed << "\n";
+	os << "Barrier " << b->me << ": gen=" << b->generation.load()
+	   << " subscr=" << b->gen_subscribed.load() << "\n";
 	for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
 	       b->generations.begin(); git != b->generations.end(); git++) {
 	  const EventWaiter::EventWaiterList &waiters = git->second->local_waiters;
