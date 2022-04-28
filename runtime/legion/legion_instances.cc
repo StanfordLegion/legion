@@ -2500,7 +2500,7 @@ namespace Legion {
         // therefore always add the owner address space to the source to 
         // produce a non-zero processor ID. Note that this formulation also
         // avoid conflicts from different remote sources.
-        const Processor fake_proc = { source + manager->owner_space };
+        const Processor fake_proc = { source + manager->local_space };
 #ifdef DEBUG_LEGION
         assert(fake_proc.id != 0);
 #endif
@@ -6228,9 +6228,7 @@ namespace Legion {
         std::vector<CopySrcDstField> src_fields;
         source->compute_copy_offsets(copy_mask, src_fields);
         // We have to follow the tree for other kinds of operations here
-        const AddressSpaceID origin = 
-          collective_mapping->contains(local_space) ? local_space :
-          collective_mapping->find_nearest(local_space);
+        const AddressSpaceID origin = select_origin_space(); 
         ApUserEvent copy_done = Runtime::create_ap_user_event(&trace_info);
         // Record the copy done event on the source view
         src_view->add_copy_user(true/*reading*/, 0/*redop*/, copy_done,
@@ -6251,7 +6249,9 @@ namespace Legion {
           if (source->redop > 0)
           {
             Runtime::trigger_event(&trace_info, copy_done, all_bar);
+#ifdef DEBUG_LEGION
             copy_done = ApUserEvent::NO_AP_USER_EVENT;
+#endif
           }
         }
         if (origin != local_space)
@@ -6328,8 +6328,7 @@ namespace Legion {
       else
       {
         CollectiveManager *collective = source_manager->as_collective_manager();
-        AddressSpaceID origin = collective_mapping->contains(local_space) ?
-          local_space : owner_space;
+        const AddressSpaceID origin = select_origin_space();
         // If the source is a reduction collective instance then we need
         // to see if we can go down the point-wise route based on performing
         // an all-reduce, or whether we have to do a tree reduction followed
@@ -6352,21 +6351,11 @@ namespace Legion {
             // For correctness, the reduce cast must start whereever
             // a comparable broadcast or fill would have started
             // on the destination collective instance
-            if (!collective_mapping->contains(local_space))
-            {
-              const AddressSpaceID origin = 
-                collective_mapping->find_nearest(local_space);
-              perform_collective_hourglass(collective, src_view, dst_view,
-                  precondition, predicate_guard, copy_expression,
-                  op, index, copy_mask, trace_info, recorded_events, 
-                  applied_events, all_done, origin, copy_restricted);
-            }
-            else
-              perform_collective_hourglass(collective, src_view, dst_view,
-                  precondition, predicate_guard, copy_expression,
-                  op, index, copy_mask, trace_info, recorded_events, 
-                  applied_events, all_done, local_space, copy_restricted);
-            return all_done; 
+            perform_collective_hourglass(collective, src_view, dst_view,
+                precondition, predicate_guard, copy_expression,
+                op, index, copy_mask, trace_info, recorded_events, 
+                applied_events, all_done, origin, copy_restricted);
+            return all_done;
           }
           // Otherwise we can fall through and do the allreduce as part
           // of the pointwise copy, get a tag through for unique identification
@@ -8062,6 +8051,16 @@ namespace Legion {
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(origin, local_space, children);
       std::vector<ApEvent> reduce_events;
+      if (!children.empty() && !trace_info.recording)
+      {
+        // Help out with broadcasting the precondition event
+        // In the tracing case the precondition is a barrier 
+        // so there's no need for us to do this
+        const ApUserEvent local_precondition =
+          Runtime::create_ap_user_event(&trace_info);
+        Runtime::trigger_event(&trace_info, local_precondition, precondition);
+        precondition = local_precondition;
+      }
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {

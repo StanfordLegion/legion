@@ -429,26 +429,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    size_t ReplCollectiveInstanceCreator<OP>::
-                                      get_total_collective_instance_points(void)
+    ShardID ReplCollectiveInstanceCreator<OP>::
+                                      get_collective_instance_origin_shard(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(this->get_context());
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx =
-        static_cast<ReplicateContext*>(this->get_context());
-#endif
-      ShardedMapping *mapping = shard_mapping.load(); 
+      ShardedMapping *mapping = shard_mapping.load();
       if (mapping == NULL)
       {
         mapping = get_collective_instance_sharded_mapping();
-#ifdef DEBUG_LEGION
-        // We should be included in this if we've received this call
-        assert(mapping->contains(repl_ctx->owner_shard->shard_id));
-#endif
         // Try to write it and see if we lost the race
         ShardedMapping *previous = NULL;
         if (!shard_mapping.compare_exchange_strong(previous, mapping))
@@ -459,7 +447,28 @@ namespace Legion {
           mapping = previous;
         }
       }
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      unsigned offset = this->get_context_index() % mapping->size();
+      return (*mapping)[offset];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    size_t ReplCollectiveInstanceCreator<OP>::
+                                      get_total_collective_instance_points(void)
+    //--------------------------------------------------------------------------
+    {
+      ShardID origin_shard = get_collective_instance_origin_shard();
+      ShardedMapping *mapping = shard_mapping.load();
+#ifdef DEBUG_LEGION
+      assert(mapping != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(mapping->contains(repl_ctx->owner_shard->shard_id));
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
       // Figure out how many local points we have plus how ever
       // many messages we are expecting from "children" shards
       return OP::get_total_collective_instance_points() +
@@ -651,7 +660,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -695,7 +704,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -736,7 +745,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we were the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -803,7 +812,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -852,7 +861,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -893,7 +902,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->
@@ -933,7 +942,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(this->get_context());
 #endif
       // Check to see if we are the owner shard or not
-      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      ShardID origin_shard = get_collective_instance_origin_shard();
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
         const ShardID parent_shard = shard_mapping.load()->

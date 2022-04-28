@@ -1393,13 +1393,6 @@ namespace Legion {
     public:
       void activate_repl_collective_instance_creator(void);
       void deactivate_repl_collective_instance_creator(void);
-    protected:
-      // Shard ownership for each operation based on its context
-      // index in the order of operations which should yield a 
-      // relatively balanced load across the shards (hopefully)
-      inline ShardID get_collective_instance_origin_shard(
-                                    ReplicateContext *ctx) const
-        { return this->get_context_index() % ctx->total_shards; }
     public:
       // We use this method as our hook to get ourselves registered
       // with the replicated context as a handler of messages coming
@@ -1409,6 +1402,11 @@ namespace Legion {
       virtual void handle_collective_instance_message(Deserializer &derez);
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;
+      // Shard ownership for each operation based on its context
+      // index in the order of operations which should yield a 
+      // relatively balanced load across the shards that this operation
+      // maps onto (hopefully)
+      ShardID get_collective_instance_origin_shard(void);
       void register_handler(void);
     public:
       // hook all entry points so we can register ourselves on the first call 

@@ -984,6 +984,9 @@ namespace Legion {
                                 std::vector<Reservation> &to_delete);
     public:
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
+      AddressSpaceID select_origin_space(void) const
+        { return (collective_mapping->contains(local_space) ? local_space :
+                  collective_mapping->find_nearest(local_space)); }
       void register_collective_analysis(DistributedID view_did,
                                         CollectiveCopyFillAnalysis *analysis);
       RtEvent find_collective_analyses(DistributedID view_did,
