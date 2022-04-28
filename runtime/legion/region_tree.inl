@@ -5088,13 +5088,13 @@ namespace Legion {
 #ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::check_field_size(size_t field_size, bool range)
+    size_t IndexSpaceNodeT<DIM,T>::get_coordinate_size(bool range) const
     //--------------------------------------------------------------------------
     {
       if (range)
-        return (sizeof(Realm::Rect<DIM,T>) == field_size);
+        return sizeof(Realm::Rect<DIM,T>);
       else
-        return (sizeof(Realm::Point<DIM,T>) == field_size);
+        return sizeof(Realm::Point<DIM,T>);
     } 
 
     //--------------------------------------------------------------------------

@@ -3955,21 +3955,6 @@ namespace Legion {
         }
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
-        // If our privilege is not reduce, then shift it to write discard
-        // since we are going to write all over the region, although we
-        // can only do this safely now if there is no scatter region
-        // requirement or there is no gather indirect requirement 
-        // and we know we don't have any out of bounds accesses,
-        // otherwise we're doing it onto
-        if (dst_requirements[idx].privilege != LEGION_REDUCE)
-        {
-          if (((idx < launcher.src_indirect_requirements.size()) &&
-                launcher.possible_src_indirect_out_of_range) ||
-              (idx < launcher.dst_indirect_requirements.size()))
-            dst_requirements[idx].privilege = LEGION_READ_WRITE;
-          else
-            dst_requirements[idx].privilege = LEGION_WRITE_DISCARD;
-        }
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -4106,126 +4091,344 @@ namespace Legion {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(), unique_op_id,
             copy_kind, context_index, false, false);
       }
+      if (runtime->check_privileges)
+      {
+        perform_type_checking();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::check_compatibility_properties(void) const
+    void CopyOp::perform_type_checking(void) const
     //--------------------------------------------------------------------------
     {
+      if (src_requirements.size() != dst_requirements.size())
+        REPORT_LEGION_ERROR(ERROR_NUMBER_SOURCE_REQUIREMENTS,
+                      "Number of source requirements (%zd) does not "
+                      "match number of destination requirements (%zd) "
+                      "for copy operation (ID %lld) with parent "
+                      "task %s (ID %lld)",
+                      src_requirements.size(), dst_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+      if (!src_indirect_requirements.empty() && 
+          (src_indirect_requirements.size() != src_requirements.size()))
+        REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
+                      "Number of source indirect requirements (%zd) does not "
+                      "match number of source requirements (%zd) "
+                      "for copy operation (ID %lld) with parent "
+                      "task %s (ID %lld)", src_indirect_requirements.size(),
+                      src_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+      if (!dst_indirect_requirements.empty() &&
+          (dst_indirect_requirements.size() != src_requirements.size()))
+        REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
+                      "Number of destination indirect requirements (%zd) "
+                      "does not match number of source requriements (%zd) "
+                      "for copy operation ID (%lld) with parent "
+                      "task %s (ID %lld)", dst_indirect_requirements.size(),
+                      src_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
+        if (src_requirements[idx].privilege_fields.size() != 
+            src_requirements[idx].instance_fields.size())
+          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
+                        "Copy source requirement %d for copy operation "
+                        "(ID %lld) in parent task %s (ID %lld) has %zd "
+                        "privilege fields and %zd instance fields.  "
+                        "Copy requirements must have exactly the same "
+                        "number of privilege and instance fields.",
+                        idx, get_unique_id(), 
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        src_requirements[idx].privilege_fields.size(),
+                        src_requirements[idx].instance_fields.size())
+        if (!IS_READ_ONLY(src_requirements[idx]))
+          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
+                        "Copy source requirement %d for copy operation "
+                        "(ID %lld) in parent task %s (ID %lld) must "
+                        "be requested with a read-only privilege.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (dst_requirements[idx].privilege_fields.size() != 
+            dst_requirements[idx].instance_fields.size())
+          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
+                        "Copy destination requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields and %zd "
+                        "instance fields.  Copy requirements must "
+                        "have exactly the same number of privilege "
+                        "and instance fields.", idx, 
+                        get_unique_id(), 
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        dst_requirements[idx].privilege_fields.size(),
+                        dst_requirements[idx].instance_fields.size())
+        if (!HAS_WRITE(dst_requirements[idx]))
+          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
+                        "Copy destination requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-write or write-discard privilege.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+        {
+          if (src_indirect_requirements[idx].privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                      "Copy source indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) has %zd privilege fields but "
+                      "source indirect requirements are only permitted "
+                      "to have one privilege field.", idx,
+                      get_unique_id(), parent_task->get_task_name(),
+                      parent_task->get_unique_id(),
+                      src_indirect_requirements[idx].privilege_fields.size())
+          if (!IS_READ_ONLY(src_indirect_requirements[idx]))
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                      "Copy source indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) must be requested with a "
+                      "read-only privilege.", idx,
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+        }
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+        {
+          if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                      "Copy destination indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) has %zd privilege fields but "
+                      "destination indirect requirements are only permitted "
+                      "to have one privilege field.", idx,
+                      get_unique_id(), parent_task->get_task_name(),
+                      parent_task->get_unique_id(),
+                      dst_indirect_requirements[idx].privilege_fields.size())
+          if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
+            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                      "Copy destination indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) must be requested with a "
+                      "read-only privilege.", idx,
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+        } 
+      }
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        // Check that the source and destination field sizes are the same
+        const std::vector<FieldID> &src_fields = 
+          src_requirements[idx].instance_fields;
+        const std::vector<FieldID> &dst_fields =
+          dst_requirements[idx].instance_fields;
+        const FieldSpace src_space = 
+          src_requirements[idx].parent.get_field_space();
+        const FieldSpace dst_space =
+          dst_requirements[idx].parent.get_field_space();
+        for (unsigned fidx = 0; src_fields.size(); idx++)
+        {
+          const size_t src_size = 
+            runtime->forest->get_field_size(src_space, src_fields[fidx]);
+          const size_t dst_size = 
+            runtime->forest->get_field_size(dst_space, dst_fields[fidx]);
+          if (src_size != dst_size)
+            REPORT_LEGION_ERROR(ERROR_FIELD_SIZE_MISMATCH,
+                "Different field sizes are not permitted for region-to-region "
+                "copy operations. Fields %d and %d of region requirement %d "
+                "have different sizes (%zd bytes and %zd bytes respectively) "
+                "in copy operation (UID %lld) in parent task %s (UID %lld).",
+                src_fields[fidx], dst_fields[fidx], idx, src_size, dst_size,
+                get_unique_id(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+          const CustomSerdezID src_serdez =
+            runtime->forest->get_field_serdez(src_space, src_fields[fidx]);
+          const CustomSerdezID dst_serdez =
+            runtime->forest->get_field_serdez(dst_space, dst_fields[fidx]);
+           if (src_serdez != dst_serdez)
+            REPORT_LEGION_ERROR(ERROR_FIELD_SERDEZ_MISMATCH,
+                "Field with different serdez modes are not permitted for "
+                "region-to-region copy operations. Fields %d and %d of "
+                "region requirement %d have different serdez modes "
+                "(%d and %d respectively) in copy operation (UID %lld) in "
+                "parent task %s (UID %lld).",
+                src_fields[fidx], dst_fields[fidx], idx, src_serdez, 
+                dst_serdez, get_unique_id(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+        }
+        if (idx < src_indirect_requirements.size())
+        {
+          // Check that the size of the source indirect field is same 
+          // as the size of the source coordinate type
+          const RegionRequirement &src_idx_req = src_indirect_requirements[idx];
+          const FieldID fid = *src_idx_req.privilege_fields.begin();
+          const size_t idx_size = runtime->forest->get_field_size(
+              src_idx_req.parent.get_field_space(), fid);
+          const IndexSpace src_space =
+            src_requirements[idx].parent.get_index_space();
+          const size_t coord_size = 
+            runtime->forest->get_coordinate_size(src_space, false/*range*/);
+          if (idx_size != coord_size)
+            REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+                "The source indirect field for a copy operation has the "
+                "incorrect size for the source region coordinate space. "
+                "Field %d of source indirect region requirement %d is "
+                "%zd bytes but the coordinate types of the source space "
+                "is %zd bytes for copy operation (UID %lld) in parent task "
+                "%s (UID %lld).", fid, idx, idx_size, coord_size,
+                get_unique_id(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+          const CustomSerdezID idx_serdez = runtime->forest->get_field_serdez(
+              src_idx_req.parent.get_field_space(), fid);
+          if (idx_serdez != 0)
+            REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+                "Serdez fields are not permitted to be used as "
+                "indirection fields for copy operations. Field %d "
+                "of source indirect region requirement %d in copy "
+                "(UID %lld) in parent task %s (UID %lld) has serdez "
+                "function %d.", fid, idx, get_unique_id(),
+                parent_ctx->get_task_name(), 
+                parent_ctx->get_unique_id(), idx_serdez)
+        }
         if (idx >= dst_indirect_requirements.size())
         {
           if (idx >= src_indirect_requirements.size())
           {
             // Normal copy
             IndexSpace src_space = 
-              src_requirements[idx].region.get_index_space();
+              src_requirements[idx].parent.get_index_space();
             IndexSpace dst_space = 
-              dst_requirements[idx].region.get_index_space();
-            if (!runtime->forest->are_compatible(src_space, dst_space))
-              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+              dst_requirements[idx].parent.get_index_space();
+            bool diff_dims = false;
+            if (!runtime->forest->check_types(src_space.get_type_tag(),
+                                  dst_space.get_type_tag(), diff_dims))
+              REPORT_LEGION_ERROR(ERROR_TYPE_MISMATCH,
                             "Copy launcher index space mismatch at index "
                             "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source requirement with index "
-                            "space %x and destination requirement "
-                            "with index space %x do not have the "
-                            "same number of dimensions.",
+                            "(ID %lld). The index spaces of the source "
+                            "and destination requirements have incompatible "
+                            "types because they have different %s.",
                             idx, get_unique_id(),
                             parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_space.id, dst_space.id)
-            // Only need to check for dominance if we're not reducing
-            else if ((dst_requirements[idx].redop == 0) &&
-                      !runtime->forest->is_dominated(src_space, dst_space))
-              REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE,
-                            "Destination index space %x for "
-                            "requirement %d of cross-region copy "
-                            "(ID %lld) in task %s (ID %lld) is not "
-                            "a sub-space of the source index space %x.", 
-                            dst_space.id, idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            src_space.id)
+                            parent_ctx->get_unique_id(), diff_dims ? 
+                              "numbers of dimensions" : "coordinate types")
           }
           else
           {
             // Gather copy
             IndexSpace src_indirect_space = 
-              src_indirect_requirements[idx].region.get_index_space();
+              src_indirect_requirements[idx].parent.get_index_space();
             IndexSpace dst_space = 
-              dst_requirements[idx].region.get_index_space();
-            if (!runtime->forest->are_compatible(src_indirect_space, dst_space))
-              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+              dst_requirements[idx].parent.get_index_space();
+            bool diff_dims = false;
+            if (!runtime->forest->check_types(src_indirect_space.get_type_tag(),
+                                           dst_space.get_type_tag(), diff_dims))
+              REPORT_LEGION_ERROR(ERROR_TYPE_MISMATCH,
                             "Copy launcher index space mismatch at index "
                             "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source indirect requirement with index "
-                            "space %d and destination requirement "
-                            "with index space %d do not have the "
-                            "same number of dimensions.", 
+                            "(ID %lld). The index spaces of the source "
+                            "indirect requirement and the destination "
+                            "requirement have incompatible types because "
+                            "they have different %s.",
                             idx, get_unique_id(),
                             parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_indirect_space.id, dst_space.id)
-            else if ((dst_requirements[idx].redop == 0) &&
-                   !runtime->forest->is_dominated(src_indirect_space,dst_space))
-              REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE,
-                            "Destination index space %d for "
-                            "requirement %d of cross-region copy "
-                            "(ID %lld) in task %s (ID %lld) is not a sub-space "
-                            "of the source indirection index space %d.",
-                            dst_space.id, idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            src_indirect_space.id)
+                            parent_ctx->get_unique_id(), diff_dims ?
+                              "numbers of dimensions" : "coordinate types")
           }
         }
         else
         {
+          // Check that the size of the source indirect field is same 
+          // as the size of the source coordinate type
+          const RegionRequirement &dst_idx_req = dst_indirect_requirements[idx];
+          const FieldID fid = *dst_idx_req.privilege_fields.begin();
+          const size_t idx_size = runtime->forest->get_field_size(
+              dst_idx_req.parent.get_field_space(), fid);
+          const IndexSpace dst_space =
+            dst_requirements[idx].parent.get_index_space();
+          const size_t coord_size = 
+            runtime->forest->get_coordinate_size(dst_space, false/*range*/);
+          if (idx_size != coord_size)
+            REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+                "The destination indirect field for a copy operation has the "
+                "incorrect size for the destination region coordinate space. "
+                "Field %d of destination indirect region requirement %d is "
+                "%zd bytes but the coordinate types of the destination space "
+                "is %zd bytes for copy operation (UID %lld) in parent task "
+                "%s (UID %lld).", fid, idx, idx_size, coord_size,
+                get_unique_id(), parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+          const CustomSerdezID idx_serdez = runtime->forest->get_field_serdez(
+              dst_idx_req.parent.get_field_space(), fid);
+          if (idx_serdez != 0)
+            REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+                "Serdez fields are not permitted to be used as "
+                "indirection fields for copy operations. Field %d "
+                "of destination indirect region requirement %d in copy "
+                "(UID %lld) in parent task %s (UID %lld) has serdez "
+                "function %d.", fid, idx, get_unique_id(),
+                parent_ctx->get_task_name(), 
+                parent_ctx->get_unique_id(), idx_serdez)
           if (idx >= src_indirect_requirements.size())
           {
             // Scatter copy
             IndexSpace src_space = 
-              src_requirements[idx].region.get_index_space();
+              src_requirements[idx].parent.get_index_space();
             IndexSpace dst_indirect_space= 
-              dst_indirect_requirements[idx].region.get_index_space();
+              dst_indirect_requirements[idx].parent.get_index_space();
             // Just check compatibility here since it's really hard to
             // prove that we're actually going to write everything
-            if (!runtime->forest->are_compatible(src_space, dst_indirect_space))
-              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+            bool diff_dims = false;
+            if (!runtime->forest->check_types(src_space.get_type_tag(), 
+                          dst_indirect_space.get_type_tag(), diff_dims))
+              REPORT_LEGION_ERROR(ERROR_TYPE_MISMATCH,
                             "Copy launcher index space mismatch at index "
                             "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source requirement with index "
-                            "space %d and destination indirect requirement "
-                            "with index space %d do not have the "
-                            "same number of dimensions.",
+                            "(ID %lld). The index spaces of the source "
+                            "requirement and the destination indirect "
+                            "requirement have incompatible types because " 
+                            "they have different %s.",
                             idx, get_unique_id(),
                             parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_space.id, dst_indirect_space.id)
+                            parent_ctx->get_unique_id(), diff_dims ?
+                              "numbers of dimensions" : "coordinate types ")
           }
           else
           {
             // Indirect copy
             IndexSpace src_indirect_space = 
-              src_indirect_requirements[idx].region.get_index_space();
+              src_indirect_requirements[idx].parent.get_index_space();
             IndexSpace dst_indirect_space= 
-              dst_indirect_requirements[idx].region.get_index_space();
+              dst_indirect_requirements[idx].parent.get_index_space();
             // Just check compatibility here since it's really hard to
             // prove that we're actually going to write everything
-            if (!runtime->forest->are_compatible(src_indirect_space, 
-                                                 dst_indirect_space))
-              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+            bool diff_dims = false;
+            if (!runtime->forest->check_types(src_indirect_space.get_type_tag(),
+                                  dst_indirect_space.get_type_tag(), diff_dims))
+              REPORT_LEGION_ERROR(ERROR_TYPE_MISMATCH,
                             "Copy launcher index space mismatch at index "
                             "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source indirect requirement with index "
-                            "space %d and destination indirect requirement "
-                            "with index space %d do not have the "
-                            "same number of dimensions.",
+                            "(ID %lld). The index spaces of the source "
+                            "indirect requirement and the destination indirect "
+                            "requirement have incompatible types because "
+                            "they have different %s.",
                             idx, get_unique_id(),
                             parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_indirect_space.id, dst_indirect_space.id)
+                            parent_ctx->get_unique_id(), diff_dims ?
+                              "numbers of dimensions" : "coordinate types")
           }
         }
       }
@@ -4460,11 +4663,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->check_privileges)
-      {
         check_copy_privileges(false/*permit projection*/);
-        // Also check the compatibility properties here
-        check_compatibility_properties();
-      }
       // Register a dependence on our predicate
       register_predicate_dependence();
       if (!wait_barriers.empty() || !arrive_barriers.empty())
@@ -5445,152 +5644,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::check_copy_privileges(const bool permit_projection) 
+    void CopyOp::check_copy_privileges(const bool permit_projection) const 
     //--------------------------------------------------------------------------
     {
-      if (src_requirements.size() != dst_requirements.size())
-        REPORT_LEGION_ERROR(ERROR_NUMBER_SOURCE_REQUIREMENTS,
-                      "Number of source requirements (%zd) does not "
-                      "match number of destination requirements (%zd) "
-                      "for copy operation (ID %lld) with parent "
-                      "task %s (ID %lld)",
-                      src_requirements.size(), dst_requirements.size(),
-                      get_unique_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
-      if (!src_indirect_requirements.empty() && 
-          (src_indirect_requirements.size() != src_requirements.size()))
-        REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
-                      "Number of source indirect requirements (%zd) does not "
-                      "match number of source requirements (%zd) "
-                      "for copy operation (ID %lld) with parent "
-                      "task %s (ID %lld)", src_indirect_requirements.size(),
-                      src_requirements.size(),
-                      get_unique_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
-      if (!dst_indirect_requirements.empty() &&
-          (dst_indirect_requirements.size() != src_requirements.size()))
-        REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
-                      "Number of destination indirect requirements (%zd) "
-                      "does not match number of source requriements (%zd) "
-                      "for copy operation ID (%lld) with parent "
-                      "task %s (ID %lld)", dst_indirect_requirements.size(),
-                      src_requirements.size(),
-                      get_unique_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        if (src_requirements[idx].privilege_fields.size() != 
-            src_requirements[idx].instance_fields.size())
-          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
-                        "Copy source requirement %d for copy operation "
-                        "(ID %lld) in parent task %s (ID %lld) has %zd "
-                        "privilege fields and %zd instance fields.  "
-                        "Copy requirements must have exactly the same "
-                        "number of privilege and instance fields.",
-                        idx, get_unique_id(), 
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id(),
-                        src_requirements[idx].privilege_fields.size(),
-                        src_requirements[idx].instance_fields.size())
-        if (!IS_READ_ONLY(src_requirements[idx]))
-          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
-                        "Copy source requirement %d for copy operation "
-                        "(ID %lld) in parent task %s (ID %lld) must "
-                        "be requested with a read-only privilege.",
-                        idx, get_unique_id(),
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
         check_copy_privilege(src_requirements[idx], idx, permit_projection);
-      }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        if (dst_requirements[idx].privilege_fields.size() != 
-            dst_requirements[idx].instance_fields.size())
-          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                        "Copy destination requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) has %zd privilege fields and %zd "
-                        "instance fields.  Copy requirements must "
-                        "have exactly the same number of privilege "
-                        "and instance fields.", idx, 
-                        get_unique_id(), 
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id(),
-                        dst_requirements[idx].privilege_fields.size(),
-                        dst_requirements[idx].instance_fields.size())
-        if (!HAS_WRITE(dst_requirements[idx]))
-          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                        "Copy destination requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) must be requested with a "
-                        "read-write or write-discard privilege.",
-                        idx, get_unique_id(),
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
         check_copy_privilege(dst_requirements[idx], 
                         src_requirements.size() + idx, permit_projection);
-      }
       if (!src_indirect_requirements.empty())
       {
         const size_t offset = 
           src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-        {
-          if (src_indirect_requirements[idx].privilege_fields.size() != 1)
-            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                      "Copy source indirect requirement %d for copy "
-                      "operation (ID %lld) in parent task %s "
-                      "(ID %lld) has %zd privilege fields but "
-                      "source indirect requirements are only permitted "
-                      "to have one privilege field.", idx,
-                      get_unique_id(), parent_task->get_task_name(),
-                      parent_task->get_unique_id(),
-                      src_indirect_requirements[idx].privilege_fields.size())
-          if (!IS_READ_ONLY(src_indirect_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                      "Copy source indirect requirement %d for copy "
-                      "operation (ID %lld) in parent task %s "
-                      "(ID %lld) must be requested with a "
-                      "read-only privilege.", idx,
-                      get_unique_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
           check_copy_privilege(src_indirect_requirements[idx], 
                                offset + idx, permit_projection);
-        }
       }
       if (!dst_indirect_requirements.empty())
       {
         const size_t offset = src_requirements.size() + 
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-        {
-          if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
-            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                      "Copy destination indirect requirement %d for copy "
-                      "operation (ID %lld) in parent task %s "
-                      "(ID %lld) has %zd privilege fields but "
-                      "destination indirect requirements are only permitted "
-                      "to have one privilege field.", idx,
-                      get_unique_id(), parent_task->get_task_name(),
-                      parent_task->get_unique_id(),
-                      dst_indirect_requirements[idx].privilege_fields.size())
-          if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                      "Copy destination indirect requirement %d for copy "
-                      "operation (ID %lld) in parent task %s "
-                      "(ID %lld) must be requested with a "
-                      "read-only privilege.", idx,
-                      get_unique_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id())
           check_copy_privilege(dst_indirect_requirements[idx], 
                                offset + idx, permit_projection);
-        } 
       }
     }
 
     //--------------------------------------------------------------------------
     void CopyOp::check_copy_privilege(const RegionRequirement &requirement, 
-                                      unsigned idx, const bool permit_proj)
+                                     unsigned idx, const bool permit_proj) const
     //--------------------------------------------------------------------------
     {
       if (!permit_proj && 
@@ -6339,21 +6421,6 @@ namespace Legion {
                           parent_ctx->get_unique_id())
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
-        // If our privilege is not reduce, then shift it to write discard
-        // since we are going to write all over the region, although we
-        // can only do this safely now if there is no scatter region
-        // requirement or there is no gather indirect requirement 
-        // and we know we don't have any out of bounds accesses,
-        // otherwise we're doing it onto
-        if (dst_requirements[idx].privilege != LEGION_REDUCE)
-        {
-          if (((idx < launcher.src_indirect_requirements.size()) &&
-                launcher.possible_src_indirect_out_of_range) ||
-              (idx < launcher.dst_indirect_requirements.size()))
-            dst_requirements[idx].privilege = LEGION_READ_WRITE;
-          else
-            dst_requirements[idx].privilege = LEGION_WRITE_DISCARD;
-        }
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -6479,6 +6546,8 @@ namespace Legion {
                                       collective_dst_indirect_points);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
+      if (runtime->check_privileges)
+        perform_type_checking();
     }
 
     //--------------------------------------------------------------------------
@@ -6774,16 +6843,9 @@ namespace Legion {
     {
       // Enumerate the points
       enumerate_points(false/*replaying*/); 
+      // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
-      {
-        // Check for interfering point requirements in debug mode
         check_point_requirements();
-        // Also check to make sure source requirements dominate
-        // the destination requirements for each point
-        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-              it != points.end(); it++)
-          (*it)->check_compatibility_properties();
-      } 
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -13818,18 +13880,35 @@ namespace Legion {
                                                    const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            handle.get_field_space(), fid, false/*range*/, 
-            true/*use color space*/))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the color space elements for 'partition_by_field' "
-                      "call in task %s (UID %lld)", fid, ctx->get_task_name(),
-                      ctx->get_unique_id());
-        assert(false);
+        const size_t field_size = 
+          runtime->forest->get_field_size(handle.get_field_space(), fid);
+        IndexSpace color_space = 
+          runtime->forest->get_index_partition_color_space(pid);
+        const size_t coord_size = 
+          runtime->forest->get_coordinate_size(color_space, false/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-field operation does not "
+              "match the size of the coordinate type of the color space "
+              "of the resulting partition. Field %d has size %zd bytes "
+              "but the coordinates of color space %d of partition %d are "
+              "%zd bytes for dependent partition operation (UID %lld) in "
+              "parent task %s (UID %lld).", fid, field_size, 
+              color_space.get_id(), pid.get_id(), coord_size, get_unique_id(),
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            handle.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-field "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/); 
       // Start without the projection requirement, we'll ask
@@ -13865,17 +13944,36 @@ namespace Legion {
                                           const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            projection.get_field_space(), fid, false/*range*/))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the destination index space elements for "
-                      "'partition_by_image' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
+        const size_t field_size = 
+          runtime->forest->get_field_size(projection.get_field_space(), fid);
+        const IndexPartition projection_part = projection.get_index_partition();
+        const IndexSpace projection_parent = 
+          runtime->forest->get_parent_index_space(projection_part);
+        const size_t coord_size = runtime->forest->get_coordinate_size(
+                                      projection_parent, false/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-image operation does not "
+              "match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).", 
+              fid, field_size, projection_part.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            projection.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-image "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -13914,17 +14012,36 @@ namespace Legion {
                                                 const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            projection.get_field_space(), fid, true/*range*/))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the destination index space elements for "
-                      "'partition_by_image_range' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
+        const size_t field_size = 
+          runtime->forest->get_field_size(projection.get_field_space(), fid);
+        const IndexPartition projection_part = projection.get_index_partition();
+        const IndexSpace projection_parent = 
+          runtime->forest->get_parent_index_space(projection_part);
+        const size_t coord_size = runtime->forest->get_coordinate_size(
+                                      projection_parent, true/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-image-range operation does not "
+              "match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).", 
+              fid, field_size, projection_part.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            projection.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-image-range "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -13961,17 +14078,35 @@ namespace Legion {
                                     const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(proj,
-            handle.get_field_space(), fid, false/*range*/))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the range index space elements for "
-                      "'partition_by_preimage' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
+        const size_t field_size = 
+          runtime->forest->get_field_size(handle.get_field_space(), fid);
+        const IndexSpace proj_parent = 
+          runtime->forest->get_parent_index_space(proj);
+        const size_t coord_size =
+          runtime->forest->get_coordinate_size(proj_parent, false/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-preimage operation does not "
+              "match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).",
+              fid, field_size, proj.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            handle.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-preimage "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -14006,17 +14141,35 @@ namespace Legion {
                                     const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(proj,
-            handle.get_field_space(), fid, true/*range*/))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                     "of the range index space elements for "
-                     "'partition_by_preimage_range' call in task %s (UID %lld)",
-                     fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
+        const size_t field_size = 
+          runtime->forest->get_field_size(handle.get_field_space(), fid);
+        const IndexSpace proj_parent = 
+          runtime->forest->get_parent_index_space(proj);
+        const size_t coord_size = 
+          runtime->forest->get_coordinate_size(proj_parent, true/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-preimage-range operation does "
+              "not match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).",
+              fid, field_size, proj.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            handle.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-preimage-range "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -14050,17 +14203,32 @@ namespace Legion {
                         MapperID id, MappingTagID t, const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_association_field_size(range,
-            domain.get_field_space(), fid))
+      if (runtime->check_privileges)
       {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the range index space elements for "
-                      "'create_association' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
+        const size_t field_size =
+          runtime->forest->get_field_size(domain.get_field_space(), fid);
+        const size_t coord_size = 
+          runtime->forest->get_coordinate_size(range, false/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for create-by-association operation does not "
+              "match the size of the range index space. Field %d has size "
+              "%zd bytes but the coordinates of the range index space %d "
+              "are %zd bytes for create-by-association operation (UID %lld) "
+              "in parent task %s (UID %lld).", fid, field_size,
+              range.get_id(), coord_size, get_unique_id(),
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            domain.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to create-by-association "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
       }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // start-off with non-projection requirement

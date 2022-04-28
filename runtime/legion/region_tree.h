@@ -276,13 +276,6 @@ namespace Legion {
                     const std::vector<FieldDataDescriptor> &instances,
                                  ApEvent instances_ready);
     public:
-      bool check_partition_by_field_size(IndexPartition pid,
-                                         FieldSpace fspace, FieldID fid,
-                                         bool is_range,
-                                         bool use_color_space = false);
-      bool check_association_field_size(IndexSpace is,
-                                        FieldSpace fspace, FieldID fid);
-    public:
       IndexSpace find_pending_space(IndexPartition parent,
                                     const void *realm_color,
                                     TypeTag type_tag,
@@ -365,7 +358,9 @@ namespace Legion {
     public:
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
+      size_t get_coordinate_size(IndexSpace handle, bool range);
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      CustomSerdezID get_field_serdez(FieldSpace handle, FieldID fid);
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
@@ -747,7 +742,7 @@ namespace Legion {
       bool are_disjoint_tree_only(IndexTreeNode *one, IndexTreeNode *two,
                                   IndexTreeNode *&common_ancestor);
     public:
-      bool are_compatible(IndexSpace left, IndexSpace right);
+      bool check_types(TypeTag t1, TypeTag t2, bool &diff_dims);
       bool is_dominated(IndexSpace src, IndexSpace dst);
       bool is_dominated_tree_only(IndexSpace test, IndexPartition dominator);
       bool is_dominated_tree_only(IndexPartition test, IndexSpace dominator);
@@ -2211,7 +2206,7 @@ namespace Legion {
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready) = 0;
-      virtual bool check_field_size(size_t field_size, bool range) = 0;
+      virtual size_t get_coordinate_size(bool range) const = 0;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
 				   const std::vector<Realm::FieldID> &field_ids,
@@ -2440,7 +2435,7 @@ namespace Legion {
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
-      virtual bool check_field_size(size_t field_size, bool range);
+      virtual size_t get_coordinate_size(bool range) const;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
@@ -3284,6 +3279,7 @@ namespace Legion {
     public:
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
+      CustomSerdezID get_field_serdez(FieldID fid);
       void get_all_fields(std::vector<FieldID> &to_set);
       void get_all_regions(std::set<LogicalRegion> &regions);
       void get_field_set(const FieldMask &mask, TaskContext *context,

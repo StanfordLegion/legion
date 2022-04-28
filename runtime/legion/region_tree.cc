@@ -736,31 +736,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::check_partition_by_field_size(IndexPartition pid,
-                FieldSpace fs, FieldID fid, bool is_range, bool use_color_space)
+    size_t RegionTreeForest::get_coordinate_size(IndexSpace handle, bool range)
     //--------------------------------------------------------------------------
     {
-      const size_t field_size = get_node(fs)->get_field_size(fid);
-      IndexPartNode *partition = get_node(pid);
-      if (use_color_space)
-      {
-#ifdef DEBUG_LEGION
-        assert(!is_range);
-#endif
-        return partition->color_space->check_field_size(field_size, 
-                                                        false/*range*/);
-      }
-      else
-        return partition->parent->check_field_size(field_size, is_range);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::check_association_field_size(IndexSpace is,
-                                                     FieldSpace fs, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      const size_t field_size = get_node(fs)->get_field_size(fid);
-      return get_node(is)->check_field_size(field_size, false/*is range*/);
+      return get_node(handle)->get_coordinate_size(range);
     }
 
     //--------------------------------------------------------------------------
@@ -1173,6 +1152,18 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
           "FieldSpace %x has no field %d", handle.id, fid)
       return node->get_field_size(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID RegionTreeForest::get_field_serdez(FieldSpace handle,
+                                                      FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      if (!node->has_field(fid))
+        REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
+          "FieldSpace %x has no field %d", handle.id, fid)
+      return node->get_field_serdez(fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5092,10 +5083,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
+    bool RegionTreeForest::check_types(TypeTag t1, TypeTag t2, bool &diff_dims)
     //--------------------------------------------------------------------------
     {
-      return (left.get_type_tag() == right.get_type_tag());
+      if (t1 == t2)
+        return true;
+      const int d1 = NT_TemplateHelper::get_dim(t1); 
+      const int d2 = NT_TemplateHelper::get_dim(t2);
+      diff_dims = (d1 != d2);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -5104,7 +5100,7 @@ namespace Legion {
     {
       // Check to see if dst is dominated by source
 #ifdef DEBUG_LEGION
-      assert(are_compatible(src, dst));
+      assert(src.get_type_tag() == dst.get_type_tag());
 #endif
       IndexSpaceNode *src_node = get_node(src);
       IndexSpaceNode *dst_node = get_node(dst);
@@ -12934,6 +12930,59 @@ namespace Legion {
       if (!wait_for.has_triggered())
         wait_for.wait();
       return get_field_size(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID FieldSpaceNode::get_field_serdez(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_for;
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        while (allocation_state == FIELD_ALLOC_PENDING)
+        {
+#ifdef DEBUG_LEGION
+          assert(is_owner());
+#endif
+          const RtEvent wait_on = pending_field_allocation;
+          n_lock.release();
+          if (!wait_on.has_triggered())
+            wait_on.wait();
+          n_lock.reacquire();
+        }
+        if (allocation_state != FIELD_ALLOC_INVALID)
+        {
+          std::map<FieldID,FieldInfo>::const_iterator finder = 
+            field_infos.find(fid);
+#ifdef DEBUG_LEGION
+          assert(finder != field_infos.end());
+#endif
+          // See if this field has been allocated or not yet
+          if (!finder->second.size_ready.exists())
+            return finder->second.serdez_id;
+          wait_for = Runtime::protect_event(finder->second.size_ready);
+        }
+      }
+      if (!wait_for.exists())
+      {
+        std::map<FieldID,FieldInfo> local_infos;
+        const RtEvent ready = 
+          request_field_infos_copy(&local_infos, local_space);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        std::map<FieldID,FieldInfo>::const_iterator finder = 
+          local_infos.find(fid);
+#ifdef DEBUG_LEGION
+        assert(finder != local_infos.end());
+#endif
+        // See if this field has been allocated or not yet
+        if (!finder->second.size_ready.exists())
+          return finder->second.field_size;
+        wait_for = Runtime::protect_event(finder->second.size_ready);
+      }
+      if (!wait_for.has_triggered())
+        wait_for.wait();
+      return get_field_serdez(fid);
     }
 
     //--------------------------------------------------------------------------

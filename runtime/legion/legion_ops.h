@@ -1280,10 +1280,10 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
     protected:
-      void check_copy_privileges(const bool permit_projection);
+      void check_copy_privileges(const bool permit_projection) const;
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
-                                const bool permit_projection);
-      void check_compatibility_properties(void) const;
+                                const bool permit_projection) const;
+      void perform_type_checking(void) const;
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
                                const ApEvent local_init_precondition,
@@ -1329,6 +1329,7 @@ namespace Legion {
       std::vector<unsigned>                 dst_parent_indexes;
       LegionVector<VersionInfo>             src_versions;
       LegionVector<VersionInfo>             dst_versions;
+      std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
       std::vector<RegionTreePath>           gather_privilege_paths;
       std::vector<RegionTreePath>           scatter_privilege_paths;
