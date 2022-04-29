@@ -13880,6 +13880,30 @@ namespace Legion {
                                                    const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/); 
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByFieldThunk(pid);
+      if (runtime->legion_spy_enabled)
+        perform_logging();
       if (runtime->check_privileges)
       {
         const size_t field_size = 
@@ -13909,30 +13933,6 @@ namespace Legion {
               fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id())
       }
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/); 
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      requirement = 
-        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new ByFieldThunk(pid);
-      if (runtime->legion_spy_enabled)
-        perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -13944,36 +13944,6 @@ namespace Legion {
                                           const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(projection.get_field_space(), fid);
-        const IndexPartition projection_part = projection.get_index_partition();
-        const IndexSpace projection_parent = 
-          runtime->forest->get_parent_index_space(projection_part);
-        const size_t coord_size = runtime->forest->get_coordinate_size(
-                                      projection_parent, false/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-image operation does not "
-              "match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).", 
-              fid, field_size, projection_part.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            projection.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-image "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -14000,6 +13970,35 @@ namespace Legion {
       thunk = new ByImageThunk(pid, projection.get_index_partition());
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+      {
+        const size_t field_size = 
+          runtime->forest->get_field_size(projection.get_field_space(), fid);
+        const IndexSpace pid_parent = 
+          runtime->forest->get_parent_index_space(pid);
+        const size_t coord_size = runtime->forest->get_coordinate_size(
+                                            pid_parent, false/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-image operation does not "
+              "match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).", 
+              fid, field_size, pid.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            projection.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-image "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14012,36 +14011,6 @@ namespace Legion {
                                                 const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(projection.get_field_space(), fid);
-        const IndexPartition projection_part = projection.get_index_partition();
-        const IndexSpace projection_parent = 
-          runtime->forest->get_parent_index_space(projection_part);
-        const size_t coord_size = runtime->forest->get_coordinate_size(
-                                      projection_parent, true/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-image-range operation does not "
-              "match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).", 
-              fid, field_size, projection_part.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            projection.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-image-range "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -14068,6 +14037,35 @@ namespace Legion {
       thunk = new ByImageRangeThunk(pid, projection.get_index_partition());
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+      {
+        const size_t field_size = 
+          runtime->forest->get_field_size(projection.get_field_space(), fid);
+        const IndexSpace pid_parent =
+          runtime->forest->get_parent_index_space(pid);
+        const size_t coord_size = runtime->forest->get_coordinate_size(
+                                              pid_parent, true/*range*/);
+        if (field_size != coord_size)
+          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+              "The field size for partition-by-image-range operation does not "
+              "match the size of the coordinate types of the projection "
+              "partition. Field %d has size %zd bytes but the coordinates "
+              "of the projection partition %d are %zd bytes for dependent "
+              "partition operation (UID %lld) in parent task %s (UID %lld).", 
+              fid, field_size, pid.get_id(), coord_size, 
+              get_unique_id(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id())
+        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+            projection.get_field_space(), fid);
+        if (serdez != 0)
+          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+              "Serdez fields are not permitted to be used for any "
+              "dependent partitioning calls. Field %d has serdez "
+              "function %d and was passed to partition-by-image-range "
+              "operation (UID %lld) in parent task %s (UID %lld).",
+              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14078,6 +14076,30 @@ namespace Legion {
                                     const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByPreimageThunk(pid, proj);
+      if (runtime->legion_spy_enabled)
+        perform_logging();
       if (runtime->check_privileges)
       {
         const size_t field_size = 
@@ -14107,6 +14129,16 @@ namespace Legion {
               fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id())
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::initialize_by_preimage_range(InnerContext *ctx,
+                                    IndexPartition pid, IndexPartition proj,
+                                    LogicalRegion handle, LogicalRegion parent,
+                                    FieldID fid, MapperID id, MappingTagID t,
+                                    const UntypedBuffer &marg)
+    //--------------------------------------------------------------------------
+    {
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -14128,19 +14160,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ByPreimageThunk(pid, proj);
+      thunk = new ByPreimageRangeThunk(pid, proj);
       if (runtime->legion_spy_enabled)
         perform_logging();
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_preimage_range(InnerContext *ctx,
-                                    IndexPartition pid, IndexPartition proj,
-                                    LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t,
-                                    const UntypedBuffer &marg)
-    //--------------------------------------------------------------------------
-    {
       if (runtime->check_privileges)
       {
         const size_t field_size = 
@@ -14170,12 +14192,20 @@ namespace Legion {
               fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id())
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::initialize_by_association(InnerContext *ctx,
+                        LogicalRegion domain, LogicalRegion domain_parent, 
+                        FieldID fid, IndexSpace range, 
+                        MapperID id, MappingTagID t, const UntypedBuffer &marg)
+    //--------------------------------------------------------------------------
+    {
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      requirement = 
-        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
+      // start-off with non-projection requirement
+      requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
+                                      LEGION_EXCLUSIVE, domain_parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -14191,18 +14221,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ByPreimageRangeThunk(pid, proj);
+      thunk = new AssociationThunk(domain.get_index_space(), range);
       if (runtime->legion_spy_enabled)
         perform_logging();
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_association(InnerContext *ctx,
-                        LogicalRegion domain, LogicalRegion domain_parent, 
-                        FieldID fid, IndexSpace range, 
-                        MapperID id, MappingTagID t, const UntypedBuffer &marg)
-    //--------------------------------------------------------------------------
-    {
       if (runtime->check_privileges)
       {
         const size_t field_size =
@@ -14229,29 +14250,6 @@ namespace Legion {
               fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id())
       }
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
-      // start-off with non-projection requirement
-      requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
-                                      LEGION_EXCLUSIVE, domain_parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new AssociationThunk(domain.get_index_space(), range);
-      if (runtime->legion_spy_enabled)
-        perform_logging();
     }
 
     //--------------------------------------------------------------------------
