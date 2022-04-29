@@ -31,12 +31,13 @@
 // REALM_COMPILER_IS_HIPCC - defined if compiler is hipcc
 #if defined(__HIPCC__)
   #define REALM_COMPILER_IS_HIPCC
+// Detect nvc++ before testing __CUDACC__
+#elif defined(__PGIC__) || defined(__NVCOMPILER)
+  #define REALM_COMPILER_IS_PGI
 #elif defined(__CUDACC__)
   #define REALM_COMPILER_IS_NVCC
 #elif defined(__ICC)
   #define REALM_COMPILER_IS_ICC
-#elif defined(__PGIC__)
-  #define REALM_COMPILER_IS_PGI
 #elif defined(__clang__)
   #define REALM_COMPILER_IS_CLANG
 #elif defined(_MSC_VER)
