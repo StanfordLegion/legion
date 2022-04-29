@@ -854,7 +854,7 @@ endif
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
 ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
 CC_FLAGS += -std=c++11
-else ifeq($(findstring nvc++,$(CXX)),nvc++)
+else ifeq ($(findstring nvc++,$(CXX)),nvc++)
 # nvc++ is dumb and will give you an error if you try to overwrite the input
 # file with the output file and so errors at our test above, we'll just assume
 # that all versions of nvc++ will support c++11 for now
