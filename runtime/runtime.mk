@@ -531,7 +531,8 @@ ifeq ($(strip $(USE_CUDA)),1)
 NVCC	        ?= $(CUDA)/bin/nvcc
 # If CUDA compiler is nvcc then set the host compiler
 ifeq ($(findstring nvcc,$(NVCC)),nvcc)
-NVCC_FLAGS	+= -ccbin $(CXX)
+CUDAHOSTCXX	?= $(CXX)
+NVCC_FLAGS	+= -ccbin $(CUDAHOSTCXX)
 endif
 REALM_CC_FLAGS        += -DREALM_USE_CUDA
 LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
