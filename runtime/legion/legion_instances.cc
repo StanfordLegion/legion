@@ -9802,7 +9802,7 @@ namespace Legion {
             {
 #ifdef DEBUG_LEGION
               assert(0 < affinity.bandwidth);
-#ifndef __APPLE_CC__ // Apple clang is stupid and this this is a tautology
+#ifndef __clang__ // Apparently all clangs are stupid about this
               assert(affinity.bandwidth < GUARD_SIZE);
 #endif
 #endif
@@ -9823,7 +9823,7 @@ namespace Legion {
               {
 #ifdef DEBUG_LEGION
                 assert(0 < affinity.latency);
-#ifndef __APPLE_CC__ // Apple clang is stupid and this this is a tautology
+#ifndef __clang__ // Apparently all clangs are stupid about this
                 assert(affinity.latency < GUARD_SIZE);
 #endif
 #endif
