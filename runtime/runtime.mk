@@ -22,10 +22,9 @@ FC_FLAGS ?=
 LD_FLAGS ?=
 SO_FLAGS ?=
 INC_FLAGS ?=
+NVCC_FLAGS ?=
 HIPCC_FLAGS ?=
-# Make sure that NVCC_FLAGS are simple expanded since later we use shell to append to it (performance).
-CUDAHOSTCXX ?= $(CXX)
-NVCC_FLAGS := $(NVCC_FLAGS) -ccbin $(CUDAHOSTCXX)
+
 # These flags are NOT passed on the command line, but are used to
 # generate the public-facing legion/realm_defines.h files.
 # (Additional flags will be picked up from environment variables of
@@ -530,12 +529,21 @@ endif
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 NVCC	        ?= $(CUDA)/bin/nvcc
+# If CUDA compiler is nvcc then set the host compiler
+ifeq ($(findstring nvcc,$(NVCC)),nvcc)
+CUDAHOSTCXX	?= $(CXX)
+NVCC_FLAGS	+= -ccbin $(CUDAHOSTCXX)
+endif
 REALM_CC_FLAGS        += -DREALM_USE_CUDA
 LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
 # provide this for backward-compatibility in applications
 CC_FLAGS              += -DUSE_CUDA
 FC_FLAGS	      += -DUSE_CUDA
 REALM_USE_CUDART_HIJACK ?= 1
+# We don't support the hijack for nvc++
+ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
+REALM_USE_CUDART_HIJACK := 1
+endif
 # Have this for backwards compatibility
 ifdef USE_CUDART_HIJACK
 REALM_USE_CUDART_HIJACK = $(USE_CUDART_HIJACK)
@@ -635,8 +643,12 @@ endif
 
 # finally, convert space-or-comma separated list of architectures (e.g. 35,50)
 #  into nvcc -gencode arguments
+ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
+NVCC_FLAGS += $(foreach X, -gpu=cc$(X))
+else
 COMMA=,
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
+endif
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 endif
@@ -842,6 +854,11 @@ endif
 # Check for a minimum C++ version and if none is specified then set it to c++11
 ifneq ($(findstring -std=c++,$(CC_FLAGS)),-std=c++)
 ifeq ($(shell $(CXX) -x c++ -std=c++11 -c /dev/null -o /dev/null 2> /dev/null; echo $$?),0)
+CC_FLAGS += -std=c++11
+else ifeq ($(findstring nvc++,$(CXX)),nvc++)
+# nvc++ is dumb and will give you an error if you try to overwrite the input
+# file with the output file and so errors at our test above, we'll just assume
+# that all versions of nvc++ will support c++11 for now
 CC_FLAGS += -std=c++11
 else
 $(error Legion requires a C++ compiler that supports at least C++11)
