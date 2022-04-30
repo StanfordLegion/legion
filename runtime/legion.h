@@ -4067,6 +4067,7 @@ namespace Legion {
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_INLINE_MAPPABLE; }
       virtual const InlineMapping* as_inline(void) const { return this; }
+      virtual ShardID get_parent_shard(void) const { return 0; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;

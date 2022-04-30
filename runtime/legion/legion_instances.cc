@@ -4427,7 +4427,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < instance_points.size(); idx++)
           known_points.insert(instance_points[idx]);
         for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
-              remote_instances.begin(); it != remote_instances.end(); it++)
+              remote_points.begin(); it != remote_points.end(); it++)
           known_points.insert(it->first);
       }
       std::vector<DomainPoint> unknown_points;
@@ -4493,7 +4493,7 @@ namespace Legion {
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
-              remote_instances.begin(); it != remote_instances.end(); it++)
+              remote_points.begin(); it != remote_points.end(); it++)
           known_points.insert(it->first);
       }
       for (std::vector<DomainPoint>::const_iterator it =
@@ -4521,8 +4521,8 @@ namespace Legion {
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(point);
-        if (finder != remote_instances.end())
+          remote_points.find(point);
+        if (finder != remote_points.end())
           return true;
       }
       // Broadcast out a request for this remote instance
@@ -4530,7 +4530,7 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-      return (remote_instances.find(point) != remote_instances.end());
+      return (remote_points.find(point) != remote_points.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4548,8 +4548,8 @@ namespace Legion {
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(point);
-        if (finder != remote_instances.end())
+          remote_points.find(point);
+        if (finder != remote_points.end())
           return (finder->second.index == 0);
       }
       // Broadcast out a request for this remote instance
@@ -4558,9 +4558,9 @@ namespace Legion {
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
       std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(point);
+          remote_points.find(point);
 #ifdef DEBUG_LEGION
-      assert(finder != remote_instances.end());
+      assert(finder != remote_points.end());
 #endif
       return (finder->second.index == 0);
     }
@@ -4650,8 +4650,8 @@ namespace Legion {
               points.begin(); it != points.end(); /*nothing*/)
         {
           std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-            remote_instances.find(*it);
-          if (finder != remote_instances.end())
+            remote_points.find(*it);
+          if (finder != remote_points.end())
           {
             found_insts.insert(*finder);
             std::set<DomainPoint>::iterator to_delete = it++;
@@ -4731,16 +4731,16 @@ namespace Legion {
             new_instances.begin(); it != new_instances.end(); it++)
       {
         std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(it->first);
-        if (finder == remote_instances.end())
-          remote_instances.insert(*it);
+          remote_points.find(it->first);
+        if (finder == remote_points.end())
+          remote_points.insert(*it);
 #ifndef NDEBUG
         else
           assert(finder->second == it->second);
 #endif
       }
 #else
-      remote_instances.insert(new_instances.begin(), new_instances.end()); 
+      remote_points.insert(new_instances.begin(), new_instances.end()); 
 #endif
     }
 
@@ -4855,8 +4855,8 @@ namespace Legion {
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(point);
-        if (finder != remote_instances.end())
+          remote_points.find(point);
+        if (finder != remote_points.end())
           return finder->second.unique_event;
       }
       // Broadcast out a request for this remote instance
@@ -4865,21 +4865,29 @@ namespace Legion {
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
       std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-        remote_instances.find(point);
+        remote_points.find(point);
 #ifdef DEBUG_LEGION
-      assert(finder != remote_instances.end());
+      assert(finder != remote_points.end());
 #endif
       return finder->second.unique_event;
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance CollectiveManager::get_instance(const DomainPoint &p) const
+    PhysicalInstance CollectiveManager::get_instance(const DomainPoint &p,
+                                                     bool from_mapper) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(p.get_dim() > 0);
       assert(collective_mapping != NULL);
 #endif
+      if (from_mapper && (p.get_dim() == 0))
+        REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NOPOINT,
+            "Mapper did not pass in a domain point when calling "
+            "PhysicalInstance::get_instance or "
+            "PhysicalInstance::get_location for a collective instance. "
+            "Mappers must always specify a point when calling these "
+            "methods on a collective instance.")
       // Check the local points first since they are read-only at this point
       for (unsigned idx = 0; idx < instance_points.size(); idx++)
         if (instance_points[idx] == p)
@@ -4887,8 +4895,8 @@ namespace Legion {
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-          remote_instances.find(p);
-        if (finder != remote_instances.end())
+          remote_points.find(p);
+        if (finder != remote_points.end())
           return finder->second.instance;
       }
       // Broadcast out a request for this remote instance
@@ -4897,9 +4905,14 @@ namespace Legion {
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
       std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
-        remote_instances.find(p);
+        remote_points.find(p);
+      if (from_mapper && (finder == remote_points.end()))
+        REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NOPOINT,
+            "Unable to find point in collective instance from "
+            "invocation of PhysicalInstance::get_instance or "
+            "PhysicalInstance::get_location inside a mapper call.")
 #ifdef DEBUG_LEGION
-      assert(finder != remote_instances.end());
+      assert(finder != remote_points.end());
 #endif
       return finder->second.instance;
     }
@@ -8892,7 +8905,7 @@ namespace Legion {
           {
             AutoLock i_lock(inst_lock,1,false/*exclusive*/);
             for (std::map<DomainPoint,RemoteInstInfo>::const_iterator rit =
-                 remote_instances.begin(); rit != remote_instances.end(); rit++)
+                  remote_points.begin(); rit != remote_points.end(); rit++)
             {
               if (it->inst != rit->second.instance)
                 continue;
@@ -8977,9 +8990,9 @@ namespace Legion {
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         // Skip anything that we already logged
-        if (remote_instances.find(points[idx]) != remote_instances.end())
+        if (remote_points.find(points[idx]) != remote_points.end())
           continue;
-        RemoteInstInfo &info = remote_instances[points[idx]];
+        RemoteInstInfo &info = remote_points[points[idx]];
         info.instance = fields[idx].inst;
         info.unique_event = events[idx];
         info.index = indexes[idx];
@@ -9492,6 +9505,442 @@ namespace Legion {
         ready.wait();
       manager->process_register_user_response(view_did, op_ctx_index,
                                               index, registered);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::find_points_in_memory(Memory memory,
+                                         std::vector<DomainPoint> &points) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      const AddressSpaceID space = memory.address_space();
+      if (space != local_space)
+      {
+        if (!collective_mapping->contains(space))
+          return;
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(memory);
+          rez.serialize(&points);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_find_points_request(space, rez);
+        if (!ready_event.has_triggered())
+          ready_event.wait();
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < memories.size(); idx++)
+          if (memories[idx]->memory == memory)
+            points.push_back(instance_points[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_find_points_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      Memory memory;
+      derez.deserialize(memory);
+      std::vector<DomainPoint> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      CollectiveManager *manager = static_cast<CollectiveManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)
+      {
+        std::vector<DomainPoint> results;
+        manager->find_points_in_memory(memory, results);
+        if (!results.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(target);
+            rez.serialize<size_t>(results.size());
+            for (unsigned idx = 0; idx < results.size(); idx++)
+              rez.serialize(results[idx]);
+            rez.serialize(done);
+          }
+          runtime->send_collective_find_points_response(source, rez);
+          if (manager->remove_base_resource_ref(RUNTIME_REF))
+            delete manager;
+          return;
+        }
+        else if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_find_points_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::vector<DomainPoint> *target;
+      derez.deserialize(target);
+      size_t num_points;
+      derez.deserialize(num_points);
+      target->resize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+        derez.deserialize((*target)[idx]);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::find_points_nearest_memory(Memory memory,
+                     std::map<DomainPoint,Memory> &points, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      std::atomic<size_t> best(bandwidth ? 0 : GUARD_SIZE);
+      const AddressSpaceID origin = select_origin_space();
+      const RtEvent ready = find_points_nearest_memory(memory, local_space,
+          &points, &best, origin, bandwidth ? 0 : GUARD_SIZE, bandwidth);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveManager::find_points_nearest_memory(Memory memory,
+                    AddressSpaceID source, std::map<DomainPoint,Memory> *points,
+                    std::atomic<size_t> *target, AddressSpaceID origin, 
+                    size_t best, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      const AddressSpaceID space = memory.address_space();
+      if (space != local_space)
+      {
+        if (collective_mapping->contains(space))
+        {
+#ifdef DEBUG_LEGION
+          assert(source == local_space);
+#endif
+          // Assume that all memmories in the same space are always inherently
+          // closer to the target memory than any others, so we can send the
+          // request straight to that node and do the lookup
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(memory);
+            rez.serialize(source);
+            rez.serialize(points);
+            rez.serialize(target);
+            rez.serialize(origin);
+            rez.serialize(best);
+            rez.serialize<bool>(bandwidth);
+            rez.serialize(done);
+          }
+          runtime->send_collective_nearest_points_request(space, rez);
+          return done;
+        }
+        else
+        {
+          if (collective_mapping->contains(local_space))
+          {
+            // Do our local check and update the best
+            std::map<DomainPoint,Memory> local_results;
+            find_nearest_local_points(memory, best, local_results, bandwidth);
+            std::vector<RtEvent> done_events;
+            std::vector<AddressSpaceID> children;
+            collective_mapping->get_children(origin, local_space, children);
+            for (std::vector<AddressSpaceID>::const_iterator it = 
+                  children.begin(); it != children.end(); it++)
+            {
+              const RtUserEvent done = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(memory);
+                rez.serialize(source);
+                rez.serialize(points);
+                rez.serialize(target);
+                rez.serialize(origin);
+                rez.serialize(best);
+                rez.serialize<bool>(bandwidth);
+                rez.serialize(done);
+              }
+              runtime->send_collective_nearest_points_request(*it, rez);
+              done_events.push_back(done);
+            }
+            if (!local_results.empty())
+            {
+              const RtUserEvent done = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(points);
+                rez.serialize(target);
+                rez.serialize(best);
+                rez.serialize<size_t>(local_results.size());
+                for (std::map<DomainPoint,Memory>::const_iterator it =
+                      local_results.begin(); it != local_results.end(); it++)
+                {
+                  rez.serialize(it->first);
+                  rez.serialize(it->second);
+                }
+                rez.serialize<bool>(bandwidth);
+                rez.serialize(done);
+              }
+              runtime->send_collective_nearest_points_response(source, rez);
+              done_events.push_back(done);
+            }
+            if (!done_events.empty())
+              return Runtime::merge_events(done_events);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(source == local_space);
+#endif
+            // Send to the origin to start
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(memory);
+              rez.serialize(source);
+              rez.serialize(points);
+              rez.serialize(target);
+              rez.serialize(origin);
+              rez.serialize(best);
+              rez.serialize<bool>(bandwidth);
+              rez.serialize(done);
+            }
+            runtime->send_collective_nearest_points_request(origin, rez);
+            return done;
+          }
+        }
+      }
+      else
+      {
+        // Assume that all memories in the same space are always inherently
+        // closer to the target memory than any others
+        // See if we find the memory itself
+        std::map<DomainPoint,Memory> results;
+        find_nearest_local_points(memory, best, results, bandwidth);
+        if (source != local_space)
+        {
+          if (!results.empty())
+          {
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(points);
+              rez.serialize(target);
+              rez.serialize(best);
+              rez.serialize<size_t>(results.size());
+              for (std::map<DomainPoint,Memory>::const_iterator it =
+                    results.begin(); it != results.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+              rez.serialize<bool>(bandwidth);
+              rez.serialize(done);
+            }
+            runtime->send_collective_nearest_points_response(source, rez);
+            return done;
+          }
+        }
+        else
+        {
+          // This is the local case, so there's no atomicity required
+          points->swap(results);
+          target->store(best);
+        }
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::find_nearest_local_points(Memory memory,
+      size_t &best, std::map<DomainPoint,Memory> &results, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < memories.size(); idx++)
+      {
+        if (memories[idx]->memory == memory)
+          results[instance_points[idx]] = memory;
+      }
+      if (results.empty())
+      {
+        // Nothing in the memory itself, so see which of our memories
+        // are closer to anything else
+        std::map<Memory,size_t> searches;
+        for (unsigned idx = 0; idx < memories.size(); idx++)
+        {
+          const Memory local = memories[idx]->memory;
+          std::map<Memory,size_t>::const_iterator finder =
+            searches.find(local);
+          if (finder == searches.end())
+          {
+            Realm::Machine::AffinityDetails affinity;
+            if (runtime->machine.has_affinity(memory, local, &affinity))
+            {
+#ifdef DEBUG_LEGION
+              assert(0 < affinity.bandwidth);
+#ifndef __APPLE_CC__ // Apple clang is stupid and this this is a tautology
+              assert(affinity.bandwidth < GUARD_SIZE);
+#endif
+#endif
+              if (bandwidth)
+              {
+                searches[local] = affinity.bandwidth;
+                if (affinity.bandwidth >= best)
+                {
+                  if (affinity.bandwidth > best)
+                  {
+                    results.clear();
+                    best = affinity.bandwidth;
+                  }
+                  results[instance_points[idx]] = local;
+                }
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(0 < affinity.latency);
+#ifndef __APPLE_CC__ // Apple clang is stupid and this this is a tautology
+                assert(affinity.latency < GUARD_SIZE);
+#endif
+#endif
+                searches[local] = affinity.latency;
+                if (affinity.latency <= best)
+                {
+                  if (affinity.latency < best)
+                  {
+                    results.clear();
+                    best = affinity.latency;
+                  }
+                  results[instance_points[idx]] = local;
+                }
+              }
+            }
+            else
+              searches[local] = bandwidth ? 0 : GUARD_SIZE;
+          }
+          else if (finder->second == best)
+            results[instance_points[idx]] = local;
+        }
+      }
+      else
+        best = bandwidth ? GUARD_SIZE-1 : 1;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_nearest_points_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      Memory memory;
+      derez.deserialize(memory);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      std::map<DomainPoint,Memory> *points;
+      derez.deserialize(points);
+      std::atomic<size_t> *target;
+      derez.deserialize(target);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      size_t best;
+      derez.deserialize(best);
+      bool bandwidth;
+      derez.deserialize(bandwidth);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      CollectiveManager *manager = static_cast<CollectiveManager*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)     
+      {
+        Runtime::trigger_event(done, manager->find_points_nearest_memory(
+              memory, source, points, target, origin, best, bandwidth));
+        if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_nearest_points_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::map<DomainPoint,Memory> *points;
+      derez.deserialize(points);
+      std::atomic<size_t> *target;
+      derez.deserialize(target);
+      size_t best;
+      derez.deserialize(best);
+      size_t num_points;
+      derez.deserialize(num_points);
+      std::vector<std::pair<DomainPoint,Memory> > results(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        derez.deserialize(results[idx].first);
+        derez.deserialize(results[idx].second);
+      }
+      bool bandwidth;
+      derez.deserialize(bandwidth);
+      // spin until we can get safely set the guard to add our entries
+      const size_t guard = bandwidth ? GUARD_SIZE : 0;
+      size_t current = target->load();
+      while ((current == guard) ||
+             (bandwidth && (current <= best)) ||
+             (!bandwidth && (best <= current)))
+      {
+        if (!target->compare_exchange_weak(current, guard))
+          continue;
+        // If someone else still holds the guard then keep trying
+        if (current == guard)
+          continue;
+        if (bandwidth)
+        {
+          if (current < best)
+            points->clear();
+          for (unsigned idx = 0; idx < results.size(); idx++)
+            points->insert(results[idx]);
+        }
+        else
+        {
+          if (best < current)
+            points->clear();
+          for (unsigned idx = 0; idx < results.size(); idx++)
+            points->insert(results[idx]);
+        }
+        target->store(best);
+        break;
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
     }
 
     //--------------------------------------------------------------------------

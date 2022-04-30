@@ -57,6 +57,11 @@ namespace Legion {
       unsigned long get_instance_id(const DomainPoint *point = NULL) const;
       size_t get_instance_size(void) const;
       Domain get_instance_domain(void) const;
+      // For collective instances find nearest points
+      void find_points_in_memory(Memory memory,
+          std::vector<DomainPoint> &points) const;
+      void find_points_nearest_memory(Memory memory,
+          std::map<DomainPoint,Memory> &points, bool bandwidth) const;
       // Adds all fields that exist in instance to 'fields', unless
       //  instance is virtual
       void get_fields(std::set<FieldID> &fields) const;
@@ -2193,17 +2198,6 @@ namespace Legion {
       // Is a no-op if the operation is not an index space launch
       // Returns 'true' if all the instances matched
       bool match_collective_instances(
-                                   MapperContext ctx,
-                                   std::vector<PhysicalInstance> &matches,
-                                   size_t collective_tag = 0) const;
-      // Filter any collective instances that cannot be used by the
-      // operation that performing this mapper call. If the operation
-      // does not support collective instances then all collective
-      // instances will be filtered. If the operation does support
-      // collective instances then only collective instances that
-      // can be used by the operation will be kept.
-      // Returns 'true' if any instances are filtered
-      bool filter_collective_instances(
                                    MapperContext ctx,
                                    std::vector<PhysicalInstance> &matches,
                                    size_t collective_tag = 0) const;

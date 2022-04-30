@@ -347,10 +347,12 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
       virtual ApEvent get_unique_event(const DomainPoint &point) const = 0;
-      virtual PhysicalInstance get_instance(const DomainPoint &point) const = 0;
+      virtual PhysicalInstance get_instance(const DomainPoint &point,
+                                            bool from_mapper = false) const = 0;
       virtual PointerConstraint 
                      get_pointer_constraint(const DomainPoint &point) const = 0;
-      virtual Memory get_memory(const DomainPoint &point) const = 0;
+      virtual Memory get_memory(const DomainPoint &point, 
+                                bool from_mapper = false) const = 0;
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -637,13 +639,15 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const 
+      virtual PhysicalInstance get_instance(const DomainPoint &key,
+                                            bool from_mapper = false) const 
                                                    { return instance; }
       virtual ApEvent get_unique_event(const DomainPoint &point) const 
         { return unique_event; }
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
-      virtual Memory get_memory(const DomainPoint &point) const
+      virtual Memory get_memory(const DomainPoint &point, 
+                                bool from_mapper = false) const
         { return memory_manager->memory; }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
@@ -897,11 +901,13 @@ namespace Legion {
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual ApEvent get_unique_event(const DomainPoint &point) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &point) const;
+      virtual PhysicalInstance get_instance(const DomainPoint &point, 
+                                            bool from_mapper = false) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const; 
-      virtual Memory get_memory(const DomainPoint &point) const
-        { return get_instance(point).get_location(); }
+      virtual Memory get_memory(const DomainPoint &point,
+                                bool from_mapper = false) const
+        { return get_instance(point, from_mapper).get_location(); }
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -982,6 +988,20 @@ namespace Legion {
                                 const std::vector<Reservation> &rsrvs);
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete);
+    public:
+      void find_points_in_memory(Memory memory, 
+                                 std::vector<DomainPoint> &point) const;
+      void find_points_nearest_memory(Memory memory,
+                                 std::map<DomainPoint,Memory> &points,
+                                 bool bandwidth) const;
+      RtEvent find_points_nearest_memory(Memory, AddressSpaceID source, 
+                                 std::map<DomainPoint,Memory> *points, 
+                                 std::atomic<size_t> *target,
+                                 AddressSpaceID origin, size_t best,
+                                 bool bandwidth) const;
+      void find_nearest_local_points(Memory memory, size_t &best,
+                                 std::map<DomainPoint,Memory> &results,
+                                 bool bandwidth) const;
     public:
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
       AddressSpaceID select_origin_space(void) const
@@ -1230,6 +1250,12 @@ namespace Legion {
                                     Deserializer &derez);
       static void handle_point_request(Runtime *runtime, Deserializer &derez);
       static void handle_point_response(Runtime *runtime, Deserializer &derez);
+      static void handle_find_points_request(Runtime *runtime,
+                                    Deserializer &derez, AddressSpaceID source);
+      static void handle_find_points_response(Deserializer &derez);
+      static void handle_nearest_points_request(Runtime *runtime,
+                                                Deserializer &derez);
+      static void handle_nearest_points_response(Deserializer &derez);
       static void handle_remote_registration(Runtime *runtime,
                                              Deserializer &derez);
       static void handle_deletion(Runtime *runtime, Deserializer &derez);
@@ -1255,6 +1281,7 @@ namespace Legion {
       const size_t total_points;
       // This can be NULL if the point set is implicit
       IndexSpaceNode *const point_space;
+      static constexpr size_t GUARD_SIZE = std::numeric_limits<size_t>::max();
     protected:
       // Note that there is a collective mapping from DistributedCollectable
       //CollectiveMapping *collective_mapping;
@@ -1262,7 +1289,7 @@ namespace Legion {
       std::vector<PhysicalInstance> instances; // local instances
       std::vector<DomainPoint> instance_points; // points for local instances
       std::vector<ApEvent> instance_events; // ready events for each instance 
-      std::map<DomainPoint,RemoteInstInfo> remote_instances;
+      std::map<DomainPoint,RemoteInstInfo> remote_points;
     protected:
       struct UserRendezvous {
         UserRendezvous(void) 

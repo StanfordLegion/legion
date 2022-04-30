@@ -12221,6 +12221,27 @@ namespace Legion {
               runtime->handle_collective_point_response(derez);
               break;
             }
+          case SEND_COLLECTIVE_FIND_POINTS_REQUEST:
+            {
+              runtime->handle_collective_find_points_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_FIND_POINTS_RESPONSE:
+            {
+              runtime->handle_collective_find_points_response(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_NEAREST_POINTS_REQUEST:
+            {
+              runtime->handle_collective_nearest_points_request(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE:
+            {
+              runtime->handle_collective_nearest_points_response(derez);
+              break;
+            }
           case SEND_COLLECTIVE_REMOTE_REGISTRATION:
             {
               runtime->handle_collective_remote_registration(derez);
@@ -22310,6 +22331,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_find_points_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_FIND_POINTS_REQUEST>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_find_points_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_FIND_POINTS_RESPONSE>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_nearest_points_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_NEAREST_POINTS_REQUEST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_nearest_points_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_remote_registration(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24481,6 +24540,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_point_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_find_points_request(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_find_points_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_find_points_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_find_points_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_nearest_points_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_nearest_points_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_nearest_points_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_nearest_points_response(derez);
     }
 
     //--------------------------------------------------------------------------

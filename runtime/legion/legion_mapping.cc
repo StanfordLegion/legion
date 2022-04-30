@@ -103,14 +103,14 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
       if (point == NULL)
       {
-        if (impl->is_collective_manager())
-          return Memory::NO_MEMORY;
         const DomainPoint dummy_point;
-        return impl->as_physical_manager()->get_memory(dummy_point);
+        return manager->get_memory(dummy_point, true/*from mapper*/);
       }
-      return impl->as_physical_manager()->get_memory(*point);
+      else
+        return manager->get_memory(*point, true/*from mapper*/);
     }
 
     //--------------------------------------------------------------------------
@@ -119,14 +119,14 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
       if (p == NULL)
       {
-        if (impl->is_collective_manager())
-          return 0;
         const DomainPoint dummy_point;
-        return impl->as_physical_manager()->get_instance(dummy_point).id;
+        return manager->get_instance(dummy_point, true/*from mapper*/).id;
       }
-      return impl->as_physical_manager()->get_instance(*p).id;
+      else
+        return manager->get_instance(*p, true/*from mapper*/).id;
     }
 
     //--------------------------------------------------------------------------
@@ -148,6 +148,25 @@ namespace Legion {
       Domain domain = impl->instance_domain->get_domain(ready, true);
       ready.wait_faultignorant();
       return domain;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalInstance::find_points_in_memory(Memory memory,
+                                         std::vector<DomainPoint> &points) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->is_collective_manager())
+        impl->as_collective_manager()->find_points_in_memory(memory, points);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalInstance::find_points_nearest_memory(Memory memory,
+                     std::map<DomainPoint,Memory> &points, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->is_collective_manager())
+        impl->as_collective_manager()->find_points_nearest_memory(memory, 
+                                                      points, bandwidth);
     }
 
     //--------------------------------------------------------------------------

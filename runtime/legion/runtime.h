@@ -3225,6 +3225,14 @@ namespace Legion {
       void send_collective_point_request(AddressSpaceID target,Serializer &rez);
       void send_collective_point_response(AddressSpaceID target,
                                           Serializer &rez);
+      void send_collective_find_points_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_collective_find_points_response(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_collective_nearest_points_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_collective_nearest_points_response(AddressSpaceID target,
+                                                   Serializer &rez);
       void send_collective_remote_registration(AddressSpaceID target,
                                                Serializer &rez);
       void send_collective_deletion(AddressSpaceID target, Serializer &rez);
@@ -3569,6 +3577,11 @@ namespace Legion {
       void handle_collective_user_registration(Deserializer &derez);
       void handle_collective_point_request(Deserializer &derez);
       void handle_collective_point_response(Deserializer &derez);
+      void handle_collective_find_points_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_collective_find_points_response(Deserializer &derez);
+      void handle_collective_nearest_points_request(Deserializer &derez);
+      void handle_collective_nearest_points_response(Deserializer &derez);
       void handle_collective_remote_registration(Deserializer &derez);
       void handle_collective_deletion(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
@@ -5694,6 +5707,14 @@ namespace Legion {
         case SEND_COLLECTIVE_POINT_REQUEST:
           break;
         case SEND_COLLECTIVE_POINT_RESPONSE:
+          break;
+        case SEND_COLLECTIVE_FIND_POINTS_REQUEST:
+          break;
+        case SEND_COLLECTIVE_FIND_POINTS_RESPONSE:
+          break;
+        case SEND_COLLECTIVE_NEAREST_POINTS_REQUEST:
+          break;
+        case SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE:
           break;
         case SEND_COLLECTIVE_REMOTE_REGISTRATION:
           break;

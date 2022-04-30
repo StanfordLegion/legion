@@ -7481,16 +7481,20 @@ namespace Legion {
     DomainPoint ReplMapOp::get_collective_instance_point(void) const
     //--------------------------------------------------------------------------
     {
+      return DomainPoint(get_parent_shard());
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ReplMapOp::get_parent_shard(void) const
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      DomainPoint result;
-      result.dim = 1;
-      result[0] = repl_ctx->owner_shard->shard_id;
-      return result;
+      return repl_ctx->owner_shard->shard_id;
     }
 
     //--------------------------------------------------------------------------
