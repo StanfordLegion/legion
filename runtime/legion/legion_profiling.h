@@ -85,22 +85,6 @@ namespace Legion {
         unsigned kind;
         const char *name;
       };
-      struct ProcDesc {
-      public:
-        ProcID proc_id;
-        ProcKind kind;
-      };
-      struct MemDesc {
-      public:
-        MemID mem_id;
-        MemKind kind;
-        unsigned long long capacity;
-      };
-      struct ProcMemDesc {
-      public:
-        ProcID proc_id;
-        MemID mem_id;
-      };
       struct MaxDimDesc {
 	unsigned max_dim;
       };
@@ -338,6 +322,22 @@ namespace Legion {
         timestamp_t start, stop;
         ProcID proc_id;
       };
+      struct ProcDesc {
+      public:
+        ProcID proc_id;
+        ProcKind kind;
+      };
+      struct MemDesc {
+      public:
+        MemID mem_id;
+        MemKind kind;
+        unsigned long long capacity;
+      };
+      struct ProcMemDesc {
+      public:
+        ProcID proc_id;
+        MemID mem_id;
+      };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
@@ -437,6 +437,10 @@ namespace Legion {
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
+      void process_mem_desc(const Memory &m);
+      void process_proc_desc(const Processor &p);
+      void process_proc_mem_aff_desc(const Memory &m);
+
     public:
       void record_mapper_call(Processor proc, MappingCallKind kind, 
                               UniqueID uid, timestamp_t start,
@@ -482,9 +486,14 @@ namespace Legion {
       std::deque<InstUsageInfo> inst_usage_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
-    private:
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
+      std::deque<MemDesc> mem_desc_infos;
+      std::deque<ProcDesc> proc_desc_infos;
+      std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
+      // keep track of MemIDs/ProcIDs to avoid duplicate entries
+      std::set<MemID> mem_ids_set;
+      std::set<ProcID> proc_ids_set;
 #ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
