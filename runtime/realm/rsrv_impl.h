@@ -165,6 +165,7 @@ namespace Realm {
   struct DestroyLockMessage {
     Reservation actual;
     Reservation dummy;
+    Event wait_on;
 
     static void handle_message(NodeID sender,const DestroyLockMessage &msg,
 			       const void *data, size_t datalen);
