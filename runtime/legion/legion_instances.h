@@ -272,7 +272,8 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
-      bool try_collection(AddressSpaceID source, RtEvent &ready);
+      bool try_collection(AddressSpaceID source, RtEvent &ready, 
+                          bool &already_collected);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
