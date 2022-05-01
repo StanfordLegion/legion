@@ -267,11 +267,11 @@ namespace Realm {
       }
 
       // to destroy a local lock, we first must lock it (exclusively)
-      ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
-      Event e = lock_impl->acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING, wait_on);
+      Event e = acquire(0/*mode*/, true/*exclusive*/, wait_on);
       if(!e.has_triggered()) {
 	EventImpl::add_waiter(e, new DeferredLockDestruction(*this));
       } else {
+        ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
 	// got grant immediately - can release reservation now
 	lock_impl->release_reservation();
       }
