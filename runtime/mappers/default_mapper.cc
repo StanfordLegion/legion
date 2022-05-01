@@ -2516,7 +2516,11 @@ namespace Legion {
             std::vector<DomainPoint> local_points;
             instance.find_points_in_memory(destination_memory, local_points);
             if (!local_points.empty())
+            {
+              // Give non-local collective instances the worst possible ranking
+              band_ranking[idx] = std::pair<PhysicalInstance,unsigned>(instance, 0);
               continue;
+            }
             location = destination_memory;
           }
           else
