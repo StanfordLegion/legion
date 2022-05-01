@@ -419,6 +419,7 @@ namespace Legion {
     public:
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
       bool try_collection(AddressSpaceID source, RtEvent &ready,
+                          bool &already_collected,
                           std::atomic<unsigned> *target = NULL);
       bool verify_collection(RtEvent &collected);
       void release_collection(AddressSpaceID source);

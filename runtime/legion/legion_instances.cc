@@ -1780,16 +1780,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::try_collection(AddressSpaceID source, RtEvent &ready,
-                                         std::atomic<unsigned> *target/*=NULL*/)
+                bool &already_collected, std::atomic<unsigned> *target/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      already_collected = false;
       AutoLock i_lock(inst_lock);
       // Do a quick to check to see if we can do a collection on the local node
       if ((gc_state == ACQUIRED_GC_STATE) || (gc_state == VALID_GC_STATE))
         return false;
       // If it's already collected then we're done
       if (gc_state == COLLECTED_GC_STATE)
-        return true;
+      {
+        already_collected = true;
+        return false;
+      }
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -1918,6 +1922,7 @@ namespace Legion {
 #endif
           // Send the message to the owner to perform the collection
           std::atomic<bool> result(false);
+          std::atomic<bool> collected(false);
           const RtUserEvent ready_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
@@ -1925,10 +1930,12 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(ready_event);
             rez.serialize(&result);
+            rez.serialize(&collected);
             rez.serialize(&ready);
           }
           runtime->send_gc_request(owner_space, rez);
           ready_event.wait();
+          already_collected = collected.load();
           return result.load();
         }
         else
@@ -1955,8 +1962,9 @@ namespace Legion {
       derez.deserialize(did);
       RtUserEvent done;
       derez.deserialize(done);
-      std::atomic<bool> *result;
+      std::atomic<bool> *result, *collected;
       derez.deserialize(result);
+      derez.deserialize(collected);
       RtEvent *target;
       derez.deserialize(target);
 
@@ -1964,11 +1972,21 @@ namespace Legion {
           runtime->weak_find_distributed_collectable(did));
       if (manager == NULL)
       {
-        Runtime::trigger_event(done);
+        // This was already collected, so indicate that
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(collected);
+          rez.serialize(target);
+          rez.serialize(RtEvent::NO_RT_EVENT);
+          rez.serialize(done);
+        }
+        runtime->send_gc_response(source, rez);
         return;
       }
       RtEvent ready;
-      if (manager->try_collection(source, ready))
+      bool already_collected = false;
+      if (manager->try_collection(source, ready, already_collected))
       {
         // Add a reference to ensure it is still there when 
         // we do the check or release
@@ -1979,6 +1997,19 @@ namespace Legion {
           rez.serialize(result);
           rez.serialize(target);
           rez.serialize(ready);
+          rez.serialize(done);
+        }
+        runtime->send_gc_response(source, rez);
+      }
+      else if (already_collected)
+      {
+        // This was already collected, so indicate that
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(collected);
+          rez.serialize(target);
+          rez.serialize(RtEvent::NO_RT_EVENT);
           rez.serialize(done);
         }
         runtime->send_gc_response(source, rez);
@@ -2028,7 +2059,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ready = RtEvent::NO_RT_EVENT;
 #endif
-      if (!manager->try_collection(source, ready, target))
+      bool dummy_collected = false;
+      if (!manager->try_collection(source, ready, dummy_collected, target))
       {
 #ifdef DEBUG_LEGION
         assert(!ready.exists());
@@ -2043,6 +2075,9 @@ namespace Legion {
       }
       else
         Runtime::trigger_event(done, ready);
+#ifdef DEBUG_LEGION
+      assert(!dummy_collected); // should never be set here
+#endif
     }
 
     //--------------------------------------------------------------------------

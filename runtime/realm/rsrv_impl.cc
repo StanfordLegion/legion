@@ -252,7 +252,7 @@ namespace Realm {
       return Reservation::NO_RESERVATION;
     }
 
-    void Reservation::destroy_reservation()
+    void Reservation::destroy_reservation(Event wait_on)
     {
       log_reservation.info() << "reservation destroyed: rsrv=" << *this;
 
@@ -261,13 +261,14 @@ namespace Realm {
 	ActiveMessage<DestroyLockMessage> amsg(ID(*this).rsrv_creator_node());
 	amsg->actual = *this;
 	amsg->dummy = *this;
+        amsg->wait_on = wait_on;
 	amsg.commit();
 	return;
       }
 
       // to destroy a local lock, we first must lock it (exclusively)
       ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
-      Event e = lock_impl->acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING);
+      Event e = lock_impl->acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING, wait_on);
       if(!e.has_triggered()) {
 	EventImpl::add_waiter(e, new DeferredLockDestruction(*this));
       } else {
@@ -752,7 +753,7 @@ namespace Realm {
 						       const void *data, size_t datalen)
     {
       Reservation a = args.actual;
-      a.destroy_reservation();
+      a.destroy_reservation(args.wait_on);
     }
 
 
