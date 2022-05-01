@@ -1281,11 +1281,19 @@ namespace Legion {
           context_views.erase(view_finder);
         }
       }
+      if (!to_delete.empty())
+      {
+        // Make sure that we don't delete these reservations until after
+        // execution has finished for the context
+        const RtEvent precondition =
+          Runtime::protect_event(own_ctx->owner_task->get_completion_event());
+        for (std::vector<Reservation>::iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+          it->destroy_reservation(precondition);
+      }
       if (own_ctx->remove_reference())
         delete context;
-      for (std::vector<Reservation>::iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-        it->destroy_reservation();
+      
     }
 
     //--------------------------------------------------------------------------
