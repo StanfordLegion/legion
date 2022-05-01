@@ -184,17 +184,50 @@ public:
   CollectiveInstanceMapper(Mapping::MapperRuntime *rt, Machine machine, 
                            Processor local, const char *mapper_name)
     : DefaultMapper(rt, machine, local, mapper_name) { }
-  virtual void default_policy_select_constraints(Mapping::MapperContext ctx,
-      LayoutConstraintSet &constraints, Memory target_memory,
-      const RegionRequirement &req)
+  virtual LayoutConstraintID default_policy_select_layout_constraints(
+                                    Mapping::MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
+                                    MappingKind mapping_kind,
+                                    bool needs_field_constraint_check,
+                                    bool &force_new_instances) override
   {
-    // Do the base call, and then make all instances collective instances
-    DefaultMapper::default_policy_select_constraints(ctx, constraints,
-                                                     target_memory, req);
-    // Now make this a collective instance if it was requested
-    if (req.tag == COLLECTIVE_INST_TAG)
+    // Avoid polluting the default mapper's layout constraint caches
+    if (req.tag & COLLECTIVE_INST_TAG)
+    {
+      std::pair<Memory::Kind,FieldSpace> constraint_key(target_memory.kind(),
+                                              req.region.get_field_space());
+      std::map<std::pair<Memory::Kind,FieldSpace>,LayoutConstraintID>::
+        const_iterator finder = collective_constraint_cache.find(constraint_key);
+      if (finder != collective_constraint_cache.end())
+        return finder->second;
+      LayoutConstraintSet constraints;
+      default_policy_select_constraints(ctx, constraints, target_memory, req);
+      // Do the registration
+      LayoutConstraintID result = runtime->register_layout(ctx, constraints);
+      // Record our results, there is a benign race here as another mapper
+      // call could have registered the exact same registration constraints
+      // here if we were preempted during the registration call. The
+      // constraint sets are identical though so it's all good.
+      collective_constraint_cache[constraint_key] = result;
+      return result;
+    }
+    else
+      return DefaultMapper::default_policy_select_layout_constraints(
+          ctx, target_memory, req, mapping_kind, 
+          needs_field_constraint_check, force_new_instances);
+  }
+  virtual void default_policy_select_constraints(Mapping::MapperContext ctx,
+                     LayoutConstraintSet &constraints, Memory target_memory,
+                     const RegionRequirement &req) override
+  {
+    DefaultMapper::default_policy_select_constraints(ctx, 
+                        constraints, target_memory, req);
+    if (req.tag & COLLECTIVE_INST_TAG)
       constraints.specialized_constraint.collective = true;
   }
+protected:
+  std::map<std::pair<Memory::Kind,FieldSpace>,
+    LayoutConstraintID> collective_constraint_cache;
 };
 
 void update_mappers(Machine machine, Runtime *runtime,
