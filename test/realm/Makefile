@@ -133,7 +133,7 @@ ifeq ($(strip $(HIP_TARGET)),ROCM)
 endif
 ifeq ($(strip $(HIP_TARGET)),CUDA)
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
-        $(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
 endif
 endif
 
