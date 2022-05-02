@@ -858,6 +858,23 @@ namespace Legion {
     void LegionProfInstance::dump_state(LegionProfSerializer *serializer)
     //--------------------------------------------------------------------------
     {
+      for (std::deque<MemDesc>::const_iterator it =
+            mem_desc_infos.begin(); it != mem_desc_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<ProcDesc>::const_iterator it =
+            proc_desc_infos.begin(); it != proc_desc_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<ProcMemDesc>::const_iterator it =
+            proc_mem_aff_desc_infos.begin();
+           it != proc_mem_aff_desc_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
       for (std::deque<TaskKind>::const_iterator it = task_kinds.begin();
             it != task_kinds.end(); it++)
       {
@@ -1037,22 +1054,6 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
-      for (std::deque<MemDesc>::const_iterator it =
-            mem_desc_infos.begin(); it != mem_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<ProcDesc>::const_iterator it =
-            proc_desc_infos.begin(); it != proc_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<ProcMemDesc>::const_iterator it =
-            proc_mem_aff_desc_infos.begin();
-           it != proc_mem_aff_desc_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
 
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
@@ -1103,6 +1104,36 @@ namespace Legion {
       // Scale our latency by how much we are over the space limit
       const long long t_stop = t_start + over * owner->output_target_latency;
       size_t diff = 0; 
+      while (!mem_desc_infos.empty())
+        {
+          MemDesc &front = mem_desc_infos.front();
+          serializer->serialize(front);
+          diff += sizeof(front);
+          mem_desc_infos.pop_front();
+          const long long t_curr = Realm::Clock::current_time_in_microseconds();
+          if (t_curr >= t_stop)
+            return diff;
+        }
+      while (!proc_desc_infos.empty())
+        {
+          ProcDesc &front = proc_desc_infos.front();
+          serializer->serialize(front);
+          diff += sizeof(front);
+          proc_desc_infos.pop_front();
+          const long long t_curr = Realm::Clock::current_time_in_microseconds();
+          if (t_curr >= t_stop)
+            return diff;
+        }
+      while (!proc_mem_aff_desc_infos.empty())
+        {
+          ProcMemDesc &front = proc_mem_aff_desc_infos.front();
+          serializer->serialize(front);
+          diff += sizeof(front);
+          proc_mem_aff_desc_infos.pop_front();
+          const long long t_curr = Realm::Clock::current_time_in_microseconds();
+          if (t_curr >= t_stop)
+            return diff;
+        }
       while (!task_kinds.empty())
       {
         TaskKind &front = task_kinds.front();
@@ -1406,36 +1437,7 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
-      while (!mem_desc_infos.empty())
-        {
-          MemDesc &front = mem_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          mem_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
-      while (!proc_desc_infos.empty())
-        {
-          ProcDesc &front = proc_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          proc_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
-      while (!proc_mem_aff_desc_infos.empty())
-        {
-          ProcMemDesc &front = proc_mem_aff_desc_infos.front();
-          serializer->serialize(front);
-          diff += sizeof(front);
-          proc_mem_aff_desc_infos.pop_front();
-          const long long t_curr = Realm::Clock::current_time_in_microseconds();
-          if (t_curr >= t_stop)
-            return diff;
-        }
+
 #ifdef LEGION_PROF_SELF_PROFILE
       while (!prof_task_infos.empty())
       {
@@ -2207,9 +2209,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
+              thread_local_profiling_instance->process_proc_desc(usage.proc);
               thread_local_profiling_instance->process_task(info, 
                                                             response, usage);
-              thread_local_profiling_instance->process_proc_desc(usage.proc);
             }
             break;
           }
@@ -2219,9 +2221,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
+              thread_local_profiling_instance->process_proc_desc(usage.proc);
               thread_local_profiling_instance->process_meta(info, 
                                                             response, usage); 
-              thread_local_profiling_instance->process_proc_desc(usage.proc);
             }
             break;
           }
@@ -2231,9 +2233,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>(usage)) {
+              thread_local_profiling_instance->process_proc_desc(usage.proc);
               thread_local_profiling_instance->process_message(info, 
                                                                response, usage);
-              thread_local_profiling_instance->process_proc_desc(usage.proc);
             }
             break;
           }
@@ -2243,10 +2245,10 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
-              thread_local_profiling_instance->process_copy(info, 
-                                                            response, usage);
               thread_local_profiling_instance->process_mem_desc(usage.source);
               thread_local_profiling_instance->process_mem_desc(usage.target);
+              thread_local_profiling_instance->process_copy(info,
+                                                            response, usage);
             }
             break;
           }
@@ -2256,9 +2258,9 @@ namespace Legion {
             // Check for predication and speculation
             if (response.get_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>(usage)) {
+              thread_local_profiling_instance->process_mem_desc(usage.target);
               thread_local_profiling_instance->process_fill(info, 
                                                             response, usage);
-              thread_local_profiling_instance->process_mem_desc(usage.target);
             }
             break;
           }
@@ -2274,10 +2276,10 @@ namespace Legion {
 	    if (response.get_measurement<
                 Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
               {
-                thread_local_profiling_instance->process_inst_usage(info,
-                                                         response, usage);
                 thread_local_profiling_instance->process_mem_desc(
                                                             usage.memory);
+                thread_local_profiling_instance->process_inst_usage(info,
+                                                         response, usage);
               }
             break;
           }
@@ -2292,9 +2294,9 @@ namespace Legion {
 #ifdef LEGION_PROF_SELF_PROFILE
       long long t_stop = Realm::Clock::current_time_in_nanoseconds();
       const Processor p = Realm::Processor::get_executing_processor();
+      thread_local_profiling_instance->process_proc_desc(p);
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
                                                        t_start, t_stop);
-      thread_local_profiling_instance->process_proc_desc(p);
 #endif
 #ifdef DEBUG_LEGION
       decrement_total_outstanding_requests(info->kind);
@@ -2353,9 +2355,9 @@ namespace Legion {
       Processor current = Processor::get_executing_processor();
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
+      thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_mapper_call(current, kind, uid, 
                                                    start, stop);
-      thread_local_profiling_instance->process_proc_desc(current);
     }
 
     //--------------------------------------------------------------------------
@@ -2380,9 +2382,9 @@ namespace Legion {
       Processor current = Processor::get_executing_processor();
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
+      thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_runtime_call(current, kind, 
                                                            start, stop);
-      thread_local_profiling_instance->process_proc_desc(current);
     }
 
 #ifdef DEBUG_LEGION
