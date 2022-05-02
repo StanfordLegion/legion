@@ -16,6 +16,7 @@
 #include"realm_defines.h"
 
 #ifdef REALM_USE_HIP
+#include <hip/hip_runtime.h>
 #include "realm/hip/hiphijack_api.h"
 #endif
 

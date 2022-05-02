@@ -53,6 +53,7 @@ LD_FLAGS ?=
 
 CC_FLAGS += -fPIC
 NVCC_FLAGS += -Xcompiler -fPIC
+HIPCC_FLAGS += -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
