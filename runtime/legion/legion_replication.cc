@@ -3427,6 +3427,7 @@ namespace Legion {
       activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      shard_points = NULL;
       mapper = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -3443,6 +3444,7 @@ namespace Legion {
 #endif
       deactivate_repl_collective_instance_creator();
       deactivate_index_fill();
+      remove_launch_space_reference(shard_points);
       runtime->free_repl_index_fill_op(this);
     }
 
@@ -3545,10 +3547,8 @@ namespace Legion {
       }
       else // We have valid points, so it goes on the ready queue
       {
-        if (remove_launch_space_reference(launch_space))
-          delete launch_space;
-        launch_space = runtime->forest->get_node(local_space);
-        add_launch_space_reference(launch_space);
+        shard_points = runtime->forest->get_node(local_space);
+        add_launch_space_reference(shard_points);
         IndexFillOp::trigger_ready();
       }
     }
@@ -3581,10 +3581,8 @@ namespace Legion {
       }
       else
       {
-        if (remove_launch_space_reference(launch_space))
-          delete launch_space;
-        launch_space = runtime->forest->get_node(local_space);
-        add_launch_space_reference(launch_space);
+        shard_points = runtime->forest->get_node(local_space);
+        add_launch_space_reference(shard_points);
         IndexFillOp::trigger_replay();
       }
     }
@@ -3887,6 +3885,7 @@ namespace Legion {
       activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      shard_points = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -3908,6 +3907,7 @@ namespace Legion {
         dst_collectives.clear();
       deactivate_repl_collective_instance_creator();
       deactivate_index_copy();
+      remove_launch_space_reference(shard_points);
       runtime->free_repl_index_copy_op(this);
     }
 
@@ -4112,10 +4112,8 @@ namespace Legion {
       }
       else // If we have any valid points do the base call
       {
-        if (remove_launch_space_reference(launch_space))
-          delete launch_space;
-        launch_space = runtime->forest->get_node(local_space);
-        add_launch_space_reference(launch_space);
+        shard_points = runtime->forest->get_node(local_space);
+        add_launch_space_reference(shard_points);
         IndexCopyOp::trigger_ready();
       }
     }
@@ -4175,10 +4173,8 @@ namespace Legion {
       }
       else
       {
-        if (remove_launch_space_reference(launch_space))
-          delete launch_space;
-        launch_space = runtime->forest->get_node(local_space);
-        add_launch_space_reference(launch_space);
+        shard_points = runtime->forest->get_node(local_space);
+        add_launch_space_reference(shard_points);
         std::vector<ApBarrier> copy_pre_barriers, copy_post_barriers;
         IndexCopyOp::trigger_replay();
       }
@@ -5365,6 +5361,7 @@ namespace Legion {
       activate_dependent_op();
       activate_repl_collective_instance_creator();
       sharding_function = NULL;
+      shard_points = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -5379,6 +5376,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      remove_launch_space_reference(shard_points);
       runtime->free_repl_dependent_partition_op(this);
     }
 
@@ -5557,10 +5555,8 @@ namespace Legion {
         }
         else // If we have valid points then we do the base call
         {
-          if (remove_launch_space_reference(launch_space))
-            delete launch_space;
-          launch_space = runtime->forest->get_node(local_space);
-          add_launch_space_reference(launch_space);
+          shard_points = runtime->forest->get_node(local_space);
+          add_launch_space_reference(shard_points);
           DependentPartitionOp::trigger_ready();
         }
       }

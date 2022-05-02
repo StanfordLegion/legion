@@ -8731,8 +8731,9 @@ namespace Legion {
     {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
+      IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
+      local_points->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -17611,8 +17612,9 @@ namespace Legion {
 #endif
         // Need to get the launch domain in case it is different than
         // the original index domain due to control replication
+        IndexSpaceNode *local_points = get_shard_points();
         Domain launch_domain;
-        launch_space->get_launch_space_domain(launch_domain);
+        local_points->get_launch_space_domain(launch_domain);
         // Now enumerate the points and kick them off
         size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -20286,8 +20288,9 @@ namespace Legion {
       // Enumerate the points
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
+      IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
+      local_points->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION

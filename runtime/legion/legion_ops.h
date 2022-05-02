@@ -1637,6 +1637,8 @@ namespace Legion {
       virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return launch_space; }
       void enumerate_points(bool replaying);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
@@ -3544,6 +3546,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return launch_space; }
     public:
       void activate_dependent(void);
       void deactivate_dependent(void);
@@ -3879,6 +3883,8 @@ namespace Legion {
         { return points.size(); }
     public:
       void perform_base_dependence_analysis(void);
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return launch_space; }
       void enumerate_points(bool replaying);
       void handle_point_commit(void);
       void check_point_requirements(void);

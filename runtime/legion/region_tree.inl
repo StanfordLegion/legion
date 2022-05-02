@@ -6379,7 +6379,7 @@ namespace Legion {
       DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       Domain shard_domain;
-      if (shard_space != handle)
+      if (shard_space.exists() && shard_space != handle)
         context->find_launch_space_domain(shard_space, shard_domain);
       else
         shard_domain = local_space;

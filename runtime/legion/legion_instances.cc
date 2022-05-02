@@ -2841,12 +2841,8 @@ namespace Legion {
       else // add a resource reference to remove once this manager is set
         add_base_resource_ref(PENDING_UNBOUND_REF);
 
-      if (!is_owner())
-      {
-        // Register it with the memory manager, the memory manager
-        // on the owner node will handle this
+      if (!is_owner() && !is_external_instance())
         memory_manager->register_remote_instance(this);
-      } 
 #ifdef LEGION_GC
       log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
                         LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
@@ -2868,7 +2864,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remote references removed by DistributedCollectable destructor
-      if (!is_owner())
+      if (!is_owner() && !is_external_instance())
         memory_manager->unregister_remote_instance(this);
       if (is_owner())
       {

@@ -1728,6 +1728,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return shard_points; }
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     public:
@@ -1735,6 +1737,7 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      IndexSpaceNode *shard_points;
       MapperManager *mapper;
 #ifdef DEBUG_LEGION
     public:
@@ -1809,6 +1812,8 @@ namespace Legion {
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key, LegionVector<IndirectRecord> &records,
           const bool sources);
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return shard_points; }
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     public:
@@ -1818,6 +1823,7 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      IndexSpaceNode *shard_points;
       std::vector<ApBarrier> pre_indirection_barriers;
       std::vector<ApBarrier> post_indirection_barriers;
       std::vector<CollectiveID> src_collectives;
@@ -2054,12 +2060,15 @@ namespace Legion {
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
       virtual void select_partition_projection(void);
+      virtual IndexSpaceNode* get_shard_points(void) const 
+        { return shard_points; }
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       void select_sharding_function(void);
     protected:
       ShardingFunction *sharding_function;
+      IndexSpaceNode *shard_points;
       RtBarrier mapping_barrier;
 #ifdef DEBUG_LEGION
     public:
