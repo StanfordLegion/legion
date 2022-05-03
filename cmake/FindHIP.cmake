@@ -46,23 +46,3 @@ endmacro()
 macro(HIP_COMPILE generated_files)
   hip_compile_base(hip_compile OBJ ${generated_files} ${ARGN})
 endmacro()
-
-###############################################################################
-# HIPIFY_CUDA_FILE
-###############################################################################
-macro(HIPIFY_CUDA_FILE hip_files cuda_files)
-  set(_hip_generated_files "")
-  foreach(file ${cuda_files})
-    get_filename_component(filename ${file} NAME_WE)
-    get_filename_component(directory ${file} DIRECTORY)
-    set(hip_file ${filename}.cpp)
-    # message( STATUS "hip file: ${hip_file}" )
-    # message( STATUS "cuda file: ${file}" )
-    add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${hip_file}
-      COMMAND hipify-perl ${CMAKE_CURRENT_SOURCE_DIR}/${file} > ${CMAKE_CURRENT_BINARY_DIR}/${hip_file}
-      VERBATIM)
-    list(APPEND _hip_generated_files ${CMAKE_CURRENT_BINARY_DIR}/${hip_file})
-  endforeach()
-  set(${hip_files} ${_hip_generated_files})
-endmacro()

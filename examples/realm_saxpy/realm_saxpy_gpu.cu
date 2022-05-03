@@ -15,6 +15,15 @@
 
 #include "realm_saxpy.h"
 
+#ifdef REALM_USE_HIP
+#include <hip/hip_runtime.h>
+#include "realm/hip/hiphijack_api.h"
+#define cudaGetDevice hipGetDevice
+#define cudaMemAdvise hipMemAdvise
+#define cudaMemPrefetchAsync hipMemPrefetchAsync
+#define cudaMemAdviseSetReadMostly hipMemAdviseSetReadMostly
+#endif
+
 extern Logger log_app;
 
 namespace TestConfig {
@@ -87,7 +96,11 @@ void gpu_saxpy_task(const void *args, size_t arglen,
 
   size_t cta_threads = 256;
   size_t total_ctas = (num_elements + (cta_threads-1))/cta_threads;
-  gpu_saxpy<<<total_ctas, cta_threads>>>(saxpy_args->alpha, saxpy_args->bounds,
+  gpu_saxpy<<<total_ctas, cta_threads
+#ifdef REALM_USE_HIP
+              , 0, hipGetTaskStream()
+#endif
+           >>>(saxpy_args->alpha, saxpy_args->bounds,
 					 ra_x, ra_y, ra_z);
   // LOOK: NO WAIT! :)
 }

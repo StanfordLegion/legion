@@ -883,8 +883,7 @@ HIP_SRC         ?=
 # Backwards compatibility for older makefiles
 GEN_GPU_SRC	?= 
 CUDA_SRC	+= $(GEN_GPU_SRC)
-GEN_HIP_SRC     ?=
-HIP_SRC         += $(GEN_HIP_SRC)
+HIP_SRC         += $(GEN_GPU_SRC)
 REALM_SRC	?=
 LEGION_SRC	?=
 LEGION_CUDA_SRC	?=
