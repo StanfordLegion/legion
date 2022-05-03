@@ -53,6 +53,7 @@ if(Legion_USE_CUDA)
 else()
   add_library(Regent ${REGENT_SRC})
 endif()
+add_library(Legion::Regent ALIAS Regent)
 target_link_libraries(Regent Legion::Legion)
 
 if(Legion_USE_CUDA)
