@@ -325,6 +325,15 @@ namespace Legion {
                             const Task& task,
                             bool include_index_point = true);
 
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const InlineMapping& inline_op);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Copy& copy,
+                            bool include_index_point = true);
+
       /** @} */
 
     }; // namespace Utilities
