@@ -685,20 +685,9 @@ if(Legion_USE_CUDA)
 endif()
 
 if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
-  if (Legion_HIP_TARGET STREQUAL "CUDA")
-    list(APPEND LEGION_HIP_SRC
-      legion/legion_redop.cu
-    )
-  endif()
-  if (Legion_HIP_TARGET STREQUAL "ROCM")
-    list(APPEND HIP_CUDA_SRC
-      legion/legion_redop.cu
-    )
-    hipify_cuda_file(HIP_HIPIFY_SRC ${HIP_CUDA_SRC})
-    list(APPEND LEGION_HIP_SRC
-      ${HIP_HIPIFY_SRC}
-    )
-  endif()
+  list(APPEND LEGION_HIP_SRC
+    legion/legion_redop.cu
+  )
 endif()
 
 # generate per-dimension object files for deppart stuff
