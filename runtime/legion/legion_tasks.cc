@@ -3331,11 +3331,14 @@ namespace Legion {
         target_processors = procs;
 
       virtual_mapped.resize(regions.size(), false);
+      bool needs_reservations = false;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         InstanceSet &instances = physical_instances[idx];
         if (IS_NO_ACCESS(regions[idx]))
           continue;
+        if (IS_ATOMIC(regions[idx]))
+          needs_reservations = true;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
         if (runtime->legion_spy_enabled)
@@ -3343,6 +3346,9 @@ namespace Legion {
                                                 idx, regions[idx],
                                                 instances);
       }
+      if (needs_reservations)
+        // We group all reservations together anyway
+        tpl->get_reservations(this, 0/*index*/, atomic_locks);
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
       assert(!task_effects_complete.exists());
@@ -3859,11 +3865,10 @@ namespace Legion {
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         if (!atomic_locks.empty())
         {
-#ifdef DEBUG_LEGION
-          assert(single_task_termination.exists());
-#endif
-          trace_info.record_reservations(this, ready_event, atomic_locks,
-                                         ready_event, single_task_termination);
+          const TraceLocalID tlid = get_trace_local_id();
+          // All reservations are grouped together so always index 0
+          trace_info.record_reservations(tlid, 0/*index*/, atomic_locks,
+                                         map_applied_conditions);
         }
         trace_info.record_complete_replay(this, ready_event);
       }

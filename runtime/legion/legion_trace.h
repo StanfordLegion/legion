@@ -645,6 +645,8 @@ namespace Legion {
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
     private:
+      typedef std::tuple<unsigned,DomainPoint,unsigned> ReservationKey;
+    private:
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >         ViewExprs;
       typedef LegionMap<InstanceView*,
@@ -738,6 +740,8 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
+      void get_reservations(Memoizable *memo, unsigned index,
+                             std::map<Reservation,bool> &reservations) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
@@ -833,9 +837,9 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
-      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks, 
-                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_reservations(const TraceLocalID &tlid, unsigned idx,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events); 
     public:
       void perform_replay(Runtime *rt, std::set<RtEvent> &replayed_events);
       void finish_replay(std::set<ApEvent> &postconditions);
@@ -891,6 +895,7 @@ namespace Legion {
       std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
+      std::map<ReservationKey,std::map<Reservation,bool> > cached_reservations;
       bool has_virtual_mapping;
     private:
       GetTermEvent                    *last_fence;
@@ -961,8 +966,6 @@ namespace Legion {
       friend class SetOpSyncEvent;
       friend class SetEffects;
       friend class CompleteReplay;
-      friend class AcquireReplay;
-      friend class ReleaseReplay;
 #endif
     };
 
@@ -979,8 +982,6 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
-      ACQUIRE_REPLAY,
-      RELEASE_REPLAY,
     };
 
     /**
@@ -1010,8 +1011,6 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
-      virtual AcquireReplay* as_acquire_replay(void) { return NULL; }
-      virtual ReleaseReplay* as_release_replay(void) { return NULL; }
     public:
       const TraceLocalID owner;
     };
@@ -1342,59 +1341,6 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      unsigned rhs;
-    };
-
-    /**
-     * \class AcquireReplay
-     * This instruction has the following semantics:
-     *   events[lhs] = acquire_reservations(events[pre])
-     */
-    class AcquireReplay : public Instruction {
-    public:
-      AcquireReplay(PhysicalTemplate &tpl, unsigned lhs,
-          unsigned rhs, const TraceLocalID &tld,
-          const std::map<Reservation,bool> &reservations);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations);
-      virtual std::string to_string(
-                           std::map<TraceLocalID,Memoizable*> &operations);
-
-      virtual InstructionKind get_kind(void)
-        { return ACQUIRE_REPLAY; }
-      virtual AcquireReplay * as_acquire_replay(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      const std::map<Reservation,bool> reservations;
-      unsigned lhs;
-      unsigned rhs;
-    };
-
-    /**
-     * \class ReleaseReplay
-     * This instruction has the following semantics:
-     *   release_reservations(events[pre])
-     */
-    class ReleaseReplay : public Instruction {
-    public:
-      ReleaseReplay(PhysicalTemplate &tpl, 
-          unsigned rhs, const TraceLocalID &tld,
-          const std::map<Reservation,bool> &reservations);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations);
-      virtual std::string to_string(
-                           std::map<TraceLocalID,Memoizable*> &operations);
-
-      virtual InstructionKind get_kind(void)
-        { return RELEASE_REPLAY; }
-      virtual ReleaseReplay * as_release_replay(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      const std::map<Reservation,bool> reservations;
       unsigned rhs;
     };
 

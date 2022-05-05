@@ -4802,8 +4802,9 @@ namespace Legion {
             Runtime::release_reservation(it->first, local_completion);
           }
           if (is_recording())
-            trace_info.record_reservations(this, local_init_precondition,
-                local_locks, reservation_precondition, local_completion);
+            REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                "No support currently for tracing region-to-region copy "
+                "operations with atomic coherence.") 
         }
         if (src_composite < 0)
         {

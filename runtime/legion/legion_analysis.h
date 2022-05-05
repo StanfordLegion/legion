@@ -212,9 +212,9 @@ namespace Legion {
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
-      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks, 
-                              ApEvent precondition, ApEvent postcondition) = 0;
+      virtual void record_reservations(const TraceLocalID &tlid, unsigned index,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events) = 0;
     };
 
     /**
@@ -337,9 +337,9 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
-      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks,
-                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_reservations(const TraceLocalID &tlid, unsigned index,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                           Runtime *runtime, Memoizable *memo);
@@ -422,7 +422,7 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
-                          std::set<RtEvent> &applied)
+                          std::set<RtEvent> &applied) const
         {
           base_sanity_check();
           rec->record_mapper_output(tlid, output, physical_instances, applied);
@@ -438,13 +438,12 @@ namespace Legion {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
         }
-      inline void record_reservations(Memoizable *memo, ApEvent &lhs,
+      inline void record_reservations(const TraceLocalID &tlid, unsigned index,
                       const std::map<Reservation,bool> &reservations,
-                      ApEvent precondition, ApEvent postcondition) const
+                      std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_reservations(memo, lhs, reservations, 
-                                   precondition, postcondition);
+          rec->record_reservations(tlid, index, reservations, applied);
         }
     public:
       inline RtEvent get_collect_event(void) const 

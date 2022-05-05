@@ -3007,18 +3007,6 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              used[gen[acquire->rhs]] = true;
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
-              used[gen[release->rhs]] = true;
-              break;
-            }
           case GET_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -3239,16 +3227,6 @@ namespace Legion {
                 event_to_check = &inst->as_complete_replay()->rhs;
                 break;
               }
-            case ACQUIRE_REPLAY:
-              {
-                event_to_check = &inst->as_acquire_replay()->rhs;
-                break;
-              }
-            case RELEASE_REPLAY:
-              {
-                event_to_check = &inst->as_release_replay()->rhs;
-                break;
-              }
             default:
               {
                 break;
@@ -3413,17 +3391,6 @@ namespace Legion {
 #endif
               incoming[lhs].push_back(replay->rhs);
               outgoing[replay->rhs].push_back(lhs);
-              break;
-            }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              incoming[acquire->lhs].push_back(acquire->rhs);
-              outgoing[acquire->rhs].push_back(acquire->lhs);
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
               break;
             }
           default:
@@ -3775,21 +3742,6 @@ namespace Legion {
               if (subst >= 0) replay->rhs = (unsigned)subst;
               break;
             }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              int subst = substs[acquire->rhs];
-              if (subst >= 0) acquire->rhs = (unsigned)subst;
-              lhs = acquire->lhs;
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
-              int subst = substs[release->rhs];
-              if (subst >= 0) release->rhs = (unsigned)subst;
-              break;
-            }
           default:
             {
               break;
@@ -3913,24 +3865,6 @@ namespace Legion {
               assert(gen[complete->rhs] != -1U);
 #endif
               used[gen[complete->rhs]] = true;
-              break;
-            }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
- #ifdef DEBUG_LEGION
-              assert(gen[acquire->rhs] != -1U);
-#endif
-              used[gen[acquire->rhs]] = true;             
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
- #ifdef DEBUG_LEGION
-              assert(gen[release->rhs] != -1U);
-#endif
-              used[gen[release->rhs]] = true;             
               break;
             }
           case GET_TERM_EVENT:
@@ -4123,12 +4057,11 @@ namespace Legion {
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
+      const TraceLocalID op_key = task->get_trace_local_id();
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-
-      TraceLocalID op_key = task->get_trace_local_id();
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_mappings.end());
@@ -4839,28 +4772,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_reservations(Memoizable *memo, ApEvent &lhs,
+    void PhysicalTemplate::record_reservations(
+                                const TraceLocalID &tlid, unsigned index, 
                                 const std::map<Reservation,bool> &reservations,
-                                ApEvent precondition, ApEvent postcondition)
+                                std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      const TraceLocalID tld = find_trace_local_id(memo);
+      const ReservationKey key(tlid.first, tlid.second, index);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
+      assert(cached_reservations.find(key) == cached_reservations.end());
 #endif
-      const unsigned pre = find_event(precondition);
-      const unsigned post = find_event(postcondition);
-      // Always produce a fresh output event here
-      {
-        const ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename, lhs);
-        lhs = rename;
-      }
-      const unsigned lhs_ = convert_event(lhs);
-      insert_instruction(new AcquireReplay(*this, lhs_, pre, tld,reservations));
-      events.push_back(ApEvent());
-      insert_instruction(new ReleaseReplay(*this, post, tld, reservations));
+      cached_reservations[key] = reservations;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_reservations(Memoizable *memo, unsigned index,
+                                 std::map<Reservation,bool> &reservations) const
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID op_key = memo->get_trace_local_id();
+      const ReservationKey key(op_key.first, op_key.second, index);
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+      std::map<ReservationKey,std::map<Reservation,bool> >::const_iterator
+        finder = cached_reservations.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_reservations.end());
+#endif
+      reservations = finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -5837,94 +5780,6 @@ namespace Legion {
       std::stringstream ss;
       ss << "operations[" << owner
          << "].complete_replay(events[" << rhs << "])    (op kind: "
-         << Operation::op_names[operations[owner]->get_memoizable_kind()] 
-         << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // AcquireReplay
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    AcquireReplay::AcquireReplay(PhysicalTemplate &tpl, unsigned lhs_,
-                         unsigned rhs_, const TraceLocalID &tld,
-                         const std::map<Reservation,bool> &reservations_)
-      : Instruction(tpl, tld), reservations(reservations_), 
-        lhs(lhs_), rhs(rhs_)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tpl.operations.front().find(owner) != 
-              tpl.operations.front().end());
-      assert(lhs < tpl.events.size());
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireReplay::execute(std::vector<ApEvent> &events,
-                                std::map<unsigned,ApUserEvent> &user_events,
-                                std::map<TraceLocalID,Memoizable*> &operations)
-      //--------------------------------------------------------------------------
-    {
-      ApEvent precondition = events[rhs];
-      for (std::map<Reservation,bool>::const_iterator it = 
-            reservations.begin(); it != reservations.end(); it++)
-        precondition = 
-          Runtime::acquire_ap_reservation(it->first, it->second, precondition);
-      events[lhs] = precondition;
-    }
-
-    //--------------------------------------------------------------------------
-    std::string AcquireReplay::to_string(
-                                 std::map<TraceLocalID,Memoizable*> &operations)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "events[" << lhs << "] = acquire_reservations(events[" << rhs
-         << "])   (owner: " << owner << ")"; 
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // ReleaseReplay
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReleaseReplay::ReleaseReplay(PhysicalTemplate &tpl,
-                         unsigned rhs_, const TraceLocalID &tld,
-                         const std::map<Reservation,bool> &reservations_)
-      : Instruction(tpl, tld), reservations(reservations_), rhs(rhs_)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tpl.operations.front().find(owner) != 
-              tpl.operations.front().end());
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseReplay::execute(std::vector<ApEvent> &events,
-                                std::map<unsigned,ApUserEvent> &user_events,
-                                std::map<TraceLocalID,Memoizable*> &operations)
-    //--------------------------------------------------------------------------
-    {
-      const ApEvent precondition = events[rhs];
-      for (std::map<Reservation,bool>::const_iterator it = 
-            reservations.begin(); it != reservations.end(); it++)
-        Runtime::release_reservation(it->first, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string ReleaseReplay::to_string(
-                                 std::map<TraceLocalID,Memoizable*> &operations)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "operations[" << owner << "].release_reservations(events["
-         << rhs << "])   (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
          << ")";
       return ss.str();
