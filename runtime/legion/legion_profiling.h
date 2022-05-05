@@ -492,8 +492,8 @@ namespace Legion {
       std::deque<ProcDesc> proc_desc_infos;
       std::deque<ProcMemDesc> proc_mem_aff_desc_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
-      std::set<MemID> mem_ids_set;
-      std::set<ProcID> proc_ids_set;
+      std::vector<MemID> mem_ids;
+      std::vector<ProcID> proc_ids;
 #ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;

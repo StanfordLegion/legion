@@ -737,8 +737,11 @@ namespace Legion {
     {
       if (m == Memory::NO_MEMORY)
         return;
-      if (!(mem_ids_set.insert(m.id).second))
+      if (std::binary_search(mem_ids.begin(), mem_ids.end(), m.id))
         return;
+      mem_ids.push_back(m.id);
+      std::sort(mem_ids.begin(), mem_ids.end());
+
       mem_desc_infos.push_back(MemDesc());
       MemDesc &info = mem_desc_infos.back();
       info.mem_id = m.id;
@@ -753,8 +756,11 @@ namespace Legion {
     void LegionProfInstance::process_proc_desc(const Processor &p)
     //--------------------------------------------------------------------------
     {
-      if (!(proc_ids_set.insert(p.id).second))
+      if (std::binary_search(proc_ids.begin(), proc_ids.end(), p.id))
         return;
+      proc_ids.push_back(p.id);
+      std::sort(proc_ids.begin(), proc_ids.end());
+
       proc_desc_infos.push_back(ProcDesc());
       ProcDesc &info = proc_desc_infos.back();
       info.proc_id = p.id;
