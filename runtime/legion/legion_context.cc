@@ -8626,20 +8626,21 @@ namespace Legion {
       // Do anything that we need to do
       if (to_trigger.exists())
       {
-        if (need_deferral)
+        if (wait_on.exists() && !wait_on.has_triggered())
         {
-          PostDecrementArgs post_decrement_args(this);
-          RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-              LG_LATENCY_WORK_PRIORITY, wait_on); 
-          Runtime::trigger_event(to_trigger, done);
-          return to_trigger;
+          if (need_deferral)
+          {
+            PostDecrementArgs post_decrement_args(this);
+            RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
+                LG_LATENCY_WORK_PRIORITY, wait_on); 
+            Runtime::trigger_event(to_trigger, done);
+            return to_trigger;
+          }
+          else
+            wait_on.wait();
         }
-        else
-        {
-          wait_on.wait();
-          runtime->activate_context(this);
-          Runtime::trigger_event(to_trigger);
-        }
+        runtime->activate_context(this);
+        Runtime::trigger_event(to_trigger);
       }
       return RtEvent::NO_RT_EVENT;
     }

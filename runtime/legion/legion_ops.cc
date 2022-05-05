@@ -133,8 +133,7 @@ namespace Legion {
         Runtime::trigger_event(mapped_event);
       if (!resolved)
         Runtime::trigger_event(resolved_event);
-      if (need_completion_trigger && 
-          !completion_event.has_triggered_faultignorant())
+      if (need_completion_trigger)
         Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
@@ -877,7 +876,10 @@ namespace Legion {
         }
       }
       if (need_completion_trigger)
+      {
         Runtime::trigger_event(NULL, completion_event);
+        need_completion_trigger = false;
+      }
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -911,21 +913,7 @@ namespace Legion {
       // Tell our parent context that we are committed
       // Do this before actually committing to avoid race conditions
       if (track_parent)
-      {
-        // Do a check here to make sure the completion event has triggered
-        // before we record that this operation is commited. This is crucial
-        // to ensuring that fence operations are working correctly in the
-        // parent context. If not triggered, then defer this until it does.
-        // Inner task completion also relies upon this to work correctly
-        if (!completion_event.has_triggered_faultignorant())
-        {
-          DeferredCommitArgs args(this, do_deactivate);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(completion_event));
-          return;
-        }
         parent_ctx->register_child_commit(this);
-      }
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);

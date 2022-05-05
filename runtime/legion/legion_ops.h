@@ -702,6 +702,8 @@ namespace Legion {
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC> logical_records;
       // Dependence trackers for detecting when it is safe to map and commit
+      // We allocate and free these every time to ensure that their memory
+      // is always cleaned up after each operation
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
     };
