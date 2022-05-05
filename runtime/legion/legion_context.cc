@@ -1901,7 +1901,7 @@ namespace Legion {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
       if (!inline_task)
-        pending_done = find_parent_context()->decrement_pending(owner_task);
+        find_parent_context()->decrement_pending(owner_task);
       return physical_regions;
     }
 
@@ -1946,7 +1946,7 @@ namespace Legion {
     {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+      owner_task->get_context()->decrement_pending(owner_task);
     }
 
     //--------------------------------------------------------------------------
@@ -8496,31 +8496,19 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      if (!currently_active_context && (outstanding_subtasks == 0) && 
+          (((context_configuration.min_tasks_to_schedule > 0) && 
+            (pending_subtasks < 
+             context_configuration.min_tasks_to_schedule)) ||
+           ((context_configuration.min_frames_to_schedule > 0) &&
+            (pending_frames < 
+             context_configuration.min_frames_to_schedule))))
       {
-        AutoLock child_lock(child_op_lock);
-        if (!currently_active_context && (outstanding_subtasks == 0) && 
-            (((context_configuration.min_tasks_to_schedule > 0) && 
-              (pending_subtasks < 
-               context_configuration.min_tasks_to_schedule)) ||
-             ((context_configuration.min_frames_to_schedule > 0) &&
-              (pending_frames < 
-               context_configuration.min_frames_to_schedule))))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-        outstanding_subtasks++;
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = true;
         runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
+      outstanding_subtasks++;
     }
 
     //--------------------------------------------------------------------------
@@ -8533,33 +8521,21 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(outstanding_subtasks > 0);
+      assert(outstanding_subtasks > 0);
 #endif
-        outstanding_subtasks--;
-        if (currently_active_context && (outstanding_subtasks == 0) && 
-            (((context_configuration.min_tasks_to_schedule > 0) &&
-              (pending_subtasks < 
-               context_configuration.min_tasks_to_schedule)) ||
-             ((context_configuration.min_frames_to_schedule > 0) &&
-              (pending_frames < 
-               context_configuration.min_frames_to_schedule))))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
+      outstanding_subtasks--;
+      if (currently_active_context && (outstanding_subtasks == 0) && 
+          (((context_configuration.min_tasks_to_schedule > 0) &&
+            (pending_subtasks < 
+             context_configuration.min_tasks_to_schedule)) ||
+           ((context_configuration.min_frames_to_schedule > 0) &&
+            (pending_frames < 
+             context_configuration.min_frames_to_schedule))))
       {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -8570,79 +8546,40 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped frames
       if (context_configuration.min_tasks_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      pending_subtasks++;
+      if (currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_subtasks == context_configuration.min_tasks_to_schedule))
       {
-        AutoLock child_lock(child_op_lock);
-        pending_subtasks++;
-        if (currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_subtasks == context_configuration.min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(TaskOp *child)
+    void InnerContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduled by frames
-      if (context_configuration.min_tasks_to_schedule == 0)
-        return RtEvent::NO_RT_EVENT;
-      return decrement_pending(true/*need deferral*/);
+      if (context_configuration.min_tasks_to_schedule > 0)
+        decrement_pending(true/*need deferral*/);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(bool need_deferral)
+    void InnerContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(pending_subtasks > 0);
+      assert(pending_subtasks > 0);
 #endif
-        pending_subtasks--;
-        if (!currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_subtasks < context_configuration.min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-      }
-      // Do anything that we need to do
-      if (to_trigger.exists())
+      pending_subtasks--;
+      if (!currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_subtasks < context_configuration.min_tasks_to_schedule))
       {
-        if (wait_on.exists() && !wait_on.has_triggered())
-        {
-          if (need_deferral)
-          {
-            PostDecrementArgs post_decrement_args(this);
-            RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-                LG_LATENCY_WORK_PRIORITY, wait_on); 
-            Runtime::trigger_event(to_trigger, done);
-            return to_trigger;
-          }
-          else
-            wait_on.wait();
-        }
+        currently_active_context = true;
         runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8652,25 +8589,13 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      pending_frames++;
+      if (currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_frames == context_configuration.min_frames_to_schedule))
       {
-        AutoLock child_lock(child_op_lock);
-        pending_frames++;
-        if (currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_frames == context_configuration.min_frames_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -8681,28 +8606,16 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(pending_frames > 0);
+      assert(pending_frames > 0);
 #endif
-        pending_frames--;
-        if (!currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_frames < context_configuration.min_frames_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-      }
-      if (to_trigger.exists())
+      pending_frames--;
+      if (!currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_frames < context_configuration.min_frames_to_schedule))
       {
-        wait_on.wait();
+        currently_active_context = true;
         runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     } 
 
@@ -9673,12 +9586,7 @@ namespace Legion {
         finished_execution = true;
       }
       // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
+      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -12482,19 +12390,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(TaskOp *child)
+    void LeafContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(bool need_deferral)
+    void LeafContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12611,12 +12517,7 @@ namespace Legion {
         wait_on.wait();
       }
       // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
+      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION

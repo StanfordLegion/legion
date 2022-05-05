@@ -335,7 +335,6 @@ namespace Legion {
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
-      LG_POST_DECREMENT_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
@@ -448,7 +447,6 @@ namespace Legion {
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
-        "Post Decrement Task",                                    \
         "Issue Frame",                                            \
         "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \

@@ -24258,13 +24258,6 @@ namespace Legion {
             IndexPartNode::handle_pending_child_task(args);
             break;
           }
-        case LG_POST_DECREMENT_TASK_ID:
-          {
-            InnerContext::PostDecrementArgs *dargs = 
-              (InnerContext::PostDecrementArgs*)args;
-            runtime->activate_context(dargs->parent_ctx);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 

@@ -454,8 +454,8 @@ namespace Legion {
       virtual void increment_outstanding(void) = 0;
       virtual void decrement_outstanding(void) = 0;
       virtual void increment_pending(void) = 0;
-      virtual RtEvent decrement_pending(TaskOp *child) = 0;
-      virtual RtEvent decrement_pending(bool need_deferral) = 0;
+      virtual void decrement_pending(TaskOp *child) = 0;
+      virtual void decrement_pending(bool need_deferral) = 0;
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
@@ -662,7 +662,6 @@ namespace Legion {
       std::vector<PhysicalInstance> task_local_instances;
 #endif
     protected:
-      RtEvent pending_done;
       bool task_executed;
       bool has_inline_accessor;
       bool mutable_priority;
@@ -731,16 +730,6 @@ namespace Legion {
         RtEvent wait_on;
         FutureFunctor *functor;
         bool owned;
-      };
-      struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
-      public:
-        PostDecrementArgs(InnerContext *ctx)
-          : LgTaskArgs<PostDecrementArgs>(ctx->get_context_uid()),
-            parent_ctx(ctx) { }
-      public:
-        InnerContext *const parent_ctx;
       };
       struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
       public:
@@ -1245,8 +1234,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child);
-      virtual RtEvent decrement_pending(bool need_deferral);
+      virtual void decrement_pending(TaskOp *child);
+      virtual void decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
@@ -1437,8 +1426,6 @@ namespace Legion {
       unsigned pending_subtasks;
       // Number of pending_frames
       unsigned pending_frames;
-      // Event used to order operations to the runtime
-      RtEvent context_order_event;
       // Track whether this context is current active for scheduling
       // indicating that it is no longer far enough ahead
       bool currently_active_context;
@@ -2007,8 +1994,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child);
-      virtual RtEvent decrement_pending(bool need_deferral);
+      virtual void decrement_pending(TaskOp *child);
+      virtual void decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
