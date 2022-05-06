@@ -2442,6 +2442,7 @@ namespace Legion {
                                    CopyOp *op, 
                                    unsigned src_index, unsigned dst_index,
                                    ApEvent precondition, PredEvent guard, 
+                                 const std::map<Reservation,bool> &reservations,
                                    const PhysicalTraceInfo &trace_info,
                                    std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -2547,7 +2548,6 @@ namespace Legion {
         // of the two index spaces for source and destination, In the
         // normal write case we know we have to be writing everything
         IndexSpaceExpression *src_expr = src_node->row_source;
-        const std::vector<Reservation> no_reservations;
         if ((dst_req.redop > 0) && (dst_expr->expr_id != src_expr->expr_id))
         {
           IndexSpaceExpression *intersect = 
@@ -2563,20 +2563,21 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = intersect->issue_copy(op, trace_info,
-                                         dst_fields, src_fields,no_reservations,
+            const ApEvent result = intersect->issue_copy(op, trace_info, 
+                                         dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
 #endif
                                          full_precondition, guard);
-            trace_info.record_copy_views(result, intersect, tracing_srcs, 
-                                         tracing_dsts, map_applied_events);
+            trace_info.record_copy_views(result, intersect,
+                                         tracing_srcs, tracing_dsts,
+                                         map_applied_events);
             return result;
           }
           else
             return intersect->issue_copy(op, trace_info, dst_fields,
-                                         src_fields, no_reservations,
+                                         src_fields, reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
@@ -2594,20 +2595,21 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = dst_expr->issue_copy(op, trace_info,
-                                        dst_fields, src_fields, no_reservations,
+            const ApEvent result = dst_expr->issue_copy(op, trace_info, 
+                                        dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
 #endif
                                         full_precondition, guard);
-            trace_info.record_copy_views(result, dst_expr, tracing_srcs, 
-                                         tracing_dsts, map_applied_events);
+            trace_info.record_copy_views(result, dst_expr, 
+                                         tracing_srcs, tracing_dsts,
+                                         map_applied_events);
             return result;
           }
           else
-            return dst_expr->issue_copy(op, trace_info, dst_fields,
-                                        src_fields, no_reservations,
+            return dst_expr->issue_copy(op, trace_info, dst_fields, 
+                                        src_fields, reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
@@ -2615,6 +2617,10 @@ namespace Legion {
                                         full_precondition, guard);
         }
       }
+#ifdef DEBUG_LEGION
+      // Should never need to do any reservations here
+      assert(reservations.empty());
+#endif
       FieldMask src_mask, dst_mask; 
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
       {
@@ -2685,6 +2691,7 @@ namespace Legion {
                                             const ApEvent collective_pre,
                                             const ApEvent collective_post,
                                             const ApUserEvent copy_pre,
+                                 const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_src_out_of_range)
@@ -2804,8 +2811,8 @@ namespace Legion {
 #endif
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(op, trace_info, dst_fields,
-                                  src_fields, indirections,
+        copy_expr->issue_indirect(op, trace_info, dst_fields, src_fields,
+                                  indirections, reservations,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
@@ -2856,6 +2863,7 @@ namespace Legion {
                                              const ApEvent collective_pre,
                                              const ApEvent collective_post,
                                              const ApUserEvent copy_pre,
+                                 const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
@@ -2974,7 +2982,7 @@ namespace Legion {
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
         copy_expr->issue_indirect(op, trace_info, dst_fields,
-                                  src_fields, indirections,
+                                  src_fields, indirections, reservations,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
@@ -3027,6 +3035,7 @@ namespace Legion {
                               const ApEvent collective_pre,
                               const ApEvent collective_post,
                               const ApUserEvent copy_pre,
+                              const std::map<Reservation,bool> &reservations,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
@@ -3154,7 +3163,7 @@ namespace Legion {
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
         copy_expr->issue_indirect(op, trace_info, dst_fields,
-                                  src_fields, indirections,
+                                  src_fields, indirections, reservations,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif

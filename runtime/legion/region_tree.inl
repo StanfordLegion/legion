@@ -186,7 +186,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<Reservation> &reservations,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
@@ -220,14 +220,6 @@ namespace Legion {
           assert(is_indirect);
         }
       }
-#ifndef NDEBUG
-      if (!reservations.empty())
-      {
-        // Reservations shoudl always be sorted
-        for (unsigned idx = 1; idx < reservations.size(); idx++)
-          assert(reservations[idx-1] < reservations[idx]);
-      }
-#endif
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
@@ -253,13 +245,13 @@ namespace Legion {
         {
           // Need a protected version here to guarantee we always acquire
           // or release the lock regardless of poison
-          pred_pre = Runtime::ignorefaults(pred_pre);
-          for (std::vector<Reservation>::const_iterator it =
+          pred_pre = Runtime::ignorefaults(precondition);
+          for (std::map<Reservation,bool>::const_iterator it =
                 reservations.begin(); it != reservations.end(); it++)
             pred_pre = 
-              Runtime::acquire_ap_reservation(*it, true/*exclusive*/, pred_pre);
-          // Tricky: now merge the predicate back in to get the 
-          // effects of the poison since we protected against it above
+              Runtime::acquire_ap_reservation(it->first, it->second, pred_pre);
+          // Tricky: now merge the predicate and precondition back in to get the 
+          // effects of any poison since we protected against it above
           // Note you can't wait to acquire events until you know the full
           // precondition has triggered or poisoned including the predicate
           // or you risk deadlock which is why we need the double merge
@@ -267,33 +259,43 @@ namespace Legion {
             Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
         }
 #ifdef LEGION_SPY
-        result = Runtime::ignorefaults(space.copy(realm_src_fields, 
+        result = Runtime::ignorefaults(space.copy(realm_src_fields,
                             realm_dst_fields, requests, pred_pre));
 #else
-        result = Runtime::ignorefaults(space.copy(src_fields, dst_fields, 
-                                                  requests, pred_pre));
+        result = Runtime::ignorefaults(space.copy(src_fields, dst_fields,
+                            requests, pred_pre));
 #endif
+        // Release any reservations
+        if (!reservations.empty())
+        {
+          // Protect the result in case of poison so we are guaranteed to
+          // always release the reservations
+          const ApEvent protected_result = Runtime::ignorefaults(result);
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+            Runtime::release_reservation(it->first, protected_result);
+        }
       }
       else
       {
         // No need for tracing to know about the reservations
         ApEvent copy_pre = precondition;
-        for (std::vector<Reservation>::const_iterator it =
+        for (std::map<Reservation,bool>::const_iterator it =
               reservations.begin(); it != reservations.end(); it++)
-          copy_pre = Runtime::acquire_ap_reservation(*it, 
-                            true/*exclusive*/, copy_pre);
+          copy_pre = Runtime::acquire_ap_reservation(it->first, 
+                                          it->second, copy_pre);
 #ifdef LEGION_SPY
         result = ApEvent(space.copy(realm_src_fields, realm_dst_fields, 
-                                    requests, copy_pre));
+                         requests, copy_pre));
 #else
-        result = ApEvent(space.copy(src_fields, dst_fields,
-                                    requests, copy_pre));
+        result = ApEvent(space.copy(src_fields, dst_fields, 
+                         requests, copy_pre));
 #endif
+        // Release any reservations
+        for (std::map<Reservation,bool>::const_iterator it =
+              reservations.begin(); it != reservations.end(); it++)
+          Runtime::release_reservation(it->first, result);
       }
-      // Release any reservations
-      for (std::vector<Reservation>::const_iterator it =
-            reservations.begin(); it != reservations.end(); it++)
-        Runtime::release_reservation(*it, result);
       if (trace_info.recording)
         trace_info.record_issue_copy(result, this, src_fields,
                                      dst_fields, reservations,
@@ -451,6 +453,7 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<CopyIndirection*> &indirects,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
@@ -480,11 +483,26 @@ namespace Legion {
       ApEvent result;
       if (pred_guard.exists())
       {
+        // No need for tracing to know about the precondition or reservations
         ApEvent pred_pre = 
           Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
-        if (trace_info.recording)
-          trace_info.record_merge_events(pred_pre, precondition,
-                                          ApEvent(pred_guard));
+        if (!reservations.empty())
+        {
+          // Need a protected version here to guarantee we always acquire
+          // or release the lock regardless of poison
+          pred_pre = Runtime::ignorefaults(precondition);
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+            pred_pre = 
+              Runtime::acquire_ap_reservation(it->first, it->second, pred_pre);
+          // Tricky: now merge the predicate and precondition back in to get the 
+          // effects of any poison since we protected against it above
+          // Note you can't wait to acquire events until you know the full
+          // precondition has triggered or poisoned including the predicate
+          // or you risk deadlock which is why we need the double merge
+          pred_pre =
+            Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
+        }
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.copy(realm_src_fields, 
                           realm_dst_fields, indirections, requests, pred_pre));
@@ -492,20 +510,40 @@ namespace Legion {
         result = Runtime::ignorefaults(space.copy(src_fields, dst_fields, 
                                             indirections, requests, pred_pre));
 #endif
+        // Release any reservations
+        if (!reservations.empty())
+        {
+          // Protect the result in case of poison so we are guaranteed to
+          // always release the reservations
+          const ApEvent protected_result = Runtime::ignorefaults(result);
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+            Runtime::release_reservation(it->first, protected_result);
+        }
       }
       else
       {
+        // No need for tracing to know about the reservations
+        ApEvent copy_pre = precondition;
+        for (std::map<Reservation,bool>::const_iterator it =
+              reservations.begin(); it != reservations.end(); it++)
+          copy_pre = Runtime::acquire_ap_reservation(it->first, 
+                                          it->second, copy_pre);
 #ifdef LEGION_SPY
         result = ApEvent(space.copy(realm_src_fields, realm_dst_fields, 
-                                    indirections, requests, precondition));
+                                    indirections, requests, copy_pre));
 #else
         result = ApEvent(space.copy(src_fields, dst_fields, indirections,
-                                    requests, precondition));
+                                    requests, copy_pre));
 #endif
+        // Release any reservations
+        for (std::map<Reservation,bool>::const_iterator it =
+              reservations.begin(); it != reservations.end(); it++)
+          Runtime::release_reservation(it->first, result);
       }
       if (trace_info.recording)
         trace_info.record_issue_indirect(result, this, src_fields,
-                                         dst_fields, indirects,
+                                         dst_fields, indirects, reservations,
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif
@@ -1581,7 +1619,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<Reservation> &reservations,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
@@ -1592,7 +1630,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
-        return issue_copy_internal(context, op, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info,
             dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
@@ -1600,14 +1638,14 @@ namespace Legion {
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard);
       else if (space_ready.exists())
-        return issue_copy_internal(context, op, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard);
       else
-        return issue_copy_internal(context, op, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
@@ -1659,6 +1697,7 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<CopyIndirection*> &indirects,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
@@ -1670,7 +1709,7 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
         return issue_indirect_internal(context, op, local_space, trace_info, 
-            dst_fields, src_fields, indirects,
+            dst_fields, src_fields, indirects, reservations,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
@@ -1678,7 +1717,8 @@ namespace Legion {
             pred_guard, tracing_precondition);
       else if (space_ready.exists())
         return issue_indirect_internal(context, op, local_space, trace_info,
-                                       dst_fields, src_fields, indirects, 
+                                       dst_fields, src_fields,
+                                       indirects, reservations, 
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
@@ -1686,7 +1726,8 @@ namespace Legion {
                                        tracing_precondition);
       else
         return issue_indirect_internal(context, op, local_space, trace_info,
-                                       dst_fields, src_fields, indirects,
+                                       dst_fields, src_fields,
+                                       indirects, reservations,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
@@ -6065,7 +6106,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<Reservation> &reservations,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
@@ -6143,6 +6184,7 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<CopyIndirection*> &indirects,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
@@ -6154,7 +6196,7 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
         return issue_indirect_internal(context, op, local_space, trace_info, 
-            dst_fields, src_fields, indirects,
+            dst_fields, src_fields, indirects, reservations,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
@@ -6162,7 +6204,8 @@ namespace Legion {
             pred_guard, tracing_precondition);
       else if (space_ready.exists())
         return issue_indirect_internal(context, op, local_space, trace_info,
-                                       dst_fields, src_fields, indirects, 
+                                       dst_fields, src_fields,
+                                       indirects, reservations,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
@@ -6170,7 +6213,8 @@ namespace Legion {
                                        tracing_precondition);
       else
         return issue_indirect_internal(context, op, local_space, trace_info,
-                                       dst_fields, src_fields, indirects,
+                                       dst_fields, src_fields,
+                                       indirects, reservations,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif

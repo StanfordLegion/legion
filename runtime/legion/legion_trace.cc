@@ -4512,18 +4512,6 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              used[gen[acquire->rhs]] = true;
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
-              used[gen[release->rhs]] = true;
-              break;
-            }
           case GET_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -4771,16 +4759,6 @@ namespace Legion {
                 event_to_check = &inst->as_complete_replay()->rhs;
                 break;
               }
-            case ACQUIRE_REPLAY:
-              {
-                event_to_check = &inst->as_acquire_replay()->rhs;
-                break;
-              }
-            case RELEASE_REPLAY:
-              {
-                event_to_check = &inst->as_release_replay()->rhs;
-                break;
-              }
             default:
               {
                 break;
@@ -4969,17 +4947,6 @@ namespace Legion {
 #endif
               incoming[lhs].push_back(replay->rhs);
               outgoing[replay->rhs].push_back(lhs);
-              break;
-            }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              incoming[acquire->lhs].push_back(acquire->rhs);
-              outgoing[acquire->rhs].push_back(acquire->lhs);
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
               break;
             }
           default:
@@ -5343,21 +5310,6 @@ namespace Legion {
               if (subst >= 0) replay->rhs = (unsigned)subst;
               break;
             }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
-              int subst = substs[acquire->rhs];
-              if (subst >= 0) acquire->rhs = (unsigned)subst;
-              lhs = acquire->lhs;
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
-              int subst = substs[release->rhs];
-              if (subst >= 0) release->rhs = (unsigned)subst;
-              break;
-            }
           default:
             {
               break;
@@ -5483,24 +5435,6 @@ namespace Legion {
               assert(gen[complete->rhs] != -1U);
 #endif
               used[gen[complete->rhs]] = true;
-              break;
-            }
-          case ACQUIRE_REPLAY:
-            {
-              AcquireReplay *acquire = inst->as_acquire_replay();
- #ifdef DEBUG_LEGION
-              assert(gen[acquire->rhs] != -1U);
-#endif
-              used[gen[acquire->rhs]] = true;             
-              break;
-            }
-          case RELEASE_REPLAY:
-            {
-              ReleaseReplay *release = inst->as_release_replay();
- #ifdef DEBUG_LEGION
-              assert(gen[release->rhs] != -1U);
-#endif
-              used[gen[release->rhs]] = true;             
               break;
             }
           case BARRIER_ARRIVAL:
@@ -5979,7 +5913,7 @@ namespace Legion {
                                  ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
-                                 const std::vector<Reservation> &reservations,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
@@ -6017,6 +5951,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -6041,7 +5976,7 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueIndirect(
             *this, lhs_, expr, tlid,
-            src_fields, dst_fields, indirections,
+            src_fields, dst_fields, indirections, reservations,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
@@ -6312,30 +6247,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_reservations(
-                                const TraceLocalID &tlid, ApEvent &lhs,
+    void PhysicalTemplate::record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &reservations,
-                                ApEvent precondition, ApEvent postcondition)
+                                std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
+      assert(cached_reservations.find(tlid) == cached_reservations.end());
 #endif
-      // Do this first in case it gets pre-empted
-      const unsigned pre = find_event(precondition, tpl_lock);
-      const unsigned post = find_event(postcondition, tpl_lock);
+      cached_reservations[tlid] = reservations;
+    }
 
-      // Always produce a fresh output event here
-      {
-        const ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename, lhs);
-        lhs = rename;
-      }
-      const unsigned lhs_ = convert_event(lhs);
-      insert_instruction(new AcquireReplay(*this, lhs_, pre,tlid,reservations));
-      events.push_back(ApEvent());
-      insert_instruction(new ReleaseReplay(*this, post, tlid, reservations));
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_task_reservations(SingleTask *task,
+                                 std::map<Reservation,bool> &reservations) const
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID key = task->get_trace_local_id();
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+      std::map<TraceLocalID,std::map<Reservation,bool> >::const_iterator
+        finder = cached_reservations.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_reservations.end());
+#endif
+      reservations = finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -7023,7 +6963,7 @@ namespace Legion {
                                  ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
-                                 const std::vector<Reservation>& reservations,
+                                 const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
@@ -7058,6 +6998,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -7078,7 +7019,8 @@ namespace Legion {
       }
       // Then do the base call
       PhysicalTemplate::record_issue_indirect(tlid, lhs, expr, src_fields,
-                                              dst_fields, indirections,
+                                              dst_fields, indirections, 
+                                              reservations,
 #ifdef LEGION_SPY
                                               unique_indirections_identifier,
 #endif
@@ -8945,13 +8887,13 @@ namespace Legion {
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
-                         const std::vector<Reservation>& rs,
+                         const std::map<Reservation,bool>& r,
 #ifdef LEGION_SPY
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
                          unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
-        reservations(rs),
+        reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
@@ -9041,11 +8983,13 @@ namespace Legion {
                                  const std::vector<CopySrcDstField>& s,
                                  const std::vector<CopySrcDstField>& d,
                                  const std::vector<CopyIndirection*> &indirects,
+                                 const std::map<Reservation,bool>& r,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_id,
 #endif
                                  unsigned pi, unsigned pre_idx)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        reservations(r),
 #ifdef LEGION_SPY
         unique_indirections_identifier(unique_indirections_id), 
 #endif
@@ -9089,8 +9033,8 @@ namespace Legion {
       Operation *op = memo->get_operation();
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(op, -1U, false);
-      events[lhs] = expr->issue_indirect(op, trace_info, dst_fields,
-                                         src_fields, indirections,
+      events[lhs] = expr->issue_indirect(op, trace_info, dst_fields, src_fields,
+                                         indirections, reservations,
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif
@@ -9354,92 +9298,6 @@ namespace Legion {
 #endif
       ss << "operations[" << owner
          << "].complete_replay(events[" << rhs << "])    (op kind: "
-         << Operation::op_names[finder->second.second]
-         << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // AcquireReplay
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    AcquireReplay::AcquireReplay(PhysicalTemplate &tpl, unsigned lhs_,
-                         unsigned rhs_, const TraceLocalID &tld,
-                         const std::map<Reservation,bool> &reservations_)
-      : Instruction(tpl, tld), reservations(reservations_), 
-        lhs(lhs_), rhs(rhs_)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(lhs < tpl.events.size());
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireReplay::execute(std::vector<ApEvent> &events,
-                                std::map<unsigned,ApUserEvent> &user_events,
-                                std::map<TraceLocalID,Memoizable*> &operations)
-      //--------------------------------------------------------------------------
-    {
-      ApEvent precondition = events[rhs];
-      for (std::map<Reservation,bool>::const_iterator it = 
-            reservations.begin(); it != reservations.end(); it++)
-        precondition = 
-          Runtime::acquire_ap_reservation(it->first, it->second, precondition);
-      events[lhs] = precondition;
-    }
-
-    //--------------------------------------------------------------------------
-    std::string AcquireReplay::to_string(const MemoEntries &memo_entries)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      ss << "events[" << lhs << "] = acquire_reservations(events[" << rhs
-         << "])   (owner: " << owner << ")"; 
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // ReleaseReplay
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReleaseReplay::ReleaseReplay(PhysicalTemplate &tpl,
-                         unsigned rhs_, const TraceLocalID &tld,
-                         const std::map<Reservation,bool> &reservations_)
-      : Instruction(tpl, tld), reservations(reservations_), rhs(rhs_)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseReplay::execute(std::vector<ApEvent> &events,
-                                std::map<unsigned,ApUserEvent> &user_events,
-                                std::map<TraceLocalID,Memoizable*> &operations)
-    //--------------------------------------------------------------------------
-    {
-      const ApEvent precondition = events[rhs];
-      for (std::map<Reservation,bool>::const_iterator it = 
-            reservations.begin(); it != reservations.end(); it++)
-        Runtime::release_reservation(it->first, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string ReleaseReplay::to_string(const MemoEntries &memo_entries)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      MemoEntries::const_iterator finder = memo_entries.find(owner);
-#ifdef DEBUG_LEGION
-      assert(finder != memo_entries.end());
-#endif
-      ss << "operations[" << owner << "].release_reservations(events["
-         << rhs << "])   (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();

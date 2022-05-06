@@ -919,6 +919,8 @@ namespace Legion {
                              std::vector<Memory> &future_locations,
                              std::vector<size_t> &future_size_bounds,
                              std::deque<InstanceSet> &physical_instances) const;
+      void get_task_reservations(SingleTask *task,
+                             std::map<Reservation,bool> &reservations) const;
     public:
       virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
                                          const TraceLocalID &tlid);
@@ -947,7 +949,7 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<Reservation>& reservations,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -957,6 +959,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -1014,9 +1017,9 @@ namespace Legion {
                                             const TraceLocalID &tlid);
       virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
       virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
-      virtual void record_reservations(const TraceLocalID &tlid, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks, 
-                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_reservations(const TraceLocalID &tlid,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events); 
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1093,6 +1096,7 @@ namespace Legion {
     private:
       CachedPremappings cached_premappings;
       CachedMappings cached_mappings;
+      std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       bool has_virtual_mapping;
     protected:
       GetTermEvent                    *last_fence;
@@ -1267,7 +1271,7 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<Reservation>& reservations,
+                             const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -1277,6 +1281,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -1439,8 +1444,6 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
-      ACQUIRE_REPLAY,
-      RELEASE_REPLAY,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
     };
@@ -1472,8 +1475,6 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
-      virtual AcquireReplay* as_acquire_replay(void) { return NULL; }
-      virtual ReleaseReplay* as_release_replay(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
     public:
@@ -1657,7 +1658,7 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
-                const std::vector<Reservation>& reservations,
+                const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -1678,7 +1679,7 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
-      std::vector<Reservation> reservations;
+      std::map<Reservation,bool> reservations;
 #ifdef LEGION_SPY
       RegionTreeID src_tree_id;
       RegionTreeID dst_tree_id;
@@ -1702,6 +1703,7 @@ namespace Legion {
                     const std::vector<CopySrcDstField>& src_fields,
                     const std::vector<CopySrcDstField>& dst_fields,
                     const std::vector<CopyIndirection*>& indirects,
+                    const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                     unsigned unique_indirections_identifier,
 #endif
@@ -1724,6 +1726,7 @@ namespace Legion {
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
       std::vector<CopyIndirection*> indirections;
+      std::map<Reservation,bool> reservations;
 #ifdef LEGION_SPY
       unsigned unique_indirections_identifier;
 #endif
@@ -1796,57 +1799,6 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      unsigned rhs;
-    };
-
-    /**
-     * \class AcquireReplay
-     * This instruction has the following semantics:
-     *   events[lhs] = acquire_reservations(events[pre])
-     */
-    class AcquireReplay : public Instruction {
-    public:
-      AcquireReplay(PhysicalTemplate &tpl, unsigned lhs,
-          unsigned rhs, const TraceLocalID &tld,
-          const std::map<Reservation,bool> &reservations);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations);
-      virtual std::string to_string(const MemoEntries &memo_entires);
-
-      virtual InstructionKind get_kind(void)
-        { return ACQUIRE_REPLAY; }
-      virtual AcquireReplay* as_acquire_replay(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      const std::map<Reservation,bool> reservations;
-      unsigned lhs;
-      unsigned rhs;
-    };
-
-    /**
-     * \class ReleaseReplay
-     * This instruction has the following semantics:
-     *   release_reservations(events[pre])
-     */
-    class ReleaseReplay : public Instruction {
-    public:
-      ReleaseReplay(PhysicalTemplate &tpl, 
-          unsigned rhs, const TraceLocalID &tld,
-          const std::map<Reservation,bool> &reservations);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations);
-      virtual std::string to_string(const MemoEntries &memo_entires);
-
-      virtual InstructionKind get_kind(void)
-        { return RELEASE_REPLAY; }
-      virtual ReleaseReplay* as_release_replay(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      const std::map<Reservation,bool> reservations;
       unsigned rhs;
     };
 

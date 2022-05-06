@@ -4959,6 +4959,7 @@ namespace Legion {
       output.dst_indirect_source_instances.resize(
           dst_indirect_requirements.size());
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      atomic_locks.resize(dst_requirements.size());
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -5076,29 +5077,6 @@ namespace Legion {
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                                 idx, src_requirements[idx],
                                                 src_targets);
-        ApEvent local_init_precondition = init_precondition;
-        // See if we have any atomic locks we have to acquire
-        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
-        {
-          // Save a copy of the local init precondition for tracing if needed
-          ApEvent reservation_precondition;
-          if (is_recording())
-            reservation_precondition = local_init_precondition;
-          // Issue the acquires and releases for the reservations
-          // necessary for performing this across operation
-          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
-          for (std::map<Reservation,bool>::const_iterator it = 
-                local_locks.begin(); it != local_locks.end(); it++)
-          {
-            local_init_precondition = 
-              Runtime::acquire_ap_reservation(it->first, it->second,
-                                              local_init_precondition);
-            Runtime::release_reservation(it->first, local_completion);
-          }
-          if (is_recording())
-            trace_info.record_reservations(local_init_precondition,
-                local_locks, reservation_precondition, local_completion);
-        }
         if (src_composite < 0)
         {
           // Don't track source views of copy across operations here,
@@ -5115,7 +5093,7 @@ namespace Legion {
           runtime->forest->physical_perform_updates_and_registration(
                                               src_req, src_versions[idx],
                                               this, idx,
-                                              local_init_precondition,
+                                              init_precondition,
                                               local_completion,
                                               src_targets,
                                               src_sources,
@@ -5139,6 +5117,16 @@ namespace Legion {
                 src_requirements[idx], output.src_source_instances[idx], 
                 across_sources,
                !runtime->unsafe_mapper ? &acquired_instances : NULL);
+          // This is a bit weird but we don't currently have any mechanism
+          // for passing the reservations that we find in these cases through
+          // to the CopyAcrossAnalysis and through the CopyFillAggregator so
+          // for now we're just going to promote privileges on any source and
+          // destination requirements to exclusive which is sound with the 
+          // logical dependence analysis since we're not changing privileges
+          if (IS_ATOMIC(src_requirements[idx]))
+            src_requirements[idx].prop = LEGION_EXCLUSIVE;
+          if (IS_ATOMIC(dst_requirements[idx]))
+            dst_requirements[idx].prop = LEGION_EXCLUSIVE;
         }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -5163,7 +5151,7 @@ namespace Legion {
                                           dst_requirements[idx],
                                           dst_versions[idx], this,
                                           dst_idx,
-                                          local_init_precondition,
+                                          init_precondition,
                                           local_completion,
                                           dst_targets,
                                           dst_sources,
@@ -5213,7 +5201,7 @@ namespace Legion {
                                        src_indirect_requirements[idx],
                                        gather_versions[idx], this,
                                        gather_idx,
-                                       local_init_precondition,
+                                       init_precondition,
                                        local_completion,
                                        gather_targets,
                                        gather_sources,
@@ -5256,7 +5244,7 @@ namespace Legion {
                                       dst_indirect_requirements[idx],
                                       scatter_versions[idx], this,
                                       scatter_idx,
-                                      local_init_precondition,
+                                      init_precondition,
                                       local_completion,
                                       scatter_targets,
                                       scatter_sources,
@@ -5300,7 +5288,7 @@ namespace Legion {
           }
           RtUserEvent deferred_applied = Runtime::create_rt_user_event();
           DeferredCopyAcross args(this, physical_trace_info, 
-                                  idx, local_init_precondition,
+                                  idx, init_precondition,
                                   local_completion, predication_guard,
                                   deferred_applied, deferred_src, deferred_dst,
                                   deferred_gather, deferred_scatter);
@@ -5310,7 +5298,7 @@ namespace Legion {
           map_applied_conditions.insert(deferred_applied);
         }
         else
-          perform_copy_across(idx, local_init_precondition, local_completion,
+          perform_copy_across(idx, init_precondition, local_completion,
                               predication_guard, src_targets, dst_targets, 
                               gather_targets.empty() ? NULL : &gather_targets,
                               scatter_targets.empty() ? NULL : &scatter_targets,
@@ -5417,7 +5405,8 @@ namespace Legion {
               src_versions[index], dst_versions[index],
               src_targets, dst_targets, across_sources, this, index, 
               trace_info.dst_index, local_init_precondition, 
-              predication_guard, trace_info, applied_conditions);
+              predication_guard, atomic_locks[index], trace_info, 
+              applied_conditions);
         }
         else
         {
@@ -5428,8 +5417,8 @@ namespace Legion {
               (*gather_targets), dst_targets, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, gather_is_range[index],
-              local_init_precondition, predication_guard, 
-              copy_pre, copy_post, indirect_pre, trace_info,
+              local_init_precondition, predication_guard, copy_pre, copy_post,
+              indirect_pre, atomic_locks[index], trace_info,
               applied_conditions, possible_src_indirect_out_of_range);
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
@@ -5445,8 +5434,8 @@ namespace Legion {
               dst_targets, dst_records, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, scatter_is_range[index],
-              local_init_precondition, predication_guard,
-              copy_pre, copy_post, indirect_pre, trace_info,
+              local_init_precondition, predication_guard, copy_pre, copy_post,
+              indirect_pre, atomic_locks[index], trace_info,
               applied_conditions, possible_dst_indirect_out_of_range, 
               possible_dst_indirect_aliasing);
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
@@ -5466,8 +5455,8 @@ namespace Legion {
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() +
               src_indirect_requirements.size() + index, gather_is_range[index],
-              local_init_precondition, predication_guard,
-              copy_pre, copy_post, indirect_pre, trace_info,
+              local_init_precondition, predication_guard, copy_pre, copy_post,
+              indirect_pre, atomic_locks[index], trace_info,
               applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing);
@@ -5712,8 +5701,9 @@ namespace Legion {
       if (mod_index >= src_indirect_requirements.size())
         mod_index -= src_indirect_requirements.size();
       AutoLock o_lock(op_lock);
-      if (mod_index >= atomic_locks.size())
-        atomic_locks.resize(mod_index+1);
+#ifdef DEBUG_LEGION
+      assert(mod_index < atomic_locks.size());
+#endif
       std::map<Reservation,bool> &local_locks = atomic_locks[mod_index];
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
@@ -6387,29 +6377,56 @@ namespace Legion {
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
       }
-      // Destination is not allowed to have composite instances
-      if ((REQ_TYPE != SRC_REQ) && (composite_idx >= 0))
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of 'map_copy' "
-                      "on mapper %s. Mapper requested the creation of a "
-                      "virtual instance for %s region requiremnt "
-                      "%d. Only source region requirements are permitted to "
-                      "be virtual instances for explicit region-to-region "
-                      "copy operations. Operation was issued in task %s "
-                      "(ID %lld).", mapper->get_mapper_name(), 
-                      get_req_type_name<REQ_TYPE>(), idx,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-      if ((REQ_TYPE != DST_REQ) && (composite_idx >= 0) && is_reduce)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output from invocation of 'map_copy' "
-                      "on mapper %s. Mapper requested the creation of a "
-                      "virtual instance for the %s requirement %d of "
-                      "an explicit region-to-region reduction. Only real "
-                      "physical instances are permitted to be sources of "
-                      "explicit region-to-region reductions. Operation was "
-                      "issued in task %s (ID %lld).", mapper->get_mapper_name(),
-                      get_req_type_name<REQ_TYPE>(), idx, 
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      if (composite_idx >= 0)
+      {
+        // Destination is not allowed to have composite instances
+        if (REQ_TYPE != SRC_REQ)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper requested the creation of a "
+                        "virtual instance for %s region requiremnt "
+                        "%d. Only source region requirements are permitted to "
+                        "be virtual instances for explicit region-to-region "
+                        "copy operations. Operation was issued in task %s "
+                        "(ID %lld).", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), idx,
+                        parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        if (is_reduce)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper requested the creation of a "
+                        "virtual instance for the %s requirement %d of "
+                        "an explicit region-to-region reduction. Only real "
+                        "physical instances are permitted to be sources of "
+                        "explicit region-to-region reductions. Operation was "
+                        "issued in task %s (ID %lld).", mapper->get_mapper_name(),
+                        get_req_type_name<REQ_TYPE>(), idx, 
+                        parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        if (idx < src_indirect_requirements.size())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper requested the creation of a "
+                        "virtual instance for %s region requiremnt "
+                        "%d. Only source region requirements without source "
+                        "indirection requirements are permitted to "
+                        "be virtual instances for explicit region-to-region "
+                        "copy operations. Operation was issued in task %s "
+                        "(ID %lld).", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), idx,
+                        parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        if (idx < dst_indirect_requirements.size())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper requested the creation of a "
+                        "virtual instance for %s region requiremnt %d. "
+                        "Only source region requirements without destination "
+                        "indirection requirements are permitted to "
+                        "be virtual instances for explicit region-to-region "
+                        "copy operations. Operation was issued in task %s "
+                        "(ID %lld).", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), idx,
+                        parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      }
       if (runtime->unsafe_mapper)
         return composite_idx;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
