@@ -767,6 +767,7 @@ namespace Legion {
       info.kind = p.kind();
       const size_t diff = sizeof(ProcDesc);
       owner->update_footprint(diff, this);
+      process_proc_mem_aff_desc(p);
     }
 
     //--------------------------------------------------------------------------
@@ -774,43 +775,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unsigned int entry_count = 0;
-      // record affinity for memory channels
-      Machine::ProcessorQuery pq(Machine::get_machine());
-      pq.best_affinity_to(m);
-      if (pq.count())
+      // record ALL memory<->processor affinities for consistency + if needed in the future
+      std::vector<ProcessorMemoryAffinity> affinities;
+      Machine::get_machine().get_proc_mem_affinity(affinities, Processor::NO_PROC, m);
+      for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
+             affinities.begin(); it != affinities.end(); it++)
         {
-          for(Machine::ProcessorQuery::iterator it = pq.begin();
-              it != pq.end(); ++it)
-            {
-              process_proc_desc(*it);
-              proc_mem_aff_desc_infos.push_back(
-                                                ProcMemDesc());
-              ProcMemDesc &info = proc_mem_aff_desc_infos.back();
-              info.proc_id = it->id;
-              info.mem_id = m.id;
-              entry_count++;
-              break;
-            }
-        }
-      else
-        {
-          Machine::ProcessorQuery pqa(Machine::get_machine());
-          pqa.same_address_space_as(m);
-          for(Machine::ProcessorQuery::iterator it2 = pqa.begin();
-              it2 != pqa.end(); ++it2)
-            {
-              process_proc_desc(*it2);
-              proc_mem_aff_desc_infos.push_back(
-                                                ProcMemDesc());
-              ProcMemDesc &info = proc_mem_aff_desc_infos.back();
-              info.proc_id = it2->id;
-              info.mem_id = m.id;
-              entry_count++;
-              break;
-            }
+          process_proc_desc(it->p);
+          proc_mem_aff_desc_infos.push_back(
+                                            ProcMemDesc());
+          ProcMemDesc &info = proc_mem_aff_desc_infos.back();
+          info.proc_id = it->p.id;
+          info.mem_id = m.id;
+          info.bandwidth = it->bandwidth;
+          info.latency = it->latency;
+          entry_count++;
         }
       if (entry_count > 0)
         owner->update_footprint(sizeof(ProcMemDesc)*entry_count, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_proc_mem_aff_desc(const Processor &p)
+    //--------------------------------------------------------------------------
+    {
+      // record ALL processor<->memory affinities for consistency
+      // and for possible querying in the future
+      std::vector<ProcessorMemoryAffinity> affinities;
+      Machine::get_machine().get_proc_mem_affinity(affinities, p);
+      for (std::vector<ProcessorMemoryAffinity>::const_iterator it =
+             affinities.begin(); it != affinities.end(); it++) {
+        process_mem_desc(it->m); // add memory + affinity
+      }
     }
 
     //--------------------------------------------------------------------------

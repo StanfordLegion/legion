@@ -404,7 +404,7 @@ impl fmt::Display for MemShort<'_> {
             }
             MemKind::Framebuffer | MemKind::GPUDynamic => {
                 let affinity = affinity.unwrap();
-                let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
+                let proc = state.procs.get(&affinity.best_aff_proc).unwrap();
                 write!(
                     f,
                     "[n{}][gpu{}] {}",
@@ -415,7 +415,7 @@ impl fmt::Display for MemShort<'_> {
             }
             MemKind::L2Cache | MemKind::L1Cache => {
                 let affinity = affinity.unwrap();
-                let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
+                let proc = state.procs.get(&affinity.best_aff_proc).unwrap();
                 write!(
                     f,
                     "[n{}][cpu{}] {}",

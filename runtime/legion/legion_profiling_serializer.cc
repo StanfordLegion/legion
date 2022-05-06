@@ -95,7 +95,9 @@ namespace Legion {
       ss << "ProcMDesc {"
          << "id:" << PROC_MEM_DESC_ID                          << delim
          << "proc_id:ProcID:"              << sizeof(ProcID)   << delim
-         << "mem_id:MemID:"                << sizeof(MemID)
+         << "mem_id:MemID:"                << sizeof(MemID)    << delim
+         << "bandwidth:unsigned:"          << sizeof(unsigned) << delim
+         << "latency:unsigned:"            << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "IndexSpacePointDesc {"
@@ -1069,6 +1071,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*) &(pm.proc_id), sizeof(pm.proc_id));
       lp_fwrite(f, (char*) &(pm.mem_id), sizeof(pm.mem_id));
+      lp_fwrite(f, (char*) &(pm.bandwidth), sizeof(pm.bandwidth));
+      lp_fwrite(f, (char*) &(pm.latency), sizeof(pm.latency));
     }
 
 
@@ -1825,8 +1829,8 @@ namespace Legion {
                                     const LegionProfInstance::ProcMemDesc &pm)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT,
-		     pm.proc_id, pm.mem_id);
+      log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT " %u %u",
+		     pm.proc_id, pm.mem_id, pm.bandwidth, pm.latency);
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE

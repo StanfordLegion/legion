@@ -337,6 +337,8 @@ namespace Legion {
       public:
         ProcID proc_id;
         MemID mem_id;
+        unsigned bandwidth;
+        unsigned latency;
       };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
@@ -440,6 +442,7 @@ namespace Legion {
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
+      void process_proc_mem_aff_desc(const Processor &p);
 
     public:
       void record_mapper_call(Processor proc, MappingCallKind kind, 
