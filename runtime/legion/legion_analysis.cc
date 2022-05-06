@@ -558,6 +558,7 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
@@ -593,6 +594,13 @@ namespace Legion {
             pack_src_dst_field(rez, src_fields[idx]);
             pack_src_dst_field(rez, dst_fields[idx]);
           }
+          rez.serialize<size_t>(reservations.size());
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
 #ifdef LEGION_SPY
           rez.serialize(src_tree_id);
           rez.serialize(dst_tree_id);
@@ -607,7 +615,8 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields, dst_fields,
+        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields, 
+                              dst_fields, reservations,
 #ifdef LEGION_SPY
                               src_tree_id, dst_tree_id,
 #endif
@@ -673,6 +682,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -708,6 +718,13 @@ namespace Legion {
           rez.serialize<size_t>(indirections.size());
           for (unsigned idx = 0; idx < indirections.size(); idx++)
             indirections[idx]->serializer(rez);
+          rez.serialize<size_t>(reservations.size());
+          for (std::map<Reservation,bool>::const_iterator it =
+                reservations.begin(); it != reservations.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize<bool>(it->second);
+          }
           rez.serialize(precondition);
           rez.serialize(pred_guard);
           rez.serialize(tracing_precondition);
@@ -721,7 +738,7 @@ namespace Legion {
       }
       else
         remote_tpl->record_issue_indirect(memo, lhs, expr, src_fields,
-                                          dst_fields, indirections,
+                                          dst_fields, indirections,reservations,
 #ifdef LEGION_SPY
                                           unique_indirections_identifier,
 #endif
@@ -1052,13 +1069,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_reservations(Memoizable *memo,
-                  ApEvent &lhs, const std::map<Reservation,bool> &reservations,
-                  ApEvent precondition, ApEvent postcondition)
+    void RemoteTraceRecorder::record_reservations(const TraceLocalID &tlid,
+                                 const std::map<Reservation,bool> &reservations,
+                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memoizable == memo);
+      assert(memoizable->get_trace_local_id() == tlid);
 #endif
       if (local_space != origin_space)
       {
@@ -1069,10 +1086,8 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ACQUIRE_RELEASE);
           rez.serialize(done);
-          rez.serialize(&lhs);
-          rez.serialize(lhs);
-          rez.serialize(precondition);
-          rez.serialize(postcondition);
+          rez.serialize(tlid.first);
+          rez.serialize(tlid.second);
           rez.serialize<size_t>(reservations.size());
           for (std::map<Reservation,bool>::const_iterator it =
                 reservations.begin(); it != reservations.end(); it++)
@@ -1080,15 +1095,12 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize<bool>(it->second);
           }
-          memo->pack_remote_memoizable(rez, origin_space);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        // Wait to see if lhs changes
-        done.wait();
+        applied_events.insert(done);
       }
       else
-        remote_tpl->record_reservations(memo, lhs, reservations, 
-                                        precondition, postcondition);
+        remote_tpl->record_reservations(tlid, reservations, applied_events); 
     }
 
     //--------------------------------------------------------------------------
@@ -1241,6 +1253,15 @@ namespace Legion {
               unpack_src_dst_field(derez, src_fields[idx]);
               unpack_src_dst_field(derez, dst_fields[idx]);
             }
+            std::map<Reservation,bool> reservations;
+            size_t num_reservations;
+            derez.deserialize(num_reservations);
+            for (unsigned idx = 0; idx < num_reservations; idx++)
+            {
+              Reservation r;
+              derez.deserialize(r);
+              derez.deserialize(reservations[r]);
+            }
 #ifdef LEGION_SPY
             RegionTreeID src_tree_id, dst_tree_id;
             derez.deserialize(src_tree_id);
@@ -1257,8 +1278,8 @@ namespace Legion {
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
-            tpl->record_issue_copy(memo, lhs, expr,
-                                   src_fields, dst_fields,
+            tpl->record_issue_copy(memo, lhs, expr, src_fields,
+                                   dst_fields, reservations,
 #ifdef LEGION_SPY
                                    src_tree_id, dst_tree_id,
 #endif
@@ -1372,6 +1393,15 @@ namespace Legion {
             }
             std::vector<CopyIndirection*> indirections;
             expr->unpack_indirections(derez, indirections);
+            std::map<Reservation,bool> reservations;
+            size_t num_reservations;
+            derez.deserialize(num_reservations);
+            for (unsigned idx = 0; idx < num_reservations; idx++)
+            {
+              Reservation r;
+              derez.deserialize(r);
+              derez.deserialize(reservations[r]);
+            }
             ApEvent precondition;
             derez.deserialize(precondition);
             PredEvent pred_guard;
@@ -1386,7 +1416,7 @@ namespace Legion {
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
             tpl->record_issue_indirect(memo, lhs, expr, src_fields,
-                                       dst_fields, indirections,
+                                       dst_fields, indirections, reservations,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
@@ -1711,14 +1741,11 @@ namespace Legion {
           }
         case REMOTE_TRACE_ACQUIRE_RELEASE:
           {
-            RtUserEvent done;
-            derez.deserialize(done);
-            ApEvent *event_ptr;
-            derez.deserialize(event_ptr);
-            ApEvent lhs, precondition, postcondition;
-            derez.deserialize(lhs);
-            derez.deserialize(precondition);
-            derez.deserialize(postcondition);
+            RtUserEvent applied;
+            derez.deserialize(applied);
+            TraceLocalID tlid;
+            derez.deserialize(tlid.first);
+            derez.deserialize(tlid.second);
             size_t num_reservations;
             derez.deserialize(num_reservations);
             std::map<Reservation,bool> reservations;
@@ -1728,27 +1755,13 @@ namespace Legion {
               derez.deserialize(reservation);
               derez.deserialize<bool>(reservations[reservation]);
             }
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            const ApEvent lhs_copy = lhs;
-            tpl->record_reservations(memo, lhs, reservations,
-                                     precondition, postcondition);
-            if (lhs != lhs_copy)
-            {
-              Serializer rez;
-              {
-                RezCheck z2(rez);
-                rez.serialize(REMOTE_TRACE_ACQUIRE_RELEASE);
-                rez.serialize(event_ptr);
-                rez.serialize(lhs);
-                rez.serialize(done);
-              }
-              runtime->send_remote_trace_response(source, rez);
-            }
-            else // didn't change so just trigger
-              Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
+            std::set<RtEvent> applied_events;
+            tpl->record_reservations(tlid, reservations, applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied, 
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         default:
@@ -1771,7 +1784,6 @@ namespace Legion {
         case REMOTE_TRACE_ISSUE_INDIRECT:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
-        case REMOTE_TRACE_ACQUIRE_RELEASE:
           {
             ApEvent *event_ptr;
             derez.deserialize(event_ptr);

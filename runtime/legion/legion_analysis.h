@@ -154,6 +154,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
+                           const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -164,6 +165,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
                            const std::vector<CopyIndirection*> &indirections,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier, 
 #endif
@@ -212,9 +214,9 @@ namespace Legion {
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
-      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks, 
-                              ApEvent precondition, ApEvent postcondition) = 0;
+      virtual void record_reservations(const TraceLocalID &tlid,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events) = 0;
     };
 
     /**
@@ -280,6 +282,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -290,6 +293,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
                            const std::vector<CopyIndirection*> &indirections,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -337,9 +341,9 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
-      virtual void record_reservations(Memoizable *memo, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks,
-                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_reservations(const TraceLocalID &tlid,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                           Runtime *runtime, Memoizable *memo);
@@ -422,7 +426,7 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
-                          std::set<RtEvent> &applied)
+                          std::set<RtEvent> &applied) const
         {
           base_sanity_check();
           rec->record_mapper_output(tlid, output, physical_instances, applied);
@@ -438,13 +442,12 @@ namespace Legion {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
         }
-      inline void record_reservations(Memoizable *memo, ApEvent &lhs,
+      inline void record_reservations(const TraceLocalID &tlid,
                       const std::map<Reservation,bool> &reservations,
-                      ApEvent precondition, ApEvent postcondition) const
+                      std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_reservations(memo, lhs, reservations, 
-                                   precondition, postcondition);
+          rec->record_reservations(tlid, reservations, applied);
         }
     public:
       inline RtEvent get_collect_event(void) const 
@@ -492,6 +495,7 @@ namespace Legion {
                           IndexSpaceExpression *expr,
                           const std::vector<CopySrcDstField>& src_fields,
                           const std::vector<CopySrcDstField>& dst_fields,
+                          const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -499,7 +503,8 @@ namespace Legion {
                           ReductionOpID redop, bool reduction_fold) const
         {
           sanity_check();
-          rec->record_issue_copy(memo, result, expr, src_fields, dst_fields,
+          rec->record_issue_copy(memo, result, expr, src_fields, 
+                                 dst_fields, reservations,
 #ifdef LEGION_SPY
                                  src_tree_id, dst_tree_id,
 #endif
@@ -545,6 +550,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -553,7 +559,7 @@ namespace Legion {
         {
           sanity_check();
           rec->record_issue_indirect(memo, result, expr, src_fields,
-                                     dst_fields, indirections,
+                                     dst_fields, indirections, reservations,
 #ifdef LEGION_SPY
                                      unique_indirections_identifier,
 #endif
