@@ -66,12 +66,11 @@ _curr_modules = None
 def add_delta_module_cleanup():
     global _curr_modules
     prev_modules = _curr_modules
-    new_modules = set(sys.modules.keys())
     def cleanup():
-        for mod in new_modules - prev_modules:
+        for mod in set(sys.modules.keys()) - prev_modules:
             del sys.modules[mod]
     _cleanup_items.append(cleanup)
-    _curr_modules = new_modules
+    _curr_modules = set(sys.modules.keys())
 
 
 def add_cleanup_item(item):
