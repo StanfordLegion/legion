@@ -8390,6 +8390,9 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
+        // Remove the current trace now so we block at the end of the
+        // trace in the case of program order execution
+        current_trace = NULL;
         add_to_dependence_queue(complete_op);
       }
       else
@@ -8399,10 +8402,11 @@ namespace Legion {
         capture_op->initialize_capture(this, has_blocking_call, deprecated);
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
+        // Remove the current trace now so we block at the end of the
+        // trace in the case of program order execution
+        current_trace = NULL;
         add_to_dependence_queue(capture_op);
       }
-      // We no longer have a trace that we're executing 
-      current_trace = NULL;
     }
 
     //--------------------------------------------------------------------------
