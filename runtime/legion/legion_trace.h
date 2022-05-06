@@ -902,7 +902,6 @@ namespace Legion {
     private:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
-      std::vector<std::vector<TraceLocalID> > slice_tasks;
     private:
       std::map<unsigned/*event*/,unsigned/*consumers*/> crossing_events;
       // Frontiers of a template are a set of users whose events must
