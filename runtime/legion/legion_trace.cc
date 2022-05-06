@@ -4266,6 +4266,7 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
@@ -4294,7 +4295,7 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueCopy(
             *this, lhs_, expr, find_trace_local_id(memo),
-            src_fields, dst_fields,
+            src_fields, dst_fields, reservations,
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
@@ -4307,6 +4308,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -4332,7 +4334,7 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueIndirect(
             *this, lhs_, expr, find_trace_local_id(memo),
-            src_fields, dst_fields, indirections,
+            src_fields, dst_fields, indirections, reservations,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
@@ -4772,33 +4774,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_reservations(
-                                const TraceLocalID &tlid, unsigned index, 
+    void PhysicalTemplate::record_reservations(const TraceLocalID &tlid, 
                                 const std::map<Reservation,bool> &reservations,
                                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      const ReservationKey key(tlid.first, tlid.second, index);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
-      assert(cached_reservations.find(key) == cached_reservations.end());
+      assert(cached_reservations.find(tlid) == cached_reservations.end());
 #endif
-      cached_reservations[key] = reservations;
+      cached_reservations[tlid] = reservations;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::get_reservations(Memoizable *memo, unsigned index,
+    void PhysicalTemplate::get_task_reservations(SingleTask *task,
                                  std::map<Reservation,bool> &reservations) const
     //--------------------------------------------------------------------------
     {
-      const TraceLocalID op_key = memo->get_trace_local_id();
-      const ReservationKey key(op_key.first, op_key.second, index);
+      const TraceLocalID key = task->get_trace_local_id();
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-      std::map<ReservationKey,std::map<Reservation,bool> >::const_iterator
+      std::map<TraceLocalID,std::map<Reservation,bool> >::const_iterator
         finder = cached_reservations.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_reservations.end());
@@ -5367,11 +5366,13 @@ namespace Legion {
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
+                         const std::map<Reservation,bool>& r,
 #ifdef LEGION_SPY
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
                          unsigned pi, ReductionOpID ro, bool rf)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
@@ -5411,7 +5412,8 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
-      events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
+      events[lhs] = expr->issue_copy(trace_info, dst_fields,
+                                     src_fields, reservations,
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
@@ -5465,11 +5467,13 @@ namespace Legion {
                                  const std::vector<CopySrcDstField>& s,
                                  const std::vector<CopySrcDstField>& d,
                                  const std::vector<CopyIndirection*> &indirects,
+                                 const std::map<Reservation,bool>& r,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_id,
 #endif
                                  unsigned pi, unsigned pre_idx)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        reservations(r),
 #ifdef LEGION_SPY
         unique_indirections_identifier(unique_indirections_id), 
 #endif
@@ -5514,8 +5518,8 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
-      events[lhs] = expr->issue_indirect(trace_info, dst_fields,
-                                         src_fields, indirections,
+      events[lhs] = expr->issue_indirect(trace_info, dst_fields, src_fields,
+                                         indirections, reservations,
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif

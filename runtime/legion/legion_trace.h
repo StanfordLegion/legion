@@ -645,8 +645,6 @@ namespace Legion {
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
     private:
-      typedef std::tuple<unsigned,DomainPoint,unsigned> ReservationKey;
-    private:
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >         ViewExprs;
       typedef LegionMap<InstanceView*,
@@ -740,7 +738,7 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
-      void get_reservations(Memoizable *memo, unsigned index,
+      void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
@@ -764,6 +762,7 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -774,6 +773,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<CopyIndirection*> &indirections,
+                             const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
@@ -837,7 +837,7 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
-      virtual void record_reservations(const TraceLocalID &tlid, unsigned idx,
+      virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events); 
     public:
@@ -895,7 +895,7 @@ namespace Legion {
       std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
-      std::map<ReservationKey,std::map<Reservation,bool> > cached_reservations;
+      std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       bool has_virtual_mapping;
     private:
       GetTermEvent                    *last_fence;
@@ -1196,6 +1196,7 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
+                const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -1218,6 +1219,7 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
+      std::map<Reservation,bool> reservations;
 #ifdef LEGION_SPY
       RegionTreeID src_tree_id;
       RegionTreeID dst_tree_id;
@@ -1243,6 +1245,7 @@ namespace Legion {
                     const std::vector<CopySrcDstField>& src_fields,
                     const std::vector<CopySrcDstField>& dst_fields,
                     const std::vector<CopyIndirection*>& indirects,
+                    const std::map<Reservation,bool>& reservations,
 #ifdef LEGION_SPY
                     unsigned unique_indirections_identifier,
 #endif
@@ -1266,6 +1269,7 @@ namespace Legion {
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
       std::vector<CopyIndirection*> indirections;
+      std::map<Reservation,bool> reservations;
 #ifdef LEGION_SPY
       unsigned unique_indirections_identifier;
 #endif

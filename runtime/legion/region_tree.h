@@ -526,6 +526,7 @@ namespace Legion {
                           const InstanceSet &dst_targets, CopyOp *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
+                          const std::map<Reservation,bool> &reservations,
                           const PhysicalTraceInfo &trace_info,
                           std::set<RtEvent> &map_applied_events);
       ApEvent gather_across(const RegionRequirement &src_req,
@@ -543,6 +544,7 @@ namespace Legion {
                             const ApEvent collective_precondition,
                             const ApEvent collective_postcondition,
                             const ApUserEvent local_precondition,
+                            const std::map<Reservation,bool> &reservations,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &map_applied_events,
                             const bool possible_src_out_of_range);
@@ -561,6 +563,7 @@ namespace Legion {
                              const ApEvent collective_precondition,
                              const ApEvent collective_postcondition,
                              const ApUserEvent local_precondition,
+                             const std::map<Reservation,bool> &reservations,
                              const PhysicalTraceInfo &trace_info,
                              std::set<RtEvent> &map_applied_events,
                              const bool possible_dst_out_of_range,
@@ -583,6 +586,7 @@ namespace Legion {
                               const ApEvent collective_precondition,
                               const ApEvent collective_postcondition,
                               const ApUserEvent local_precondition,
+                              const std::map<Reservation,bool> &reservations,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
@@ -1171,6 +1175,7 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
@@ -1197,6 +1202,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -1263,6 +1269,7 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
+                               const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
@@ -1294,6 +1301,7 @@ namespace Legion {
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
                                const std::vector<CopyIndirection*> &indirects,
+                               const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                                unsigned unique_indirections_identifier,
 #endif
@@ -1530,6 +1538,7 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
@@ -1556,6 +1565,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -2466,6 +2476,7 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
@@ -2492,6 +2503,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,
+                           const std::map<Reservation,bool> &reservations,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif

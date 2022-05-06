@@ -3348,7 +3348,7 @@ namespace Legion {
       }
       if (needs_reservations)
         // We group all reservations together anyway
-        tpl->get_reservations(this, 0/*index*/, atomic_locks);
+        tpl->get_task_reservations(this, atomic_locks);
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
       assert(!task_effects_complete.exists());
@@ -3866,8 +3866,7 @@ namespace Legion {
         if (!atomic_locks.empty())
         {
           const TraceLocalID tlid = get_trace_local_id();
-          // All reservations are grouped together so always index 0
-          trace_info.record_reservations(tlid, 0/*index*/, atomic_locks,
+          trace_info.record_reservations(tlid, atomic_locks,
                                          map_applied_conditions);
         }
         trace_info.record_complete_replay(this, ready_event);
