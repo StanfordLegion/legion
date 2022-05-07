@@ -1438,6 +1438,11 @@ namespace Realm {
 	size_t pbt_limit = (in_port->remote_bytes_total.load_acquire() -
 			    in_port->local_bytes_total);
 	min_xfer_size = std::min(min_xfer_size, pbt_limit);
+
+        // don't ever expect to be able to read more than half the size of the
+        //  incoming intermediate buffer
+        if(min_xfer_size > (in_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (in_port->ib_size >> 1));
       }
 
       // we'd like to wait until there's `min_xfer_size` bytes available on the
@@ -1470,6 +1475,12 @@ namespace Realm {
       if(out_port->peer_guid != XFERDES_NO_GUID) {
 	write_bytes_avail = out_port->seq_remote.span_exists(out_port->local_bytes_total,
 							     write_bytes_avail);
+
+        // we'd like to wait until there's `min_xfer_size` bytes available on
+        //  the output, but if we're landing in an intermediate buffer and need
+        //  to wrap around, waiting won't do any good
+        if(min_xfer_size > (out_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (out_port->ib_size >> 1));
       }
 
       max_bytes = std::min(max_bytes, write_bytes_avail);

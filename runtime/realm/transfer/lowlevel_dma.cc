@@ -786,16 +786,24 @@ namespace Realm {
 
   bool WrappingFIFOIterator::get_addresses(AddressList &addrlist)
   {
-    // just add a single copy of our range, on the assumption it's much
-    //  bigger than what the caller actually needs right now
-    size_t *data = addrlist.begin_nd_entry(1 /*dim*/);
+    // add a very tall 2d "rectangle" that uses a stride of 0 for the
+    //  line pitch (flow control will prevent any given copy from touching
+    //  the same location twice)
+    size_t lines = std::max<size_t>((1 << 30) / size, 1);
+    int dim = (lines > 1) ? 2 : 1;
+    size_t *data = addrlist.begin_nd_entry(dim);
     if(!data)
       return true;  // can't add more until some is consumed
 
+
     // 1-D span from [base,base+size)
-    data[0] = (size << 4) + 1 /*dim*/;
+    data[0] = (size << 4) + 2 /*dim*/;
     data[1] = base;
-    addrlist.commit_nd_entry(1 /*dim*/, size);
+    if(dim == 2) {
+      data[2] = lines;
+      data[3] = 0; // stride
+    }
+    addrlist.commit_nd_entry(dim, size * lines);
 
     return false;  // we can add more if asked
   }
