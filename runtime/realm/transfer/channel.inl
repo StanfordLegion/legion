@@ -49,7 +49,7 @@ namespace Realm {
 
   inline unsigned XferDes::current_progress(void)
   {
-    unsigned val = progress_counter.load();
+    unsigned val = progress_counter.load_acquire();
     return val;
   }
 
@@ -71,7 +71,7 @@ namespace Realm {
 
     // add 2 to the counter (i.e. preserving the LSB) - if LSB was/is set,
     //  attempt to add 1 to clear it and if successful, wake up the xd
-    unsigned prev = progress_counter.fetch_add(2);
+    unsigned prev = progress_counter.fetch_add_acqrel(2);
     if((prev & 1) != 0) {
       prev += 2;  // since we added 2 above
       if(progress_counter.compare_exchange(prev, prev + 1)) {
