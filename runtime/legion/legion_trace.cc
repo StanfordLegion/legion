@@ -3318,7 +3318,7 @@ namespace Legion {
       assert(finder != subscription_owners.end());
       subscription_owners.erase(finder);
 #else
-      subscription_owners.
+      subscription_owners.erase(key);
 #endif
       return remove_reference();
     }
