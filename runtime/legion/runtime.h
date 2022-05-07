@@ -3239,9 +3239,11 @@ namespace Legion {
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
                                                   Serializer &rez);
+      void send_cancel_equivalence_sets_subscription(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_finish_equivalence_sets_subscription(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
-      void send_equivalence_set_invalidate_trackers(AddressSpaceID target,
-                                                    Serializer &rez);
       void send_equivalence_set_replication_request(AddressSpaceID target,
                                                     Serializer &rez);
       void send_equivalence_set_replication_response(AddressSpaceID target,
@@ -3535,12 +3537,16 @@ namespace Legion {
       void handle_remote_context_physical_response(Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
-      void handle_compute_equivalence_sets_response(Deserializer &derez);
+      void handle_compute_equivalence_sets_response(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_cancel_equivalence_sets_subscription(Deserializer &derez,
+                                                       AddressSpaceID source);
+      void handle_finish_equivalence_sets_subscription(Deserializer &derez,
+                                                       AddressSpaceID source);
       void handle_equivalence_set_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_equivalence_set_response(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_equivalence_set_invalidate_trackers(Deserializer &derez);
       void handle_equivalence_set_replication_request(Deserializer &derez);
       void handle_equivalence_set_replication_response(Deserializer &derez);
       void handle_equivalence_set_replication_update(Deserializer &derez);
@@ -5641,11 +5647,13 @@ namespace Legion {
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
           break;
+        case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
+          break;
+        case SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION:
+          break;
         case SEND_EQUIVALENCE_SET_REQUEST:
           break;
         case SEND_EQUIVALENCE_SET_RESPONSE:
-          break;
-        case SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS:
           break;
         case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
           break;

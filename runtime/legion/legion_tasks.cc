@@ -7140,7 +7140,9 @@ namespace Legion {
               index_point, execution_context->get_output_regions());
         // Invalidate any context that we had so that the child
         // operations can begin committing
-        execution_context->invalidate_region_tree_contexts(false,preconditions);
+        std::set<RtEvent> point_preconditions;
+        execution_context->invalidate_region_tree_contexts(false,
+                                            point_preconditions);
         if (!preconditions.empty())
           slice_owner->record_point_complete(
               Runtime::merge_events(preconditions));
@@ -7151,7 +7153,10 @@ namespace Legion {
         // See if we need to trigger that our children are complete
         const bool need_commit = execution_context->attempt_children_commit();
         // Mark that this operation is now complete
-        complete_operation();
+        if (!point_preconditions.empty())
+          complete_operation(Runtime::merge_events(point_preconditions));
+        else
+          complete_operation();
         if (need_commit)
           trigger_children_committed();
       }

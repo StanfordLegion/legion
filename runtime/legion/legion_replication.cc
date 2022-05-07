@@ -1465,7 +1465,7 @@ namespace Legion {
         }
         // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask,
-            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
@@ -1874,11 +1874,11 @@ namespace Legion {
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
-                                  map_applied_conditions, to_release, repl_ctx);
+                                 *repl_ctx, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
       // First propagate the refinements for the sharded regions and partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             sharded_partitions.begin(); it != sharded_partitions.end(); it++)

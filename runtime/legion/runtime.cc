@@ -12344,7 +12344,20 @@ namespace Legion {
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
             {
-              runtime->handle_compute_equivalence_sets_response(derez);
+              runtime->handle_compute_equivalence_sets_response(derez,
+                                                 remote_address_space);
+              break;
+            }
+          case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
+            {
+              runtime->handle_cancel_equivalence_sets_subscription(derez,
+                                                   remote_address_space);
+              break;
+            }
+          case SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION:
+            {
+              runtime->handle_finish_equivalence_sets_subscription(derez,
+                                                    remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REQUEST:
@@ -12357,11 +12370,6 @@ namespace Legion {
             {
               runtime->handle_equivalence_set_response(derez,
                                                        remote_address_space);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS:
-            {
-              runtime->handle_equivalence_set_invalidate_trackers(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
@@ -22330,22 +22338,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_cancel_equivalence_sets_subscription(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_finish_equivalence_sets_subscription(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_EQUIVALENCE_SET_RESPONSE>(rez,
                                               true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_invalidate_trackers(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    { 
-      find_messenger(target)->send_message<
-          SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS>( 
-                rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24338,10 +24355,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_compute_equivalence_sets_response(Deserializer &derez)
+    void Runtime::handle_compute_equivalence_sets_response(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_compute_equivalence_sets_response(derez, this);
+      VersionManager::handle_compute_equivalence_sets_response(derez, this, 
+                                                               source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_cancel_equivalence_sets_subscription(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker::handle_cancel_subscription(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_finish_equivalence_sets_subscription(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker::handle_finish_subscription(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -24358,14 +24393,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_equivalence_set_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_invalidate_trackers(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_invalidate_trackers(derez, this);
     }
 
     //--------------------------------------------------------------------------

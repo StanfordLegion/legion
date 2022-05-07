@@ -856,9 +856,10 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
+      SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
+      SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
-      SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
       SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
       SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
       SEND_EQUIVALENCE_SET_REPLICATION_UPDATE,
@@ -1077,9 +1078,10 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
+        "Send Cancel Equivalence Sets Subscription",                  \
+        "Send Finish Equivalence Sets Subscription",                  \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
-        "Send Equivalence Set Invalidate Trackers",                   \
         "Send Equivalence Set Replication Request",                   \
         "Send Equivalence Set Replication Response",                  \
         "Send Equivalence Set Replication Update",                    \

@@ -19503,35 +19503,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
-                                          std::set<RtEvent> &applied_events, 
-                                          bool merge, InnerContext *src_context)
+                                  std::set<RtEvent> &applied_events, bool merge)
     //--------------------------------------------------------------------------
     {
       VersionManager &src_manager = get_current_version_manager(src);
       VersionManager &dst_manager = get_current_version_manager(dst);
       std::set<RegionTreeNode*> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
       if (merge)
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, to_untrack);
+        dst_manager.merge(src_manager, to_traverse, to_untrack, trackers);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, to_untrack);
-      if (src_context == NULL)
-      {
-        const AddressSpaceID local_space = context->runtime->address_space;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              to_untrack.begin(); it != to_untrack.end(); it++)
-          it->first->invalidate_trackers(it->second, applied_events, 
-                        local_space, NULL/*no collective mapping*/);
-      }
-      else
-        src_context->deduplicate_invalidate_trackers(to_untrack,applied_events);
+        dst_manager.swap(src_manager, to_traverse, to_untrack, trackers);
+      EqSetTracker::finish_subscriptions(context->runtime, src_manager, 
+                                         trackers, to_untrack, applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
-        (*it)->migrate_version_state(src, dst,applied_events,merge,src_context);
+        (*it)->migrate_version_state(src, dst, applied_events, merge);
     }
 
     //--------------------------------------------------------------------------
@@ -19769,43 +19761,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
                        const bool invalidate, std::set<RtEvent> &applied_events,
-                       InnerContext *source_context, 
                        std::vector<DistributedCollectable*> &to_remove) 
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
       FieldMaskSet<EquivalenceSet> to_untrack;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.pack_manager(rez, invalidate, to_traverse, to_untrack, to_remove);
-      if (!to_untrack.empty())
-      {
-        if (source_context == NULL)
-        {
-          const AddressSpaceID local_space = context->runtime->address_space;
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                to_untrack.begin(); it != to_untrack.end(); it++)
-          {
-            it->first->invalidate_trackers(it->second, applied_events,
-                          local_space, NULL/*no collective mapping*/);
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-          }
-        }
-        else
-        {
-          source_context->deduplicate_invalidate_trackers(to_untrack, 
-                                                          applied_events);
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                to_untrack.begin(); it != to_untrack.end(); it++)
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-        }
-      }
+      manager.pack_manager(rez, invalidate, to_traverse, 
+                          to_untrack, trackers, to_remove);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, trackers,
+                      to_untrack, applied_events, true/*remove references*/);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        it->second->pack_version_state(ctx, rez, invalidate, applied_events, 
-                                       source_context, to_remove);
+        it->second->pack_version_state(ctx, rez, invalidate, 
+                                       applied_events, to_remove);
         if (it->second->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->second;
       }
@@ -21069,46 +21040,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::invalidate_refinement(ContextID ctx, const FieldMask &mask, 
-                                   bool self, std::set<RtEvent> &applied_events, 
+                                   bool self, InnerContext &source_context,
+                                   std::set<RtEvent> &applied_events, 
                                    std::vector<EquivalenceSet*> &to_release,
-                                   InnerContext *source_context,
                                    bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!nonexclusive_virtual_mapping_root || (source_context != NULL));
-#endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
       manager.invalidate_refinement(source_context, mask, self, to_traverse,
-                  to_untrack, to_release, nonexclusive_virtual_mapping_root);
-      if (!to_untrack.empty())
-      {
-        if (source_context == NULL)
-        {
-          const AddressSpaceID local_space = context->runtime->address_space;
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                to_untrack.begin(); it != to_untrack.end(); it++)
-          {
-            // do not invalidate trackers if we don't own the equivalence sets
-            it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/);
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-          }
-        }
-        else
-        {
-          // do not invalidate trackers if we don't own the equivalence sets
-          source_context->deduplicate_invalidate_trackers(to_untrack, 
-                  applied_events, nonexclusive_virtual_mapping_root);
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                to_untrack.begin(); it != to_untrack.end(); it++)
-            if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-              delete it->first;
-        }
-      }
+        to_untrack, trackers, to_release, nonexclusive_virtual_mapping_root);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, trackers, 
+          to_untrack, applied_events, true/*remove refs*/);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -21170,29 +21115,6 @@ namespace Legion {
       }
       partitions.insert(partitions.end(), 
                         unique_partitions.begin(), unique_partitions.end());
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::EmptySetTracker::record_equivalence_set(EquivalenceSet *s,
-                                                          const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!mask);
-      assert(s != NULL);
-      assert(set == NULL);
-#endif
-      set = s;
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet* RegionNode::EmptySetTracker::get_set(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(set != NULL);
-#endif
-      return set;
     }
 
     //--------------------------------------------------------------------------
@@ -22712,16 +22634,18 @@ namespace Legion {
                                        const FieldMask &mask, 
                                        std::set<RtEvent> &applied_events,
                                        std::vector<EquivalenceSet*> &to_release,
-                                       InnerContext *source_context)
+                                       InnerContext &source_context)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
       manager.invalidate_refinement(source_context, mask, true/*delete self*/,
-                                    to_traverse, to_untrack, to_release);
+                                to_traverse, to_untrack, trackers, to_release);
 #ifdef DEBUG_LEGION
       assert(to_untrack.empty());
+      assert(trackers.empty());
 #endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -22730,7 +22654,7 @@ namespace Legion {
         assert(it->first->is_region());
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second, 
-                  true/*self*/, applied_events, to_release, source_context);
+                  true/*self*/, source_context, applied_events, to_release);
         if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
