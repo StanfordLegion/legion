@@ -24,7 +24,9 @@
 
 namespace Realm {
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
   class ThreadPool;
+#endif
 
   // this is nearly identical to a LocalCPUProcessor, but it asks for its thread(s)
   //  to run on the specified numa domain
@@ -55,7 +57,9 @@ namespace Realm {
     int num_threads;
     CoreReservation *core_rsrv;
     OpenMPContextManager ctxmgr;
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
     ThreadPool *pool;
+#endif
   };
 
 };

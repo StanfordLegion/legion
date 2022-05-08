@@ -16,7 +16,10 @@
 #include "realm/openmp/openmp_module.h"
 
 #include "realm/openmp/openmp_internal.h"
+
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
 #include "realm/openmp/openmp_threadpool.h"
+#endif
 
 #include "realm/numa/numasysif.h"
 #include "realm/logging.h"
@@ -26,12 +29,18 @@
 #include "realm/runtime_impl.h"
 #include "realm/utils.h"
 
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+#include <omp.h>
+#endif
+
 namespace Realm {
 
   Logger log_omp("openmp");
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
   // defined in openmp_api.cc - refer to it to force linkage of that file
   extern void openmp_api_force_linkage(void);
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -53,7 +62,11 @@ namespace Realm {
     // master runs in a user threads if possible
     {
       CoreReservationParameters params;
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+      params.set_num_cores(num_threads); // system omp runtime will use these
+#else
       params.set_num_cores(1);
+#endif
       params.set_numa_domain(numa_node);
       params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
       params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
@@ -79,6 +92,7 @@ namespace Realm {
       sched->add_task_context(&ctxmgr);
     }
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
     pool = new ThreadPool(me,
                           num_threads - 1,
 			  stringbuilder() << "OMP" << numa_node << " proc " << _me,
@@ -86,6 +100,7 @@ namespace Realm {
 
     // eagerly spin up worker threads
     pool->start_worker_threads();
+#endif
   }
 
   LocalOpenMPProcessor::~LocalOpenMPProcessor(void)
@@ -96,8 +111,10 @@ namespace Realm {
   void LocalOpenMPProcessor::shutdown(void)
   {
     log_omp.info() << "shutting down";
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
     pool->stop_worker_threads();
     delete pool;
+#endif
 
     LocalTaskProcessor::shutdown();
   }
@@ -113,7 +130,18 @@ namespace Realm {
 
   void *LocalOpenMPProcessor::OpenMPContextManager::create_context(Task *task) const
   {
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+    // this must be set on the right thread
+    omp_set_num_threads(proc->num_threads);
+
+    // make sure all of our workers know who we are
+    #pragma omp parallel
+    {
+      ThreadLocal::current_processor = proc->me;
+    }
+#else
     proc->pool->associate_as_master();
+#endif
 
     // we don't need to remember anything
     return 0;
@@ -151,7 +179,9 @@ namespace Realm {
       //  disabled
       OpenMPModule *m = new OpenMPModule;
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
       openmp_api_force_linkage();
+#endif
 
       // first order of business - read command line parameters
       {
@@ -176,6 +206,13 @@ namespace Realm {
 	delete m;
 	return 0;
       }
+
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+      if(m->cfg_num_openmp_cpus > 1) {
+	log_omp.fatal() << "system omp runtime limited to 1 proc - " << m->cfg_num_openmp_cpus << " requested";
+        abort();
+      }
+#endif
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found

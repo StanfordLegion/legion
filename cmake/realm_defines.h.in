@@ -22,6 +22,7 @@
 #cmakedefine REALM_MAX_DIM @REALM_MAX_DIM@
 
 #cmakedefine REALM_USE_OPENMP
+#cmakedefine REALM_OPENMP_SYSTEM_RUNTIME
 #cmakedefine REALM_OPENMP_GOMP_SUPPORT
 #cmakedefine REALM_OPENMP_KMP_SUPPORT
 
