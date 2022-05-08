@@ -3210,7 +3210,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
-                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask)
+                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask,
+                   std::vector<RtEvent> &ready_events)
       : context(trace->logical_trace->ctx), forest(f),
         region(node), condition_expr(region->row_source), condition_mask(mask),
         invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
@@ -3218,7 +3219,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      region->add_base_resource_ref(TRACE_REF);
+      LocalReferenceMutator mutator;
+      region->add_base_valid_ref(TRACE_REF, &mutator);
+      const RtEvent done = mutator.get_done_event();
+      if (done.exists())
+        ready_events.push_back(done);
     }
 
     //--------------------------------------------------------------------------
@@ -3266,7 +3271,7 @@ namespace Legion {
             unique_view_expressions.end(); it++) 
         if ((*it)->remove_base_expression_reference(TRACE_REF))
           delete (*it);
-      if (region->remove_base_resource_ref(TRACE_REF))
+      if (region->remove_base_valid_ref(TRACE_REF))
         delete region;
       if (condition_expr->remove_base_expression_reference(TRACE_REF))
         delete condition_expr;
@@ -4058,7 +4063,7 @@ namespace Legion {
       {
         TraceConditionSet *condition =
           new TraceConditionSet(trace, forest, 
-              it->first->region_node, it->second);
+              it->first->region_node, it->second, ready_events);
         condition->add_reference();
         // This looks redundant because it is a bit since we're just going
         // to compute the single equivalence set we already have here but

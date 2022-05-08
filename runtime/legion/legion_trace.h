@@ -654,7 +654,8 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        RegionNode *region, const FieldMask &mask);
+                        RegionNode *region, const FieldMask &mask,
+                        std::vector<RtEvent> &ready_events);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
