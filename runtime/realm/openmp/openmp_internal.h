@@ -40,34 +40,22 @@ namespace Realm {
     virtual void shutdown(void);
 
   protected:
+    class OpenMPContextManager : public TaskContextManager {
+    public:
+      OpenMPContextManager(LocalOpenMPProcessor *_proc);
+
+      virtual void *create_context(Task *task) const;
+      virtual void destroy_context(Task *task, void *context) const;
+
+    protected:
+      LocalOpenMPProcessor *proc;
+    };
+
     int numa_node;
     int num_threads;
     CoreReservation *core_rsrv;
-  public:
+    OpenMPContextManager ctxmgr;
     ThreadPool *pool;
-  };
-
-
-  // we want to subclass the scheduler to replace the execute_task method, but we also want to
-  //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
-  //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
-  //  have the same prototypes)
-
-  template <typename T>
-  class OpenMPTaskScheduler : public T {
-  public:
-    OpenMPTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
-			LocalOpenMPProcessor *_omp_proc);
-
-    virtual ~OpenMPTaskScheduler(void);
-
-  protected:
-    virtual bool execute_task(Task *task);
-    virtual void execute_internal_task(InternalTask *task);
-    
-    // might also need to override the thread-switching methods to keep TLS up to date
-
-    LocalOpenMPProcessor *omp_proc;
   };
 
 };
