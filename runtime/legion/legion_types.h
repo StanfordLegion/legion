@@ -1797,6 +1797,7 @@ namespace Legion {
     class LogicalState;
     class EquivalenceSet;
     class PendingEquivalenceSet;
+    class EqSetTracker;
     class VersionManager;
     class VersionInfo;
     class RayTracer;

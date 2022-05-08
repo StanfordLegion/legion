@@ -19510,17 +19510,17 @@ namespace Legion {
       VersionManager &dst_manager = get_current_version_manager(dst);
       std::set<RegionTreeNode*> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
+      LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       if (merge)
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, to_untrack, trackers);
+        dst_manager.merge(src_manager, to_traverse, to_untrack, subscribers);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, to_untrack, trackers);
+        dst_manager.swap(src_manager, to_traverse, to_untrack, subscribers);
       EqSetTracker::finish_subscriptions(context->runtime, src_manager, 
-                                         trackers, to_untrack, applied_events);
+                                         subscribers,to_untrack,applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
@@ -19766,11 +19766,11 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);  
       FieldMaskSet<EquivalenceSet> to_untrack;
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
+      LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
       manager.pack_manager(rez, invalidate, to_traverse, 
-                          to_untrack, trackers, to_remove);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, trackers,
+                          to_untrack, subscribers, to_remove);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
                       to_untrack, applied_events, true/*remove references*/);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -21049,10 +21049,10 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
+      LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, self, to_traverse,
-        to_untrack, trackers, to_release, nonexclusive_virtual_mapping_root);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, trackers, 
+        to_untrack, subscribers, to_release, nonexclusive_virtual_mapping_root);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
           to_untrack, applied_events, true/*remove refs*/);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -22640,12 +22640,12 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
-      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > trackers;
+      LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, true/*delete self*/,
-                                to_traverse, to_untrack, trackers, to_release);
+                              to_traverse, to_untrack, subscribers, to_release);
 #ifdef DEBUG_LEGION
       assert(to_untrack.empty());
-      assert(trackers.empty());
+      assert(subscribers.empty());
 #endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)

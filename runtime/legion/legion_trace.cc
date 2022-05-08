@@ -3123,19 +3123,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::record_unique_view_expressions(ReferenceMutator &mutator,
-                             std::set<IndexSpaceExpression*> &expressions) const
-    //--------------------------------------------------------------------------
-    {
-      for (ViewExprs::const_iterator vit = 
-            conditions.begin(); vit != conditions.end(); ++vit)
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              vit->second.begin(); it != vit->second.end(); it++)
-          if (expressions.insert(it->first).second)
-            it->first->add_base_expression_reference(TRACE_REF, &mutator);
-    }
-
-    //--------------------------------------------------------------------------
     void TraceViewSet::pack(Serializer &rez, AddressSpaceID target) const
     //--------------------------------------------------------------------------
     {
@@ -3398,25 +3385,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::capture(std::vector<RtEvent> &ready_events)
+    void TraceConditionSet::capture(EquivalenceSet *set, const FieldMask &mask,
+                                    std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!invalid_mask);
-      assert(pending_sets.empty());
       assert(precondition_views == NULL);
       assert(anticondition_views == NULL);
       assert(postcondition_views == NULL);
 #endif
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            current_sets.begin(); it != current_sets.end(); it++)
-      {
-        const RtEvent ready_event = 
-          it->first->capture_trace_conditions(this, it->first->local_space,
-              condition_expr, condition_mask, RtUserEvent::NO_RT_USER_EVENT);
-        if (ready_event.exists() && !ready_event.has_triggered())
-          ready_events.push_back(ready_event);
-      }
+      const RtEvent ready_event = 
+        set->capture_trace_conditions(this, set->local_space,
+            condition_expr, mask, RtUserEvent::NO_RT_USER_EVENT);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_events.push_back(ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3424,36 +3406,57 @@ namespace Legion {
                TraceViewSet *anti, TraceViewSet *post, std::set<RtEvent> &ready)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(precondition_views == NULL);
+      assert(anticondition_views == NULL);
+      assert(postcondition_views == NULL);
+#endif
+      precondition_views = pre;
+      anticondition_views = anti;
+      postcondition_views = post;
       WrapperReferenceMutator mutator(ready);
-      // Deal with races from different equivalence set captures coming back
-      AutoLock s_lock(set_lock); 
-      if (pre != NULL)
-        pre->record_unique_view_expressions(mutator, unique_view_expressions);
-      if (anti != NULL)
-        anti->record_unique_view_expressions(mutator, unique_view_expressions);
-      if (post != NULL)
-        post->record_unique_view_expressions(mutator, unique_view_expressions);
       if (precondition_views != NULL)
       {
-        pre->merge(*precondition_views, ready);
-        delete pre;
+        precondition_views->transpose_uniquely(preconditions,
+                            unique_view_expressions, mutator);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::const_iterator 
+              eit = preconditions.begin(); eit != preconditions.end(); eit++)
+        {
+          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
-      else
-        precondition_views = pre;
       if (anticondition_views != NULL)
       {
-        anti->merge(*anticondition_views, ready);
-        delete anti;
+        anticondition_views->transpose_uniquely(anticonditions,
+                              unique_view_expressions, mutator);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::const_iterator 
+              eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
+        {
+          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
-      else
-        anticondition_views = anti;
       if (postcondition_views != NULL)
       {
-        post->merge(*postcondition_views, ready);
-        delete post;
+        postcondition_views->transpose_uniquely(postconditions,
+                              unique_view_expressions, mutator);
+        for (LegionMap<IndexSpaceExpression*,
+                       FieldMaskSet<LogicalView> >::const_iterator 
+              eit = postconditions.begin(); eit != postconditions.end(); eit++)
+        {
+          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+        }
       }
-      else
-        postcondition_views = post;
     }
 
     //--------------------------------------------------------------------------
@@ -3474,50 +3477,6 @@ namespace Legion {
                                        TraceViewSet::FailedPrecondition *failed)
     //--------------------------------------------------------------------------
     {
-      LocalReferenceMutator mutator;
-      // We've done our capture so get the views for each expression
-      if (precondition_views != NULL)
-      {
-        precondition_views->transpose_uniquely(preconditions,
-                            unique_view_expressions, mutator);
-        for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
-              eit = preconditions.begin(); eit != preconditions.end(); eit++)
-        {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
-        }
-      }
-      if (anticondition_views != NULL)
-      {
-        anticondition_views->transpose_uniquely(anticonditions,
-                              unique_view_expressions, mutator);
-        for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
-              eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
-        {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
-        }
-      }
-      if (postcondition_views != NULL)
-      {
-        postcondition_views->transpose_uniquely(postconditions,
-                              unique_view_expressions, mutator);
-        for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
-              eit = postconditions.begin(); eit != postconditions.end(); eit++)
-        {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
-        }
-      }
       bool replayable = true;
       // Note that it is ok to have precondition views and no postcondition
       // views because that means that everything was read-only and therefore
@@ -3618,7 +3577,8 @@ namespace Legion {
       // First check to see if we need to recompute our equivalence sets
       if (!!invalid_mask)
       {
-        const RtEvent ready = recompute_equivalence_sets(op);
+        const UniqueID opid = op->get_unique_op_id();
+        const RtEvent ready = recompute_equivalence_sets(opid);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent tested = Runtime::create_rt_user_event();
@@ -3751,7 +3711,8 @@ namespace Legion {
       // First check to see if we need to recompute our equivalence sets
       if (!!invalid_mask)
       {
-        const RtEvent ready = recompute_equivalence_sets(op);
+        const UniqueID opid = op->get_unique_op_id();
+        const RtEvent ready = recompute_equivalence_sets(opid);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent applied= Runtime::create_rt_user_event();
@@ -3817,15 +3778,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TraceConditionSet::recompute_equivalence_sets(Operation *op)
+    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!invalid_mask);
 #endif
       std::set<RtEvent> ready_events;
-      UniqueID opid = op->get_unique_op_id();
-      InnerContext *context = op->get_context();
       ContextID ctxid = context->get_context().get_id();
       AddressSpaceID space = forest->runtime->address_space;
       region->compute_equivalence_sets(ctxid, context, this, space, 
@@ -3838,7 +3797,7 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch a meta-task to finalize this trace condition set
-          DeferTraceFinalizeSetsArgs args(this, op->get_unique_op_id());
+          DeferTraceFinalizeSetsArgs args(this, opid);
           return forest->runtime->issue_runtime_meta_task(args, 
                           LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
@@ -4055,39 +4014,63 @@ namespace Legion {
 
       if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
-
-      // Make a trace condition set for each of our regions
-      std::vector<RtEvent> ready_events;
-      conditions.reserve(trace_regions.size()); 
-      RegionTreeForest *forest = trace->runtime->forest;
-      for (FieldMaskSet<RegionNode>::const_iterator it = 
-            trace_regions.begin(); it != trace_regions.end(); it++)
-      {
-        TraceConditionSet *condition =
-          new TraceConditionSet(trace, forest, it->first, it->second);
-        condition->add_reference();
-        conditions.push_back(condition);
-        // compute the equivalence sets for this trace
-        const RtEvent ready = condition->recompute_equivalence_sets(op);
-        if (ready.exists())
-          ready_events.push_back(ready);
-      }
+      
+      // First let's get the equivalence sets with data for these regions
+      // We'll use the result to get guide the creation of the trace condition
+      // sets. Note we're going to end up recomputing the equivalence sets
+      // inside the trace condition sets but that is a small price to pay to
+      // minimize the number of conditions that we need to do the capture
+      // Next we need to compute the equivalence sets for all these regions
+      unsigned index = 0;
+      std::set<RtEvent> eq_events;
+      const ContextID ctx = context->get_context().get_id();
+      LegionVector<VersionInfo> version_infos(trace_regions.size());
+      for (FieldMaskSet<RegionNode>::const_iterator it =
+            trace_regions.begin(); it != trace_regions.end(); it++, index++)
+        it->first->perform_versioning_analysis(ctx, context, 
+            &version_infos[index], it->second, opid, 
+            trace->runtime->address_space, eq_events);
       trace_regions.clear();
-      // Wait for all the equivalence sets to be ready in all the conditions
-      if (!ready_events.empty())
+      if (!eq_events.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
+        const RtEvent wait_on = Runtime::merge_events(eq_events);
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      // Now perform the capture for all of the conditions
-      // Note we're just letting multiple conditions that might overlap with 
-      // each other race to their equivalence sets, whichever one gets there 
-      // first for their fields will be the one to own the preconditions
-      for (std::vector<TraceConditionSet*>::const_iterator it =
-            conditions.begin(); it != conditions.end(); it++)
-        (*it)->capture(ready_events);
+      FieldMaskSet<EquivalenceSet> current_sets;
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        const FieldMaskSet<EquivalenceSet> &region_sets = 
+            version_infos[idx].get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              region_sets.begin(); it != region_sets.end(); it++)
+          current_sets.insert(it->first, it->second);
+      }
+      // Make a trace condition set for each one of them
+      // Note for control replication, we're just letting multiple shards 
+      // race to their equivalence sets, whichever one gets there first for
+      // their fields will be the one to own the preconditions
+      std::vector<RtEvent> ready_events;
+      conditions.reserve(current_sets.size()); 
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            current_sets.begin(); it != current_sets.end(); it++)
+      {
+        TraceConditionSet *condition =
+          new TraceConditionSet(trace, forest, 
+              it->first->region_node, it->second);
+        condition->add_reference();
+        // This looks redundant because it is a bit since we're just going
+        // to compute the single equivalence set we already have here but
+        // really what we're doing here is registering the condition with 
+        // the VersionManager that owns this equivalence set which is a
+        // necessary thing for us to do
+        const RtEvent ready = condition->recompute_equivalence_sets(opid);
+        if (ready.exists())
+          ready_events.push_back(ready);
+        condition->capture(it->first, it->second, ready_events);
+        conditions.push_back(condition);
+      }
       // Wait for the conditions to be ready and then test them for subsumption
       if (!ready_events.empty())
       {

@@ -590,8 +590,6 @@ namespace Legion {
       bool empty(void) const;
     public:
       void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
-      void record_unique_view_expressions(ReferenceMutator &mutator,
-                                  std::set<IndexSpaceExpression*> &exprs) const;
       void pack(Serializer &rez, AddressSpaceID target) const;
       void unpack(Deserializer &derez, size_t num_views,
                   AddressSpaceID source, std::set<RtEvent> &ready_events);
@@ -675,7 +673,8 @@ namespace Legion {
                   const FieldMaskSet<EquivalenceSet> &to_filter);
     public:
       void invalidate_equivalence_sets(void);
-      void capture(std::vector<RtEvent> &ready_events);
+      void capture(EquivalenceSet *set, const FieldMask &mask,
+                   std::vector<RtEvent> &ready_events);
       void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
                            TraceViewSet *post, std::set<RtEvent> &ready);
       bool is_empty(void) const;
@@ -694,7 +693,7 @@ namespace Legion {
       static void handle_postcondition_test(const void *args);
       static void handle_finalize_sets(const void *args);
     public:
-      RtEvent recompute_equivalence_sets(Operation *op);
+      RtEvent recompute_equivalence_sets(UniqueID opid);
       void finalize_computed_sets(void);
     public:
       InnerContext *const context;

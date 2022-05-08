@@ -2265,6 +2265,18 @@ namespace Legion {
     };
 
     /**
+     * \struct SubscriberInvalidations
+     * A small helper class for tracking data associated with invalidating
+     * subscriptions by EqSetTrackers
+     */
+    struct SubscriberInvalidations : 
+      public LegionHeapify<SubscriberInvalidations> {
+      FieldMaskSet<EqSetTracker> subscribers;
+      std::vector<EqSetTracker*> finished;
+      bool delete_all;
+    };
+
+    /**
      * \class EqSetTracker
      * This is an abstract class that provides an interface for
      * recording the equivalence sets that result from ray tracing
@@ -2289,7 +2301,7 @@ namespace Legion {
       void cancel_subscriptions(Runtime *runtime,
        const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel);
       static void finish_subscriptions(Runtime *runtime, VersionManager &source,
-          LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &trackers,
+          LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
           const FieldMaskSet<EquivalenceSet> &to_filter,
           std::set<RtEvent> &applied_events, bool remove_refs = false);
       static void handle_cancel_subscription(Deserializer &derez,
@@ -2946,7 +2958,7 @@ namespace Legion {
         FieldMask waiting_mask;
         IndexSpaceExpression *expr;
         bool expr_covers;
-      };
+      }; 
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager) = delete;
@@ -3039,24 +3051,24 @@ namespace Legion {
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
                                  FieldMaskSet<EquivalenceSet> &to_untrack,
                                  LegionMap<AddressSpaceID,
-                                  FieldMaskSet<EqSetTracker> > &trackers,
+                                  SubscriberInvalidations> &subscribers,
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_mapping_root=false);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
                FieldMaskSet<EquivalenceSet> &to_untrack,
-               LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &trackers);
+               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
               FieldMaskSet<EquivalenceSet> &to_untrack,
-              LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &trackers);
+              LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void pack_manager(Serializer &rez, const bool invalidate, 
                 std::map<LegionColor,RegionTreeNode*> &to_traverse,
                 FieldMaskSet<EquivalenceSet> &to_untrack,
-                LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &trackers,
+                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
                 std::vector<DistributedCollectable*> &to_remove);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse);
       void filter_refinement_subscriptions(const FieldMask &mask,
-               LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > &trackers);
+               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -3097,9 +3109,8 @@ namespace Legion {
       // between fields and equivalence sets in a node represeting a refinement
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EqSetTracker> > refinement_subscriptions;
-#ifdef DEBUG_LEGION
+      // Keep track of our subscription owners
       std::set<std::pair<VersionManager*,AddressSpaceID> > subscription_owners;
-#endif
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 
