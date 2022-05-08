@@ -82,7 +82,7 @@ namespace Realm {
   inline Barrier BarrierImpl::current_barrier(Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    gen_t gen = this->generation + 1;
+    gen_t gen = this->generation.load() + 1;
     if(gen > id.barrier_generation().MAXVAL)
       return Barrier::NO_BARRIER;
     id.barrier_generation() = gen;

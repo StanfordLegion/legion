@@ -55,7 +55,7 @@ CC_SRC		?=		# .c files
 CXX_SRC		?= 		# .cc files
 CUDA_SRC	?=		# .cu files
 FORT_SRC	?=		# .f90 files
-HIP_SRC		?=		# HIP files
+HIP_SRC		?=		# .cu files
 ASM_SRC		?=		# .S files
 
 # You can modify these variables, some will be appended to by the runtime makefile
@@ -63,6 +63,7 @@ INC_FLAGS	?=		# Include flags for all compilers
 CC_FLAGS	?=		# Flags for all C++ compilers
 FC_FLAGS	?=		# Flags for all Fortran compilers
 NVCC_FLAGS	?=		# Flags for all NVCC files
+HIPCC_FLAGS	?=		# Flags for all HIP files
 SO_FLAGS	?=		# Flags for building shared objects
 LD_FLAGS	?=		# Flags for linking binaries
 # Canonical GNU flags you can modify as well

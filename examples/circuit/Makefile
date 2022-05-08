@@ -33,17 +33,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 OUTFILE		?= circuit
 # List all the application source files here
 GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_init.cc circuit_mapper.cc	# .cc files
-ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
-endif
-ifeq ($(strip $(USE_HIP)),1)
-ifeq ($(strip $(HIP_TARGET)),ROCM)
-GEN_HIP_SRC	?= circuit_gpu.cpp				# .cu files
-endif
-ifeq ($(strip $(HIP_TARGET)),CUDA)
-GEN_HIP_SRC	?= circuit_gpu.cu				# .cu files
-endif
-endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

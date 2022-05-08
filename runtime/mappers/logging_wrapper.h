@@ -46,7 +46,7 @@ namespace Mapping {
  * Assumes that sharding functors are pure, and calls them an additional number
  * of times compared to normal execution.
  *
- * Currently only supports task and inline mapping API calls.
+ * Currently only supports task, inline mapping and copy API calls.
  */
 // TODO:
 // - Include other mapping calls.
@@ -55,8 +55,14 @@ class LoggingWrapper : public ForwardingMapper {
  public:
   LoggingWrapper(Mapper* mapper);
   virtual ~LoggingWrapper();
- public:
 #ifndef NO_LEGION_CONTROL_REPLICATION
+ private:
+  template<typename OPERATION>
+  void select_sharding_functor_impl(const MapperContext ctx,
+                                    const OPERATION& op,
+                                    const SelectShardingFunctorInput& input,
+                                    SelectShardingFunctorOutput& output);
+ public:
   virtual void map_replicate_task(const MapperContext ctx,
                                   const Task& task,
                                   const MapTaskInput& input,
@@ -67,7 +73,12 @@ class LoggingWrapper : public ForwardingMapper {
                                        const Task& task,
                                        const SelectShardingFunctorInput& input,
                                        SelectShardingFunctorOutput& output);
+  virtual void select_sharding_functor(const MapperContext ctx,
+                                       const Copy& copy,
+                                       const SelectShardingFunctorInput& input,
+                                       SelectShardingFunctorOutput& output);
 #endif // NO_LEGION_CONTROL_REPLICATION
+ public:
   virtual void slice_task(const MapperContext ctx,
                           const Task& task,
                           const SliceTaskInput& input,
@@ -88,6 +99,14 @@ class LoggingWrapper : public ForwardingMapper {
                                      const InlineMapping& inline_op,
                                      const SelectInlineSrcInput& input,
                                      SelectInlineSrcOutput& output);
+  virtual void map_copy(const MapperContext ctx,
+                        const Copy& copy,
+                        const MapCopyInput& input,
+                        MapCopyOutput& output);
+  virtual void select_copy_sources(const MapperContext ctx,
+                                   const Copy& copy,
+                                   const SelectCopySrcInput& input,
+                                   SelectCopySrcOutput& output);
 };
 
 }; // namespace Mapping
