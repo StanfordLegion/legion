@@ -77,7 +77,8 @@ namespace Realm {
       }
     }
 
-    pool = new ThreadPool(num_threads - 1,
+    pool = new ThreadPool(me,
+                          num_threads - 1,
 			  stringbuilder() << "OMP" << numa_node << " proc " << _me,
 			  numa_node, _stack_size, crs);
 
