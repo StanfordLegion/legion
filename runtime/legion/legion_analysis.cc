@@ -18271,10 +18271,10 @@ namespace Legion {
         assert(disjoint_complete_children.empty());
         assert(refinement_subscriptions.empty());
 #endif
-        if (subscription_owners.empty())
+        if (equivalence_sets.empty())
         {
 #ifdef DEBUG_LEGION
-          assert(equivalence_sets.empty());
+          assert(subscription_owners.empty());
 #endif
           return;
         }
@@ -18287,7 +18287,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node->is_region());
 #endif
-      cancel_subscriptions(runtime, to_cancel);
+      if (!to_cancel.empty())
+        cancel_subscriptions(runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             to_remove.begin(); it != to_remove.end(); it++)
       {
