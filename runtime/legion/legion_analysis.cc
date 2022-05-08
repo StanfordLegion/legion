@@ -18898,9 +18898,9 @@ namespace Legion {
             else // Add a version manager reference to flow back
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
           }
-          if (!!untrack_mask && !refinement_subscriptions.empty())
-            filter_refinement_subscriptions(untrack_mask, subscribers);
         }
+        if (!!untrack_mask && !refinement_subscriptions.empty())
+          filter_refinement_subscriptions(untrack_mask, subscribers);
         if (!to_delete.empty())
         {
           for (std::vector<EquivalenceSet*>::const_iterator it =
