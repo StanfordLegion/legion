@@ -654,26 +654,28 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        IndexSpaceExpression *expr, const FieldMask &mask,
-                        const std::set<RegionNode*> &regions); 
+                        RegionNode *region, const FieldMask &mask,
+                        std::vector<RtEvent> &ready_events);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
       TraceConditionSet& operator=(const TraceConditionSet &rhs) = delete;
     public:
-      virtual void add_tracker_reference(unsigned cnt = 1);
-      virtual bool remove_tracker_reference(unsigned cnt = 1);
+      virtual void record_subscription(VersionManager *owner,
+                                       AddressSpaceID space);
+      virtual bool finish_subscription(VersionManager *owner,
+                                       AddressSpaceID space);
     public:
       virtual void record_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual bool can_filter_context(ContextID filter_id) const;
-      virtual void remove_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
+      virtual void remove_equivalence_sets(const FieldMask &mask,
+                  const FieldMaskSet<EquivalenceSet> &to_filter);
     public:
       void invalidate_equivalence_sets(void);
-      void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
+      void capture(EquivalenceSet *set, const FieldMask &mask,
+                   std::vector<RtEvent> &ready_events);
       void receive_capture(TraceViewSet *pre, TraceViewSet *anti,
                            TraceViewSet *post, std::set<RtEvent> &ready);
       bool is_empty(void) const;
@@ -691,15 +693,15 @@ namespace Legion {
       static void handle_precondition_test(const void *args);
       static void handle_postcondition_test(const void *args);
       static void handle_finalize_sets(const void *args);
-    private:
-      RtEvent recompute_equivalence_sets(Operation *op);
+    public:
+      RtEvent recompute_equivalence_sets(UniqueID opid);
       void finalize_computed_sets(void);
     public:
       InnerContext *const context;
       RegionTreeForest *const forest;
+      RegionNode *const region;
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;
-      const std::vector<RegionNode*> regions;
     private:
       mutable LocalLock set_lock;
       FieldMaskSet<EquivalenceSet> current_sets;
@@ -722,6 +724,8 @@ namespace Legion {
     private:
       std::vector<InvalidInstAnalysis*> precondition_analyses;
       std::vector<AntivalidInstAnalysis*> anticondition_analyses;
+    private:
+      std::set<std::pair<VersionManager*,AddressSpaceID> > subscription_owners;
     };
 
     /**

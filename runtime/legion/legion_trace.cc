@@ -3210,19 +3210,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
-                        RegionTreeForest *f, IndexSpaceExpression *expr,
-                        const FieldMask &mask, const std::set<RegionNode*> &rgs)
+                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask,
+                   std::vector<RtEvent> &ready_events)
       : context(trace->logical_trace->ctx), forest(f),
-        condition_expr(expr), condition_mask(mask), 
-        regions(std::vector<RegionNode*>(rgs.begin(), rgs.end())),
-        precondition_views(NULL), anticondition_views(NULL), 
+        region(node), condition_expr(region->row_source), condition_mask(mask),
+        invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
         postcondition_views(NULL)
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      for (std::vector<RegionNode*>::const_iterator it =
-            regions.begin(); it != regions.end(); it++)
-        (*it)->add_base_resource_ref(TRACE_REF);
+      LocalReferenceMutator mutator;
+      region->add_base_valid_ref(TRACE_REF, &mutator);
+      const RtEvent done = mutator.get_done_event();
+      if (done.exists())
+        ready_events.push_back(done);
     }
 
     //--------------------------------------------------------------------------
@@ -3270,10 +3271,8 @@ namespace Legion {
             unique_view_expressions.end(); it++) 
         if ((*it)->remove_base_expression_reference(TRACE_REF))
           delete (*it);
-      for (std::vector<RegionNode*>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++)
-        if ((*it)->remove_base_resource_ref(TRACE_REF))
-          delete (*it);
+      if (region->remove_base_valid_ref(TRACE_REF))
+        delete region;
       if (condition_expr->remove_base_expression_reference(TRACE_REF))
         delete condition_expr;
       if (precondition_views != NULL)
@@ -3285,17 +3284,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::add_tracker_reference(unsigned cnt)
+    void TraceConditionSet::record_subscription(VersionManager *owner,
+                                                AddressSpaceID space)
     //--------------------------------------------------------------------------
     {
-      add_reference(cnt);
+      const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
+      AutoLock s_lock(set_lock);
+#ifdef DEBUG_LEGION
+      assert(subscription_owners.find(key) == subscription_owners.end());
+#endif
+      subscription_owners.insert(key);
+      add_reference();
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::remove_tracker_reference(unsigned cnt)
+    bool TraceConditionSet::finish_subscription(VersionManager *owner,
+                                                AddressSpaceID space)
     //--------------------------------------------------------------------------
     {
-      return remove_reference(cnt);
+      const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
+      AutoLock s_lock(set_lock);
+#ifdef DEBUG_LEGION
+      std::set<std::pair<VersionManager*,AddressSpaceID> >::iterator finder =
+        subscription_owners.find(key);
+      assert(finder != subscription_owners.end());
+      subscription_owners.erase(finder);
+#else
+      subscription_owners.erase(key);
+#endif
+      return remove_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -3303,7 +3320,6 @@ namespace Legion {
                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      set->record_tracker(this, mask);
       AutoLock s_lock(set_lock);
       if (current_sets.insert(set, mask))
         set->add_base_resource_ref(TRACE_REF);
@@ -3319,36 +3335,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::can_filter_context(ContextID filter_id) const
+    void TraceConditionSet::remove_equivalence_sets(const FieldMask &mask,
+                                  const FieldMaskSet<EquivalenceSet> &to_filter)
     //--------------------------------------------------------------------------
     {
-      return (filter_id == context->get_context_id());
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceConditionSet::remove_equivalence_set(EquivalenceSet *set,
-                                                   const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
+      AutoLock s_lock(set_lock);
+      invalid_mask |= mask;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            to_filter.begin(); it != to_filter.end(); it++)
       {
-        AutoLock s_lock(set_lock);
-        invalid_mask |= mask;
-        FieldMaskSet<EquivalenceSet>::iterator finder = current_sets.find(set);
-        // Might have already been removed as part of deleting the set
+        FieldMaskSet<EquivalenceSet>::iterator finder = 
+          current_sets.find(it->first);
         if (finder == current_sets.end())
-          return;
-#ifdef DEBUG_LEGION
-        assert(!(mask - finder->second));
-#endif
-        finder.filter(mask);
+          continue;
+        finder.filter(it->second);
         if (!finder->second)
+        {
           current_sets.erase(finder);
-        else
-          return;
+          if (it->first->remove_base_resource_ref(TRACE_REF))
+            assert(false); // should never end up deleting this here
+        }
       }
-      // Remove the reference if we removed the set from our current sets
-      if (set->remove_base_resource_ref(TRACE_REF))
-        delete set;
+      current_sets.tighten_valid_mask();
     }
 
     //--------------------------------------------------------------------------
@@ -3356,34 +3364,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<EquivalenceSet> to_remove;
+      std::map<AddressSpaceID,std::vector<VersionManager*> > to_cancel;
       {
         AutoLock s_lock(set_lock);
-        if (current_sets.empty())
+        if (subscription_owners.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(current_sets.empty());
+#endif
           return;
+        }
+        // Copy and not remove since we need to see the acknowledgement
+        // before we know when it is safe to remove our references
+        for (std::set<std::pair<VersionManager*,AddressSpaceID> >::
+              const_iterator it = subscription_owners.begin(); 
+              it != subscription_owners.end(); it++)
+          to_cancel[it->second].push_back(it->first);
         to_remove.swap(current_sets);
       }
+      cancel_subscriptions(context->runtime, to_cancel);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             to_remove.begin(); it != to_remove.end(); it++)
-      {
-        it->first->remove_tracker(this, it->second);
         if (it->first->remove_base_resource_ref(TRACE_REF))
           delete it->first;
-      }
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::capture(EquivalenceSet *set, 
-                                    std::set<RtEvent> &ready_events)
+    void TraceConditionSet::capture(EquivalenceSet *set, const FieldMask &mask,
+                                    std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      set->record_tracker(this, condition_mask);
-      if (current_sets.insert(set, condition_mask))
-        set->add_base_resource_ref(TRACE_REF);
+#ifdef DEBUG_LEGION
+      assert(precondition_views == NULL);
+      assert(anticondition_views == NULL);
+      assert(postcondition_views == NULL);
+#endif
       const RtEvent ready_event = 
-        set->capture_trace_conditions(this, set->local_space, condition_expr, 
-                              condition_mask, RtUserEvent::NO_RT_USER_EVENT); 
+        set->capture_trace_conditions(this, set->local_space,
+            condition_expr, mask, RtUserEvent::NO_RT_USER_EVENT);
       if (ready_event.exists() && !ready_event.has_triggered())
-        ready_events.insert(ready_event);
+        ready_events.push_back(ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3504,11 +3524,10 @@ namespace Legion {
     void TraceConditionSet::dump_preconditions(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!regions.empty());
-#endif
+      if (precondition_views == NULL)
+        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
-          forest->get_tree(regions.front()->handle.get_tree_id()));
+          forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
@@ -3522,11 +3541,10 @@ namespace Legion {
     void TraceConditionSet::dump_anticonditions(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!regions.empty());
-#endif
+      if (anticondition_views == NULL)
+        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
-          forest->get_tree(regions.front()->handle.get_tree_id()));
+          forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3540,11 +3558,10 @@ namespace Legion {
     void TraceConditionSet::dump_postconditions(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!regions.empty());
-#endif
+      if (postcondition_views == NULL)
+        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
-          forest->get_tree(regions.front()->handle.get_tree_id()));
+          forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
@@ -3565,7 +3582,8 @@ namespace Legion {
       // First check to see if we need to recompute our equivalence sets
       if (!!invalid_mask)
       {
-        const RtEvent ready = recompute_equivalence_sets(op);
+        const UniqueID opid = op->get_unique_op_id();
+        const RtEvent ready = recompute_equivalence_sets(opid);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent tested = Runtime::create_rt_user_event();
@@ -3698,7 +3716,8 @@ namespace Legion {
       // First check to see if we need to recompute our equivalence sets
       if (!!invalid_mask)
       {
-        const RtEvent ready = recompute_equivalence_sets(op);
+        const UniqueID opid = op->get_unique_op_id();
+        const RtEvent ready = recompute_equivalence_sets(opid);
         if (ready.exists() && !ready.has_triggered())
         {
           const RtUserEvent applied= Runtime::create_rt_user_event();
@@ -3764,26 +3783,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TraceConditionSet::recompute_equivalence_sets(Operation *op)
+    RtEvent TraceConditionSet::recompute_equivalence_sets(UniqueID opid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!invalid_mask);
 #endif
       std::set<RtEvent> ready_events;
-      UniqueID opid = op->get_unique_op_id();
-      InnerContext *context = op->get_context();
       ContextID ctxid = context->get_context().get_id();
       AddressSpaceID space = forest->runtime->address_space;
-      for (std::vector<RegionNode*>::const_iterator it =
-            regions.begin(); it != regions.end(); it++)
-      {
-        IndexSpaceExpression *overlap = 
-          forest->intersect_index_spaces(condition_expr, (*it)->row_source);
-        (*it)->compute_equivalence_sets(ctxid, context, this, space, overlap,
-                                    invalid_mask, opid, space, ready_events,
-                                    false/*downward only*/, false/*covers*/);
-      }
+      region->compute_equivalence_sets(ctxid, context, this, space, 
+          condition_expr, invalid_mask, opid, space, ready_events,
+          false/*downward only*/, false/*covers*/);
       invalid_mask.clear();
       if (!ready_events.empty())
       {
@@ -3791,7 +3802,7 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch a meta-task to finalize this trace condition set
-          DeferTraceFinalizeSetsArgs args(this, op->get_unique_op_id());
+          DeferTraceFinalizeSetsArgs args(this, opid);
           return forest->runtime->issue_runtime_meta_task(args, 
                           LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
@@ -3810,11 +3821,8 @@ namespace Legion {
         return;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             pending_sets.begin(); it != pending_sets.end(); it++)
-      {
-        it->first->record_tracker(this, it->second);
         if (current_sets.insert(it->first, it->second))
           it->first->add_base_resource_ref(TRACE_REF);
-      }
       pending_sets.clear();
     }
 
@@ -4011,74 +4019,62 @@ namespace Legion {
 
       if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
-
+      
+      // First let's get the equivalence sets with data for these regions
+      // We'll use the result to get guide the creation of the trace condition
+      // sets. Note we're going to end up recomputing the equivalence sets
+      // inside the trace condition sets but that is a small price to pay to
+      // minimize the number of conditions that we need to do the capture
       // Next we need to compute the equivalence sets for all these regions
-      LegionVector<VersionInfo> version_infos(trace_regions.size());
       unsigned index = 0;
-      std::set<RtEvent> ready_events;
+      std::set<RtEvent> eq_events;
       const ContextID ctx = context->get_context().get_id();
+      LegionVector<VersionInfo> version_infos(trace_regions.size());
       for (FieldMaskSet<RegionNode>::const_iterator it =
             trace_regions.begin(); it != trace_regions.end(); it++, index++)
         it->first->perform_versioning_analysis(ctx, context, 
             &version_infos[index], it->second, opid, 
-            trace->runtime->address_space, ready_events);
-      if (!ready_events.empty())
+            trace->runtime->address_space, eq_events);
+      trace_regions.clear();
+      if (!eq_events.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
+        const RtEvent wait_on = Runtime::merge_events(eq_events);
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      // Compute the sets of regions and fields associated with each set
-      index = 0;
-      LegionMap<EquivalenceSet*,FieldMaskSet<RegionNode> > set_regions;
-      for (FieldMaskSet<RegionNode>::const_iterator rit =
-            trace_regions.begin(); rit != trace_regions.end(); rit++, index++)
+      FieldMaskSet<EquivalenceSet> current_sets;
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
       {
         const FieldMaskSet<EquivalenceSet> &region_sets = 
-            version_infos[index].get_equivalence_sets();
+            version_infos[idx].get_equivalence_sets();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               region_sets.begin(); it != region_sets.end(); it++)
-          set_regions[it->first].insert(rit->first, it->second);
+          current_sets.insert(it->first, it->second);
       }
-      trace_regions.clear();
       // Make a trace condition set for each one of them
       // Note for control replication, we're just letting multiple shards 
       // race to their equivalence sets, whichever one gets there first for
       // their fields will be the one to own the preconditions
+      std::vector<RtEvent> ready_events;
+      conditions.reserve(current_sets.size()); 
       RegionTreeForest *forest = trace->runtime->forest;
-      for (LegionMap<EquivalenceSet*,
-                     FieldMaskSet<RegionNode> >::const_iterator eit =
-            set_regions.begin(); eit != set_regions.end(); eit++)
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            current_sets.begin(); it != current_sets.end(); it++)
       {
-        // Sort the region nodes into field groups so we can get a field 
-        // expression for each one of these
-        LegionList<FieldSet<RegionNode*> > region_fields;
-        eit->second.compute_field_sets(FieldMask(), region_fields);
-        for (LegionList<FieldSet<RegionNode*> >::iterator it =
-              region_fields.begin(); it != region_fields.end(); it++)
-        {
-          // The expression for this condition is the intersection of
-          // the equivalence set region with all the other regions that
-          // are represented by it
-          std::set<IndexSpaceExpression*> exprs;
-          for (std::set<RegionNode*>::const_iterator rit = 
-                it->elements.begin(); rit != it->elements.end(); rit++)
-            exprs.insert((*rit)->row_source);
-          IndexSpaceExpression *union_expr = forest->union_index_spaces(exprs);
-          IndexSpaceNode *eq_node = eit->first->region_node->row_source;
-          IndexSpaceExpression *condition_expr = 
-            forest->intersect_index_spaces(union_expr, eq_node);
-          // Small congruence test
-          if (condition_expr->get_volume() == eq_node->get_volume())
-            condition_expr = eq_node;
-          TraceConditionSet *condition = 
-            new TraceConditionSet(trace, forest, condition_expr, 
-                                  it->set_mask, it->elements);
-          condition->add_reference();
-          condition->capture(eit->first, ready_events);
-          conditions.push_back(condition);
-        }
+        TraceConditionSet *condition =
+          new TraceConditionSet(trace, forest, 
+              it->first->region_node, it->second, ready_events);
+        condition->add_reference();
+        // This looks redundant because it is a bit since we're just going
+        // to compute the single equivalence set we already have here but
+        // really what we're doing here is registering the condition with 
+        // the VersionManager that owns this equivalence set which is a
+        // necessary thing for us to do
+        const RtEvent ready = condition->recompute_equivalence_sets(opid);
+        if (ready.exists())
+          ready_events.push_back(ready);
+        condition->capture(it->first, it->second, ready_events);
+        conditions.push_back(condition);
       }
       // Wait for the conditions to be ready and then test them for subsumption
       if (!ready_events.empty())
@@ -4091,7 +4087,7 @@ namespace Legion {
       TraceViewSet::FailedPrecondition condition;
       // Need this lock in case we invalidate empty conditions
       AutoLock tpl_lock(template_lock);
-      for (std::vector<TraceConditionSet*>::iterator it = 
+      for (std::vector<TraceConditionSet*>::iterator it =
             conditions.begin(); it != conditions.end(); /*nothing*/)
       {
         if ((*it)->is_empty())

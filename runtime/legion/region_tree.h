@@ -4048,8 +4048,7 @@ namespace Legion {
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
-                                 std::set<RtEvent> &applied, bool merge,
-                                 InnerContext *source_context);
+                                 std::set<RtEvent> &applied, bool merge);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
                               const bool invalidate, 
                               std::vector<DistributedCollectable*> &to_remove);
@@ -4058,7 +4057,6 @@ namespace Legion {
       void pack_version_state(ContextID ctx, Serializer &rez, 
                               const bool invalidate,
                               std::set<RtEvent> &applied_events, 
-                              InnerContext *source_context,
                               std::vector<DistributedCollectable*> &to_remove);
       void unpack_version_state(ContextID ctx, Deserializer &derez, 
                                 AddressSpaceID source);
@@ -4206,30 +4204,6 @@ namespace Legion {
         RegionNode *const node;
         ReferenceMutator *const mutator;
       };
-      class EmptySetTracker : public EqSetTracker {
-      public:
-        EmptySetTracker(void) : set(NULL) { }
-        virtual ~EmptySetTracker(void) { }
-      public:
-        virtual void add_tracker_reference(unsigned cnt) { assert(false); }
-        virtual bool remove_tracker_reference(unsigned cnt)
-          { assert(false); return false; }
-      public:
-        virtual void record_equivalence_set(EquivalenceSet *set, 
-                                            const FieldMask &mask);
-        virtual void record_pending_equivalence_set(EquivalenceSet *set,
-                                                    const FieldMask &mask)
-          { record_equivalence_set(set, mask); }
-        virtual bool can_filter_context(ContextID filter_id) const
-          { assert(false); return false; }
-        virtual void remove_equivalence_set(EquivalenceSet *set,
-                                            const FieldMask &mask)
-          { assert(false); }
-      public:
-        EquivalenceSet* get_set(void) const;
-      private:
-        EquivalenceSet *set;
-      };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
@@ -4357,10 +4331,10 @@ namespace Legion {
                                     const bool downward_only,
                                     const bool expr_covers);
       static void handle_deferred_compute_equivalence_sets(const void *args);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
+      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+                                 bool self, InnerContext &source_context,
                                  std::set<RtEvent> &applied_events, 
                                  std::vector<EquivalenceSet*> &to_release,
-                                 InnerContext *source_context,
                                  bool nonexclusive_virtual_root = false);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
                              const FieldMask &mask,
@@ -4478,7 +4452,7 @@ namespace Legion {
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,
-                                 InnerContext *source_context);
+                                 InnerContext &source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
                                 const FieldMask &mask,
                                 std::set<RtEvent> &applied_events);

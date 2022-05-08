@@ -9633,7 +9633,7 @@ namespace Legion {
                 it->second, false/*forward*/, map_applied_conditions);
         }
         region_node->invalidate_refinement(ctx, refinement_mask, 
-            false/*self*/, map_applied_conditions, to_release, parent_ctx);
+            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -10529,12 +10529,12 @@ namespace Legion {
         const FieldMask invalidate_mask = 
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
-          to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
-                                map_applied_conditions, to_release, parent_ctx);
+          to_refine->invalidate_refinement(ctx, invalidate_mask,
+              false/*self*/, *parent_ctx, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, map_applied_conditions, to_release, parent_ctx);
+            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
       // Finally propagate the new refinements up from the regions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             refinement_partitions.begin(); it !=
