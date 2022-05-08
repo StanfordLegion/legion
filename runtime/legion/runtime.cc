@@ -19952,7 +19952,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(send_to_owner))
+          !implicit_context->perform_semantic_attach(__func__, 
+            ReplicateContext::REPLICATE_ATTACH_TASK_INFO, &task_id,
+            sizeof(task_id), tag, buffer, size, is_mutable, send_to_owner))
         return;
       if ((tag == LEGION_NAME_SEMANTIC_TAG) && legion_spy_enabled)
         LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
@@ -19972,7 +19974,9 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_INDEX_SPACE_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
@@ -19989,7 +19993,9 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_INDEX_PARTITION_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
@@ -20006,7 +20012,9 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_FIELD_SPACE_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
@@ -20023,7 +20031,10 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_FIELD_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global, 
+            &fid, sizeof(fid)))
         return;
       forest->attach_semantic_information(handle, fid, tag, address_space, 
                                           buffer, size, is_mutable, !global);
@@ -20040,7 +20051,9 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_LOGICAL_REGION_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
@@ -20057,7 +20070,9 @@ namespace Legion {
     {
       bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach(global))
+          !implicit_context->perform_semantic_attach(__func__,
+            ReplicateContext::REPLICATE_ATTACH_LOGICAL_PARTITION_INFO, &handle,
+            sizeof(handle), tag, buffer, size, is_mutable, global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);

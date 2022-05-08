@@ -119,7 +119,10 @@ namespace Legion {
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
-      virtual bool perform_semantic_attach(bool &global);
+      virtual bool perform_semantic_attach(const char *func, unsigned kind,
+          const void *arg, size_t arglen, SemanticTag tag, const void *buffer,
+          size_t size, bool is_mutable, bool &global, 
+          const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
       // Interface to operations performed by a context
@@ -1865,6 +1868,13 @@ namespace Legion {
         REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE,
         REPLICATE_END_TASK,
         REPLICATE_FUTURE_FROM_VALUE,
+        REPLICATE_ATTACH_TASK_INFO,
+        REPLICATE_ATTACH_INDEX_SPACE_INFO,
+        REPLICATE_ATTACH_INDEX_PARTITION_INFO,
+        REPLICATE_ATTACH_FIELD_SPACE_INFO,
+        REPLICATE_ATTACH_FIELD_INFO,
+        REPLICATE_ATTACH_LOGICAL_REGION_INFO,
+        REPLICATE_ATTACH_LOGICAL_PARTITION_INFO,
       };
     public:
       class AttachDetachShardingFunctor : public ShardingFunctor {
@@ -2005,7 +2015,10 @@ namespace Legion {
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
-      virtual bool perform_semantic_attach(bool &global);
+      virtual bool perform_semantic_attach(const char *func, unsigned kind,
+          const void *arg, size_t arglen, SemanticTag tag, const void *buffer,
+          size_t size, bool is_mutable, bool &global, 
+          const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,

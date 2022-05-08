@@ -290,7 +290,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::perform_semantic_attach(bool &global)
+    bool TaskContext::perform_semantic_attach(const char *func, unsigned kind,
+        const void *arg, size_t arglen, SemanticTag tag, const void *buffer,
+        size_t size, bool is_mutable, bool &global, 
+        const void *arg2, size_t arg2len)
     //--------------------------------------------------------------------------
     {
       return true;
@@ -11767,11 +11770,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplicateContext::perform_semantic_attach(bool &global)
+    bool ReplicateContext::perform_semantic_attach(const char *func, 
+        unsigned kind, const void *arg, size_t arglen, SemanticTag tag,
+        const void *buffer, size_t size, bool is_mutable, bool &global,
+        const void *arg2, size_t arg2len)
     //--------------------------------------------------------------------------
     {
       if (inside_registration_callback)
-        return TaskContext::perform_semantic_attach(global);
+        return TaskContext::perform_semantic_attach(func, kind, arg, arglen,
+            tag, buffer, size, is_mutable, global, arg2, arg2len);
+      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      {
+        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
+        hasher.hash(kind, func);
+        hasher.hash(arg, arglen, 
+            (kind == REPLICATE_ATTACH_TASK_INFO) ? "task_id" : "handle");
+        hasher.hash(tag, "tag");
+        if (runtime->safe_control_replication > 1)
+          hasher.hash(buffer, size, "buffer");
+        hasher.hash(is_mutable, "is_mutable");
+        hasher.hash(global, "send_to_owner");
+        if (arg2 != NULL)
+          hasher.hash(arg2, arg2len, "fid");
+        if (hasher.verify(func))
+          break;
+      }
       // Before we do anything else here, we need to make sure that all
       // the shards are done reading before we attempt to mutate the value
       Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
