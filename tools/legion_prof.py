@@ -938,13 +938,18 @@ class Memory(object):
         return self.__cmp__(other) > 0
 
 class MemProcAffinity(object):
-    __slots__ = ['mem', 'proc']
-    def __init__(self, mem, proc):
+    __slots__ = ['mem', 'bandwidth', 'latency', 'best_proc_aff']
+    def __init__(self, mem, proc, bandwidth, latency):
         self.mem = mem
-        self.proc = list()
+        self.best_proc_aff = proc
+        self.bandwidth = bandwidth
+        self.latency = latency
 
-    def add_proc_id(self, proc):
-        self.proc.append(proc)
+    def update_best_affinity(self, bandwidth, latency, proc):
+        if (bandwidth > self.bandwidth):
+            self.best_proc_aff = proc
+            self.bandwidth = bandwidth
+            self.latency = latency
 
     def get_short_text(self):
         if memory_node_proc[self.mem.kind] == "None":
@@ -952,9 +957,9 @@ class MemProcAffinity(object):
         elif memory_node_proc[self.mem.kind] == "Node_id":
             return "[n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "GPU_proc_id":
-            return "[n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.best_proc_aff.node_id) + "][gpu" + str(self.best_proc_aff.proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "Proc_id":
-            return "[n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.best_proc_aff.node_id) + "][cpu" + str(self.best_proc_aff.proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         else:
             return ""
 
@@ -2841,11 +2846,12 @@ class State(object):
             self.memories[mem_id].kind = kind
             self.memories[mem_id].capacity = capacity
 
-    def log_mem_proc_affinity_desc(self, mem_id, proc_id):
+    def log_mem_proc_affinity_desc(self, mem_id, proc_id, bandwidth, latency):
         if mem_id not in self.mem_proc_affinity:
-            self.mem_proc_affinity[mem_id] = MemProcAffinity(self.memories[mem_id], self.processors[proc_id])
+            self.mem_proc_affinity[mem_id] = MemProcAffinity(self.memories[mem_id], self.processors[proc_id],
+                                                             bandwidth, latency)
             self.memories[mem_id].add_affinity(self.mem_proc_affinity[mem_id])
-        self.mem_proc_affinity[mem_id].add_proc_id(self.processors[proc_id])
+        self.mem_proc_affinity[mem_id].update_best_affinity(bandwidth,latency,self.processors[proc_id])
 
     def log_op_desc(self, kind, name):
         if kind not in self.op_kinds:
