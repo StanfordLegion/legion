@@ -18167,7 +18167,7 @@ namespace Legion {
         if (!finder->second)
         {
           equivalence_sets.erase(finder);
-          if (it->first->remove_base_resource_ref(TRACE_REF))
+          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
             assert(false); // should never end up deleting this here
         }
       }
