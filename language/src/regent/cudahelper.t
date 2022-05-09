@@ -462,13 +462,13 @@ local supported_scalar_red_ops = {
 }
 
 function cudahelper.global_thread_id()
-  local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
+  local bid = `(bid_x() + int64(n_bid_x()) * bid_y() + int64(n_bid_x()) * int64(n_bid_y()) * bid_z())
   local num_threads = `(n_tid_x())
   return `([bid] * [num_threads] + tid_x())
 end
 
 function cudahelper.global_block_id()
-  return `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
+  return `(bid_x() + int64(n_bid_x()) * bid_y() + int64(n_bid_x()) * int64(n_bid_y()) * bid_z())
 end
 
 function cudahelper.get_thread_block_size()
