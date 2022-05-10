@@ -1255,9 +1255,9 @@ namespace Legion {
       virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space, 
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources);
+          std::vector<IndirectRecord> &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -1395,9 +1395,9 @@ namespace Legion {
       virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources); 
+          std::vector<IndirectRecord> &records, const bool sources); 
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -1415,8 +1415,8 @@ namespace Legion {
       IndexSpaceNode*                                    launch_space;
     protected:
       std::vector<PointCopyOp*>                          points;
-      std::vector<LegionVector<IndirectRecord> >         src_records;
-      std::vector<LegionVector<IndirectRecord> >         dst_records;
+      std::vector<std::vector<IndirectRecord> >          src_records;
+      std::vector<std::vector<IndirectRecord> >          dst_records;
       std::vector<std::vector<ApEvent> >                 exchange_pre_events;
       std::vector<std::vector<ApEvent> >                 exchange_post_events;
       std::vector<ApUserEvent>                           pre_merged;
@@ -1463,9 +1463,9 @@ namespace Legion {
       virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources);
+          std::vector<IndirectRecord> &records, const bool sources);
     public:
       // For collective instances
       virtual CollectiveManager* find_or_create_collective_instance(

@@ -5232,7 +5232,7 @@ namespace Legion {
       // Trigger our local completion event contingent upon 
       // the copy/reduce across being done
       ApEvent copy_post, copy_pre;
-      LegionVector<IndirectRecord> src_records, dst_records;
+      std::vector<IndirectRecord> src_records, dst_records;
       ApUserEvent indirect_done, indirect_pre;
       if (gather_targets != NULL)
       {
@@ -5243,8 +5243,7 @@ namespace Legion {
         indirect_done = Runtime::create_ap_user_event(&trace_info);
         std::pair<ApEvent,ApEvent> result =
           exchange_indirect_records(index, indirect_pre, indirect_done, 
-              trace_info, src_targets,
-              src_requirements[index].region.get_index_space(),
+              trace_info, src_targets, src_requirements[index],
               index_point, src_records, true/*sources*/);
         copy_pre = result.first;
         copy_post = result.second;
@@ -5263,8 +5262,7 @@ namespace Legion {
         // from the gather case if this is a full-on indirection
         std::pair<ApEvent,ApEvent> result =
           exchange_indirect_records(index, indirect_pre, indirect_done,
-              trace_info, dst_targets,
-              dst_requirements[index].region.get_index_space(),
+              trace_info, dst_targets, dst_requirements[index],
               index_point, dst_records, false/*sources*/);
         copy_pre = result.first;
         copy_post = result.second;
@@ -5460,19 +5458,11 @@ namespace Legion {
     std::pair<ApEvent,ApEvent> CopyOp::exchange_indirect_records(
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
-        const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord> &records, const bool sources)
+        const RegionRequirement &req, const DomainPoint &key,
+        std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *node = runtime->forest->get_node(space);
-      ApEvent domain_ready;
-      const Domain dom = node->get_domain(domain_ready, true/*tight*/);
-      for (unsigned idx = 0; idx < insts.size(); idx++)
-      {
-        const InstanceRef &ref = insts[idx];
-        records.push_back(IndirectRecord(ref.get_valid_fields(),
-              ref.get_manager(), key, space, dom));
-      }
+      records.emplace_back(IndirectRecord(runtime->forest, req, insts, key));
       return std::make_pair(local_pre, local_post);
     }
 
@@ -7062,16 +7052,16 @@ namespace Legion {
     std::pair<ApEvent,ApEvent> IndexCopyOp::exchange_indirect_records(
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
-        const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord> &records, const bool sources)
+        const RegionRequirement &req, const DomainPoint &key,
+        std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
-                              trace_info, insts, space, key, records, sources);
+                              trace_info, insts, req, key, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
-                              trace_info, insts, space, key, records, sources);
+                              trace_info, insts, req, key, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_pre.exists());
       assert(local_post.exists());
@@ -7080,20 +7070,13 @@ namespace Legion {
       RtUserEvent to_trigger;
       std::pair<ApEvent,ApEvent> result;
       {
-        IndexSpaceNode *node = runtime->forest->get_node(space);
-        ApEvent domain_ready;
-        const Domain dom = node->get_domain(domain_ready, true/*tight*/);
         bool done_all_exchanges = false;
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          for (unsigned idx = 0; idx < insts.size(); idx++)
-          {
-            const InstanceRef &ref = insts[idx];
-            src_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
-          }
+          src_records[index].emplace_back(
+              IndirectRecord(runtime->forest, req, insts, key));
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
           exchange_pre_events[index].push_back(local_pre);
@@ -7119,12 +7102,8 @@ namespace Legion {
         }
         else
         {
-          for (unsigned idx = 0; idx < insts.size(); idx++)
-          {
-            const InstanceRef &ref = insts[idx];
-            dst_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
-          }
+          dst_records[index].emplace_back(
+              IndirectRecord(runtime->forest, req, insts, key));
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
           exchange_pre_events[index].push_back(local_pre);
@@ -7477,13 +7456,13 @@ namespace Legion {
     std::pair<ApEvent,ApEvent> PointCopyOp::exchange_indirect_records(
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
-        const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord> &records, const bool sources)
+        const RegionRequirement &req, const DomainPoint &key,
+        std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
       return owner->exchange_indirect_records(index, local_pre, local_post,
-                  trace_info, insts, space, index_point, records, sources);
+                  trace_info, insts, req, index_point, records, sources);
     }
 
     //--------------------------------------------------------------------------

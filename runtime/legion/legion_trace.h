@@ -762,23 +762,14 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::map<Reservation,bool> &reservations,
+                             const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard,
                              ReductionOpID redop, bool reduction_fold);
-      virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<CopyIndirection*> &indirections,
-                             const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                             unsigned unique_indirections_identifier,
-#endif
-                             ApEvent precondition, PredEvent pred_guard,
-                             ApEvent tracing_precondition);
+      virtual void record_issue_across(Memoizable *memo, 
+                             CopyAcrossExecutor *executor);
       virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
@@ -962,7 +953,7 @@ namespace Legion {
       friend class AssignFenceCompletion;
       friend class IssueCopy;
       friend class IssueFill;
-      friend class IssueIndirect;
+      friend class IssueAcross;
       friend class SetOpSyncEvent;
       friend class SetEffects;
       friend class CompleteReplay;
@@ -1007,7 +998,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy(void) { return NULL; }
       virtual IssueFill* as_issue_fill(void) { return NULL; }
-      virtual IssueIndirect* as_issue_indirect(void) { return NULL; }
+      virtual IssueAcross* as_issue_across(void) { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
@@ -1230,28 +1221,19 @@ namespace Legion {
     };
 
     /**
-     * \class IssueIndirect
+     * \class IssueAcross
      * This instruction has the following semantics:
      *  events[lhs] = expr->issue_indirect(dst_fields, src_fields,
      *                                     indirections,
      *                                     events[precondition_idx],
      *                                     predicate_guard)
      */
-    class IssueIndirect : public Instruction {
+    class IssueAcross : public Instruction {
     public:
-      IssueIndirect(PhysicalTemplate &tpl,
-                    unsigned lhs, IndexSpaceExpression *expr,
-                    const TraceLocalID &op_key,
-                    const std::vector<CopySrcDstField>& src_fields,
-                    const std::vector<CopySrcDstField>& dst_fields,
-                    const std::vector<CopyIndirection*>& indirects,
-                    const std::map<Reservation,bool>& reservations,
-#ifdef LEGION_SPY
-                    unsigned unique_indirections_identifier,
-#endif
-                    unsigned precondition_idx,
-                    unsigned tracing_pre_idx);
-      virtual ~IssueIndirect(void);
+      IssueAcross(PhysicalTemplate &tpl,
+                  const TraceLocalID &op_key,
+                  CopyAcrossExecutor *executor);
+      virtual ~IssueAcross(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,Memoizable*> &operations);
@@ -1260,21 +1242,12 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return ISSUE_INDIRECT; }
-      virtual IssueIndirect* as_issue_indirect(void)
+      virtual IssueAcross * as_issue_across(void)
         { return this; }
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
-      IndexSpaceExpression *expr;
-      std::vector<CopySrcDstField> src_fields;
-      std::vector<CopySrcDstField> dst_fields;
-      std::vector<CopyIndirection*> indirections;
-      std::map<Reservation,bool> reservations;
-#ifdef LEGION_SPY
-      unsigned unique_indirections_identifier;
-#endif
-      unsigned precondition_idx;
-      unsigned tracing_pre_idx;
+      CopyAcrossExecutor *const executor;
     };
 
     /**

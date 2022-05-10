@@ -1517,7 +1517,7 @@ namespace Legion {
     class AssignFenceCompletion;
     class IssueCopy;
     class IssueFill;
-    class IssueIndirect;
+    class IssueAcross;
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class SetEffects;
@@ -1527,7 +1527,8 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
-    class CopyIndirection;
+    class CopyAcrossExecutor;
+    class CopyAcrossUnstructured;
     class IndexSpaceExpression;
     class IndexSpaceExprRef;
     class IndexSpaceOperation;

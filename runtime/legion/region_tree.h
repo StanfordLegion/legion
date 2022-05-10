@@ -46,20 +46,22 @@ namespace Legion {
      * A small helper class for performing exchanges of
      * instances for indirection copies
      */
-    struct IndirectRecord : public LegionHeapify<IndirectRecord> {
+    struct IndirectRecord {
     public:
       IndirectRecord(void) { }
-      IndirectRecord(const FieldMask &m, InstanceManager *p, 
-                     const DomainPoint &key, IndexSpace handle, 
-                     const Domain &d);
+      IndirectRecord(RegionTreeForest *forest, 
+                     const RegionRequirement &req,
+                     const InstanceSet &insts,
+                     const DomainPoint &key);
     public:
-      FieldMask fields;
-      PhysicalInstance inst;
+      // In the same order as the fields for the actual copy
+      std::vector<PhysicalInstance> instances;
 #ifdef LEGION_SPY
-      ApEvent instance_event;
+      std::vector<ApEvent> instance_events;
       IndexSpace index_space;
 #endif
       Domain domain;
+      ApEvent domain_ready;
     };
 
     /**
@@ -527,7 +529,7 @@ namespace Legion {
       ApEvent gather_across(const RegionRequirement &src_req,
                             const RegionRequirement &idx_req,
                             const RegionRequirement &dst_req,
-                            const LegionVector<IndirectRecord> &records,
+                            std::vector<IndirectRecord> &records,
                             const InstanceSet &src_targets,
                             const InstanceSet &idx_targets,
                             const InstanceSet &dst_targets,
@@ -549,7 +551,7 @@ namespace Legion {
                              const InstanceSet &src_targets,
                              const InstanceSet &idx_targets,
                              const InstanceSet &dst_targets,
-                             const LegionVector<IndirectRecord> &records,
+                             std::vector<IndirectRecord> &records,
                              CopyOp *op, unsigned src_index,
                              unsigned idx_index, unsigned dst_index,
                              const bool scatter_is_range,
@@ -569,9 +571,9 @@ namespace Legion {
                               const RegionRequirement &dst_idx_req,
                               const InstanceSet &src_targets,
                               const InstanceSet &dst_targets,
-                              const LegionVector<IndirectRecord> &src_records,
+                              std::vector<IndirectRecord> &src_records,
                               const InstanceSet &src_idx_target,
-                              const LegionVector<IndirectRecord> &dst_records,
+                              std::vector<IndirectRecord> &dst_records,
                               const InstanceSet &dst_idx_target, CopyOp *op,
                               unsigned src_index, unsigned dst_index,
                               unsigned src_idx_index, unsigned dst_idx_index,
@@ -967,82 +969,221 @@ namespace Legion {
       std::vector<Rect<DIM,T> > pieces;
     };
 
-
     /**
-     * \class CopyIndirection
-     * This is a type-erased copy indirection representation
+     * \class CopyAcrossExecutor
+     * This is a virtual interface for performing copies between
+     * two different fields including with lots of different kinds
+     * of indirections and transforms.
      */
-    class CopyIndirection {
+    class CopyAcrossExecutor : public Collectable {
     public:
-      CopyIndirection(TypeTag one, TypeTag two)
-        : t1(one), t2(two) { }
-      virtual ~CopyIndirection(void) { }
+      CopyAcrossExecutor(Runtime *rt,
+                         const std::map<Reservation,bool> &rsrvs)
+        : runtime(rt), reservations(rsrvs) { }
+      virtual ~CopyAcrossExecutor(void) { }
     public:
-      template<int N, typename T>
-      typename Realm::CopyIndirection<N,T>::Base* to_base(void) const
-      {
-#ifdef DEBUG_LEGION
-        const TypeTag tag = NT_TemplateHelper::template encode_tag<N,T>();
-        assert(t1 == tag);
+      virtual ApEvent execute(Operation *op,
+                              const PhysicalTraceInfo &trace_info,
+                              unsigned stage = 0, bool replay = false) = 0;
+    public:
+      Runtime *const runtime;
+      // Reservations that must be acquired for performing this copy
+      // across and whether they need to be acquired with exclusive
+      // permissions or not
+      const std::map<Reservation,bool> reservations;
+    };
+    
+    /**
+     * \class CopyAcrossUnstructured
+     * Untyped base class for all unstructured copies between fields
+     */
+    class CopyAcrossUnstructured : public CopyAcrossExecutor {
+    public:
+      CopyAcrossUnstructured(Runtime *rt,
+                             const std::map<Reservation,bool> &rsrvs)
+        : CopyAcrossExecutor(rt, rsrvs) { }
+      virtual ~CopyAcrossUnstructured(void) { }
+    public:
+      virtual ApEvent execute(Operation *op,
+                              const PhysicalTraceInfo &trace_info,
+                              unsigned stage = 0, bool replay = false) = 0;
+    public:
+      void initialize_source_fields(RegionTreeForest *forest,
+                                    const RegionRequirement &req,
+                                    const InstanceSet &instances,
+                                    const std::vector<InstanceView*> &views,
+                                    const PhysicalTraceInfo &trace_info);
+      void initialize_destination_fields(RegionTreeForest *forest,
+                                    const RegionRequirement &req,
+                                    const InstanceSet &instances,
+                                    const std::vector<InstanceView*> &views,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const bool exclusive_redop);
+      void initialize_source_indirections(RegionTreeForest *forest,
+                                    std::vector<IndirectRecord> &records,
+                                    const RegionRequirement &src_req,
+                                    const RegionRequirement &idx_req,
+                                    const InstanceRef &indirect_instance,
+                                    const DomainPoint &index_point,
+                                    const ApEvent src_precondition,
+                                    const bool both_are_range,
+                                    const bool possible_out_of_range);
+      void initialize_destination_indirections(RegionTreeForest *forest,
+                                    std::vector<IndirectRecord> &records,
+                                    const RegionRequirement &dst_req,
+                                    const RegionRequirement &idx_req,
+                                    const InstanceRef &indirect_instance,
+                                    const DomainPoint &index_point,
+                                    const ApEvent dst_precondition,
+                                    const bool both_are_range,
+                                    const bool possible_out_of_range,
+                                    const bool possible_aliasing,
+                                    const bool exclusive_redop);
+    public:
+      // All the entries in these data structures are ordered by the
+      // order of the fields in the original region requirements
+      std::vector<CopySrcDstField> src_fields, dst_fields;
+#ifdef LEGION_SPY
+      std::vector<Realm::CopySrcDstField> realm_src_fields, realm_dst_fields;
 #endif
-        void *ptr = get_base();
-        typename Realm::CopyIndirection<N,T>::Base *result = NULL;
-        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
-        memcpy(&result, &ptr, sizeof(result));
-        return result;
-      }
     public:
-      virtual CopyIndirection* clone(void) = 0;
-      virtual void serializer(Serializer &rez) const = 0;
-    protected:
-      virtual void* get_base(void) const = 0;
+      // All the 'instances' in the entries in these data strctures are
+      // ordered by the order of the fields in the origin region requirements
+      std::vector<IndirectRecord> src_indirections, dst_indirections;
+      FieldID src_indirect_field, dst_indirect_field;
+      PhysicalInstance src_indirect_instance, dst_indirect_instance;
+      TypeTag src_indirect_type, dst_indirect_type;
     public:
-      const TypeTag t1;
-      const TypeTag t2;
+      PredEvent pred_guard;
+      ApEvent init_precondition;
+      ApEvent src_ready, dst_ready, src_idx_ready, dst_idx_ready;
+      ApEvent last_copy;
+    public:
+      bool both_are_range;
+      bool possible_src_out_of_range;
+      bool possible_dst_out_of_range;
+      bool possible_dst_aliasing;
     };
 
     /**
-     * This is the cross-product typed verison of a copy indirection
+     * \class CopyAcrossExecutorT
+     * This is the templated version of the copy-across executor. It is
+     * templated on the dimensions and coordinate type of the copy space
+     * for the copy operation.
      */
-    template<int N1, typename T1, int N2, typename T2>
-    class CopyIndirectionT : public CopyIndirection {
+    template<int DIM, typename T>
+    class CopyAcrossUnstructuredT : public CopyAcrossUnstructured {
     public:
-      CopyIndirectionT(typename 
-            Realm::CopyIndirection<N1,T1>::template Unstructured<N2,T2> *ptr)
-        : CopyIndirection(NT_TemplateHelper::template encode_tag<N1,T1>(),
-          NT_TemplateHelper::template encode_tag<N2,T2>()), indirection(ptr) { }
-      virtual ~CopyIndirectionT(void) { delete indirection; }
+      typedef typename Realm::CopyIndirection<DIM,T>::Base CopyIndirection;
     public:
-      virtual CopyIndirection* clone(void)
-      {
-        return new CopyIndirectionT<N1,T1,N2,T2>(
-            new typename Realm::CopyIndirection<N1,T1>::template
-              Unstructured<N2,T2>(*indirection));
-      }
-      virtual void serializer(Serializer &rez) const
-      {
-        rez.serialize(this->t2);
-        rez.serialize(indirection->field_id);
-        rez.serialize(indirection->inst);
-#ifdef DEBUG_LEGION
-        assert(indirection->spaces.size() == indirection->insts.size());
-#endif
-        rez.serialize<size_t>(indirection->spaces.size());
-        for (unsigned idx = 0; idx < indirection->spaces.size(); idx++)
+      struct UnstructuredIndirectionHelper {
+      public:
+        UnstructuredIndirectionHelper(
+            const std::vector<unsigned> &nonempty, 
+            const std::vector<IndirectRecord> &recs,
+            std::vector<const CopyIndirection*> &indirects,
+            const FieldID fid, const PhysicalInstance inst,
+            bool range, bool out_of_range, bool aliasing, unsigned off) 
+          : nonempty_indexes(nonempty), records(recs),
+            indirections(indirects), indirect_field(fid), indirect_inst(inst),
+            offset(off), is_range(range), possible_out_of_range(out_of_range),
+            possible_aliasing(aliasing), indirect_index(0) 
+        { instances.reserve(nonempty_indexes.size()); }
+      public:
+        template<int N2, typename T2>
+        inline void find_or_create_indirection(void)
         {
-          rez.serialize(indirection->insts[idx]);
-          Domain domain(indirection->spaces[idx]);
-          rez.serialize(domain);
+          typedef typename Realm::CopyIndirection<DIM,T>::template 
+            Unstructured<N2,T2> UnstructuredIndirection;
+          // Search through all the existing copy indirections starting from
+          // the offset and check to see if we can reuse them
+          for (unsigned index = offset; index < indirections.size(); index++)
+          {
+            // It's safe to cast here because we know that the same types
+            // made all these indirections as well
+            const UnstructuredIndirection *unstructured = 
+              static_cast<const UnstructuredIndirection*>(indirections[index]);
+#ifdef DEBUG_LEGION
+            assert(unstructured->inst == indirect_inst);
+            assert(unstructured->field_id == indirect_field);
+            assert(unstructured->insts.size() == instances.size());
+#endif
+            bool instances_match = true;
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              if (unstructured->insts[idx] == instances[idx])
+                continue;
+              instances_match = false;
+              break;
+            }
+            if (!instances_match)
+              continue;
+            // If we made it here we can reuse this indirection
+            indirect_index = index;
+            return;
+          }
+          // If we make it here we need to make a new indirection
+          UnstructuredIndirection *unstructured = new UnstructuredIndirection();
+          unstructured->field_id = indirect_field;
+          unstructured->inst = indirect_inst;
+          unstructured->is_ranges = is_range;
+          unstructured->oor_possible = possible_out_of_range;
+          unstructured->aliasing_possible = possible_aliasing;
+          unstructured->subfield_offset = 0;
+          unstructured->insts.swap(instances);
+          unstructured->spaces.resize(nonempty_indexes.size());
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+            unstructured->spaces[idx] = records[nonempty_indexes[idx]].domain;
+          indirect_index = indirections.size();
+          indirections.push_back(unstructured);
         }
-        rez.serialize(indirection->is_ranges);
-        rez.serialize(indirection->oor_possible);
-        rez.serialize(indirection->aliasing_possible);
-      }
+        template<typename N2, typename T2>
+        static inline void demux(UnstructuredIndirectionHelper *helper)
+          { helper->find_or_create_indirection<N2::N,T2>(); }
+      public:
+        std::vector<PhysicalInstance> instances;
+        const std::vector<unsigned> &nonempty_indexes;
+        const std::vector<IndirectRecord> &records;
+        std::vector<const CopyIndirection*> &indirections;
+        const FieldID indirect_field;
+        const PhysicalInstance indirect_inst;
+        const unsigned offset;
+        const bool is_range;
+        const bool possible_out_of_range;
+        const bool possible_aliasing;
+        unsigned indirect_index;
+      };
+    public:
+      CopyAcrossUnstructuredT(Runtime *runtime, 
+                              IndexSpaceExpression *expr,
+                              const DomainT<DIM,T> &domain,
+                              ApEvent domain_ready,
+                              const std::map<Reservation,bool> &rsrvs);
+      virtual ~CopyAcrossUnstructuredT(void);
+    public:
+      virtual ApEvent execute(Operation *op,
+                              const PhysicalTraceInfo &trace_info,
+                              unsigned stage = 0, bool replay = false); 
+    public:
+      static void rebuild_indirections(
+          std::vector<CopySrcDstField> &fields,
+          std::vector<DomainT<DIM,T> > &preimages,
+          std::vector<const CopyIndirection*> &indirections,
+          const std::vector<IndirectRecord> &indirect_records,
+#ifdef LEGION_SPY
+          unsigned unique_indirections_identifier,
+          ApEvent indirect_inst_event,
+#endif
+          FieldID indirect_field, PhysicalInstance indirect_inst,
+          TypeTag indirect_type, bool both_are_range, 
+          bool out_of_range, bool aliasing);
+    public:
+      IndexSpaceExpression *const expr;
+      const DomainT<DIM,T> copy_domain;
+      const ApEvent copy_domain_ready;
     protected:
-      virtual void* get_base(void) const { return indirection; }
-    protected:
-      typename Realm::CopyIndirection<N1,T1>::template 
-        Unstructured<N2,T2> *const indirection;
+      std::vector<DomainT<DIM,T> > src_preimages, dst_preimages;
+      std::vector<const CopyIndirection*> indirections;
     };
 
     /**
@@ -1068,50 +1209,6 @@ namespace Legion {
       public:
         IndexSpaceExpression *const proxy_this;
         DistributedCollectable *const proxy_dc;
-      };
-    public:
-      template<int N1, typename T1>
-      struct UnstructuredIndirectionHelper {
-      public:
-        UnstructuredIndirectionHelper(FieldID fid, bool range, 
-            PhysicalInstance inst, const std::set<IndirectRecord*> &recs,
-            bool out_of_range, bool aliasing)
-          : indirect_field(fid), indirect_inst(inst), 
-            records(recs), result(NULL), is_range(range),
-            possible_out_of_range(out_of_range), possible_aliasing(aliasing) { }
-      public:
-        template<typename N2, typename T2>
-        static inline void demux(UnstructuredIndirectionHelper *helper)
-        {
-          typename Realm::CopyIndirection<N1,T1>::template
-            Unstructured<N2::N,T2> *indirect = new typename 
-              Realm::CopyIndirection<N1,T1>::template Unstructured<N2::N,T2>();
-          indirect->field_id = helper->indirect_field;
-          indirect->inst = helper->indirect_inst;
-          indirect->is_ranges = helper->is_range;
-          indirect->oor_possible = helper->possible_out_of_range;
-          indirect->aliasing_possible = helper->possible_aliasing;
-          indirect->subfield_offset = 0;
-          indirect->spaces.resize(helper->records.size());
-          indirect->insts.resize(helper->records.size());
-          unsigned index = 0;
-          for (std::set<IndirectRecord*>::const_iterator it = 
-                helper->records.begin(); it != 
-                helper->records.end(); it++, index++)
-          {
-            indirect->spaces[index] = (*it)->domain;
-            indirect->insts[index] = (*it)->inst; 
-          }
-          helper->result = new CopyIndirectionT<N1,T1,N2::N,T2>(indirect);
-        }
-      public:
-        const FieldID indirect_field;
-        const PhysicalInstance indirect_inst;
-        const std::set<IndirectRecord*> &records;
-        CopyIndirection *result;
-        const bool is_range;
-        const bool possible_out_of_range;
-        const bool possible_aliasing;
       };
     public:
       IndexSpaceExpression(LocalLock &lock);
@@ -1170,39 +1267,15 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::map<Reservation,bool> &reservations,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold) = 0;
-      virtual void construct_indirections(
-                           const std::vector<unsigned> &field_indexes,
-                           const FieldID indirect_field,
-                           const TypeTag indirect_type, const bool is_range,
-                           const PhysicalInstance indirect_instance,
-                           const LegionVector<IndirectRecord> &records,
-                           std::vector<CopyIndirection*> &indirections,
-                           std::vector<unsigned> &indirect_indexes,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-                           const ApEvent indirect_inst_event,
-#endif
-                           const bool possible_out_of_range,
-                           const bool possible_aliasing) = 0;
-      virtual void unpack_indirections(Deserializer &derez,
-                           std::vector<CopyIndirection*> &indirections) = 0;
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
-                           const std::vector<CopySrcDstField> &dst_fields,
-                           const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<CopyIndirection*> &indirects,
-                           const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition) = 0;
+      virtual CopyAcrossUnstructured* create_across_unstructured(
+                           const std::map<Reservation,bool> &reservations) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -1264,44 +1337,13 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
-                               const std::map<Reservation,bool> &reservations,
+                               const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
 #endif
                                ApEvent precondition, PredEvent pred_guard,
                                ReductionOpID redop, bool reduction_fold);
-      template<int DIM, typename T>
-      inline void construct_indirections_internal(
-                               const std::vector<unsigned> &field_indexes,
-                               const FieldID indirect_field,
-                               const TypeTag indirect_type, const bool is_range,
-                               const PhysicalInstance indirect_instance,
-                               const LegionVector<IndirectRecord> &records,
-                               std::vector<CopyIndirection*> &indirections,
-                               std::vector<unsigned> &indirect_indexes,
-#ifdef LEGION_SPY
-                               unsigned unique_indirections_identifier,
-                               const ApEvent indirect_inst_event,
-#endif
-                               const bool possible_out_of_range,
-                               const bool possible_aliasing);
-      template<int DIM, typename T>
-      inline void unpack_indirections_internal(Deserializer &derez,
-                               std::vector<CopyIndirection*> &indirections);
-      template<int DIM, typename T>
-      inline ApEvent issue_indirect_internal(RegionTreeForest *forest,
-                               const Realm::IndexSpace<DIM,T> &space,
-                               const PhysicalTraceInfo &trace_info,
-                               const std::vector<CopySrcDstField> &dst_fields,
-                               const std::vector<CopySrcDstField> &src_fields,
-                               const std::vector<CopyIndirection*> &indirects,
-                               const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                               unsigned unique_indirections_identifier,
-#endif
-                               ApEvent precondition, PredEvent pred_guard,
-                               ApEvent tracing_precondition);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1533,39 +1575,15 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::map<Reservation,bool> &reservations,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
-      virtual void construct_indirections(
-                           const std::vector<unsigned> &field_indexes,
-                           const FieldID indirect_field,
-                           const TypeTag indirect_type, const bool is_range,
-                           const PhysicalInstance indirect_instance,
-                           const LegionVector<IndirectRecord> &records,
-                           std::vector<CopyIndirection*> &indirections,
-                           std::vector<unsigned> &indirect_indexes,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-                           const ApEvent indirect_inst_event,
-#endif
-                           const bool possible_out_of_range,
-                           const bool possible_aliasing);
-      virtual void unpack_indirections(Deserializer &derez,
-                           std::vector<CopyIndirection*> &indirections);
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
-                           const std::vector<CopySrcDstField> &dst_fields,
-                           const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<CopyIndirection*> &indirects,
-                           const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition);
+      virtual CopyAcrossUnstructured* create_across_unstructured(
+                           const std::map<Reservation,bool> &reservations);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -2471,39 +2489,15 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::map<Reservation,bool> &reservations,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
-      virtual void construct_indirections(
-                           const std::vector<unsigned> &field_indexes,
-                           const FieldID indirect_field,
-                           const TypeTag indirect_type, const bool is_range,
-                           const PhysicalInstance indirect_instance,
-                           const LegionVector<IndirectRecord> &records,
-                           std::vector<CopyIndirection*> &indirections,
-                           std::vector<unsigned> &indirect_indexes,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-                           const ApEvent indirect_inst_event,
-#endif
-                           const bool possible_out_of_range,
-                           const bool possible_aliasing);
-      virtual void unpack_indirections(Deserializer &derez,
-                           std::vector<CopyIndirection*> &indirections);
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
-                           const std::vector<CopySrcDstField> &dst_fields,
-                           const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<CopyIndirection*> &indirects,
-                           const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition);
+      virtual CopyAcrossUnstructured* create_across_unstructured(
+                           const std::map<Reservation,bool> &reservations);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
