@@ -38,7 +38,7 @@ typedef CObjectWrapper::ArrayAccessor1D ArrayAccessor1D;
 typedef CObjectWrapper::ArrayAccessor2D ArrayAccessor2D;
 typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
 
-#ifndef LEGION_USE_CUDA
+#if !defined(LEGION_USE_CUDA) && !defined(LEGION_USE_HIP)
 // declare (CPU-only) reductions here
 
 #define DECLARE_ARRAY_REDUCTION(REG, CLASS)                             \

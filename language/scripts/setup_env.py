@@ -19,12 +19,8 @@ from __future__ import print_function
 import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys, tempfile, traceback
 
 def discover_llvm_version():
-    if os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
-        return '60'
-    elif os.environ.get('NERSC_HOST') == 'perlmutter':
-        return '110'
-    else:
-        return '60'
+    # standardize on LLVM 13.0 everywhere
+    return '130'
 
 def discover_skip_certificate_check():
     if platform.node().startswith('titan'):
@@ -45,8 +41,10 @@ def discover_conduit():
         return 'psm'
     elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
         return 'ibv'
+    elif os.environ.get('LMOD_SYSTEM_NAME') == 'crusher': # Crusher doesn't set hostname
+        return 'ofi-slingshot11'
     elif os.environ.get('NERSC_HOST') == 'perlmutter':
-        return 'ucx'
+        return 'ofi-slingshot10'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
@@ -203,6 +201,9 @@ def build_hdf(source_dir, install_dir, thread_count, is_cray):
 
 def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
                  gasnet_dir, llvm_dir, terra_dir, hdf_dir, conduit, thread_count):
+    if conduit is not None and conduit.startwith('ofi-'):
+        conduit = 'ofi'
+
     env = dict(list(os.environ.items()) +
         ([('CONDUIT', conduit),
           ('GASNET', gasnet_dir),
