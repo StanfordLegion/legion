@@ -1,6 +1,7 @@
 # Regent Compiler
 
-This directory contains the compiler for the Regent language.
+This directory contains the compiler for the [Regent
+language](http://regent-lang.org/).
 
 ## Quickstart for Ubuntu
 
@@ -68,9 +69,17 @@ Regent also has a number of transitive dependencies via Legion:
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
   * *Optional*: HDF5 (for file I/O)
 
-## Installing
+## Installing Regent on a Personal Machine with `install.py`
 
-Run the following command from the `language` directory:
+There are two ways to install Regent. The first, `install.py`, assumes
+that (most) dependencies are pre-installed (e.g., through a package
+manager). The exception is Terra, which is downloaded automatically by
+the script.
+
+On supercomputers (which often do not come with these packages), the
+`setup_env.py` script is recommended (see below).
+
+From the `legion/language` directory:
 
 ```bash
 ./install.py [-h] [--debug] [--gasnet] [--cuda] [--openmp] [--python] [--hdf5]
@@ -80,28 +89,71 @@ Run the following command from the `language` directory:
 
 Run with `-h` to get a full list of available flags.
 
-This command:
-
-  * Downloads and builds [Terra](http://terralang.org/). (Terra will
-    recursively download and build [LuaJIT](http://luajit.org/)).
-  * Builds a dynamic library for [Legion](http://legion.stanford.edu/).
-  * (OS X) Patches said dynamic library to avoid hard-coded absolute paths.
-  * Sets everything up to run from `regent.py`.
-
 Notes:
 
   * Use `--debug` to enable Legion's debug mode. Debug mode includes
     significantly more safety checks and better error messages, but
-    also runs signficantly slower than release mode.
-  * For CUDA support, use `--cuda`.
-  * For GASNet (networking) support, use `--gasnet`.
+    also runs significantly slower than release mode.
+  * For CUDA support, use `--cuda`. This requires that CUDA be
+    pre-installed and the location of CUDA be specified via
+    `CUDA_HOME` or `CUDA` environment variables.
+  * For GASNet (networking) support, use `--gasnet`. This requires
+    that GASNet be pre-installed and the location of GASNet be
+    specified via the `GASNET_ROOT` or `GASNET` environment variables.
   * RDIR is an optional (but recommended) plugin for Regent; this is
     required for Regent's static control replication
-    optimization. Selecting `auto` here will instruct the installer to
+    optimization. Specifying `--rdir=auto` will instruct the installer to
     download and manage RDIR automatically.
-  * If you want to build with your own copy of Terra, pass the path to
+  * If you prefer to build your own copy of Terra, pass the path to
     the Terra directory via the `--with-terra` flag. You will be
     responsible for building Terra yourself if you do this.
+
+## Installing Regent on a Supercomputer via `setup_env.py`
+
+The `setup_env.py` script is our main way of deploying Regent on
+supercomputers. This script has built-in support for identifying
+commonly used machines that we run on, and also builds all
+dependencies. In contrast to `install.py`, GASNet is also enabled by
+default. CUDA must still be enabled manually. Note that when using
+`setup_env.py`, some of options differ from `install.py`.
+
+From the `legion/language` directory:
+
+```bash
+./scripts/setup_env.py
+```
+
+There are a number of variables that you may need to pass in addition
+to this, depending on your configuration:
+
+  * On Cray machines, the C and C++ compilers are offered via wrappers
+    `cc` and `CC`. These wrappers cannot be used to build all Regent
+    dependencies. Therefore, on Cray systems, we require that the
+    non-wrapped host compilers be passed via `HOST_CC` and `HOST_CXX`
+    environment variables. We generally recommend using GCC as the
+    host compiler, which would mean loading the `PrgEnv-gnu` module
+    and then passing `gcc` and `g++` as `HOST_CC` and `HOST_CXX`.
+  * By default the script will build LLVM 13.0. If for some reason
+    another version is required, this can be specified via the
+    `--llvm-version` flag.
+  * For CUDA support, set `USE_CUDA` to `1`. Make sure that CUDA can
+    be located through the `CUDA_HOME` environment variable.
+  * Similarly for HIP set `USE_HIP` to `1` and make sure HIP is
+    available via `HIP_PATH`. Please note that `HIP_ARCH` must be set
+    to the AMD GPU architecture (e.g., `gfx90a`).
+  * GASNet is enabled by default, and the network conduit will be
+    automatically identified on common machines that we use with
+    Regent. If your machine is not one of these, you may need to
+    specify the `CONDUIT` environment variable (e.g, `ibv` for
+    Infiniband, `aries` for Cray Aries, and `ofi` for HPE
+    Slingshot). If you prefer to disable GASNet (e.g., for single-node
+    runs), set `USE_GASNET` to `0`.
+  * The script will enable RDIR in `auto` mode by default.
+  * Unlike `install.py` the `setup_env.py` script will auto-detect the
+    number of available CPU cores on the machine to parallelize the
+    build.
+
+Additional flags and options can be queried via the `-h` flag.
 
 ## Running
 
@@ -132,20 +184,21 @@ the Regent compiler.
     Regent to attach a unique number to every symbol and region in the
     program. This can help to debug certain types of compile errors
     where otherwise the names can be difficult to disambiguate.
-  * `-fcuda 1`: Enable CUDA support. By default, Regent will attempt
+  * `-fgpu cuda`: Enable CUDA support. By default, Regent will attempt
     to auto-detect CUDA, but if this fails, it will silently ignore
     the failure. With this flag, Regent will produce an error if CUDA
     support cannot be enabled.
-  * `-fcuda-offline 1`: When CUDA auto-detection fails (e.g., if the
-    compute node the compiler is running on does not have a working
-    GPU), but the CUDA toolkit is still installed, use this flag to
-    force Regent to use CUDA in "offline" mode. You will not be able
-    to run with CUDA support directly, but this mode can be used to
-    dump a CUDA binary that can be run on a machine with a working
-    GPU.
-  * `-fcuda-arch`: In offline mode, it is necessary to manually
-    specify the architecture of the GPU that is being targeted (e.g.,
-    `ampere`).
+  * `-fgpu hip`: Enable HIP support. Currently Regent does not attempt
+    to auto-detect HIP.
+  * `-fgpu-arch`: Specify the GPU architecture. Note that this is
+    auto-detected by default on NVIDIA GPUs, but must be manually
+    specified for AMD GPUs. Example values include `ampere` (for
+    NVIDIA) and `gfx90a` (for AMD). The GPU architecture can also be
+    specified via the `GPU_ARCH` environment variable.
+  * `-fgpu-offline 1`: When a GPU is not available on the current
+    node, it is still possible to build GPU programs via this flag as
+    long as the appropriate compiler toolchain is installed. Note that
+    GPU architecture is mandatory in this mode (even with CUDA).
 
 ## Tests
 
