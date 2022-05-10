@@ -18070,10 +18070,12 @@ namespace Legion {
         const std::pair<VersionManager*,AddressSpaceID> key(owner, space);
         AutoLock m_lock(manager_lock);
         add_reference = subscription_owners.empty();
-#ifdef DEBUG_LEGION
-        assert(subscription_owners.find(key) == subscription_owners.end());
-#endif
-        subscription_owners.insert(key);
+        std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+          finder = subscription_owners.find(key);
+        if (finder == subscription_owners.end())
+          subscription_owners[key] = 1;
+        else
+          finder->second++;
       }
       if (add_reference)
         node->add_base_resource_ref(VERSION_MANAGER_REF);
@@ -18088,12 +18090,14 @@ namespace Legion {
       {
         const std::pair<VersionManager*,AddressSpaceID> key(owner, space);
         AutoLock m_lock(manager_lock);
-        std::set<std::pair<VersionManager*,AddressSpaceID> >::iterator finder =
-          subscription_owners.find(key);
+        std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+          finder = subscription_owners.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != subscription_owners.end());
+        assert(finder->second > 0);
 #endif
-        subscription_owners.erase(finder);
+        if (--finder->second == 0)
+          subscription_owners.erase(finder);
         remove_reference = subscription_owners.empty();
       }
       // Do this last to avoid 
@@ -18279,10 +18283,10 @@ namespace Legion {
           return;
         }
         to_remove.swap(equivalence_sets);
-        for (std::set<std::pair<VersionManager*,AddressSpaceID> >::
+        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
               const_iterator it = subscription_owners.begin();
               it != subscription_owners.end(); it++)
-          to_cancel[it->second].push_back(it->first);
+          to_cancel[it->first.second].push_back(it->first.first);
       }
 #ifdef DEBUG_LEGION
       assert(node->is_region());

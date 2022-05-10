@@ -3290,11 +3290,14 @@ namespace Legion {
     {
       const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
       AutoLock s_lock(set_lock);
-#ifdef DEBUG_LEGION
-      assert(subscription_owners.find(key) == subscription_owners.end());
-#endif
-      subscription_owners.insert(key);
-      add_reference();
+      if (subscription_owners.empty())
+        add_reference();
+      std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+        finder = subscription_owners.find(key);
+      if (finder == subscription_owners.end())
+        subscription_owners[key] = 1;
+      else
+        finder->second++;
     }
 
     //--------------------------------------------------------------------------
@@ -3304,14 +3307,16 @@ namespace Legion {
     {
       const std::pair<VersionManager*,AddressSpaceID> key(owner,space);
       AutoLock s_lock(set_lock);
+      std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::iterator
+        finder = subscription_owners.find(key);
 #ifdef DEBUG_LEGION
-      std::set<std::pair<VersionManager*,AddressSpaceID> >::iterator finder =
-        subscription_owners.find(key);
       assert(finder != subscription_owners.end());
-      subscription_owners.erase(finder);
-#else
-      subscription_owners.erase(key);
+      assert(finder->second > 0);
 #endif
+      if (--finder->second == 0)
+        subscription_owners.erase(finder);
+      if (!subscription_owners.empty())
+        return false;
       return remove_reference();
     }
 
@@ -3376,10 +3381,10 @@ namespace Legion {
         }
         // Copy and not remove since we need to see the acknowledgement
         // before we know when it is safe to remove our references
-        for (std::set<std::pair<VersionManager*,AddressSpaceID> >::
+        for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
               const_iterator it = subscription_owners.begin(); 
               it != subscription_owners.end(); it++)
-          to_cancel[it->second].push_back(it->first);
+          to_cancel[it->first.second].push_back(it->first.first);
         to_remove.swap(current_sets);
       }
       cancel_subscriptions(context->runtime, to_cancel);

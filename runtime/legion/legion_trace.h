@@ -725,7 +725,14 @@ namespace Legion {
       std::vector<InvalidInstAnalysis*> precondition_analyses;
       std::vector<AntivalidInstAnalysis*> anticondition_analyses;
     private:
-      std::set<std::pair<VersionManager*,AddressSpaceID> > subscription_owners;
+      // Keep track of our subscription owners
+      // Note that from the owners perspective it only has at most one
+      // reference to this subscriber at a time, but in practice the
+      // removal of references can be delayed arbitrarily so we need to
+      // keep a count of how many outstanding references there are for
+      // each owner so we know when it is done
+      std::map<std::pair<VersionManager*,AddressSpaceID>,
+               unsigned> subscription_owners;
     };
 
     /**
