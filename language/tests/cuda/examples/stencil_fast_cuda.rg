@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:gpu", "1", "-fcuda", "1", "-foverride-demand-cuda", "1"]]
+-- [["-ll:gpu", "1", "-foverride-demand-cuda", "1"]]
 
 package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../examples/?.rg"
 
