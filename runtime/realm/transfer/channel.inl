@@ -66,9 +66,6 @@ namespace Realm {
   // updates the progress counter, waking up the xd if needed
   inline void XferDes::update_progress(void)
   {
-    // no point in doing an update on an xd that's known to be done
-    if(transfer_completed.load()) return;
-
     // add 2 to the counter (i.e. preserving the LSB) - if LSB was/is set,
     //  attempt to add 1 to clear it and if successful, wake up the xd
     unsigned prev = progress_counter.fetch_add_acqrel(2);
@@ -152,7 +149,7 @@ namespace Realm {
       // now process this transfer request, paying attention to our deadline
 
       while(true) {
-	if(!xd->is_completed()) {
+	if(!xd->transfer_completed.load_acquire()) {
 	  // take a snapshot of the xd's progress counter before we work
 	  //  on it
 	  unsigned progress = xd->current_progress();
@@ -163,7 +160,7 @@ namespace Realm {
 	  // if we didn't do any work, and we're not done (i.e. by
 	  //  concluding there wasn't any work to actually do), re-check
 	  //  the progress counter and sleep the xd if needed
-	  if(!did_work && !xd->is_completed()) {
+	  if(!did_work && !xd->transfer_completed.load_acquire()) {
 	    if(!xd->check_for_progress(progress)) {
 	      // just drop the xd here (i.e. do not re-enqueue) - somebody
 	      //  else will (or already has) when new data comes in
@@ -174,7 +171,7 @@ namespace Realm {
 	  }
 	}
 
-	if(xd->is_completed()) {
+	if(xd->transfer_completed.load_acquire()) {
 	  xd->flush();
 	  log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
 	  xd->mark_completed();

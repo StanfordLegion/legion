@@ -2356,6 +2356,7 @@ namespace Realm {
 			   output_ports[output_space_id].local_bytes_total,
 			   output_bytes);
 	output_ports[output_space_id].local_bytes_total += output_bytes;
+	output_ports[output_space_id].local_bytes_cons.fetch_add(output_bytes);
 	did_work = true;
       }
 
@@ -2387,10 +2388,12 @@ namespace Realm {
           memcpy(dstptr, &cword, sizeof(unsigned));
 
           cp.local_bytes_total += sizeof(unsigned);
+          cp.local_bytes_cons.fetch_add(sizeof(unsigned));
         } while(!ctrl_sent);
 
 	if(input_done && ctrl_sent) {
-	  iteration_completed.store_release(true);
+          begin_completion();
+
 	  // mark all address streams as done (dummy write update)
 	  for(size_t i = 0; i < spaces.size(); i++)
 	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
