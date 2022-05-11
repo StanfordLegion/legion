@@ -201,7 +201,7 @@ def build_hdf(source_dir, install_dir, thread_count, is_cray):
 
 def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
                  gasnet_dir, llvm_dir, terra_dir, hdf_dir, conduit, thread_count):
-    if conduit is not None and conduit.startwith('ofi-'):
+    if conduit is not None and conduit.startswith('ofi-'):
         conduit = 'ofi'
 
     env = dict(list(os.environ.items()) +
