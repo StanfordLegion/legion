@@ -841,6 +841,16 @@ namespace Legion {
     void PhysicalManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifndef DEBUG_LEGION
+      // In non-debug mode we can just add the valid reference to the
+      // owner without needing to check. While this isn't strictly necessary
+      // for correctness, it is an important performance optimization to help
+      // the garbage collector quickly detect when instances should not be
+      // eligible for collection early in the process before trying to do
+      // the whole distributed protocol.
+      if (!is_owner())
+        send_remote_valid_increment(owner_space, mutator);
+#endif
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(!deferred_deletion.exists());
@@ -968,11 +978,11 @@ namespace Legion {
     void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+        send_remote_valid_decrement(owner_space, mutator);
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(gc_state == VALID_GC_STATE);
-      if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator);
 #endif
       if (pending_changes == 0)
       {
