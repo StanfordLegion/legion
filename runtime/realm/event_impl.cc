@@ -972,7 +972,7 @@ namespace Realm {
 			<< (remote_waiters.empty() ? "" : " remote waiters");
       while(!current_local_waiters.empty()) {
 	EventWaiter *ew = current_local_waiters.pop_front();
-	log_event.fatal() << "  waiting on " << make_event(generation.load()) << ": " << ew;
+	log_event.fatal() << "  waiting on " << make_event(generation.load() + 1) << ": " << ew;
       }
       for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
 	  it != future_local_waiters.end();
