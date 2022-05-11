@@ -72,7 +72,7 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
         if cuda:
-            extra_flags.append('--cuda')
+            extra_flags.append('--gpu=cuda')
             test_threads = ['-j', '1']  # do not oversubscribe GPU
         if hip:
             extra_flags.append('--gpu=hip')

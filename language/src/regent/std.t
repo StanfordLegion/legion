@@ -17,7 +17,7 @@
 local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local base = require("regent/std_base")
-local cudahelper = require("regent/cudahelper")
+local gpuhelper = require("regent/gpu/helper")
 local data = require("common/data")
 local ffi = require("ffi")
 local header_helper = require("regent/header_helper")
@@ -46,7 +46,8 @@ std.replicable_whitelist = base.replicable_whitelist
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE
-std.check_cuda_available = cudahelper.check_cuda_available
+std.check_gpu_available = gpuhelper.check_gpu_available
+std.check_cuda_available = gpuhelper.check_gpu_available
 
 -- #####################################
 -- ## Utilities
@@ -4285,16 +4286,16 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
   local cuda_setup = quote end
-  if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
+  if gpuhelper.check_gpu_available() then
+    gpuhelper.link_driver_library()
     local all_kernels = terralib.newlist()
     variants:map(function(variant)
       if variant:is_cuda() then
         all_kernels:insertall(variant:get_cuda_kernels())
       end
     end)
-    all_kernels:insertall(cudahelper.get_internal_kernels())
-    cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
+    all_kernels:insertall(gpuhelper.get_internal_kernels())
+    cuda_setup = gpuhelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local extra_setup = quote end
@@ -4738,31 +4739,34 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   end
   if link_flags then flags:insertall(link_flags) end
   if os.getenv('CRAYPE_VERSION') then
-    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local ugni_link_opts = os.getenv('CRAY_UGNI_POST_LINK_OPTS')
+    if ugni_link_opts then
+      for flag in ugni_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-lugni")
     end
-    flags:insert("-lugni")
-    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local udreg_link_opts = os.getenv('CRAY_UDREG_POST_LINK_OPTS')
+    if udreg_link_opts then
+      for flag in udreg_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-ludreg")
     end
-    flags:insert("-ludreg")
-    for flag in os.getenv('CRAY_XPMEM_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local xpmem_link_opts = os.getenv('CRAY_XPMEM_POST_LINK_OPTS')
+    if xpmem_link_opts then
+      for flag in xpmem_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-lxpmem")
     end
-    flags:insert("-lxpmem")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated CUDA code correctly
-  if std.config["cuda"] and cudahelper.check_cuda_available() and base.c.REGENT_USE_HIJACK == 0 then
-    flags:insertall({
-      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
-      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
-      "-lpthread", "-lrt"
-    })
+  if gpuhelper.check_gpu_available() then
+    flags:insertall(gpuhelper.driver_library_link_flags())
   end
 
   profile('compile', nil, function()

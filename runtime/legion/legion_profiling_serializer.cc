@@ -95,7 +95,9 @@ namespace Legion {
       ss << "ProcMDesc {"
          << "id:" << PROC_MEM_DESC_ID                          << delim
          << "proc_id:ProcID:"              << sizeof(ProcID)   << delim
-         << "mem_id:MemID:"                << sizeof(MemID)
+         << "mem_id:MemID:"                << sizeof(MemID)    << delim
+         << "bandwidth:unsigned:"          << sizeof(unsigned) << delim
+         << "latency:unsigned:"            << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "IndexSpacePointDesc {"
@@ -473,16 +475,6 @@ namespace Legion {
       lp_fwrite(f, op_desc.name, strlen(op_desc.name) + 1);
     }
 
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
-                                      const LegionProfDesc::ProcDesc& proc_desc)
-    //--------------------------------------------------------------------------
-    {
-      int ID = PROC_DESC_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
-      lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
-    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -496,30 +488,6 @@ namespace Legion {
 		sizeof(max_dim_desc.max_dim));
 
     }
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
-                                        const LegionProfDesc::MemDesc& mem_desc)
-    //--------------------------------------------------------------------------
-    {
-      int ID = MEM_DESC_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(mem_desc.mem_id),   sizeof(mem_desc.mem_id));
-      lp_fwrite(f, (char*)&(mem_desc.kind),     sizeof(mem_desc.kind));
-      lp_fwrite(f, (char*)&(mem_desc.capacity), sizeof(mem_desc.capacity));
-    }
-
-    // Serialize Methods
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
-                                          const LegionProfDesc::ProcMemDesc &pm)
-    //--------------------------------------------------------------------------
-    {
-      int ID = PROC_MEM_DESC_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*) &(pm.proc_id), sizeof(pm.proc_id));
-      lp_fwrite(f, (char*) &(pm.mem_id), sizeof(pm.mem_id));
-    }
-
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                const LegionProfInstance::IndexSpacePointDesc &ispace_point_desc)
@@ -1072,6 +1040,42 @@ namespace Legion {
                 sizeof(runtime_call_info.proc_id));
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfInstance::ProcDesc& proc_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PROC_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(proc_desc.proc_id), sizeof(proc_desc.proc_id));
+      lp_fwrite(f, (char*)&(proc_desc.kind),    sizeof(proc_desc.kind));
+    }
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                        const LegionProfInstance::MemDesc& mem_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MEM_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(mem_desc.mem_id),   sizeof(mem_desc.mem_id));
+      lp_fwrite(f, (char*)&(mem_desc.kind),     sizeof(mem_desc.kind));
+      lp_fwrite(f, (char*)&(mem_desc.capacity), sizeof(mem_desc.capacity));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                          const LegionProfInstance::ProcMemDesc &pm)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PROC_MEM_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(pm.proc_id), sizeof(pm.proc_id));
+      lp_fwrite(f, (char*) &(pm.mem_id), sizeof(pm.mem_id));
+      lp_fwrite(f, (char*) &(pm.bandwidth), sizeof(pm.bandwidth));
+      lp_fwrite(f, (char*) &(pm.latency), sizeof(pm.latency));
+    }
+
+
 #ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -1529,39 +1533,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                      const LegionProfDesc::ProcDesc &proc_desc)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Proc Desc " IDFMT " %d", 
-                     proc_desc.proc_id, proc_desc.kind);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
                                       const LegionProfDesc::MaxDimDesc
 				      &max_dim_desc)
     //--------------------------------------------------------------------------
     {
       log_prof.print("Max Dim Desc %d",
                      max_dim_desc.max_dim);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
-                                        const LegionProfDesc::MemDesc &mem_desc)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Mem Desc " IDFMT " %d %llu", 
-                      mem_desc.mem_id, mem_desc.kind, mem_desc.capacity);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
-                                          const LegionProfDesc::ProcMemDesc &pm)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT,
-		     pm.proc_id, pm.mem_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1827,6 +1804,33 @@ namespace Legion {
       log_prof.print("Prof Runtime Call Info %u " IDFMT " %llu %llu",
                      runtime_call_info.kind, runtime_call_info.proc_id, 
                      runtime_call_info.start, runtime_call_info.stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                 const LegionProfInstance::ProcDesc &proc_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Proc Desc " IDFMT " %d",
+                     proc_desc.proc_id, proc_desc.kind);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                   const LegionProfInstance::MemDesc &mem_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Mem Desc " IDFMT " %d %llu",
+                      mem_desc.mem_id, mem_desc.kind, mem_desc.capacity);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                    const LegionProfInstance::ProcMemDesc &pm)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT " %u %u",
+		     pm.proc_id, pm.mem_id, pm.bandwidth, pm.latency);
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE

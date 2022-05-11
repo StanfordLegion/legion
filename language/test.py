@@ -305,7 +305,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, no_pretty, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_gpu, use_python, max_dim, no_pretty, extra_flags):
     base_env = {
     }
     run_env = {
@@ -361,18 +361,18 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
          )),
     ]
     openmp = [
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fopenmp", "1", "-fopenmp-offline", "1"] + extra_flags, base_env)),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'openmp', 'compile_fail'),
          )),
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),
     ]
-    cuda = [
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fcuda", "1", "-fcuda-offline", "1"] + extra_flags, base_env)),
+    gpu = [
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'cuda', 'compile_fail'),
          )),
-        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
+        ('run_pass', (test_run_pass, (['-fgpu', use_gpu] + extra_flags, run_env)),
          (os.path.join('tests', 'cuda', 'run_pass'),
           os.path.join('tests', 'cuda', 'examples'),
          )),
@@ -391,7 +391,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         ]
 
     result = []
-    if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_cuda):
+    if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_gpu):
         result.extend(base)
         if not no_pretty:
             result.extend(pretty)
@@ -408,8 +408,8 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         result.extend(hdf5)
     if use_openmp:
         result.extend(openmp)
-    if use_cuda:
-        result.extend(cuda)
+    if use_gpu:
+        result.extend(gpu)
     if use_python:
         result.extend(python)
     for dim in range(4, min(max_dim, 8) + 1):
@@ -417,7 +417,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     return result
 
 def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
-                  openmp, cuda, python, extra_flags, verbose, quiet,
+                  openmp, gpu, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, poll_interval,
                   short, no_pretty, legion_prof_rs):
     # run only one test at a time if '-j' isn't set
@@ -433,7 +433,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, no_pretty, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, gpu, python, max_dim, no_pretty, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -595,9 +595,9 @@ def test_driver(argv):
     parser.add_argument('--openmp',
                         action='store_true',
                         help='run OpenMP tests')
-    parser.add_argument('--cuda',
-                        action='store_true',
-                        help='run CUDA tests')
+    parser.add_argument('--gpu',
+                        choices=['cuda', 'hip'],
+                        help='run GPU tests')
     parser.add_argument('--python',
                         action='store_true',
                         help='run Python tests')
@@ -657,7 +657,7 @@ def test_driver(argv):
         args.prof,
         args.hdf5,
         args.openmp,
-        args.cuda,
+        args.gpu,
         args.python,
         args.extra_flags,
         args.verbose,
