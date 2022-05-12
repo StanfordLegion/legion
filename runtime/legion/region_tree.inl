@@ -5197,12 +5197,18 @@ namespace Legion {
     {
       if (expr->remove_base_expression_reference(COPY_ACROSS_REF))
         delete expr;
+#ifdef DEBUG_LEGION
+      assert(src_preimages.empty());
+      assert(dst_preimages.empty());
+#endif
       // Clean up any preimages that we computed
       for (typename std::vector<DomainT<DIM,T> >::iterator it =
-            src_preimages.begin(); it != src_preimages.end(); it++)
+            current_src_preimages.begin(); it != 
+            current_src_preimages.end(); it++)
         it->destroy(last_copy);
       for (typename std::vector<DomainT<DIM,T> >::iterator it =
-            dst_preimages.begin(); it != dst_preimages.end(); it++)
+            current_dst_preimages.begin(); it != 
+            current_dst_preimages.end(); it++)
         it->destroy(last_copy);
       for (typename std::vector<const CopyIndirection*>::const_iterator it =
             indirections.begin(); it != indirections.end(); it++)
@@ -5211,40 +5217,62 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent CopyAcrossUnstructuredT<DIM,T>::execute(Operation *op,
-               const PhysicalTraceInfo &trace_info, unsigned stage, bool replay)
+    ApEvent CopyAcrossUnstructuredT<DIM,T>::execute(Operation *op, 
+          PredEvent pred_guard, ApEvent copy_precondition, 
+          ApEvent src_indirect_precondition, ApEvent dst_indirect_precondition,
+          const PhysicalTraceInfo &trace_info, const bool recurrent_replay,
+          const unsigned stage)
     //--------------------------------------------------------------------------
     {
-      if (stage <= 0)
+      if (stage == 0)
       {
-        // Compute preimages if necessary
-        if (!src_indirections.empty() && (src_preimages.empty() || !replay))
+        RtEvent src_preimages_ready, dst_preimages_ready;
+        if (!recurrent_replay)
         {
-          // Destroy the old preimages
-          for (typename std::vector<DomainT<DIM,T> >::iterator it =
-                src_preimages.begin(); it != src_preimages.end(); it++)
-            it->destroy(last_copy);
-          // Compute the new preimages
+          // Compute preimages if necessary
+          if (!src_indirections.empty())
+          {
+            // Compute new preimages and add the to the back of the queue
+            std::vector<DomainT<DIM,T> > new_src_preimages;
 
+            AutoLock p_lock(preimage_lock);
+            src_preimages.emplace_back(new_src_preimages); 
+          }
+          if (!dst_indirections.empty())
+          {
+            // Compute new preimages and add them to the back of the queue
+            std::vector<DomainT<DIM,T> > new_dst_preimages;
+
+            AutoLock p_lock(preimage_lock);
+            dst_preimages.emplace_back(new_dst_preimages);
+          }
         }
-        if (!dst_indirections.empty() && (dst_preimages.empty() || !replay))
+        // Make sure that all the stage 1's are ordered 
+        // by deferring execution if necessary
+        if ((prev_done.exists() && !prev_done.has_triggered()) ||
+            (src_preimages_ready.exists() && 
+             !src_preimages_ready.has_triggered()) ||
+            (dst_preimages_ready.exists() &&
+             !dst_preimages_ready.has_triggered()))
         {
-          // Destroy the old preimages
-          for (typename std::vector<DomainT<DIM,T> >::iterator it =
-                dst_preimages.begin(); it != dst_preimages.end(); it++)
-            it->destroy(last_copy);
-          // Compute the new preimages
-
+          const RtEvent defer = Runtime::merge_events(prev_done, 
+              src_preimages_ready, dst_preimages_ready);
+          DeferCopyAcrossArgs args(this, op, pred_guard, copy_precondition,
+              src_indirect_precondition, dst_indirect_precondition,
+              trace_info, recurrent_replay, stage);
+          prev_done = runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, defer);
+          return args.done_event;
         }
-        // Defer the execution if necessary
       }
-      if ((stage <= 1) && !replay)
+      if (!recurrent_replay)
       {
 #ifdef LEGION_SPY
         // Make a unique indirections identifier if necessary
-        unsigned  unique_indirections_identifier =
+        unique_indirections_identifier =
           runtime->get_unique_indirections_id();
 #endif
+        // No need for the lock here, we know we are ordered
         if (!indirections.empty())
         {
           for (typename std::vector<const CopyIndirection*>::const_iterator it =
@@ -5253,23 +5281,63 @@ namespace Legion {
           indirections.clear();
         }
         // Prune preimages if necessary
-        if (!src_preimages.empty())
-          rebuild_indirections(src_fields, src_preimages, 
+        if (!src_indirections.empty())
+        {
+          if (!current_src_preimages.empty())
+          {
+            // Destroy any previous source preimage spaces
+            for (typename std::vector<DomainT<DIM,T> >::iterator it =
+                  current_src_preimages.begin(); it != 
+                  current_src_preimages.end(); it++)
+              it->destroy(last_copy);
+          }
+          {
+            // Get the next batch of src preimages to use
+            AutoLock p_lock(preimage_lock);
+#ifdef DEBUG_LEGION
+            assert(!src_preimages.empty());
+#endif
+            current_src_preimages.swap(src_preimages.front());
+            src_preimages.pop_front();
+          }
+          rebuild_indirections(src_fields, current_src_preimages, 
               indirections, src_indirections, 
 #ifdef LEGION_SPY
               unique_indirections_identifier,
+              src_indirect_instance_event,
 #endif
               src_indirect_field, src_indirect_instance, src_indirect_type, 
               both_are_range, possible_src_out_of_range,
               false/*no possible aliasing in this case*/);
-        if (!dst_preimages.empty())
-          rebuild_indirections(dst_fields, dst_preimages,
+        }
+        if (!dst_indirections.empty())
+        {
+          if (!current_dst_preimages.empty())
+          {
+            // Destroy any previous destination preimage spaces
+            for (typename std::vector<DomainT<DIM,T> >::iterator it =
+                  current_dst_preimages.begin(); it != 
+                  current_dst_preimages.end(); it++)
+              it->destroy(last_copy);
+          }
+          {
+            // Get the next batch of dst preimages to use
+            AutoLock p_lock(preimage_lock);
+#ifdef DEBUG_LEGION
+            assert(!dst_preimages.empty());
+#endif
+            current_dst_preimages.swap(dst_preimages.front());
+            dst_preimages.pop_front();
+          }
+          rebuild_indirections(dst_fields, current_dst_preimages,
               indirections, dst_indirections, 
 #ifdef LEGION_SPY
               unique_indirections_identifier,
+              dst_indirect_instance_event,
 #endif
               dst_indirect_field, dst_indirect_instance, dst_indirect_type,
               both_are_range, possible_dst_out_of_range, possible_dst_aliasing);
+        }
 #ifdef LEGION_SPY
         // Have to convert back to Realm structures because C++ is dumb  
         realm_src_fields.resize(src_fields.size());
@@ -5289,24 +5357,16 @@ namespace Legion {
         op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (runtime->profiler != NULL)
         runtime->profiler->add_copy_request(requests, op);
-      std::vector<ApEvent> preconditions(6);
-      preconditions[0] = copy_domain_ready;
-      preconditions[1] = init_precondition;
-      preconditions[2] = src_ready;
-      preconditions[3] = dst_ready;
-      preconditions[4] = src_idx_ready;
-      preconditions[5] = dst_idx_ready;
-      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations
         ApEvent pred_pre = 
-          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
+          Runtime::merge_events(NULL, copy_precondition, ApEvent(pred_guard));
         if (!reservations.empty())
         {
           // Need a protected version here to guarantee we always acquire
           // or release the lock regardless of poison
-          pred_pre = Runtime::ignorefaults(precondition);
+          pred_pre = Runtime::ignorefaults(copy_precondition);
           for (std::map<Reservation,bool>::const_iterator it =
                 reservations.begin(); it != reservations.end(); it++)
             pred_pre = 
@@ -5317,7 +5377,7 @@ namespace Legion {
           // precondition has triggered or poisoned including the predicate
           // or you risk deadlock which is why we need the double merge
           pred_pre =
-            Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
+            Runtime::merge_events(NULL, pred_pre, ApEvent(pred_guard));
         }
 #ifdef LEGION_SPY
         if (!indirections.empty())
@@ -5340,22 +5400,22 @@ namespace Legion {
         // No need for tracing to know about the reservations
         for (std::map<Reservation,bool>::const_iterator it =
               reservations.begin(); it != reservations.end(); it++)
-          precondition = Runtime::acquire_ap_reservation(it->first, 
-                                          it->second, precondition);
+          copy_precondition = Runtime::acquire_ap_reservation(it->first, 
+                                          it->second, copy_precondition);
 #ifdef LEGION_SPY
         if (!indirections.empty())
           last_copy = ApEvent(copy_domain.copy(realm_src_fields, 
-                realm_dst_fields, indirections, requests, precondition));
+                realm_dst_fields, indirections, requests, copy_precondition));
         else
           last_copy = ApEvent(copy_domain.copy(realm_src_fields,
-                realm_dst_fields, requests, precondition));
+                realm_dst_fields, requests, copy_precondition));
 #else
         if (!indirections.empty())
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
-                indirections, requests, precondition));
+                indirections, requests, copy_precondition));
         else
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
-                requests, precondition));
+                requests, copy_precondition));
 #endif
       }
       // Release any reservations
@@ -5377,18 +5437,19 @@ namespace Legion {
       assert(op != NULL);
       if (src_indirections.empty() && dst_indirections.empty())
       {
-        LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
-            expr->expr_id, src_tree_id, dst_tree_id, precondition, last_copy);
+        LegionSpy::log_copy_events(op->get_unique_op_id(), expr->expr_id,
+                  src_tree_id, dst_tree_id, copy_precondition, last_copy);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_copy_field(last_copy, src_fields[idx].field_id,
                                     src_fields[idx].inst_event,
                                     dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event, redop);
+                                    dst_fields[idx].inst_event, 
+                                    dst_fields[idx].redop_id);
       }
       else
       {
         LegionSpy::log_indirect_events(op->get_unique_op_id(), expr->expr_id,
-                    unique_indirections_identifier, precondition, last_copy);
+                unique_indirections_identifier, copy_precondition, last_copy);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_indirect_field(last_copy, src_fields[idx].field_id,
                                         src_fields[idx].inst_event,

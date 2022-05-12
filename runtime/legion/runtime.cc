@@ -24594,6 +24594,11 @@ namespace Legion {
             Operation::handle_deferred_release(args);
             break;
           }
+        case LG_DEFER_COPY_ACROSS_TASK_ID:
+          {
+            CopyAcrossExecutor::handle_deferred_copy_across(args);
+            break;
+          }
 #ifdef LEGION_MALLOC_INSTANCES
         // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:

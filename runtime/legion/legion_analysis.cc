@@ -627,11 +627,16 @@ namespace Legion {
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                               PrivilegeMode src_mode,
                                               PrivilegeMode dst_mode,
+                                              bool src_indirect,
+                                              bool dst_indirect,
                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(memoizable == memo);
+      // Should never be recording indirect copies on remote nodes
+      assert(!src_indirect);
+      assert(!dst_indirect);
 #endif
       if (local_space != origin_space)
       {
@@ -669,12 +674,17 @@ namespace Legion {
       }
       else
         remote_tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                tracing_srcs, tracing_dsts, src_mode, dst_mode, applied);
+                tracing_srcs, tracing_dsts, src_mode, dst_mode,
+                src_indirect, dst_indirect, applied);
     } 
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_across(Memoizable *memo, 
-                                                  CopyAcrossExecutor *executor)
+    void RemoteTraceRecorder::record_issue_across(Memoizable *memo,ApEvent &lhs,
+                                              ApEvent collective_precondition,
+                                              ApEvent copy_precondition,
+                                              ApEvent src_indirect_precondition,
+                                              ApEvent dst_indirect_precondition,
+                                              CopyAcrossExecutor *executor)
     //--------------------------------------------------------------------------
     {
       // We should never get a call to record a remote indirection
@@ -1291,7 +1301,8 @@ namespace Legion {
                 wait_on.wait();
             }
             tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                  tracing_srcs, tracing_dsts, src_mode, dst_mode, ready_events);
+                  tracing_srcs, tracing_dsts, src_mode, dst_mode,
+                  false/*indirect*/, false/*indirect*/, ready_events);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else

@@ -977,14 +977,41 @@ namespace Legion {
      */
     class CopyAcrossExecutor : public Collectable {
     public:
+      struct DeferCopyAcrossArgs : public LgTaskArgs<DeferCopyAcrossArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COPY_ACROSS_TASK_ID;
+      public:
+        DeferCopyAcrossArgs(CopyAcrossExecutor *e, Operation *o, 
+            PredEvent guard, ApEvent copy_pre, ApEvent src_pre,
+            ApEvent dst_pre, const PhysicalTraceInfo &info,
+            bool recurrent, unsigned stage);
+      public:
+        CopyAcrossExecutor *const executor;
+        Operation *const op;
+        PhysicalTraceInfo *const trace_info;
+        const PredEvent guard;
+        const ApEvent copy_precondition;
+        const ApEvent src_indirect_precondition;
+        const ApEvent dst_indirect_precondition;
+        const ApUserEvent done_event;
+        const unsigned stage;
+        const bool recurrent_replay;
+      };
+    public:
       CopyAcrossExecutor(Runtime *rt,
                          const std::map<Reservation,bool> &rsrvs)
         : runtime(rt), reservations(rsrvs) { }
       virtual ~CopyAcrossExecutor(void) { }
     public:
-      virtual ApEvent execute(Operation *op,
+      virtual ApEvent execute(Operation *op, PredEvent pred_guard,
+                              ApEvent copy_precondition,
+                              ApEvent src_indirect_precondition, 
+                              ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
-                              unsigned stage = 0, bool replay = false) = 0;
+                              const bool recurrent_replay = false,
+                              const unsigned stage = 0) = 0;
+    public:
+      static void handle_deferred_copy_across(const void *args);
     public:
       Runtime *const runtime;
       // Reservations that must be acquired for performing this copy
@@ -1004,9 +1031,13 @@ namespace Legion {
         : CopyAcrossExecutor(rt, rsrvs) { }
       virtual ~CopyAcrossUnstructured(void) { }
     public:
-      virtual ApEvent execute(Operation *op,
+      virtual ApEvent execute(Operation *op, PredEvent pred_guard,
+                              ApEvent copy_precondition,
+                              ApEvent src_indirect_precondition,
+                              ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
-                              unsigned stage = 0, bool replay = false) = 0;
+                              const bool recurrent_replay = false,
+                              const unsigned stage = 0) = 0;
     public:
       void initialize_source_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
@@ -1025,7 +1056,6 @@ namespace Legion {
                                     const RegionRequirement &idx_req,
                                     const InstanceRef &indirect_instance,
                                     const DomainPoint &index_point,
-                                    const ApEvent src_precondition,
                                     const bool both_are_range,
                                     const bool possible_out_of_range);
       void initialize_destination_indirections(RegionTreeForest *forest,
@@ -1034,7 +1064,6 @@ namespace Legion {
                                     const RegionRequirement &idx_req,
                                     const InstanceRef &indirect_instance,
                                     const DomainPoint &index_point,
-                                    const ApEvent dst_precondition,
                                     const bool both_are_range,
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
@@ -1045,6 +1074,8 @@ namespace Legion {
       std::vector<CopySrcDstField> src_fields, dst_fields;
 #ifdef LEGION_SPY
       std::vector<Realm::CopySrcDstField> realm_src_fields, realm_dst_fields;
+      RegionTreeID src_tree_id, dst_tree_id;
+      unsigned unique_indirections_identifier;
 #endif
     public:
       // All the 'instances' in the entries in these data strctures are
@@ -1052,11 +1083,12 @@ namespace Legion {
       std::vector<IndirectRecord> src_indirections, dst_indirections;
       FieldID src_indirect_field, dst_indirect_field;
       PhysicalInstance src_indirect_instance, dst_indirect_instance;
+#ifdef LEGION_SPY
+      ApEvent src_indirect_instance_event, dst_indirect_instance_event;
+#endif
       TypeTag src_indirect_type, dst_indirect_type;
     public:
-      PredEvent pred_guard;
-      ApEvent init_precondition;
-      ApEvent src_ready, dst_ready, src_idx_ready, dst_idx_ready;
+      RtEvent prev_done;
       ApEvent last_copy;
     public:
       bool both_are_range;
@@ -1161,9 +1193,13 @@ namespace Legion {
                               const std::map<Reservation,bool> &rsrvs);
       virtual ~CopyAcrossUnstructuredT(void);
     public:
-      virtual ApEvent execute(Operation *op,
+      virtual ApEvent execute(Operation *op, PredEvent pred_guard,
+                              ApEvent copy_precondition,
+                              ApEvent src_indirect_precondition,
+                              ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
-                              unsigned stage = 0, bool replay = false); 
+                              const bool recurrent_replay = false,
+                              const unsigned stage = 0); 
     public:
       static void rebuild_indirections(
           std::vector<CopySrcDstField> &fields,
@@ -1182,7 +1218,9 @@ namespace Legion {
       const DomainT<DIM,T> copy_domain;
       const ApEvent copy_domain_ready;
     protected:
-      std::vector<DomainT<DIM,T> > src_preimages, dst_preimages;
+      mutable LocalLock preimage_lock;
+      std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
+      std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
     };
 

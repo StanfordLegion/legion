@@ -2238,6 +2238,10 @@ namespace Legion {
         CopyAcrossUnstructured *across = 
           copy_expr->create_across_unstructured(reservations);
         across->add_reference();
+#ifdef LEGION_SPY
+        across->src_tree_id = src_req.region.get_tree_id();
+        across->dst_tree_id = dst_req.region.get_tree_id();
+#endif
         // Fill in the source fields 
         InnerContext *src_context = 
           op->find_physical_context(src_index, src_req);
@@ -2250,13 +2254,31 @@ namespace Legion {
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
         across->initialize_destination_fields(this, dst_req, dst_targets, 
                               target_views, trace_info, exclusive_redop);
-        across->pred_guard = guard;
-        across->init_precondition = precondition;
-        const ApEvent result = across->execute(op, trace_info);
+        // Get the preconditions for this copy
+        std::vector<ApEvent> copy_preconditions;
+        if (precondition.exists())
+          copy_preconditions.push_back(precondition);
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+        {
+          const ApEvent ready = src_targets[idx].get_ready_event();
+          if (ready.exists())
+            copy_preconditions.push_back(ready);
+        }
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const ApEvent ready = dst_targets[idx].get_ready_event();
+          if (ready.exists())
+            copy_preconditions.push_back(ready);
+        }
+        if (!copy_preconditions.empty())
+          precondition = Runtime::merge_events(&trace_info, copy_preconditions);
+        ApEvent result = across->execute(op, guard, precondition,
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, trace_info);
         if (trace_info.recording)
         {
           // Record this with the trace
-          trace_info.record_issue_across(across);
+          trace_info.record_issue_across(result, precondition, precondition,
+                        ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
           FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
             tracing_srcs.insert(source_views[idx],
@@ -2355,7 +2377,7 @@ namespace Legion {
                                             const PredEvent pred_guard,
                                             const ApEvent collective_pre,
                                             const ApEvent collective_post,
-                                            const ApUserEvent sources_pre,
+                                            const ApUserEvent local_pre,
                                  const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
@@ -2383,21 +2405,27 @@ namespace Legion {
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
       across->initialize_source_indirections(this, src_records,
-          src_req, idx_req, idx_target, op->index_point, collective_pre,
-          gather_is_range, possible_src_out_of_range);
+          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
+          possible_src_out_of_range);
+#ifdef LEGION_SPY
+      across->src_indirect_instance_event = 
+        idx_target.get_physical_manager()->get_use_event();
+#endif
       // Trigger the source precondition event when all our sources are ready
-      std::vector<ApEvent> src_preconditions;
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
       for (unsigned idx = 0; idx < src_targets.size(); idx++)
       {
         const ApEvent ready = src_targets[idx].get_ready_event();
         if (ready.exists())
-          src_preconditions.push_back(ready);
+          local_preconditions.push_back(ready);
       }
-      if (!src_preconditions.empty())
-        Runtime::trigger_event(&trace_info, sources_pre, 
-            Runtime::merge_events(&trace_info, src_preconditions));
-      else
-        Runtime::trigger_event(&trace_info, sources_pre);
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition = 
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Initialize the destination fields
       InnerContext *context = op->find_physical_context(dst_index, dst_req);
       std::vector<InstanceView*> target_views;
@@ -2406,14 +2434,41 @@ namespace Legion {
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
       across->initialize_destination_fields(this, dst_req, dst_targets,
           target_views, trace_info, exclusive_redop);
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
+      else
+        copy_preconditions.swap(local_preconditions);
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      {
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          copy_preconditions.push_back(ready);
+      }
+      ApEvent src_indirect_ready = idx_target.get_ready_event();
+      if (src_indirect_ready.exists())
+        copy_preconditions.push_back(src_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (src_indirect_ready.exists())
+          src_indirect_ready = Runtime::merge_events(&trace_info, 
+                          src_indirect_ready, init_precondition);
+        else
+          src_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
+      if (!copy_preconditions.empty())
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
       // Launch the copy
-      across->pred_guard = pred_guard;
-      across->init_precondition = init_precondition;
-      const ApEvent copy_post = across->execute(op, trace_info);
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          src_indirect_ready, ApEvent::NO_AP_EVENT, trace_info);
       if (trace_info.recording)
       {
         // Record this with the trace
-        trace_info.record_issue_across(across);
+        trace_info.record_issue_across(copy_post, local_precondition,
+           copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
         // Get the src_views
@@ -2438,8 +2493,8 @@ namespace Legion {
         trace_info.record_indirect_views(copy_post, collective_post, src_index,
             src_node, src_views, map_applied_events, LEGION_READ_PRIV);
         trace_info.record_copy_views(copy_post, idx_index, dst_index,
-            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr,
-            idx_views, dst_views, map_applied_events);
+            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr, idx_views,
+            dst_views, true/*indirect*/, false/*indirect*/, map_applied_events);
       }
       if (across->remove_reference())
         delete across;
@@ -2462,7 +2517,7 @@ namespace Legion {
                                              const PredEvent pred_guard,
                                              const ApEvent collective_pre,
                                              const ApEvent collective_post,
-                                             const ApUserEvent dests_pre,
+                                             const ApUserEvent local_pre,
                                  const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
@@ -2502,30 +2557,62 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, idx_req, idx_target, op->index_point, collective_pre,
-          scatter_is_range, possible_dst_out_of_range, 
-          possible_dst_aliasing, exclusive_redop);
+          dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
+          possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
+#ifdef LEGION_SPY
+      across->dst_indirect_instance_event = 
+        idx_target.get_physical_manager()->get_use_event();
+#endif
       // Trigger the source precondition event when all our sources are ready
-      std::vector<ApEvent> dst_preconditions;
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
       for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
         const ApEvent ready = dst_targets[idx].get_ready_event();
         if (ready.exists())
-          dst_preconditions.push_back(ready);
+          local_preconditions.push_back(ready);
       }
-      if (!dst_preconditions.empty())
-        Runtime::trigger_event(&trace_info, dests_pre, 
-            Runtime::merge_events(&trace_info, dst_preconditions));
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition =
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
       else
-        Runtime::trigger_event(&trace_info, dests_pre);
+        copy_preconditions.swap(local_preconditions);
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+      {
+        const ApEvent ready = src_targets[idx].get_ready_event();
+        if (ready.exists())
+          copy_preconditions.push_back(ready);
+      }
+      ApEvent dst_indirect_ready = idx_target.get_ready_event();
+      if (dst_indirect_ready.exists())
+        copy_preconditions.push_back(dst_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (dst_indirect_ready.exists())
+          dst_indirect_ready = Runtime::merge_events(&trace_info, 
+                          dst_indirect_ready, init_precondition);
+        else
+          dst_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
+      if (!copy_preconditions.empty())
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
       // Launch the copy
-      across->pred_guard = pred_guard;
-      across->init_precondition = init_precondition;
-      const ApEvent copy_post = across->execute(op, trace_info);
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          ApEvent::NO_AP_EVENT, dst_indirect_ready, trace_info);
       if (trace_info.recording)
       {
         // Record this with the trace
-        trace_info.record_issue_across(across);
+        trace_info.record_issue_across(copy_post, local_precondition,
+           copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, dst_views, idx_views;
         // src_views
@@ -2546,9 +2633,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
           dst_views.insert(target_views[idx],
               dst_targets[idx].get_valid_fields());
-        trace_info.record_copy_views(copy_post, src_index, dst_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, idx_views,
-            dst_views, map_applied_events); 
+        trace_info.record_copy_views(copy_post, src_index, idx_index,
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_views,
+            idx_views, false/*indirect*/, true/*indirect*/,map_applied_events); 
         IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
         trace_info.record_indirect_views(copy_post, collective_post, dst_index,
           dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
@@ -2576,7 +2663,7 @@ namespace Legion {
                               const PredEvent pred_guard,
                               const ApEvent collective_pre,
                               const ApEvent collective_post,
-                              const ApUserEvent indirect_pre,
+                              const ApUserEvent local_pre,
                               const std::map<Reservation,bool> &reservations,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
@@ -2613,14 +2700,20 @@ namespace Legion {
       const InstanceRef &src_idx_target = src_idx_targets[0];
       across->initialize_source_indirections(this, src_records,
           src_req, src_idx_req, src_idx_target, op->index_point, 
-          collective_pre, both_are_range, possible_src_out_of_range);
+          both_are_range, possible_src_out_of_range);
+#ifdef LEGION_SPY
+      across->src_indirect_instance_event = 
+        src_idx_target.get_physical_manager()->get_use_event();
+#endif
       // Trigger the source precondition event when all our sources are ready
-      std::vector<ApEvent> indirect_preconditions;
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
       for (unsigned idx = 0; idx < src_targets.size(); idx++)
       {
         const ApEvent ready = src_targets[idx].get_ready_event();
         if (ready.exists())
-          indirect_preconditions.push_back(ready);
+          local_preconditions.push_back(ready);
       }
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
@@ -2629,29 +2722,64 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, dst_idx_req, dst_idx_target, op->index_point, 
-          collective_pre, both_are_range, possible_dst_out_of_range, 
-          possible_dst_aliasing, exclusive_redop);
+          dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
+          possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
+#ifdef LEGION_SPY
+      across->dst_indirect_instance_event = 
+        dst_idx_target.get_physical_manager()->get_use_event();
+#endif
       // Trigger the source precondition event when all our sources are ready
       for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
         const ApEvent ready = dst_targets[idx].get_ready_event();
         if (ready.exists())
-          indirect_preconditions.push_back(ready);
+          local_preconditions.push_back(ready);
       }
-      if (!indirect_preconditions.empty())
-        Runtime::trigger_event(&trace_info, indirect_pre, 
-            Runtime::merge_events(&trace_info, indirect_preconditions));
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition = 
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
       else
-        Runtime::trigger_event(&trace_info, indirect_pre);
+        copy_preconditions.swap(local_preconditions);
+      ApEvent src_indirect_ready = src_idx_target.get_ready_event();
+      if (src_indirect_ready.exists())
+        copy_preconditions.push_back(src_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (src_indirect_ready.exists())
+          src_indirect_ready = Runtime::merge_events(&trace_info, 
+                          src_indirect_ready, init_precondition);
+        else
+          src_indirect_ready = init_precondition;
+      }
+      ApEvent dst_indirect_ready = dst_idx_target.get_ready_event();
+      if (dst_indirect_ready.exists())
+        copy_preconditions.push_back(dst_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (dst_indirect_ready.exists())
+          dst_indirect_ready = Runtime::merge_events(&trace_info, 
+                          dst_indirect_ready, init_precondition);
+        else
+          dst_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
+      if (!copy_preconditions.empty())
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
       // Launch the copy
-      across->pred_guard = pred_guard;
-      across->init_precondition = init_precondition;
-      const ApEvent copy_post = across->execute(op, trace_info);
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          src_indirect_ready, dst_indirect_ready, trace_info);
       if (trace_info.recording)
       {
         // Record this with the trace
-        trace_info.record_issue_across(across);
+        trace_info.record_issue_across(copy_post, local_precondition,
+            copy_precondition, src_indirect_ready, dst_indirect_ready, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, src_idx_views;
         FieldMaskSet<InstanceView> dst_idx_views, dst_views;
@@ -2690,8 +2818,8 @@ namespace Legion {
         trace_info.record_indirect_views(copy_post, collective_post, dst_index,
            dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
         trace_info.record_copy_views(copy_post, src_idx_index, dst_idx_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr,
-            src_idx_views, dst_idx_views, map_applied_events);
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_idx_views,
+            dst_idx_views,true/*indirect*/,true/*indirect*/,map_applied_events);
       }
       if (across->remove_reference())
         delete across;
@@ -6434,6 +6562,42 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Copy Across Executor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
+        CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
+        ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
+        bool recurrent, unsigned s)
+      : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
+        executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
+        copy_precondition(copy_pre), src_indirect_precondition(src_pre),
+        dst_indirect_precondition(dst_pre), 
+        done_event(Runtime::create_ap_user_event(trace_info)),
+        stage(s+1), recurrent_replay(recurrent)
+    //--------------------------------------------------------------------------
+    {
+      executor->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CopyAcrossExecutor::handle_deferred_copy_across(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCopyAcrossArgs *dargs = (const DeferCopyAcrossArgs*)args;
+      Runtime::trigger_event(dargs->trace_info, dargs->done_event,
+          dargs->executor->execute(dargs->op, dargs->guard, 
+            dargs->copy_precondition, dargs->src_indirect_precondition, 
+            dargs->dst_indirect_precondition, *dargs->trace_info,
+            dargs->recurrent_replay, dargs->stage));
+      if (dargs->executor->remove_reference())
+        delete dargs->executor;
+      delete dargs->trace_info;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Copy Across Unstructured
     /////////////////////////////////////////////////////////////
 
@@ -6475,17 +6639,6 @@ namespace Legion {
         assert(found);
 #endif
       }
-      std::vector<ApEvent> ready_events;
-      ready_events.reserve(insts.size());
-      for (unsigned idx = 0; idx < insts.size(); idx++)
-      {
-        const InstanceRef &ref = insts[idx];
-        ApEvent ready = ref.get_ready_event();
-        if (ready.exists())
-          ready_events.push_back(ready);
-      }
-      if (!ready_events.empty())
-        src_ready = Runtime::merge_events(&trace_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6531,17 +6684,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_fields.size(); idx++)
           dst_fields[idx].set_redop(req.redop, false/*fold*/, exclusive_redop);
       }
-      std::vector<ApEvent> ready_events;
-      ready_events.reserve(insts.size());
-      for (unsigned idx = 0; idx < insts.size(); idx++)
-      {
-        const InstanceRef &ref = insts[idx];
-        ApEvent ready = ref.get_ready_event();
-        if (ready.exists())
-          ready_events.push_back(ready);
-      }
-      if (!ready_events.empty())
-        dst_ready = Runtime::merge_events(&trace_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6549,8 +6691,7 @@ namespace Legion {
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &src_req, const RegionRequirement &idx_req,
             const InstanceRef &indirect_instance, const DomainPoint &point,
-            const ApEvent src_precondition, const bool are_range, 
-            const bool possible_out_of_range)
+            const bool are_range, const bool possible_out_of_range)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6562,8 +6703,6 @@ namespace Legion {
       src_indirect_instance =
         indirect_instance.get_physical_manager()->get_instance(point);
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
-      src_ready = src_precondition;
-      src_idx_ready = indirect_instance.get_ready_event();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
       src_fields.resize(src_req.instance_fields.size());
@@ -6581,9 +6720,8 @@ namespace Legion {
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &dst_req, const RegionRequirement &idx_req,
             const InstanceRef &indirect_instance, const DomainPoint &point,
-            const ApEvent dst_precondition, const bool are_range, 
-            const bool possible_out_of_range, const bool possible_aliasing,
-            const bool exclusive_redop)
+            const bool are_range, const bool possible_out_of_range,
+            const bool possible_aliasing, const bool exclusive_redop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6595,8 +6733,6 @@ namespace Legion {
       dst_indirect_instance =
         indirect_instance.get_physical_manager()->get_instance(point);
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
-      dst_ready = dst_precondition;
-      dst_idx_ready = indirect_instance.get_ready_event();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;
       possible_dst_aliasing = possible_aliasing;

@@ -399,6 +399,7 @@ namespace Legion {
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
+      LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -512,6 +513,7 @@ namespace Legion {
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
+        "Defer Copy-Across Execution for Preimages",              \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Yield",                                                  \
