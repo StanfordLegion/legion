@@ -211,9 +211,13 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
     device_paths = device_paths .. " " .. v
   end
 
-  os.execute(pr("ld.lld -shared -plugin-opt=mcpu=" .. arch .. " -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=O3 -plugin-opt=-amdgpu-early-inline-all=true -plugin-opt=-amdgpu-function-calls=false -o " .. device_so .. " " .. device_o .. " " .. device_paths))
+  local hip_path = os.getenv("HIP_PATH")
+  local rocm_path = os.getenv("ROCM_PATH") or (hip_path and hip_path .. "/..")
+  local llvm_path = rocm_path and (rocm_path .. "/llvm/bin/") or ""
 
-  os.execute(pr("clang-offload-bundler --inputs=/dev/null," .. device_so .. " --type=o --outputs=" .. bundle_o .. " --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--" .. arch))
+  os.execute(pr(llvm_path .. "ld.lld -shared -plugin-opt=mcpu=" .. arch .. " -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=O3 -plugin-opt=-amdgpu-early-inline-all=true -plugin-opt=-amdgpu-function-calls=false -o " .. device_so .. " " .. device_o .. " " .. device_paths))
+
+  os.execute(pr(llvm_path .. "clang-offload-bundler --inputs=/dev/null," .. device_so .. " --type=o --outputs=" .. bundle_o .. " --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--" .. arch))
 
   local f = assert(io.open(bundle_o, "rb"))
   local bundle_contents = f:read("*all")

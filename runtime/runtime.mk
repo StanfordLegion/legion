@@ -725,11 +725,9 @@ ifeq ($(strip $(USE_HDF)), 1)
   endif
 endif
 
-SKIP_MACHINES= titan% daint% excalibur% cori%
-# use mpi{cc,cxx,f90} compiler wrappers if USE_MPI=1
+# use mpi{cc,cxx,f90} compiler wrappers if USE_MPI=1 and we're not on a Cray system
 ifeq ($(strip $(USE_MPI)),1)
-  # Skip any machines on this list list
-  ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
+  ifeq (${CRAYPE_VERSION},)
     # OpenMPI check
     ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
       # MPICH check
