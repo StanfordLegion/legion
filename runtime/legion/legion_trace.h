@@ -575,6 +575,8 @@ namespace Legion {
     public:
       bool require(Operation *op, std::set<RtEvent> &applied_events);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
+      bool modifies_fields(const LegionMap<InstanceView*,
+              FieldMaskSet<IndexSpaceExpression> > &instances) const;
     private:
       bool cached;
       // The following containers are populated only when the 'cached' is true.
@@ -939,8 +941,9 @@ namespace Legion {
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
-      std::map<unsigned,ViewExprs>     src_across_views;
-      std::map<unsigned,ViewExprs>     dst_across_views;
+      std::map<unsigned,ViewExprs>     src_indirect_views;
+      std::map<unsigned,ViewExprs>     dst_indirect_views;
+      std::vector<IssueAcross*>        across_copies;
     private:
       TraceConditionSet   pre, post;
       ViewGroups          view_groups;

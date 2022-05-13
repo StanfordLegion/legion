@@ -1010,6 +1010,7 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
+      virtual void record_trace_immutable_indirection(bool source) = 0;
     public:
       static void handle_deferred_copy_across(const void *args);
     public:
@@ -1038,6 +1039,7 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
+      virtual void record_trace_immutable_indirection(bool source) = 0;
     public:
       void initialize_source_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
@@ -1108,82 +1110,33 @@ namespace Legion {
     public:
       typedef typename Realm::CopyIndirection<DIM,T>::Base CopyIndirection;
     public:
-      struct UnstructuredIndirectionHelper {
+      struct ComputePreimagesHelper {
       public:
-        UnstructuredIndirectionHelper(
-            const std::vector<unsigned> &nonempty, 
-            const std::vector<IndirectRecord> &recs,
-            std::vector<const CopyIndirection*> &indirects,
-            const FieldID fid, const PhysicalInstance inst,
-            bool range, bool out_of_range, bool aliasing, unsigned off) 
-          : nonempty_indexes(nonempty), records(recs),
-            indirections(indirects), indirect_field(fid), indirect_inst(inst),
-            offset(off), is_range(range), possible_out_of_range(out_of_range),
-            possible_aliasing(aliasing), indirect_index(0) 
-        { instances.reserve(nonempty_indexes.size()); }
+        ComputePreimagesHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
+          : unstructured(u), source(s) { }
       public:
-        template<int N2, typename T2>
-        inline void find_or_create_indirection(void)
-        {
-          typedef typename Realm::CopyIndirection<DIM,T>::template 
-            Unstructured<N2,T2> UnstructuredIndirection;
-          // Search through all the existing copy indirections starting from
-          // the offset and check to see if we can reuse them
-          for (unsigned index = offset; index < indirections.size(); index++)
-          {
-            // It's safe to cast here because we know that the same types
-            // made all these indirections as well
-            const UnstructuredIndirection *unstructured = 
-              static_cast<const UnstructuredIndirection*>(indirections[index]);
-#ifdef DEBUG_LEGION
-            assert(unstructured->inst == indirect_inst);
-            assert(unstructured->field_id == indirect_field);
-            assert(unstructured->insts.size() == instances.size());
-#endif
-            bool instances_match = true;
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-            {
-              if (unstructured->insts[idx] == instances[idx])
-                continue;
-              instances_match = false;
-              break;
-            }
-            if (!instances_match)
-              continue;
-            // If we made it here we can reuse this indirection
-            indirect_index = index;
-            return;
-          }
-          // If we make it here we need to make a new indirection
-          UnstructuredIndirection *unstructured = new UnstructuredIndirection();
-          unstructured->field_id = indirect_field;
-          unstructured->inst = indirect_inst;
-          unstructured->is_ranges = is_range;
-          unstructured->oor_possible = possible_out_of_range;
-          unstructured->aliasing_possible = possible_aliasing;
-          unstructured->subfield_offset = 0;
-          unstructured->insts.swap(instances);
-          unstructured->spaces.resize(nonempty_indexes.size());
-          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
-            unstructured->spaces[idx] = records[nonempty_indexes[idx]].domain;
-          indirect_index = indirections.size();
-          indirections.push_back(unstructured);
-        }
         template<typename N2, typename T2>
-        static inline void demux(UnstructuredIndirectionHelper *helper)
-          { helper->find_or_create_indirection<N2::N,T2>(); }
+        static inline void demux(ComputePreimagesHelper *helper)
+          { helper->result = helper->unstructured->template 
+            compute_preimages<N2::N,T2>(helper->new_preimages,helper->source); }
       public:
-        std::vector<PhysicalInstance> instances;
-        const std::vector<unsigned> &nonempty_indexes;
-        const std::vector<IndirectRecord> &records;
-        std::vector<const CopyIndirection*> &indirections;
-        const FieldID indirect_field;
-        const PhysicalInstance indirect_inst;
-        const unsigned offset;
-        const bool is_range;
-        const bool possible_out_of_range;
-        const bool possible_aliasing;
-        unsigned indirect_index;
+        std::vector<DomainT<DIM,T> > new_preimages;
+        CopyAcrossUnstructuredT<DIM,T> *const unstructured;
+        ApEvent result;
+        const bool source; 
+      };
+      struct RebuildIndirectionsHelper {
+      public:
+        RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
+          : unstructured(u), source(s) { }
+      public:
+        template<typename N2, typename T2>
+        static inline void demux(RebuildIndirectionsHelper *helper)
+          { helper->unstructured->template 
+            rebuild_indirections<N2::N,T2>(helper->source); }
+      public:
+        CopyAcrossUnstructuredT<DIM,T> *const unstructured;
+        const bool source;
       };
     public:
       CopyAcrossUnstructuredT(Runtime *runtime, 
@@ -1200,19 +1153,13 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0); 
+      virtual void record_trace_immutable_indirection(bool source);
     public:
-      static void rebuild_indirections(
-          std::vector<CopySrcDstField> &fields,
-          std::vector<DomainT<DIM,T> > &preimages,
-          std::vector<const CopyIndirection*> &indirections,
-          const std::vector<IndirectRecord> &indirect_records,
-#ifdef LEGION_SPY
-          unsigned unique_indirections_identifier,
-          ApEvent indirect_inst_event,
-#endif
-          FieldID indirect_field, PhysicalInstance indirect_inst,
-          TypeTag indirect_type, bool both_are_range, 
-          bool out_of_range, bool aliasing);
+      template<int D2, typename T2>
+      ApEvent compute_preimages(std::vector<DomainT<DIM,T> > &preimages, 
+                                const bool source); 
+      template<int D2, typename T2>
+      void rebuild_indirections(const bool source);
     public:
       IndexSpaceExpression *const expr;
       const DomainT<DIM,T> copy_domain;
@@ -1222,6 +1169,8 @@ namespace Legion {
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
+      bool src_indirect_immutable_for_tracing;
+      bool dst_indirect_immutable_for_tracing;
     };
 
     /**

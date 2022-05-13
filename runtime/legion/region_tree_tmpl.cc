@@ -108,7 +108,12 @@ namespace Legion {
     create_association_helper<INST_N2,T2>(Operation *, \
 				     IndexSpaceNode *, \
 				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent);
+				     ApEvent); \
+  template ApEvent CopyAcrossUnstructuredT<INST_N1,T1>:: \
+    compute_preimages<INST_N2,T2>(std::vector<DomainT<INST_N1,T1> >&, \
+                                     const bool); \
+  template void CopyAcrossUnstructuredT<INST_N1,T1>:: \
+    rebuild_indirections<INST_N2,T2>(const bool);
 
   FOREACH_TT(DOIT_TT)
 #else

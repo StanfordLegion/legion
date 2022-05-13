@@ -5184,7 +5184,8 @@ namespace Legion {
                 IndexSpaceExpression *e, const DomainT<DIM,T> &domain, 
                 ApEvent ready, const std::map<Reservation,bool> &rsrvs)
       : CopyAcrossUnstructured(rt, rsrvs), expr(e), copy_domain(domain),
-        copy_domain_ready(ready)
+        copy_domain_ready(ready), src_indirect_immutable_for_tracing(false),
+        dst_indirect_immutable_for_tracing(false)
     //--------------------------------------------------------------------------
     {
       expr->add_base_expression_reference(COPY_ACROSS_REF);
@@ -5227,25 +5228,25 @@ namespace Legion {
       if (stage == 0)
       {
         RtEvent src_preimages_ready, dst_preimages_ready;
-        if (!recurrent_replay)
+        if (!src_indirections.empty() && 
+            (!src_indirect_immutable_for_tracing || !recurrent_replay))
         {
-          // Compute preimages if necessary
-          if (!src_indirections.empty())
-          {
-            // Compute new preimages and add the to the back of the queue
-            std::vector<DomainT<DIM,T> > new_src_preimages;
-
-            AutoLock p_lock(preimage_lock);
-            src_preimages.emplace_back(new_src_preimages); 
-          }
-          if (!dst_indirections.empty())
-          {
-            // Compute new preimages and add them to the back of the queue
-            std::vector<DomainT<DIM,T> > new_dst_preimages;
-
-            AutoLock p_lock(preimage_lock);
-            dst_preimages.emplace_back(new_dst_preimages);
-          }
+          // Compute new preimages and add the to the back of the queue
+          ComputePreimagesHelper helper(this, true/*source*/);
+          NT_TemplateHelper::demux<ComputePreimagesHelper>(
+              src_indirect_type, &helper);
+          AutoLock p_lock(preimage_lock);
+          src_preimages.emplace_back(helper.new_preimages);
+        }
+        if (!dst_indirections.empty() &&
+            (!dst_indirect_immutable_for_tracing || !recurrent_replay))
+        {
+          // Compute new preimages and add them to the back of the queue
+          ComputePreimagesHelper helper(this, true/*source*/);
+          NT_TemplateHelper::demux<ComputePreimagesHelper>(
+              dst_indirect_type, &helper);
+          AutoLock p_lock(preimage_lock);
+          dst_preimages.emplace_back(helper.new_preimages);
         }
         // Make sure that all the stage 1's are ordered 
         // by deferring execution if necessary
@@ -5300,15 +5301,9 @@ namespace Legion {
             current_src_preimages.swap(src_preimages.front());
             src_preimages.pop_front();
           }
-          rebuild_indirections(src_fields, current_src_preimages, 
-              indirections, src_indirections, 
-#ifdef LEGION_SPY
-              unique_indirections_identifier,
-              src_indirect_instance_event,
-#endif
-              src_indirect_field, src_indirect_instance, src_indirect_type, 
-              both_are_range, possible_src_out_of_range,
-              false/*no possible aliasing in this case*/);
+          RebuildIndirectionsHelper helper(this, true/*sources*/);
+          NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
+              src_indirect_type, &helper);
         }
         if (!dst_indirections.empty())
         {
@@ -5329,14 +5324,9 @@ namespace Legion {
             current_dst_preimages.swap(dst_preimages.front());
             dst_preimages.pop_front();
           }
-          rebuild_indirections(dst_fields, current_dst_preimages,
-              indirections, dst_indirections, 
-#ifdef LEGION_SPY
-              unique_indirections_identifier,
-              dst_indirect_instance_event,
-#endif
-              dst_indirect_field, dst_indirect_instance, dst_indirect_type,
-              both_are_range, possible_dst_out_of_range, possible_dst_aliasing);
+          RebuildIndirectionsHelper helper(this, false/*sources*/);
+          NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
+              dst_indirect_type, &helper);
         }
 #ifdef LEGION_SPY
         // Have to convert back to Realm structures because C++ is dumb  
@@ -5465,29 +5455,53 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    /*static*/ void CopyAcrossUnstructuredT<DIM,T>::rebuild_indirections(
-                         std::vector<CopySrcDstField> &fields,
-                         std::vector<DomainT<DIM,T> > &preimages,
-                         std::vector<const CopyIndirection*> &indirections,
-                         const std::vector<IndirectRecord> &indirect_records,
-#ifdef LEGION_SPY
-                         unsigned unique_indirections_identifier,
-                         ApEvent indirect_inst_event,
-#endif
-                         FieldID indirect_field, PhysicalInstance indirect_inst,
-                         TypeTag indirect_type, bool both_are_range,
-                         bool out_of_range, bool aliasing)
+    void CopyAcrossUnstructuredT<DIM,T>::record_trace_immutable_indirection(
+                                                                    bool source)
     //--------------------------------------------------------------------------
     {
+      if (source)
+        src_indirect_immutable_for_tracing = true;
+      else
+        dst_indirect_immutable_for_tracing = true;
+    }
+#endif // defined(DEFINE_NT_TEMPLATES)
+
+#ifdef DEFINE_NTNT_TEMPLATES
+    //--------------------------------------------------------------------------
+    template<int D1, typename T1> template<int D2, typename T2>
+    ApEvent CopyAcrossUnstructuredT<D1,T1>::compute_preimages(
+                     std::vector<DomainT<D1,T1> > &preimages, const bool source)
+    //--------------------------------------------------------------------------
+    {
+      const std::vector<IndirectRecord> &indirect_records =
+        source ? src_indirections : dst_indirections;
+      std::vector<Realm::IndexSpace<D2,T2> > targets(indirect_records.size());
+      for (unsigned idx = 0; idx < indirect_records.size(); idx++)
+        targets[idx] = indirect_records[idx].domain;
+
+
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int D1, typename T1> template<int D2, typename T2>
+    void CopyAcrossUnstructuredT<D1,T1>::rebuild_indirections(const bool source)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> &fields = source ? src_fields : dst_fields;
+      std::vector<DomainT<D1,T1> > &preimages = 
+        source ? current_src_preimages : current_dst_preimages;
+      const std::vector<IndirectRecord> &indirect_records =
+        source ? src_indirections : dst_indirections;
       std::vector<unsigned> nonempty_indexes;
       for (unsigned idx = 0; idx < preimages.size(); idx++)
       {
-        DomainT<DIM,T> &preimage = preimages[idx];
+        DomainT<D1,T1> &preimage = preimages[idx];
         if (preimage.empty())
         {
           // Reclaim any sparsity maps eagerly
           preimage.destroy();
-          preimage = DomainT<DIM,T>::make_empty();
+          preimage = DomainT<D1,T1>::make_empty();
         }
         else
           nonempty_indexes.push_back(idx);
@@ -5495,46 +5509,93 @@ namespace Legion {
       // Now that we have the non-empty indexes we can go through and make
       // the indirections for each of the fields. We'll try to share 
       // indirections as much as possible wherever we can
-      const unsigned start_offset = indirections.size();
+      const unsigned offset = indirections.size();
+      typedef typename Realm::CopyIndirection<D1,T1>::template 
+            Unstructured<D2,T2> UnstructuredIndirection;
       for (unsigned fidx = 0; fidx < fields.size(); fidx++)
       {
-        // Either find or make a new copy indirection
-        UnstructuredIndirectionHelper helper(nonempty_indexes,
-            indirect_records, indirections, indirect_field,
-            indirect_inst, both_are_range, out_of_range, 
-            aliasing, start_offset);
+        // Compute our physical instances for this field
+        std::vector<PhysicalInstance> instances(nonempty_indexes.size());
         for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
-          helper.instances.push_back(
-            indirect_records[nonempty_indexes[idx]].instances[fidx]);
-#ifdef LEGION_SPY
-        const unsigned oldsize = indirections.size();
-#endif
-        NT_TemplateHelper::demux<UnstructuredIndirectionHelper>(
-            indirect_type, &helper);
-        fields[fidx].indirect_index = helper.indirect_index;
-#ifdef LEGION_SPY
-        if (oldsize < indirections.size())
+          instances[idx] =
+            indirect_records[nonempty_indexes[idx]].instances[fidx];
+        // See if there is an unstructured index which already does what we want
+        int indirect_index = -1;
+        // Search through all the existing copy indirections starting from
+        // the offset and check to see if we can reuse them
+        for (unsigned index = offset; index < indirections.size(); index++)
         {
+          // It's safe to cast here because we know that the same types
+          // made all these indirections as well
+          const UnstructuredIndirection *unstructured = 
+            static_cast<const UnstructuredIndirection*>(indirections[index]);
+#ifdef DEBUG_LEGION
+          assert(unstructured->inst == 
+              (source ? src_indirect_instance : dst_indirect_instance));
+          assert(unstructured->field_id == 
+              (source ? src_indirect_field : dst_indirect_field));
+          assert(unstructured->insts.size() == instances.size());
+#endif
+          bool instances_match = true;
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            if (unstructured->insts[idx] == instances[idx])
+              continue;
+            instances_match = false;
+            break;
+          }
+          if (!instances_match)
+            continue;
+          // If we made it here we can reuse this indirection
+          indirect_index = index;
+          break;
+        }
+        if (indirect_index < 0)
+        {
+          // If we didn't make it then make it now
+          UnstructuredIndirection *unstructured = new UnstructuredIndirection();
+          unstructured->field_id = 
+            source ? src_indirect_field : dst_indirect_field;
+          unstructured->inst = 
+            source ? src_indirect_instance : dst_indirect_instance;
+          unstructured->is_ranges = both_are_range;
+          unstructured->oor_possible = 
+            source ? possible_src_out_of_range : possible_dst_out_of_range;
+          unstructured->aliasing_possible = 
+            source ? false/*no aliasing*/ : possible_dst_aliasing;
+          unstructured->subfield_offset = 0;
+          unstructured->insts.swap(instances);
+          unstructured->spaces.resize(nonempty_indexes.size());
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+            unstructured->spaces[idx] =
+              indirect_records[nonempty_indexes[idx]].domain;
+          indirect_index = indirections.size();
+          indirections.push_back(unstructured);
+#ifdef LEGION_SPY
           // If we made a new indirection then log it with Legion Spy
           LegionSpy::log_indirect_instance(unique_indirections_identifier,
-              oldsize, indirect_inst_event, indirect_field);
+              indirect_index, source ? source_indirect_instance_event :
+              dst_indirect_instance_event, unstructured->field_id);
           for (std::vector<unsigned>::const_iterator it =
                 nonempty_indexes.begin(); it != nonempty_indexes.end(); it++)
           {
             const IndirectRecord &record = indirect_records[*it];
             LegionSpy::log_indirect_group(unique_indirections_identifier,
-                oldsize, record.instance_events[fidx], 
+                indirect_index, record.instance_events[fidx], 
                 record.index_space.get_id());
           }
-        }
 #endif
+        }
+        fields[fidx].indirect_index = indirect_index;
       }
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
     /////////////////////////////////////////////////////////////
     // Templated Index Partition Node 
     /////////////////////////////////////////////////////////////
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartNodeT<DIM,T>::IndexPartNodeT(RegionTreeForest *ctx, 

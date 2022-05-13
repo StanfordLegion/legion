@@ -2728,6 +2728,11 @@ namespace Legion {
       else if (trace->runtime->dump_physical_traces)
         dump_template();
       operations.pop_front();
+      op_views.clear();
+      copy_views.clear();
+      src_indirect_views.clear();
+      dst_indirect_views.clear();
+      across_copies.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2924,9 +2929,9 @@ namespace Legion {
               if (across->src_indirect_precondition != 0)
               {
                 users.clear();
-                finder = src_across_views.find(across->lhs);
+                finder = src_indirect_views.find(across->lhs);
 #ifdef DEBUG_LEGION
-                assert(finder != src_across_views.end());
+                assert(finder != src_indirect_views.end());
 #endif
                 find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->src_indirect_precondition, users,
@@ -2935,9 +2940,9 @@ namespace Legion {
               if (across->dst_indirect_precondition != 0)
               {
                 users.clear();
-                finder = dst_across_views.find(across->lhs);
+                finder = dst_indirect_views.find(across->lhs);
 #ifdef DEBUG_LEGION
-                assert(finder != dst_across_views.end());
+                assert(finder != dst_indirect_views.end());
 #endif
                 find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->dst_indirect_precondition, users,
@@ -4486,8 +4491,10 @@ namespace Legion {
         src_indirect_pre = find_event(src_indirect_precondition);
       if (dst_indirect_precondition.exists())
         dst_indirect_pre = find_event(dst_indirect_precondition);
-      insert_instruction(new IssueAcross(*this, lhs_, copy_pre, collective_pre,
-        src_indirect_pre,dst_indirect_pre,find_trace_local_id(memo),executor));
+      IssueAcross *across = new IssueAcross(*this, lhs_,copy_pre,collective_pre,
+       src_indirect_pre, dst_indirect_pre, find_trace_local_id(memo), executor);
+      across_copies.push_back(across);
+      insert_instruction(across);
     }
 
     //--------------------------------------------------------------------------
@@ -4657,11 +4664,11 @@ namespace Legion {
       record_views(lhs_, expr, RegionUsage(src_mode, 
             LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs);
       record_expression_views(src_indirect ? 
-          src_across_views[lhs_] : copy_views[lhs_], expr, tracing_srcs);
+          src_indirect_views[lhs_] : copy_views[lhs_], expr, tracing_srcs);
       record_views(lhs_, expr, RegionUsage(dst_mode, 
             LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs);
       record_expression_views(dst_indirect ?
-          dst_across_views[lhs_] : copy_views[lhs_], expr, tracing_dsts);
+          dst_indirect_views[lhs_] : copy_views[lhs_], expr, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
