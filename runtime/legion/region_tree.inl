@@ -6496,56 +6496,67 @@ namespace Legion {
       for (int d = 0; d < DIM; d++)
       {
         // Try to compute a splitting plane for this dimension
-        // Sort the start and end of each equivalence set bounding rectangle
-        // along the splitting dimension
-        std::set<KDLine> lines;
+        // Count how many rectangles start and end at each location
+        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> lines;
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx].first;
-          lines.insert(KDLine(subset_bounds.lo[d], idx, true));
-          lines.insert(KDLine(subset_bounds.hi[d], idx, false));
+          const std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
+          std::map<std::pair<coord_t,bool>,unsigned>::iterator finder =
+            lines.find(start_key);
+          if (finder == lines.end())
+            lines[start_key] = 1;
+          else
+            finder->second++;
+          const std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
+          finder = lines.find(stop_key);
+          if (finder == lines.end())
+            lines[stop_key] = 1;
+          else
+            finder->second += 1;
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
-        std::map<coord_t,unsigned> left_exclusive, right_exclusive;
+        std::map<coord_t,unsigned> lower_inclusive, upper_exclusive;
         unsigned count = 0;
-        for (typename std::set<KDLine>::const_iterator it =
-              lines.begin(); it != lines.end(); it++)
+        for (typename std::map<std::pair<coord_t,bool>,unsigned>::const_iterator
+              it = lines.begin(); it != lines.end(); it++)
         {
+          // Increment first for starts for inclusivity
+          if (!it->first.second)
+            count += it->second;
           // Always record the count for all splits
-          left_exclusive[it->value] = count;
-          // Only increment for new rectangles
-          if (it->start)
-            count++;
+          lower_inclusive[it->first.first] = count;
         }
         // If all the lines exist at the same value
         // then we'll never have a splitting plane
-        if (left_exclusive.size() == 1)
+        if (lower_inclusive.size() == 1)
           continue;
         count = 0;
-        for (typename std::set<KDLine>::const_reverse_iterator it =
+        for (typename std::map<
+              std::pair<coord_t,bool>,unsigned>::const_reverse_iterator it = 
               lines.rbegin(); it != lines.rend(); it++)
         {
           // Always record the count for all splits
-          right_exclusive[it->value] = count;
-          // End of rectangles are the beginning in this direction
-          if (!it->start)
-            count++;
+          upper_exclusive[it->first.first] = count;
+          // Increment last for stops for exclusivity
+          if (it->first.second)
+            count += it->second;
         }
 #ifdef DEBUG_LEGION
-        assert(left_exclusive.size() == right_exclusive.size());
+        assert(lower_inclusive.size() == upper_exclusive.size());
 #endif
         // We want to take the mini-max of the two numbers in order
         // to try to balance the splitting plane across the two sets
         T split = 0;
         unsigned split_max = subrects.size();
         for (std::map<coord_t,unsigned>::const_iterator it =
-              left_exclusive.begin(); it != left_exclusive.end(); it++)
+              lower_inclusive.begin(); it != lower_inclusive.end(); it++)
         {
-          const unsigned left = it->second;
-          const unsigned right = right_exclusive[it->first];
-          const unsigned max = (left > right) ? left : right;
+          const unsigned lower = it->second;
+          const unsigned upper = upper_exclusive[it->first];
+          const unsigned max = (lower > upper) ? lower : upper;
           if (max < split_max)
           {
             split_max = max;
@@ -6677,56 +6688,66 @@ namespace Legion {
       for (int d = 0; d < DIM; d++)
       {
         // Try to compute a splitting plane for this dimension
-        // Sort the start and end of each equivalence set bounding rectangle
-        // along the splitting dimension
-        std::vector<KDLine> lines(2*subrects.size());
+        // Count how many rectangles start and end at each location
+        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> lines;
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx];
-          lines[2*idx] = KDLine(subset_bounds.lo[d], idx, true);
-          lines[2*idx+1] = KDLine(subset_bounds.hi[d], idx, false);
+          const std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
+          std::map<std::pair<coord_t,bool>,unsigned>::iterator finder =
+            lines.find(start_key);
+          if (finder == lines.end())
+            lines[start_key] = 1;
+          else
+            finder->second++;
+          const std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
+          finder = lines.find(stop_key);
+          if (finder == lines.end())
+            lines[stop_key] = 1;
+          else
+            finder->second += 1;
         }
-        std::sort(lines.begin(), lines.end());
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
-        std::map<coord_t,unsigned> left_exclusive, right_exclusive;
+        std::map<coord_t,unsigned> lower_inclusive, upper_exclusive;
         unsigned count = 0;
-        for (typename std::vector<KDLine>::const_iterator it =
-              lines.begin(); it != lines.end(); it++)
+        for (typename std::map<std::pair<coord_t,bool>,unsigned>::const_iterator
+              it = lines.begin(); it != lines.end(); it++)
         {
+          // Increment first for starts for inclusivity
+          if (!it->first.second)
+            count += it->second;
           // Always record the count for all splits
-          left_exclusive[it->value] = count;
-          // Only increment for new rectangles
-          if (it->start)
-            count++;
+          lower_inclusive[it->first.first] = count;
         }
         // If all the lines exist at the same value
         // then we'll never have a splitting plane
-        if (left_exclusive.size() == 1)
+        if (lower_inclusive.size() == 1)
           continue;
         count = 0;
-        for (typename std::vector<KDLine>::const_reverse_iterator it =
+        for (typename std::map<
+              std::pair<coord_t,bool>,unsigned>::const_reverse_iterator it = 
               lines.rbegin(); it != lines.rend(); it++)
         {
           // Always record the count for all splits
-          right_exclusive[it->value] = count;
-          // End of rectangles are the beginning in this direction
-          if (!it->start)
-            count++;
+          upper_exclusive[it->first.first] = count;
+          // Increment last for stops for exclusivity
+          if (it->first.second)
+            count += it->second;
         }
 #ifdef DEBUG_LEGION
-        assert(left_exclusive.size() == right_exclusive.size());
+        assert(lower_inclusive.size() == upper_exclusive.size());
 #endif
         // We want to take the mini-max of the two numbers in order
         // to try to balance the splitting plane across the two sets
         T split = 0;
         unsigned split_max = subrects.size();
         for (std::map<coord_t,unsigned>::const_iterator it = 
-              left_exclusive.begin(); it != left_exclusive.end(); it++)
+              lower_inclusive.begin(); it != lower_inclusive.end(); it++)
         {
           const unsigned left = it->second;
-          const unsigned right = right_exclusive[it->first];
+          const unsigned right = upper_exclusive[it->first];
           const unsigned max = (left > right) ? left : right;
           if (max < split_max)
           {

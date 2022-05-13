@@ -3357,48 +3357,6 @@ namespace Legion {
     }; 
 
     /**
-     * \struct KDLine
-     * A small helper struct for tracking splitting planes for 
-     * KD-tree construction
-     */
-    struct KDLine {
-    public:
-      KDLine(void)
-        : value(0), index(0), start(false) { }
-      KDLine(coord_t val, unsigned idx, bool st)
-        : value(val), index(idx), start(st) { }
-    public:
-      inline bool operator<(const KDLine &rhs) const
-      {
-        if (value < rhs.value)
-          return true;
-        if (value > rhs.value)
-          return false;
-        if (index < rhs.index)
-          return true;
-        if (index > rhs.index)
-          return false;
-        // Note that this intentionally reversed to
-        // make sure starts always come before ends
-        return start > rhs.start;
-      }
-      inline bool operator==(const KDLine &rhs) const
-      {
-        if (value != rhs.value)
-          return false;
-        if (index != rhs.index)
-          return false;
-        if (start != rhs.start)
-          return false;
-        return true;
-      }
-    public:
-      coord_t value;
-      unsigned index;
-      bool start;
-    };
-
-    /**
      * \class KDNode
      * A KDNode is used for performing fast interference tests for
      * expressions against rectangles from child subregions in a partition.
