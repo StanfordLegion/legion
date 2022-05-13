@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [[ "-ll:gpu", "1", "-ll:fsize", "10000", "-ll:csize", "10000" ]]
+-- [[ "-ll:gpu", "1", "-ll:fsize", "7000", "-ll:csize", "7000" ]]
 
 import "regent"
 
@@ -89,6 +89,6 @@ task main()
   __fence(__execution, __block)
   test_size(1000000000)
   __fence(__execution, __block)
-  test_size(10000000000LL)
+  test_size(7000000000LL)
 end
 regentlib.start(main)
