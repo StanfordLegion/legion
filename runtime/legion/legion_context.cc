@@ -11928,6 +11928,11 @@ namespace Legion {
     {
       if (barriers.empty())
         return;
+      // We're not handling phase barriers that come from hanshakes correctly
+      // right now because those can be safely different across the shards
+      // so only check this with precise checks for now
+      if (!hasher.precise)
+        return;
       Serializer rez;
       for (std::vector<PhaseBarrier>::const_iterator it = 
             barriers.begin(); it != barriers.end(); it++)
