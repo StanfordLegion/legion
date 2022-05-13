@@ -6497,23 +6497,40 @@ namespace Legion {
       {
         // Try to compute a splitting plane for this dimension
         // Count how many rectangles start and end at each location
-        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> lines;
+        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> inclusive_lines;
+        std::map<std::pair<coord_t,bool/*start*/>,unsigned> exclusive_lines;
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx].first;
-          const std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
+          // Start inclusive
+          std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
           std::map<std::pair<coord_t,bool>,unsigned>::iterator finder =
-            lines.find(start_key);
-          if (finder == lines.end())
-            lines[start_key] = 1;
+            inclusive_lines.find(start_key);
+          if (finder == inclusive_lines.end())
+            inclusive_lines[start_key] = 1;
           else
             finder->second++;
-          const std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
-          finder = lines.find(stop_key);
-          if (finder == lines.end())
-            lines[stop_key] = 1;
+          // Start exclusive
+          start_key.second = true;
+          finder = exclusive_lines.find(start_key);
+          if (finder == exclusive_lines.end())
+            exclusive_lines[start_key] = 1;
+          else
+            finder->second++;
+          // Stop inclusive
+          std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
+          finder = inclusive_lines.find(stop_key);
+          if (finder == inclusive_lines.end())
+            inclusive_lines[stop_key] = 1;
           else
             finder->second += 1;
+          // Stop exclusive
+          stop_key.second = false;
+          finder = exclusive_lines.find(stop_key);
+          if (finder == exclusive_lines.end())
+            exclusive_lines[stop_key] = 1;
+          else
+            finder->second++;
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
@@ -6521,7 +6538,7 @@ namespace Legion {
         std::map<coord_t,unsigned> lower_inclusive, upper_exclusive;
         unsigned count = 0;
         for (typename std::map<std::pair<coord_t,bool>,unsigned>::const_iterator
-              it = lines.begin(); it != lines.end(); it++)
+              it = inclusive_lines.begin(); it != inclusive_lines.end(); it++)
         {
           // Increment first for starts for inclusivity
           if (!it->first.second)
@@ -6536,7 +6553,7 @@ namespace Legion {
         count = 0;
         for (typename std::map<
               std::pair<coord_t,bool>,unsigned>::const_reverse_iterator it = 
-              lines.rbegin(); it != lines.rend(); it++)
+              exclusive_lines.rbegin(); it != exclusive_lines.rend(); it++)
         {
           // Always record the count for all splits
           upper_exclusive[it->first.first] = count;
@@ -6689,23 +6706,40 @@ namespace Legion {
       {
         // Try to compute a splitting plane for this dimension
         // Count how many rectangles start and end at each location
-        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> lines;
+        std::map<std::pair<coord_t,bool/*stop*/>,unsigned> inclusive_lines;
+        std::map<std::pair<coord_t,bool/*start*/>,unsigned> exclusive_lines;
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx];
-          const std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
+          // Start inclusive
+          std::pair<coord_t,bool> start_key(subset_bounds.lo[d],false);
           std::map<std::pair<coord_t,bool>,unsigned>::iterator finder =
-            lines.find(start_key);
-          if (finder == lines.end())
-            lines[start_key] = 1;
+            inclusive_lines.find(start_key);
+          if (finder == inclusive_lines.end())
+            inclusive_lines[start_key] = 1;
           else
             finder->second++;
-          const std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
-          finder = lines.find(stop_key);
-          if (finder == lines.end())
-            lines[stop_key] = 1;
+          // Start exclusive
+          start_key.second = true;
+          finder = exclusive_lines.find(start_key);
+          if (finder == exclusive_lines.end())
+            exclusive_lines[start_key] = 1;
+          else
+            finder->second++;
+          // Stop inclusive
+          std::pair<coord_t,bool> stop_key(subset_bounds.lo[d],true);
+          finder = inclusive_lines.find(stop_key);
+          if (finder == inclusive_lines.end())
+            inclusive_lines[stop_key] = 1;
           else
             finder->second += 1;
+          // Stop exclusive
+          stop_key.second = false;
+          finder = exclusive_lines.find(stop_key);
+          if (finder == exclusive_lines.end())
+            exclusive_lines[stop_key] = 1;
+          else
+            finder->second++;
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
@@ -6713,7 +6747,7 @@ namespace Legion {
         std::map<coord_t,unsigned> lower_inclusive, upper_exclusive;
         unsigned count = 0;
         for (typename std::map<std::pair<coord_t,bool>,unsigned>::const_iterator
-              it = lines.begin(); it != lines.end(); it++)
+              it = inclusive_lines.begin(); it != inclusive_lines.end(); it++)
         {
           // Increment first for starts for inclusivity
           if (!it->first.second)
@@ -6728,7 +6762,7 @@ namespace Legion {
         count = 0;
         for (typename std::map<
               std::pair<coord_t,bool>,unsigned>::const_reverse_iterator it = 
-              lines.rbegin(); it != lines.rend(); it++)
+              exclusive_lines.rbegin(); it != exclusive_lines.rend(); it++)
         {
           // Always record the count for all splits
           upper_exclusive[it->first.first] = count;
