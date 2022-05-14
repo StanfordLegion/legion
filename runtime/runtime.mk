@@ -469,7 +469,7 @@ ifeq ($(strip $(USE_HIP)),1)
     # Latter is preferred, former is for backwards compatability
     REALM_CC_FLAGS  += -DREALM_USE_HIP
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
-    CC_FLAGS        += -D__HIP_PLATFORM_HCC__
+    CC_FLAGS        += -D__HIP_PLATFORM_AMD__
     HIPCC_FLAGS     += -fno-strict-aliasing
     INC_FLAGS       += -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
     ifeq ($(strip $(DEBUG)),1)
@@ -490,8 +490,8 @@ ifeq ($(strip $(USE_HIP)),1)
     # Latter is preferred, former is for backwards compatability
     REALM_CC_FLAGS  += -DREALM_USE_HIP
     LEGION_CC_FLAGS += -DLEGION_USE_HIP
-    CC_FLAGS        += -D__HIP_PLATFORM_NVCC__
-    HIPCC_FLAGS     += -D__HIP_PLATFORM_NVCC__
+    CC_FLAGS        += -D__HIP_PLATFORM_NVIDIA__
+    HIPCC_FLAGS     += -D__HIP_PLATFORM_NVIDIA__
     INC_FLAGS       += -I$(CUDA_PATH)/include -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g -O0
