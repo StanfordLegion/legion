@@ -64,9 +64,11 @@ if(Legion_USE_HIP)
 
     # some tests have CUDA source files too
     set(CUDASRC_memspeed memspeed_gpu.cu)
+    set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
   elseif (Legion_HIP_TARGET STREQUAL "ROCM")
     # some tests have HIP source files too
-    set(HIPSRC_memspeed memspeed_gpu.cpp)
+    set(HIPSRC_memspeed memspeed_gpu.cu)
+    set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
   endif()
 endif()
 
@@ -79,6 +81,15 @@ foreach(test IN LISTS REALM_TESTS)
     add_executable(${test} ${test}.cc)
   endif()
   target_link_libraries(${test} Legion::Realm)
+
+  if(Legion_USE_HIP)
+    target_include_directories(${test} PRIVATE ${HIP_INCLUDE_DIRS})
+    if(Legion_HIP_TARGET STREQUAL "CUDA")
+      target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_NVIDIA__)
+    elseif (Legion_HIP_TARGET STREQUAL "ROCM")
+      target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_AMD__)
+    endif()
+  endif()
 endforeach()
 
 # scatter uses C++11 lambdas
