@@ -230,7 +230,7 @@ def symlink(from_path, to_path):
 
 def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, build_dir,
-                     debug, cuda, openmp, python, llvm, hdf, spy,
+                     debug, cuda, hip, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose):
     # Don't blow away an existing directory
@@ -291,6 +291,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
+             '-DLegion_USE_HIP=%s' % ('ON' if hip else 'OFF'),
              '-DLegion_USE_OpenMP=%s' % ('ON' if openmp else 'OFF'),
              '-DLegion_USE_Python=%s' % ('ON' if python else 'OFF'),
              '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
@@ -300,6 +301,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
              '-DLegion_BUILD_BINDINGS=ON',
              '-DBUILD_SHARED_LIBS=ON',
             ] +
+            (['-DHIP_THRUST_ROOT_DIR=%s' % os.environ['THRUST_PATH']] if 'THRUST_PATH' in os.environ else []) +
             extra_flags +
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []))
@@ -332,6 +334,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
              'DEFINE_HEADERS_DIR=%s' % bindings_dir, # otherwise Python build recompiles everything
              'DEBUG=%s' % (1 if debug else 0),
              'USE_CUDA=%s' % (1 if cuda else 0),
+             'USE_HIP=%s' % (1 if hip else 0),
              'USE_OPENMP=%s' % (1 if openmp else 0),
              'USE_PYTHON=%s' % (1 if python else 0),
              'USE_LLVM=%s' % (1 if llvm else 0),
@@ -388,7 +391,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
     dump_json_config(config_filename, cmake)
     return cmake
 
-def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hdf=False,
+def install(gasnet=False, cuda=False, hip=False, openmp=False, python=False, llvm=False, hdf=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             cmake_exe=None, cmake_build_dir=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
@@ -434,7 +437,7 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
     python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
     install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, cmake_build_dir,
-                     debug, cuda, openmp, python, llvm, hdf, spy,
+                     debug, cuda, hip, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose)
 
@@ -474,6 +477,10 @@ def driver():
         '--cuda', dest='cuda', action='store_true', required=False,
         default=os.environ.get('USE_CUDA') == '1',
         help='Build Legion with CUDA.')
+    parser.add_argument(
+        '--hip', dest='hip', action='store_true', required=False,
+        default=os.environ.get('USE_HIP') == '1',
+        help='Build Legion with HIP.')
     parser.add_argument(
         '--openmp', dest='openmp', action='store_true', required=False,
         default=os.environ.get('USE_OPENMP') == '1',
