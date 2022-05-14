@@ -840,6 +840,13 @@ if(Legion_REDOP_HALF)
 endif()
 mark_as_advanced(Legion_REDOP_HALF)
 
+if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
+  set(HIP_THRUST_ROOT_DIR "" CACHE STRING "Location of HIP THRUST library")
+  if(NOT HIP_THRUST_ROOT_DIR)
+    message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
+  endif()
+endif()
+
 #------------------------------------------------------------------------------#
 # Configure definition headers
 #------------------------------------------------------------------------------#
