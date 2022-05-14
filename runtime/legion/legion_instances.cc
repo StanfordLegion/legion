@@ -2215,7 +2215,7 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(copy_mask, dst_fields);
       source_manager->compute_copy_offsets(copy_mask, src_fields);
-      const std::vector<Reservation> no_reservations;
+      const std::vector<Reservation> no_reservations{};
       const ApEvent result = copy_expression->issue_copy(trace_info, dst_fields,
                                          src_fields, no_reservations,
 #ifdef LEGION_SPY
