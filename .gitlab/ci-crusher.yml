@@ -28,6 +28,9 @@ variables:
   NO_PRETTY: "1"
   CXXFLAGS: "-std=c++11 -D__HIP_PLATFORM_AMD__"
 
+.cmake: &cmake
+  USE_CMAKE: "1"
+
 .tests: &tests
   script:
     - .gitlab/test_script.sh
@@ -59,6 +62,15 @@ legion:
   variables:
     <<: [*legion]
 
+legion_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*legion, *cmake]
+
 regent:
   <<: [*tests]
   stage: test
@@ -67,6 +79,15 @@ regent:
     - crusher
   variables:
     <<: [*regent]
+
+regent_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent, *cmake]
 
 clean:
   stage: clean

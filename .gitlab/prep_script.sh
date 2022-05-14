@@ -46,7 +46,8 @@ set -x
 # download Thrust
 git clone https://github.com/ROCmSoftwarePlatform/Thrust.git
 cat >>env.sh <<EOF
-export THRUST_PATH=\$PWD/Thrust
+# Important: has to be \$EXTERNAL_WORKDIR or else CMake sees it in-source
+export THRUST_PATH=\$EXTERNAL_WORKDIR/Thrust
 EOF
 
 # download and build GASNet
@@ -57,11 +58,13 @@ if [[ "$REALM_NETWORKS" == gasnet* ]]; then
     set -x
     if [[ "$GASNET_DEBUG" -eq 1 ]]; then
         cat >>env.sh <<EOF
-export GASNET_ROOT="\$PWD/gasnet/debug"
+# Important: has to be \$EXTERNAL_WORKDIR or else CMake sees it in-source
+export GASNET_ROOT="\$EXTERNAL_WORKDIR/gasnet/debug"
 EOF
     else
         cat >>env.sh <<EOF
-export GASNET_ROOT="\$PWD/gasnet/release"
+# Important: has to be \$EXTERNAL_WORKDIR or else CMake sees it in-source
+export GASNET_ROOT="\$EXTERNAL_WORKDIR/gasnet/release"
 EOF
     fi
 fi
