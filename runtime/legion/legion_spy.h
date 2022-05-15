@@ -1590,7 +1590,7 @@ namespace Legion {
       }
 
       static inline void log_deppart_events(UniqueID op_unique_id,
-                                            IndexSpace handle,
+                                            IndexSpaceExprID expr_id,
                                             LgEvent pre, LgEvent post)
       {
         // Realm has an optimization where if it can do the deppart op
@@ -1598,8 +1598,8 @@ namespace Legion {
         // which of course breaks Legion Spy's way of logging deppart
         // operations uniquely as their completion event
         assert(pre != post);
-        log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
-                      op_unique_id, handle.get_id(), pre.id, post.id);
+        log_spy.print("Deppart Events %llu %lld " IDFMT " " IDFMT,
+                      op_unique_id, expr_id, pre.id, post.id);
       }
 
       // We use this call as a special guard call to know when 

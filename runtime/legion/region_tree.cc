@@ -46,7 +46,7 @@ namespace Legion {
       index_space = req.region.get_index_space();
 #endif
       FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
-      std::vector<unsigned> field_indexes;
+      std::vector<unsigned> field_indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, field_indexes);
       instances.resize(field_indexes.size());
 #ifdef LEGION_SPY
@@ -69,9 +69,10 @@ namespace Legion {
           const FieldMask &mask = ref.get_valid_fields();
           if (!mask.is_set(field_indexes[fidx]))
             continue;
-          instances[fidx] = ref.get_physical_manager()->get_instance(key);
+          PhysicalManager *manager = ref.get_physical_manager();
+          instances[fidx] = manager->get_instance(key);
 #ifdef LEGION_SPY
-          instance_events[fidx] = ref.get_ready_event();
+          instance_events[fidx] = manager->get_use_event();
 #endif
 #ifdef DEBUG_LEGION
           found = true;
@@ -6612,7 +6613,7 @@ namespace Legion {
       assert(src_fields.empty());
 #endif
       FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
-      std::vector<unsigned> indexes;
+      std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       src_fields.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
@@ -6652,7 +6653,7 @@ namespace Legion {
       assert(dst_fields.empty());
 #endif
       FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
-      std::vector<unsigned> indexes;
+      std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       dst_fields.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =

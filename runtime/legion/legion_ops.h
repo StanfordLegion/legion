@@ -1195,13 +1195,17 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
       public:
         DeferredCopyAcross(CopyOp *op, const PhysicalTraceInfo &info,
-                           unsigned idx, ApEvent pre, ApUserEvent d,
-                           PredEvent g, RtUserEvent a, 
+                           unsigned idx, ApEvent init, ApUserEvent local_pre,
+                           ApUserEvent local_post, ApEvent collective_pre, 
+                           ApEvent collective_post, PredEvent g, RtUserEvent a,
                            InstanceSet *src, InstanceSet *dst,
                            InstanceSet *gather, InstanceSet *scatter)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
-            PhysicalTraceInfo(info), copy(op),
-            index(idx), precondition(pre), done(d), guard(g), applied(a),
+            PhysicalTraceInfo(info), copy(op), index(idx),
+            init_precondition(init), local_precondition(local_pre),
+            local_postcondition(local_post), 
+            collective_precondition(collective_pre), 
+            collective_postcondition(collective_post), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
             scatter_targets(scatter) 
           // This is kind of scary, Realm is about to make a copy of this
@@ -1215,8 +1219,11 @@ namespace Legion {
       public:
         CopyOp *const copy;
         const unsigned index;
-        const ApEvent precondition;
-        const ApUserEvent done;
+        const ApEvent init_precondition;
+        const ApUserEvent local_precondition;
+        const ApUserEvent local_postcondition;
+        const ApEvent collective_precondition;
+        const ApEvent collective_postcondition;
         const PredEvent guard;
         const RtUserEvent applied;
         InstanceSet *const src_targets;
@@ -1252,9 +1259,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources);
@@ -1286,8 +1294,11 @@ namespace Legion {
       void perform_type_checking(void) const;
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
-                               const ApEvent local_init_precondition,
-                               const ApUserEvent local_completion,
+                               const ApEvent init_precondition,
+                               const ApUserEvent local_precondition,
+                               const ApUserEvent local_postcondition,
+                               const ApEvent collective_precondition,
+                               const ApEvent collective_postcondition,
                                const PredEvent predication_guard,
                                const InstanceSet &src_targets,
                                const InstanceSet &dst_targets,
@@ -1339,6 +1350,8 @@ namespace Legion {
       std::vector<bool>                     scatter_is_range;
       LegionVector<VersionInfo>             gather_versions;
       LegionVector<VersionInfo>             scatter_versions;
+      std::vector<std::vector<IndirectRecord> > src_indirect_records;
+      std::vector<std::vector<IndirectRecord> > dst_indirect_records;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
@@ -1392,9 +1405,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources); 
@@ -1415,16 +1429,17 @@ namespace Legion {
       IndexSpaceNode*                                    launch_space;
     protected:
       std::vector<PointCopyOp*>                          points;
-      std::vector<std::vector<IndirectRecord> >          src_records;
-      std::vector<std::vector<IndirectRecord> >          dst_records;
-      std::vector<std::vector<ApEvent> >                 exchange_pre_events;
-      std::vector<std::vector<ApEvent> >                 exchange_post_events;
-      std::vector<ApUserEvent>                           pre_merged;
-      std::vector<ApUserEvent>                           post_merged;
-      std::vector<size_t>                                src_exchanges;
-      std::vector<size_t>                                dst_exchanges;
-      std::vector<RtUserEvent>                           src_exchanged;
-      std::vector<RtUserEvent>                           dst_exchanged;
+      struct IndirectionExchange {
+        std::set<ApEvent> local_preconditions;
+        std::set<ApEvent> local_postconditions;
+        std::vector<std::vector<IndirectRecord>*> src_records;
+        std::vector<std::vector<IndirectRecord>*> dst_records;
+        ApUserEvent collective_pre;
+        ApUserEvent collective_post;
+        RtUserEvent src_ready;
+        RtUserEvent dst_ready;
+      };
+      std::vector<IndirectionExchange>                   collective_exchanges;
       unsigned                                           points_committed;
       bool                                       collective_src_indirect_points;
       bool                                       collective_dst_indirect_points;
@@ -1460,9 +1475,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources);

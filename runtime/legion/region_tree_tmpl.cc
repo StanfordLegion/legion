@@ -111,8 +111,10 @@ namespace Legion {
 				     ApEvent); \
   template ApEvent CopyAcrossUnstructuredT<INST_N1,T1>:: \
     compute_preimages<INST_N2,T2>(std::vector<DomainT<INST_N1,T1> >&, \
+                                     Operation*, \
+                                     ApEvent, \
                                      const bool); \
-  template void CopyAcrossUnstructuredT<INST_N1,T1>:: \
+  template bool CopyAcrossUnstructuredT<INST_N1,T1>:: \
     rebuild_indirections<INST_N2,T2>(const bool);
 
   FOREACH_TT(DOIT_TT)

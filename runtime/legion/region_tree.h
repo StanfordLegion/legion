@@ -1112,31 +1112,36 @@ namespace Legion {
     public:
       struct ComputePreimagesHelper {
       public:
-        ComputePreimagesHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
-          : unstructured(u), source(s) { }
+        ComputePreimagesHelper(CopyAcrossUnstructuredT<DIM,T> *u,
+                               Operation *o, ApEvent p, bool s)
+          : unstructured(u), op(o), precondition(p), source(s) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(ComputePreimagesHelper *helper)
           { helper->result = helper->unstructured->template 
-            compute_preimages<N2::N,T2>(helper->new_preimages,helper->source); }
+            compute_preimages<N2::N,T2>(helper->new_preimages,
+              helper->op, helper->precondition, helper->source); }
       public:
         std::vector<DomainT<DIM,T> > new_preimages;
         CopyAcrossUnstructuredT<DIM,T> *const unstructured;
+        Operation *const op;
+        const ApEvent precondition;
         ApEvent result;
         const bool source; 
       };
       struct RebuildIndirectionsHelper {
       public:
         RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
-          : unstructured(u), source(s) { }
+          : unstructured(u), source(s), empty(true) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(RebuildIndirectionsHelper *helper)
-          { helper->unstructured->template 
+          { helper->empty = helper->unstructured->template 
             rebuild_indirections<N2::N,T2>(helper->source); }
       public:
         CopyAcrossUnstructuredT<DIM,T> *const unstructured;
         const bool source;
+        bool empty;
       };
     public:
       CopyAcrossUnstructuredT(Runtime *runtime, 
@@ -1157,9 +1162,9 @@ namespace Legion {
     public:
       template<int D2, typename T2>
       ApEvent compute_preimages(std::vector<DomainT<DIM,T> > &preimages, 
-                                const bool source); 
+                Operation *op, ApEvent precondition, const bool source); 
       template<int D2, typename T2>
-      void rebuild_indirections(const bool source);
+      bool rebuild_indirections(const bool source);
     public:
       IndexSpaceExpression *const expr;
       const DomainT<DIM,T> copy_domain;
@@ -1169,8 +1174,11 @@ namespace Legion {
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
+      ApEvent src_indirect_spaces_precondition,dst_indirect_spaces_precondition;
+      bool need_src_indirect_precondition, need_dst_indirect_precondition;
       bool src_indirect_immutable_for_tracing;
       bool dst_indirect_immutable_for_tracing;
+      bool has_empty_preimages;
     };
 
     /**
