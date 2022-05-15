@@ -1532,6 +1532,9 @@ namespace Legion {
     public:
       virtual const DomainPoint& get_domain_point(void) const = 0;
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps) = 0;
+      virtual const Mappable* as_mappable(void) const = 0;
     }; 
 
     /**
@@ -1555,7 +1558,8 @@ namespace Legion {
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
-                          const std::vector<ProjectionPoint*> &points);
+                          const std::vector<ProjectionPoint*> &points,
+                          IndexSpaceNode *launch_space);
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
@@ -1575,6 +1579,10 @@ namespace Legion {
       void check_inversion(const Task *task, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);
       void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
+      void check_inversion(const Mappable *mappable, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Mappable *mappable, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
     public:
       const int depth; 

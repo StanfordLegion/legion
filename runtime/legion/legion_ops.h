@@ -1398,6 +1398,10 @@ namespace Legion {
           const DomainPoint &key,
           LegionVector<IndirectRecord> &records, const bool sources); 
     public:
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 RtEvent point_mapped);
+    public:
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
@@ -1432,6 +1436,8 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements; 
+      std::map<DomainPoint,RtEvent> intra_space_dependences;
+      std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     };
 
     /**
@@ -1482,12 +1488,16 @@ namespace Legion {
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
-      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
     protected:
-      IndexCopyOp*              owner;
+      IndexCopyOp*                          owner;
+      std::set<RtEvent>                     intra_space_mapping_dependences;
     };
 
     /**
@@ -3196,6 +3206,9 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       DependentPartitionOp *owner;
     };
@@ -3385,7 +3398,10 @@ namespace Legion {
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
-      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
