@@ -5671,7 +5671,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(unstructured->inst == 
               (source ? src_indirect_instance : dst_indirect_instance));
-          assert(unstructured->field_id == 
+          assert(unsigned(unstructured->field_id) == 
               (source ? src_indirect_field : dst_indirect_field));
           assert(unstructured->insts.size() == instances.size());
 #endif
