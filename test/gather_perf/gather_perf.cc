@@ -67,14 +67,30 @@ class ProjectionOneLevel : public ProjectionFunctor {
 public:
   ProjectionOneLevel(int _index1) : index1(_index1) {}
   virtual bool is_functional(void) const { return true; }
+  virtual bool is_invertible(void) const { return true; }
   virtual unsigned get_depth(void) const { return 0; }
   using ProjectionFunctor::project;
+  using ProjectionFunctor::invert;
   virtual LogicalRegion project(LogicalPartition upper_bound,
 				const DomainPoint &point,
 				const Domain &launch_domain)
   {
     return runtime->get_logical_subregion_by_color(upper_bound,
 						   point[index1]);
+  }
+  virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                      const Domain &launch_domain,
+                      std::vector<DomainPoint> &ordered_points)
+  {
+    // Invert this the dumb way for now since these are likely to be
+    // small launch domains
+    for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+    {
+      LogicalRegion lr = project(upper_bound, itr.p, launch_domain);
+      if (lr != region)
+        continue;
+      ordered_points.push_back(itr.p);
+    }
   }
 
 protected:
