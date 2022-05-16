@@ -918,6 +918,9 @@ namespace Legion {
       // ProjectionPoint methods
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned index,
+             const std::vector<DomainPoint> &dependences);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments, bool eager,
@@ -944,9 +947,7 @@ namespace Legion {
                                                 unsigned index, bool success);
       virtual void report_total_collective_instance_calls(MappingCallKind call,
                                                           unsigned total_calls);
-    public:
-      void record_intra_space_dependences(unsigned index,
-             const std::vector<DomainPoint> &dependences);
+    public: 
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;

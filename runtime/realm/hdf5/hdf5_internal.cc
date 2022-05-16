@@ -263,6 +263,10 @@ namespace Realm {
         long idx = 0;
 	
 	while((idx < nr) && request_available()) {	  
+	  // TODO: we really shouldn't even be trying if the iteration
+	  //   is already done
+	  if(iteration_completed.load()) break;
+
 	  // TODO: use control stream to determine which input/output ports
 	  //  to use
 	  int in_port_idx = 0;
@@ -276,7 +280,7 @@ namespace Realm {
 	    // non-ib iterators should end at the same time
 	    assert((in_port->peer_guid != XFERDES_NO_GUID) || in_port->iter->done());
 	    assert((out_port->peer_guid != XFERDES_NO_GUID) || out_port->iter->done());
-	    iteration_completed.store_release(true);
+	    begin_completion();
 	    break;
 	  }
 
@@ -300,7 +304,7 @@ namespace Realm {
 	      // otherwise, this shouldn't happen - we should detect this case
 	      //  on the the transfer of those last bytes
 	      assert(0);
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	      break;
 	    }
 	    if(pre_max < max_bytes) {
@@ -413,6 +417,7 @@ namespace Realm {
 	  new_req->write_seq_pos = out_port->local_bytes_total;
 	  new_req->write_seq_count = hdf5_bytes;
 	  out_port->local_bytes_total += hdf5_bytes;
+          out_port->local_bytes_cons.fetch_add(hdf5_bytes);
 
 	  requests[idx++] = new_req;
 
@@ -420,7 +425,7 @@ namespace Realm {
 	  //  process the request (so that multi-hop successors are notified
 	  //  properly)
 	  if(hdf5_iter->done())
-	    iteration_completed.store_release(true);
+	    begin_completion();
 	}
 
 	return idx;
@@ -524,7 +529,7 @@ namespace Realm {
                     output_control.eos_received);
 
           if(done)
-            iteration_completed.store_release(true);
+            begin_completion();
 
           if(done || work_until.is_expired())
             break;

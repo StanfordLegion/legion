@@ -15117,9 +15117,8 @@ namespace Legion {
       assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
       assert(mappable != NULL);
 #endif
-      // TODO: support for invertible point operations
-      if (is_invertible && (req.privilege == LEGION_READ_WRITE))
-        assert(false);
+      const bool find_dependences = is_invertible && IS_WRITE(req);
+      std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -15136,6 +15135,17 @@ namespace Legion {
             check_projection_partition_result(req.partition, op, idx,
                                               result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result,req.partition,launch_domain,region_deps);
+                check_inversion((*it)->as_mappable(), idx, region_deps);
+              }
+              else
+                check_containment((*it)->as_mappable(), idx, region_deps);
+            }
           }
         }
         else
@@ -15150,6 +15160,18 @@ namespace Legion {
                                (*it)->get_domain_point());
             check_projection_region_result(req.region, op, idx, result,runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result, req.region, launch_domain, region_deps);
+                check_inversion((*it)->as_mappable(), idx, region_deps);
+              }
+              else
+                check_containment((*it)->as_mappable(), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
       }
@@ -15168,6 +15190,18 @@ namespace Legion {
             check_projection_partition_result(req.partition, op, idx,
                                               result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result,req.partition,launch_domain,region_deps);
+                check_inversion((*it)->as_mappable(), idx, region_deps);
+              }
+              else
+                check_containment((*it)->as_mappable(), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
         else
@@ -15182,6 +15216,18 @@ namespace Legion {
                                (*it)->get_domain_point());
             check_projection_region_result(req.region, op, idx, result,runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result, req.region, launch_domain, region_deps);
+                check_inversion((*it)->as_mappable(), idx, region_deps);
+              }
+              else
+                check_containment((*it)->as_mappable(), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
       }
@@ -15451,6 +15497,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionFunction::check_inversion(const Mappable *mappable, 
+                         unsigned index, const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      switch (mappable->get_mappable_type())
+      {
+        case LEGION_COPY_MAPPABLE:
+          {
+            const Copy *copy = mappable->as_copy();
+            if (points.empty())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an empty inversion result "
+                  "while inverting region requirement %d of copy (UID %lld)."
+                  "Empty inversions are never legal because the point copy "
+                  "that produced the region must always be included.",
+                  projection_id, index, copy->get_unique_id())
+#ifdef DEBUG_LEGION
+            std::set<DomainPoint> unique_points(points.begin(), points.end());
+            if (unique_points.size() != points.size())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an invalid inversion result "
+                  "containing duplicate points for region requirement %d of "
+                  "copy (UID %lld). Each point is only permitted to "
+                  "appear once in an inversion.", projection_id, index,
+                  copy->get_unique_id())
+            if (unique_points.find(copy->index_point) == unique_points.end())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an invalid inversion result "
+                  "that does not contain the original point for region "
+                  "requirement %d of copy (UID %lld).", projection_id, index,
+                  copy->get_unique_id())
+#endif
+            break;
+          }
+        case LEGION_FILL_MAPPABLE:
+          {
+            const Fill *fill = mappable->as_fill();
+            if (points.empty())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an empty inversion result "
+                  "while inverting region requirement %d of fill (UID %lld)."
+                  "Empty inversions are never legal because the point fill "
+                  "that produced the region must always be included.",
+                  projection_id, index, fill->get_unique_id())
+#ifdef DEBUG_LEGION
+            std::set<DomainPoint> unique_points(points.begin(), points.end());
+            if (unique_points.size() != points.size())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an invalid inversion result "
+                  "containing duplicate points for region requirement %d of "
+                  "fill (UID %lld). Each point is only permitted to "
+                  "appear once in an inversion.", projection_id, index,
+                  fill->get_unique_id())
+            if (unique_points.find(fill->index_point) == unique_points.end())
+              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+                  "Projection functor %d produced an invalid inversion result "
+                  "that does not contain the original point for region "
+                  "requirement %d of fill (UID %lld).", projection_id, index,
+                  fill->get_unique_id())
+#endif
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ProjectionFunction::check_containment(const Task *task, unsigned index,
                                          const std::vector<DomainPoint> &points)
     //--------------------------------------------------------------------------
@@ -15531,6 +15645,54 @@ namespace Legion {
                                         partition->handle, launch_domain);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_containment(const Mappable *mappable, 
+                         unsigned index, const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      
+      switch (mappable->get_mappable_type())
+      {
+        case LEGION_COPY_MAPPABLE:
+          {
+            const Copy *copy = mappable->as_copy();
+            for (std::vector<DomainPoint>::const_iterator it = 
+                  points.begin(); it != points.end(); it++)
+            {
+              if ((*it) == copy->index_point)
+                return;
+            }
+            REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+              "Projection functor %d produced an invalid inversion result "
+              "that does not contain the original point for region requirement "
+              "%d of copy (UID %lld).", projection_id, index,
+              copy->get_unique_id())
+            break;
+          }
+        case LEGION_FILL_MAPPABLE:
+          {
+            const Fill *fill = mappable->as_fill();
+            for (std::vector<DomainPoint>::const_iterator it = 
+                  points.begin(); it != points.end(); it++)
+            {
+              if ((*it) == fill->index_point)
+                return;
+            }
+            REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+              "Projection functor %d produced an invalid inversion result "
+              "that does not contain the original point for region requirement "
+              "%d of fill (UID %lld).", projection_id, index,
+              fill->get_unique_id())
+            break;
+          }
+        default:
+          assert(false);
+      
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15973,7 +16135,7 @@ namespace Legion {
       AutoLock s_lock(sharding_lock);
       shard_index_spaces[key] = result;
       return result;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Legion Runtime 

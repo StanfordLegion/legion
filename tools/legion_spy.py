@@ -6576,7 +6576,7 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req1, req2)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Check for invertible projection functions which can 
                         # the runtime knows how to handle their dependences
                         if req1.index == req2.index and \
@@ -6691,7 +6691,7 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req, other_req)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Only report this at least one is not a projection requirement
                         if req.projection_function is None or \
                             other_req.projection_function is None:

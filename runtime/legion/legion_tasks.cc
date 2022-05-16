@@ -10246,31 +10246,17 @@ namespace Legion {
         const RegionRequirement &req = regions[idx];
         if (!IS_WRITE(req))
           continue;
-        local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
-      }
-      // If the projection functions are invertible then we don't have to 
-      // worry about interference because the runtime knows how to hook
-      // up those kinds of dependences
-      for (std::set<std::pair<unsigned,unsigned> >::iterator it = 
-            local_interfering.begin(); it != local_interfering.end(); /*none*/)
-      {
-        if (it->first == it->second)
+        // If the projection functions are invertible then we don't have to 
+        // worry about interference because the runtime knows how to hook
+        // up those kinds of dependences
+        if (req.handle_type != LEGION_SINGULAR_PROJECTION)
         {
-          const RegionRequirement &req = regions[it->first];
-          if (req.handle_type != LEGION_SINGULAR_PROJECTION)
-          {
-            ProjectionFunction *func = 
-              runtime->find_projection_function(req.projection);   
-            if (func->is_invertible)
-            {
-              std::set<std::pair<unsigned,unsigned> >::iterator to_del = it++;
-              local_interfering.erase(to_del); 
-              continue;
-            }
-          }
+          ProjectionFunction *func = 
+            runtime->find_projection_function(req.projection);   
+          if (func->is_invertible)
+            continue;
         }
-        // If we make it here then keep going
-        it++;
+        local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
       }
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())

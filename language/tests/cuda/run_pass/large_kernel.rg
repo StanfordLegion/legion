@@ -34,24 +34,26 @@ where reads(r) do
   var last_fail_index : int1d = -1
   var total_failures = 0
   for e in r do
+    if last_fail_index >= int1d(0) and r[e] ~= last_fail_value then
+      if last_fail_index < e-1 then
+        format.println("(repeats another {} times)", e-last_fail_index-1)
+      end
+      last_fail_index = int1d(-1)
+    end
     if r[e] ~= v then
       if r[e] ~= last_fail_value then
-        if last_fail_index >= int1d(0) then
-          format.println("(repeats another {} times)", e-last_fail_index-1)
-        end
-        format.println("expected {} but got: r[{}] = {}", v, e, r[e])
-        last_fail_value = r[e]
-        last_fail_index = e
         total_failures += 1
-        if total_failures > 10 then
-          break
+        if total_failures <= 10 then
+          format.println("expected {} but got: r[{}] = {}", v, e, r[e])
+          last_fail_value = r[e]
+          last_fail_index = e
         end
       end
       pass = false
     end
   end
-  if last_fail_index >= int1d(0) then
-    format.println("(repeats another {} times)", r.bounds.hi-last_fail_index-1)
+  if last_fail_index >= int1d(0) and last_fail_index < r.bounds.hi then
+    format.println("(repeats another {} times)", r.bounds.hi-last_fail_index)
   end
   return pass
 end

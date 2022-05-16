@@ -1049,6 +1049,10 @@ namespace Realm {
 	  if(iip.peer_guid != XferDes::XFERDES_NO_GUID) {
 	    addr_max_bytes = iip.seq_remote.span_exists(iip.local_bytes_total,
 							addr_max_bytes);
+            // round down to multiple of sizeof(Point<N,T>)
+            size_t rem = addr_max_bytes % sizeof(Point<N,T>);
+            if(rem > 0)
+              addr_max_bytes -= rem;
 	    if(addr_max_bytes == 0) {
 	      // end of data?
 	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
@@ -1057,18 +1061,33 @@ namespace Realm {
 	    }
 	  }
 	}
+
 	size_t amt = addrs_in->step(addr_max_bytes, a_info, 0,
 				    false /*!tentative*/);
 	if(amt == 0)
 	  return nonempty;
-	point_pos = 0;
-	num_points = amt / sizeof(Point<N,T>);
-	assert(amt == (num_points * sizeof(Point<N,T>)));
-
 	memcpy(points,
 	       reinterpret_cast<const void *>(addrs_mem_base +
 					      a_info.base_offset),
 	       amt);
+        // handle reads of partial points
+        while((amt % sizeof(Point<N,T>)) != 0) {
+          // get some more - should never be empty
+          size_t todo = addrs_in->step(addr_max_bytes - amt, a_info, 0,
+                                       false /*!tentative*/);
+          assert(todo > 0);
+
+          memcpy(reinterpret_cast<char *>(points) + amt,
+                 reinterpret_cast<const void *>(addrs_mem_base +
+                                                a_info.base_offset),
+                 todo);
+          amt += todo;
+        }
+
+	point_pos = 0;
+	num_points = amt / sizeof(Point<N,T>);
+	assert(amt == (num_points * sizeof(Point<N,T>)));
+
 	//log_dma.print() << "got points: " << points[0] << "(+" << (num_points - 1) << ")";
 	if(indirect_xd != 0) {
 	  XferDes::XferPort& iip = indirect_xd->input_ports[indirect_port_idx];
@@ -1311,6 +1330,10 @@ namespace Realm {
 	  if(iip.peer_guid != XferDes::XFERDES_NO_GUID) {
 	    addr_max_bytes = iip.seq_remote.span_exists(iip.local_bytes_total,
 							addr_max_bytes);
+            // round down to multiple of sizeof(Rect<N,T>)
+            size_t rem = addr_max_bytes % sizeof(Rect<N,T>);
+            if(rem > 0)
+              addr_max_bytes -= rem;
 	    if(addr_max_bytes == 0) {
 	      // end of data?
 	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
@@ -1323,14 +1346,28 @@ namespace Realm {
 				    false /*!tentative*/);
 	if(amt == 0)
 	  return nonempty;
-	rect_pos = 0;
-	num_rects = amt / sizeof(Rect<N,T>);
-	assert(amt == (num_rects * sizeof(Rect<N,T>)));
-
 	memcpy(rects,
 	       reinterpret_cast<const void *>(addrs_mem_base +
 					      a_info.base_offset),
 	       amt);
+        // handle reads of partial rects
+        while((amt % sizeof(Rect<N,T>)) != 0) {
+          // get some more - should never be empty
+          size_t todo = addrs_in->step(addr_max_bytes - amt, a_info, 0,
+                                       false /*!tentative*/);
+          assert(todo > 0);
+
+          memcpy(reinterpret_cast<char *>(rects) + amt,
+                 reinterpret_cast<const void *>(addrs_mem_base +
+                                                a_info.base_offset),
+                 todo);
+          amt += todo;
+        }
+
+	rect_pos = 0;
+	num_rects = amt / sizeof(Rect<N,T>);
+	assert(amt == (num_rects * sizeof(Rect<N,T>)));
+
 	//log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) << ")";
 	if(indirect_xd != 0) {
 	  XferDes::XferPort& iip = indirect_xd->input_ports[indirect_port_idx];
@@ -2235,6 +2272,10 @@ namespace Realm {
 	  size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
 	  if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
 	    max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
+            // round down to multiple of sizeof(Point<N,T>)
+            size_t rem = max_bytes % sizeof(Point<N,T>);
+            if(rem > 0)
+              max_bytes -= rem;
 	    if(max_bytes < sizeof(Point<N,T>)) {
               // check to see if this is the end of the input
               if(input_ports[0].local_bytes_total ==
@@ -2246,12 +2287,25 @@ namespace Realm {
 	  size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
 						   0, false /*!tentative*/);
 	  if(bytes == 0) break;
-	  point_count = bytes / sizeof(Point<N,T>);
-	  assert(bytes == (point_count * sizeof(Point<N,T>)));
 	  const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
 								  bytes);
 	  assert(srcptr != 0);
 	  memcpy(points, srcptr, bytes);
+          // handle reads of partial points
+          while((bytes % sizeof(Point<N,T>)) != 0) {
+            // get some more - should never be empty
+            size_t todo = input_ports[0].iter->step(max_bytes - bytes, p_info,
+                                                    0, false /*!tentative*/);
+            assert(todo > 0);
+            const void *srcptr = input_ports[0].mem->get_direct_ptr(p_info.base_offset,
+                                                                    todo);
+            assert(srcptr != 0);
+            memcpy(reinterpret_cast<char *>(points) + bytes, srcptr, todo);
+            bytes += todo;
+          }
+
+	  point_count = bytes / sizeof(Point<N,T>);
+	  assert(bytes == (point_count * sizeof(Point<N,T>)));
 	  point_index = 0;
 	  rseqcache.add_span(0, input_ports[0].local_bytes_total, bytes);
 	  input_ports[0].local_bytes_total += bytes;
@@ -2278,14 +2332,18 @@ namespace Realm {
 				       sizeof(Point<N,T>)) < sizeof(Point<N,T>))
 	    break;
 	  TransferIterator::AddressInfo o_info;
-	  size_t bytes = op.iter->step(sizeof(Point<N,T>), o_info,
-				       0, false /*!tentative*/);
-	  assert(bytes == sizeof(Point<N,T>));
-	  void *dstptr = op.mem->get_direct_ptr(o_info.base_offset,
-						sizeof(Point<N,T>));
-	  assert(dstptr != 0);
-	  memcpy(dstptr, &points[point_index], sizeof(Point<N,T>));
-	  output_bytes += sizeof(Point<N,T>);
+          size_t partial = 0;
+          while(partial < sizeof(Point<N,T>)) {
+            size_t bytes = op.iter->step(sizeof(Point<N,T>) - partial, o_info,
+                                         0, false /*!tentative*/);
+            void *dstptr = op.mem->get_direct_ptr(o_info.base_offset, bytes);
+            assert(dstptr != 0);
+            memcpy(dstptr,
+                   reinterpret_cast<const char *>(&points[point_index])+partial,
+                   bytes);
+            partial += bytes;
+          }
+          output_bytes += sizeof(Point<N,T>);
 	}
 	output_count++;
 	point_index++;
@@ -2298,6 +2356,7 @@ namespace Realm {
 			   output_ports[output_space_id].local_bytes_total,
 			   output_bytes);
 	output_ports[output_space_id].local_bytes_total += output_bytes;
+	output_ports[output_space_id].local_bytes_cons.fetch_add(output_bytes);
 	did_work = true;
       }
 
@@ -2329,10 +2388,12 @@ namespace Realm {
           memcpy(dstptr, &cword, sizeof(unsigned));
 
           cp.local_bytes_total += sizeof(unsigned);
+          cp.local_bytes_cons.fetch_add(sizeof(unsigned));
         } while(!ctrl_sent);
 
 	if(input_done && ctrl_sent) {
-	  iteration_completed.store_release(true);
+          begin_completion();
+
 	  // mark all address streams as done (dummy write update)
 	  for(size_t i = 0; i < spaces.size(); i++)
 	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
