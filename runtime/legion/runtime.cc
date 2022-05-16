@@ -10704,6 +10704,7 @@ namespace Legion {
               }
               else
                 check_containment((*it)->as_mappable(), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
             }
           }
         }

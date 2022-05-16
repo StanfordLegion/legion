@@ -7739,7 +7739,14 @@ namespace Legion {
             const RtEvent pre = owner->find_intra_space_dependence(prev);
             intra_space_mapping_dependences.insert(pre);
             if (runtime->legion_spy_enabled)
-              LegionSpy::log_intra_space_dependence(unique_op_id, prev);
+            {
+              // We know we only need a dependence on the previous point but
+              // Legion Spy is stupid, so log everything we have a
+              // precondition on even if it is transitively implied
+              for (unsigned idx2 = 0; idx2 < idx; idx2++)
+                LegionSpy::log_intra_space_dependence(unique_op_id,
+                                                      dependences[idx2]);
+            }
           }
           // If we're not the last dependence, then send our mapping event
           // so that others can record a dependence on us
