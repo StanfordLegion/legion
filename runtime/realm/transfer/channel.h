@@ -299,6 +299,7 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       atomic<bool> iteration_completed;
+      atomic<int64_t> bytes_write_pending;
       atomic<bool> transfer_completed;
       // current input and output port mask
       uint64_t current_in_port_mask, current_out_port_mask;
@@ -417,7 +418,9 @@ namespace Realm {
       void update_pre_bytes_total(int port_idx, size_t pre_bytes_total);
       void update_next_bytes_read(int port_idx, size_t offset, size_t size);
 
-      bool is_completed(void);
+      // called once iteration is complete, but we need to track in flight
+      //  writes, flush byte counts, etc.
+      void begin_completion();
 
       void mark_completed();
 

@@ -1077,6 +1077,7 @@ namespace Realm {
 	  xferDes_queue(XferDesQueue::get_singleton()),
 	  launch_node(_launch_node),
 	  iteration_completed(false),
+          bytes_write_pending(0),
 	  transfer_completed(false),
           max_req_size(16 << 20 /*TO REMOVE*/), priority(_priority),
           guid(_guid),
@@ -1296,6 +1297,9 @@ namespace Realm {
 
   size_t XferDes::update_control_info(ReadSequenceCache *rseqcache)
   {
+    if(iteration_completed.load_acquire())
+      return 0;
+
     // pull control information if we need it
     if(input_control.remaining_count == 0) {
       XferPort& icp = input_ports[input_control.control_port_idx];
@@ -1342,7 +1346,7 @@ namespace Realm {
       // if count is still zero, we're done
       if(input_control.remaining_count == 0) {
 	assert(input_control.eos_received);
-	iteration_completed.store_release(true);
+	begin_completion();
 	return 0;
       }
     }
@@ -1394,10 +1398,7 @@ namespace Realm {
       // if count is still zero, we're done
       if(output_control.remaining_count == 0) {
 	assert(output_control.eos_received);
-	iteration_completed.store_release(true);
-	// give all output channels a chance to indicate completion
-	for(size_t i = 0; i < output_ports.size(); i++)
-	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	begin_completion();
 	return 0;
       }
     }
@@ -1438,6 +1439,11 @@ namespace Realm {
 	size_t pbt_limit = (in_port->remote_bytes_total.load_acquire() -
 			    in_port->local_bytes_total);
 	min_xfer_size = std::min(min_xfer_size, pbt_limit);
+
+        // don't ever expect to be able to read more than half the size of the
+        //  incoming intermediate buffer
+        if(min_xfer_size > (in_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (in_port->ib_size >> 1));
       }
 
       // we'd like to wait until there's `min_xfer_size` bytes available on the
@@ -1470,6 +1476,12 @@ namespace Realm {
       if(out_port->peer_guid != XFERDES_NO_GUID) {
 	write_bytes_avail = out_port->seq_remote.span_exists(out_port->local_bytes_total,
 							     write_bytes_avail);
+
+        // we'd like to wait until there's `min_xfer_size` bytes available on
+        //  the output, but if we're landing in an intermediate buffer and need
+        //  to wrap around, waiting won't do any good
+        if(min_xfer_size > (out_port->ib_size >> 1))
+          min_xfer_size = std::max<size_t>(1, (out_port->ib_size >> 1));
       }
 
       max_bytes = std::min(max_bytes, write_bytes_avail);
@@ -1479,7 +1491,7 @@ namespace Realm {
       // should only happen in the absence of control ports
       assert((input_control.control_port_idx == -1) &&
 	     (output_control.control_port_idx == -1));
-      iteration_completed.store_release(true);
+      begin_completion();
       return 0;
     }
 
@@ -1533,7 +1545,7 @@ namespace Realm {
 		  output_control.eos_received);
 	  
     if(in_done || out_done) {
-      iteration_completed.store_release(true);
+      begin_completion();
       return true;
     } else
       return false;
@@ -1624,7 +1636,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(input_control.remaining_count == 0) {
 	      assert(input_control.eos_received);
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	      break;
 	    }
 	  }
@@ -1673,10 +1685,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(output_control.remaining_count == 0) {
 	      assert(output_control.eos_received);
-	      iteration_completed.store_release(true);
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	      begin_completion();
 	      break;
 	    }
 	  }
@@ -1713,10 +1722,7 @@ namespace Realm {
 	      if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 		 ((output_control.remaining_count == 0) && output_control.eos_received)) {
 		log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-		iteration_completed.store_release(true);
-		// give all output channels a chance to indicate completion
-		for(size_t i = 0; i < output_ports.size(); i++)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+		begin_completion();
 		break;
 	      }
 	      continue;  // try again
@@ -1751,10 +1757,7 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed.store_release(true);
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	      begin_completion();
 	      break;
 	    }
 	    continue;  // try again
@@ -1789,11 +1792,7 @@ namespace Realm {
 		   out_port->iter->done());
 #endif
 
-	    iteration_completed.store_release(true);
-
-	    // give all output channels a chance to indicate completion
-	    for(size_t i = 0; i < output_ports.size(); i++)
-	      update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+	    begin_completion();
 	    break;
 	  }
 	  
@@ -2029,7 +2028,7 @@ namespace Realm {
 		// otherwise, this shouldn't happen - we should detect this case
 		//  on the the transfer of those last bytes
 		assert(0);
-		iteration_completed.store_release(true);
+		begin_completion();
 		break;
 	      }
 	      if(pre_max < max_bytes) {
@@ -2331,12 +2330,8 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed.store_release(true);
+	      begin_completion();
 
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		if(int(i) != output_control.current_io_port)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
 #if 0
 	      // non-ib iterators should end at the same time?
 	      for(size_t i = 0; i < input_ports.size(); i++)
@@ -2352,13 +2347,8 @@ namespace Realm {
 	    if(in_port->iter->done() || out_port->iter->done() ||
 	       (in_port->local_bytes_total == pbt_snapshot)) {
 	      assert(!iteration_completed.load());
-	      iteration_completed.store_release(true);
+	      begin_completion();
 	    
-	      // give all output channels a chance to indicate completion
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		if(int(i) != output_control.current_io_port)
-		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
-
 	      // TODO: figure out how to eliminate false positives from these
 	      //  checks with indirection and/or multiple remote inputs
 #if 0
@@ -2557,37 +2547,44 @@ namespace Realm {
         return idx;
       }
 
-
-    bool XferDes::is_completed(void)
+    void XferDes::begin_completion()
     {
-      // check below is a bit expensive, do don't do it more than once
-      if(transfer_completed.load()) return true;
-      // to be complete, we need to have finished iterating (which may have been
-      //  achieved by getting a pre_bytes_total update) and finished all of our
-      //  writes
-      // use the conservative byte write count here to make sure we don't
-      //  trigger early when serializing
-      if(!iteration_completed.load_acquire()) return false;
-      for(std::vector<XferPort>::iterator it = output_ports.begin();
-	  it != output_ports.end();
-	  ++it) {
-	// see if we still need to send the total bytes
-	if(it->needs_pbt_update.load()) {
 #ifdef DEBUG_REALM
-	  assert(it->peer_guid != XFERDES_NO_GUID);
+      // shouldn't be called more than once
+      assert(!iteration_completed.load());
 #endif
-	  // exchange sets the flag to false and tells us previous value
-	  if(it->needs_pbt_update.exchange(false))
-	    xferDes_queue->update_pre_bytes_total(it->peer_guid,
-						  it->peer_port_idx,
-						  it->local_bytes_total);
-	}
-	size_t lbc_snapshot = it->local_bytes_cons.load();
-	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
-	  return false;
+      iteration_completed.store_release(true);
+
+      // give all output channels a chance to indicate completion and determine
+      //  the total number of bytes we've written
+      size_t total_bytes_written = 0;
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        total_bytes_written += output_ports[i].local_bytes_cons.load();
+        update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+
+        // see if we still need to send the total bytes
+        if(output_ports[i].needs_pbt_update.load() &&
+           (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
+ #ifdef DEBUG_REALM
+          assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
+#endif
+          // exchange sets the flag to false and tells us previous value
+          if(output_ports[i].needs_pbt_update.exchange(false))
+            xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
+                                                  output_ports[i].peer_port_idx,
+                                                  output_ports[i].local_bytes_total);
+        }
       }
-      transfer_completed.store(true);
-      return true;
+
+      // bytes pending is total minus however many writes have already
+      //  finished - if that's all of them, we can mark full transfer completion
+      int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
+      int64_t pending = prev + total_bytes_written;
+      log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                    << " total_bytes=" << total_bytes_written << " pending=" << pending;
+      assert(pending >= 0);
+      if(pending == 0)
+        transfer_completed.store_release(true);
     }
 
       void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
@@ -2649,17 +2646,26 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our _last_ write was ack'd, update progress in case the xd
-	//  is just waiting for all writes to complete
-	if(inc_amt > 0) {
-          if(iteration_completed.load_acquire() &&
-             ((offset + inc_amt) == out_port->local_bytes_total))
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            transfer_completed.store_release(true);
             update_progress();
+          }
         }
+
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
 	  if(out_port->needs_pbt_update.load() &&
-	     iteration_completed.load_acquire()) {
+	     iteration_completed.load_acquire() &&
+             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
 	    // exchange sets the flag to false and tells us previous value
 	    if(out_port->needs_pbt_update.exchange(false))
 	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
@@ -4124,14 +4130,34 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our _last_ write was ack'd, update progress in case the xd
-	//  is just waiting for all writes to complete
-	if(inc_amt > 0) {
-          if(iteration_completed.load_acquire() &&
-             ((offset + inc_amt) == out_port->local_bytes_total))
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            transfer_completed.store_release(true);
             update_progress();
+          }
         }
+
 	// pre_bytes_write update was handled in the remote AM handler
+	if(out_port->peer_guid != XFERDES_NO_GUID) {
+	  // update bytes total if needed (and available)
+	  if(out_port->needs_pbt_update.load() &&
+	     iteration_completed.load_acquire() &&
+             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
+	    // exchange sets the flag to false and tells us previous value
+	    if(out_port->needs_pbt_update.exchange(false))
+	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
+						    out_port->peer_port_idx,
+						    out_port->local_bytes_total);
+	  }
+        }
       }
 
       /*static*/
@@ -5549,7 +5575,14 @@ namespace Realm {
 	    req->write_seq_count = out_port->local_bytes_total - req->write_seq_pos;
 	    if(rewind_dst > 0) {
 	      //log_request.print() << "rewind dst: " << rewind_dst;
-	      out_port->local_bytes_cons.fetch_sub(rewind_dst);
+              // if we've finished iteration, it's too late to rewind the
+              //  conservative count, so decrement the number of write bytes
+              //  pending (we know we can't drive it to zero) as well
+              if(req->xd->iteration_completed.load()) {
+                int64_t prev = req->xd->bytes_write_pending.fetch_sub(rewind_dst);
+                assert((prev > 0) && (static_cast<size_t>(prev) > rewind_dst));
+              }
+              out_port->local_bytes_cons.fetch_sub(rewind_dst);
 	    }
 	  } else
 	    assert(rewind_dst == 0);

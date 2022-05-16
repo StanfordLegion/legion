@@ -6620,6 +6620,8 @@ namespace Legion {
       collective_exchanges.clear();
       commit_preconditions.clear();
       interfering_requirements.clear();
+      intra_space_dependences.clear();
+      pending_intra_space_dependences.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return this operation to the runtime
@@ -6984,7 +6986,7 @@ namespace Legion {
         ProjectionFunction *function = 
           runtime->find_projection_function(src_requirements[idx].projection);
         function->project_points(this, idx, src_requirements[idx],
-                                 runtime, projection_points);
+                                 runtime, projection_points, launch_space);
       }
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -6995,7 +6997,7 @@ namespace Legion {
           runtime->find_projection_function(dst_requirements[idx].projection);
         function->project_points(this, offset + idx, 
                                  dst_requirements[idx], runtime, 
-                                 projection_points);
+                                 projection_points, launch_space);
       }
       offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
@@ -7010,7 +7012,7 @@ namespace Legion {
                 src_indirect_requirements[idx].projection);
           function->project_points(this, offset + idx,
                                    src_indirect_requirements[idx], runtime,
-                                   projection_points);
+                                   projection_points, launch_space);
         }
         offset += src_indirect_requirements.size();
       }
@@ -7026,7 +7028,7 @@ namespace Legion {
                 dst_indirect_requirements[idx].projection);
           function->project_points(this, offset + idx,
                                    dst_indirect_requirements[idx], runtime,
-                                   projection_points);
+                                   projection_points, launch_space);
         }
       }
       if (runtime->legion_spy_enabled && !replaying)
@@ -7199,10 +7201,19 @@ namespace Legion {
       // Handle any region requirements which can interfere with itself
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        if (!IS_WRITE(dst_requirements[idx]))
+        const RegionRequirement &req = dst_requirements[idx];
+        if (!IS_WRITE(req))
           continue;
-        if (!IS_EXCLUSIVE(dst_requirements[idx]))
-          continue;
+        // If the projection functions are invertible then we don't have to 
+        // worry about interference because the runtime knows how to hook
+        // up those kinds of dependences
+        if (req.handle_type != LEGION_SINGULAR_PROJECTION)
+        {
+          ProjectionFunction *func = 
+            runtime->find_projection_function(req.projection);   
+          if (func->is_invertible)
+            continue;
+        }
         const unsigned index = src_requirements.size() + idx;
         interfering_requirements.insert(
             std::pair<unsigned,unsigned>(index,index));
@@ -7242,8 +7253,11 @@ namespace Legion {
                   point_reqs[it->first].get_index_space(), 
                   other_reqs[it->second].get_index_space()))
             {
-              if (current_point.get_dim() <= 1) {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+              switch (current_point.get_dim())
+              {
+                case 1:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
                               "Index space copy launch has intefering "
                               "region requirements %d of point %lld and region "
                               "requirement %d of point %lld of %s (UID %lld) "
@@ -7252,8 +7266,12 @@ namespace Legion {
                               oit->first[0], get_logging_name(),
                               get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } else if (current_point.get_dim() == 2) {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                    break;
+                  }
+#if LEGION_MAX_DIM > 1
+                case 2:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
                               "Index space copy launch has intefering "
                               "region requirements %d of point (%lld,%lld) and "
                               "region requirement %d of point (%lld,%lld) of "
@@ -7263,8 +7281,13 @@ namespace Legion {
                               oit->first[1], get_logging_name(),
                               get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } else if (current_point.get_dim() == 3) {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 2
+                case 3:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
                               "Index space copy launch has intefering "
                               "region requirements %d of point (%lld,%lld,%lld)"
                               " and region requirement %d of point "
@@ -7275,12 +7298,189 @@ namespace Legion {
                               oit->first[1], oit->first[2], get_logging_name(),
                               get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 3
+                case 4:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld) and region "
+                              "requirement %d of point (%lld,%lld,%lld,%lld) "
+                              "of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.", it->first, current_point[0], 
+                              current_point[1], current_point[2], 
+                              current_point[3], it->second,
+                              oit->first[0], oit->first[1], oit->first[2],
+                              oit->first[3], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 4
+                case 5:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld) and "
+                              "region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld) of "
+                              "%s (UID %lld) in parent task %s (UID %lld) are "
+                              "interfering.", it->first, current_point[0],
+                              current_point[1], current_point[2], 
+                              current_point[3], current_point[4],
+                              it->second, oit->first[0], oit->first[1], 
+                              oit->first[2], oit->first[3], oit->first[4],
+                              get_logging_name(), get_unique_id(), 
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 5
+                case 6:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld) of %s (UID %lld)"
+                              " in parent task %s (UID %lld) are interfering.",
+                              it->first, current_point[0], current_point[1],
+                              current_point[2], current_point[3], 
+                              current_point[4], current_point[5], 
+                              it->second, oit->first[0], oit->first[1], 
+                              oit->first[2], oit->first[3], oit->first[4],
+                              oit->first[5], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 6
+                case 7:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                              "and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                              "of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.", it->first, current_point[0], 
+                              current_point[1], current_point[2], 
+                              current_point[3], current_point[4], 
+                              current_point[5], current_point[6], it->second,
+                              oit->first[0], oit->first[1], oit->first[2],
+                              oit->first[3], oit->first[4], oit->first[5],
+                              oit->first[6], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 7
+                case 8:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) and "
+                              "region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) of "
+                              "%s (UID %lld) in parent task %s (UID %lld) are "
+                              "interfering.", it->first, current_point[0],
+                              current_point[1], current_point[2], 
+                              current_point[3], current_point[4],
+                              current_point[5], current_point[6],
+                              current_point[7], it->second, oit->first[0],
+                              oit->first[1], oit->first[2], oit->first[3],
+                              oit->first[4], oit->first[5], oit->first[6],
+                              oit->first[7], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM > 8
+                case 9:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_COPY,
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                              "and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                              "of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.",
+                              it->first, current_point[0], current_point[1],
+                              current_point[2], current_point[3], 
+                              current_point[4], current_point[5], 
+                              current_point[6], current_point[7],
+                              current_point[8], it->second, oit->first[0],
+                              oit->first[1], oit->first[2], oit->first[3],
+                              oit->first[4], oit->first[5], oit->first[6],
+                              oit->first[7], oit->first[8], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+                default:
+                  assert(false);
               }
-              assert(false);
             }
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexCopyOp::find_intra_space_dependence(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      // Check to see if we already have it
+      std::map<DomainPoint,RtEvent>::const_iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+        return finder->second;
+      // Otherwise make a temporary one and record it for now
+      const RtUserEvent pending_event = Runtime::create_rt_user_event();
+      intra_space_dependences[point] = pending_event;
+      pending_intra_space_dependences[point] = pending_event;
+      return pending_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::record_intra_space_dependence(const DomainPoint &point,
+                                                    RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      std::map<DomainPoint,RtEvent>::iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second != point_mapped);
+#endif
+        std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
+          pending_intra_space_dependences.find(point);
+#ifdef DEBUG_LEGION
+        assert(pending_finder != pending_intra_space_dependences.end());
+#endif
+        Runtime::trigger_event(pending_finder->second, point_mapped);
+        pending_intra_space_dependences.erase(pending_finder);
+        finder->second = point_mapped;
+      }
+      else
+        intra_space_dependences[point] = point_mapped;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7387,6 +7587,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_copy();
+      intra_space_mapping_dependences.clear();
       runtime->free_point_copy_op(this);
     }
 
@@ -7420,6 +7621,8 @@ namespace Legion {
     {
       // Perform the version analysis
       std::set<RtEvent> preconditions;
+      if (!intra_space_mapping_dependences.empty())
+        preconditions.swap(intra_space_mapping_dependences);
       src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
@@ -7599,6 +7802,43 @@ namespace Legion {
         dst_indirect_requirements[idx].region = result;
         dst_indirect_requirements[idx].handle_type = LEGION_SINGULAR_PROJECTION;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::record_intra_space_dependences(unsigned index,
+                                    const std::vector<DomainPoint> &dependences)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_requirements.size() <= index); 
+#endif
+      index -= src_requirements.size();
+#ifdef DEBUG_LEGION
+      assert(index < dst_requirements.size());
+#endif
+      for (unsigned idx = 0; idx < dependences.size(); idx++)
+      {
+        if (dependences[idx] == index_point)
+        {
+          // If we've got a prior dependence then record it
+          if (idx > 0)
+          {
+            const DomainPoint &prev = dependences[idx-1];
+            const RtEvent pre = owner->find_intra_space_dependence(prev);
+            intra_space_mapping_dependences.insert(pre);
+            if (runtime->legion_spy_enabled)
+              LegionSpy::log_intra_space_dependence(unique_op_id, prev);
+          }
+          // If we're not the last dependence, then send our mapping event
+          // so that others can record a dependence on us
+          if (idx < (dependences.size()-1))
+            owner->record_intra_space_dependence(index_point,
+                                                 get_mapped_event());
+          return;
+        }
+      }
+      // We should never get here
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -14462,7 +14702,7 @@ namespace Legion {
         std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                         points.end());
         function->project_points(this, 0/*idx*/, requirement,
-                                 runtime, projection_points);
+                                 runtime, projection_points, launch_space);
         // No need to check the validity of the points, we know they are good
         if (runtime->legion_spy_enabled)
         {
@@ -15692,6 +15932,15 @@ namespace Legion {
       requirement.handle_type = LEGION_SINGULAR_PROJECTION;
     }
 
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::record_intra_space_dependences(unsigned index,
+                                    const std::vector<DomainPoint> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      // Should never get here because our requirements are always read-only
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // External Fill
     /////////////////////////////////////////////////////////////
@@ -16800,7 +17049,7 @@ namespace Legion {
       std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                       points.end());
       function->project_points(this, 0/*idx*/, requirement,
-                               runtime, projection_points);
+                               runtime, projection_points, launch_space);
       if (runtime->legion_spy_enabled && !replaying)
       {
         for (std::vector<PointFillOp*>::const_iterator it = points.begin();
@@ -16838,9 +17087,11 @@ namespace Legion {
           {
             const DomainPoint &p1 = points[idx1]->get_domain_point();
             const DomainPoint &p2 = points[idx2]->get_domain_point();
-            if (p1.get_dim() <= 1) 
+            switch (p1.get_dim())
             {
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+              case 1:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
                             "Index space fill launch has intefering "
                             "region requirements 0 of point %lld and region "
                             "requirement 0 of point %lld of %s (UID %lld) "
@@ -16848,10 +17099,12 @@ namespace Legion {
                             p1[0], p2[0], get_logging_name(),
                             get_unique_op_id(), parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
-            } 
-            else if (p1.get_dim() == 2) 
-            {
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                  break;
+                }
+#if LEGION_MAX_DIM > 1
+              case 2:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
                             "Index space fill launch has intefering "
                             "region requirements 0 of point (%lld,%lld) and "
                             "region requirement 0 of point (%lld,%lld) of "
@@ -16860,10 +17113,13 @@ namespace Legion {
                             get_logging_name(), get_unique_op_id(),
                             parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
-            } 
-            else if (p1.get_dim() == 3) 
-            {
-              REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 2
+              case 3:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
                             "Index space fill launch has intefering "
                             "region requirements 0 of point (%lld,%lld,%lld)"
                             " and region requirement 0 of point "
@@ -16873,8 +17129,124 @@ namespace Legion {
                             get_logging_name(), get_unique_op_id(),
                             parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 3
+              case 4:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld) and region "
+                            "requirement 0 of point (%lld,%lld,%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.",
+                            p1[0], p1[1], p1[2], p1[3], 
+                            p2[0], p2[1], p2[2], p2[3], get_logging_name(),
+                            get_unique_op_id(), parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 4
+              case 5:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld) and "
+                            "region requirement 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.", p1[0], p1[1], p1[2], p1[3], p1[4],
+                            p2[0], p2[1], p2[2], p2[3], p2[4],
+                            get_logging_name(), get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 5
+              case 6:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld) of %s "
+                            "(UID %lld) in parent task %s (UID %lld) " 
+                            "are interfering.",
+                            p1[0], p1[1], p1[2], p1[3], p1[4], p1[5],
+                            p2[0], p2[1], p2[2], p2[3], p2[4], p2[5],
+                            get_logging_name(), get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 6
+              case 7:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) and region "
+                            "requirement 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.",
+                            p1[0], p1[1], p1[2], p1[3], p1[4], p1[5], p1[6],
+                            p2[0], p2[1], p2[2], p2[3], p2[4], p2[5], p2[6],
+                            get_logging_name(), get_unique_op_id(), 
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 7
+              case 8:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) and "
+                            "region requirement 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.", p1[0], p1[1], p1[2], p1[3], p1[4],
+                            p1[5], p1[6], p1[7], p2[0], p2[1], p2[2], p2[3],
+                            p2[4], p2[5], p2[6], p2[7],
+                            get_logging_name(), get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+#if LEGION_MAX_DIM > 8
+              case 9:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_FILL,
+                            "Index space fill launch has intefering "
+                            "region requirements 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                            "and region requirement 0 of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                            "of %s (UID %lld) in parent task %s (UID %lld) " 
+                            "are interfering.",
+                            p1[0], p1[1], p1[2], p1[3], p1[4], p1[5], p1[6],
+                            p1[7], p1[8], p2[0], p2[1], p2[2], p2[3], p2[4],
+                            p2[5], p2[6], p2[7], p2[8],
+                            get_logging_name(), get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
+#endif
+              default:
+                assert(false);
             }
-            assert(false);
           }
         }
       }
@@ -17083,6 +17455,15 @@ namespace Legion {
 #endif
       requirement.region = result;
       requirement.handle_type = LEGION_SINGULAR_PROJECTION;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::record_intra_space_dependences(unsigned index,
+                                    const std::vector<DomainPoint> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      // Ignore any intra-space requirements on fills, we know that they
+      // are all filling the same value so they can be done in any order
     }
 
     //--------------------------------------------------------------------------
