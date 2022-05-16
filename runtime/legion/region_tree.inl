@@ -5244,6 +5244,9 @@ namespace Legion {
             src_preimages_ready = Runtime::protect_event(helper.result);
           AutoLock p_lock(preimage_lock);
           src_preimages.emplace_back(helper.new_preimages);
+#ifdef LEGION_SPY
+          src_preimage_preconditions.emplace_back(helper.result);
+#endif
         }
         if (!dst_indirections.empty() &&
             (!dst_indirect_immutable_for_tracing || !recurrent_replay))
@@ -5257,6 +5260,9 @@ namespace Legion {
             dst_preimages_ready = Runtime::protect_event(helper.result);
           AutoLock p_lock(preimage_lock);
           dst_preimages.emplace_back(helper.new_preimages);
+#ifdef LEGION_SPY
+          dst_preimage_preconditions.emplace_back(helper.result);
+#endif
         }
         // Make sure that all the stage 1's are ordered 
         // by deferring execution if necessary
@@ -5311,6 +5317,12 @@ namespace Legion {
 #endif
             current_src_preimages.swap(src_preimages.front());
             src_preimages.pop_front();
+#ifdef LEGION_SPY
+            assert(!src_preimage_preconditions.empty());
+            current_src_preimage_precondition =
+              src_preimage_preconditions.front();
+            src_preimage_preconditions.pop_front();
+#endif
           }
           RebuildIndirectionsHelper helper(this, true/*sources*/);
           NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
@@ -5336,6 +5348,12 @@ namespace Legion {
 #endif
             current_dst_preimages.swap(dst_preimages.front());
             dst_preimages.pop_front();
+#ifdef LEGION_SPY
+            assert(!dst_preimage_preconditions.empty());
+            current_dst_preimage_precondition =
+              dst_preimage_preconditions.front();
+            dst_preimage_preconditions.pop_front();
+#endif
           }
           RebuildIndirectionsHelper helper(this, false/*sources*/);
           NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
@@ -5351,6 +5369,13 @@ namespace Legion {
         realm_dst_fields.resize(dst_fields.size());
         for (unsigned idx = 0; idx < dst_fields.size(); idx++)
           realm_dst_fields[idx] = dst_fields[idx];
+        // This part isn't necessary for correctness but it helps Legion Spy
+        // see the dependences between the preimages and copy operations
+        if (current_src_preimage_precondition.exists() ||
+            current_dst_preimage_precondition.exists())
+          copy_precondition = Runtime::merge_events(NULL, copy_precondition,
+              current_src_preimage_precondition,
+              current_dst_preimage_precondition);
 #endif
       }
       if (has_empty_preimages)

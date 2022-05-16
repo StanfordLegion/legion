@@ -1175,6 +1175,12 @@ namespace Legion {
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
       ApEvent src_indirect_spaces_precondition,dst_indirect_spaces_precondition;
+#ifdef LEGION_SPY
+      std::deque<ApEvent> src_preimage_preconditions;
+      std::deque<ApEvent> dst_preimage_preconditions;
+      ApEvent current_src_preimage_precondition;
+      ApEvent current_dst_preimage_precondition;
+#endif
       bool need_src_indirect_precondition, need_dst_indirect_precondition;
       bool src_indirect_immutable_for_tracing;
       bool dst_indirect_immutable_for_tracing;
