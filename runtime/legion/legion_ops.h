@@ -1429,6 +1429,7 @@ namespace Legion {
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
       // From MemoizableOp

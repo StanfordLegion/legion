@@ -7724,6 +7724,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexCopyOp::record_intra_space_dependence(const DomainPoint &point,
+                                                    const DomainPoint &next,
                                                     RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
@@ -8101,6 +8102,7 @@ namespace Legion {
           // so that others can record a dependence on us
           if (idx < (dependences.size()-1))
             owner->record_intra_space_dependence(index_point,
+                                                 dependences[idx+1],
                                                  get_mapped_event());
           return;
         }

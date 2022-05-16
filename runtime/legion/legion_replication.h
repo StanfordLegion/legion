@@ -1596,7 +1596,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
     public:
       CollectiveID mapped_collective_id;
-      ShardEventTree *mapped_collective;
+      ShardEventTree *mapped_collective; 
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1634,6 +1634,11 @@ namespace Legion {
           const DomainPoint &key,
           LegionVector<IndirectRecord> &records, const bool sources);
     public:
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
+                                                 RtEvent point_mapped);
+    public:
       void initialize_replication(ReplicateContext *ctx,
                                   std::vector<ApBarrier> &indirection_bars,
                                   unsigned &next_indirection_index);
@@ -1644,6 +1649,7 @@ namespace Legion {
       std::vector<ApBarrier> post_indirection_barriers;
       std::vector<CollectiveID> src_collectives;
       std::vector<CollectiveID> dst_collectives;
+      std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
