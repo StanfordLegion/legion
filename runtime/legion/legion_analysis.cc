@@ -2953,7 +2953,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
-      : open_state(NOT_OPEN), redop(0), disjoint_shallow(false)
+      : open_state(NOT_OPEN), redop(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -2961,7 +2961,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            RegionTreeNode *child, std::set<RtEvent> &applied)
-      : redop(0), disjoint_shallow(false)
+      : redop(0)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2986,7 +2986,7 @@ namespace Legion {
                            ShardingFunction *fn, IndexSpaceNode *shard_space,
                            std::set<RtEvent> &applied_events,
                            RegionTreeNode *node, bool dirty_reduction)
-      : redop(0), disjoint_shallow(false)
+      : redop(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3008,17 +3008,12 @@ namespace Legion {
         open_state = OPEN_READ_WRITE_PROJ;
         projections.insert(ProjectionSummary(proj_space, proj, fn,
                                              shard_space, applied_events));
-        // Check for disjoint shallow completeness
-        if ((fn == NULL) && (proj->depth == 0) && !node->is_region() &&
-            node->are_all_children_disjoint())
-          disjoint_shallow = true;
       }
     }
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const FieldState &rhs)
-      : open_state(rhs.open_state), redop(rhs.redop), 
-        disjoint_shallow(rhs.disjoint_shallow)
+      : open_state(rhs.open_state), redop(rhs.redop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3035,7 +3030,6 @@ namespace Legion {
       open_state = rhs.open_state;
       redop = rhs.redop;
       projections.swap(rhs.projections);
-      disjoint_shallow = rhs.disjoint_shallow;
     }
 
     //--------------------------------------------------------------------------
@@ -3060,7 +3054,6 @@ namespace Legion {
 #endif
       open_state = rhs.open_state;
       redop = rhs.redop;
-      disjoint_shallow = rhs.disjoint_shallow;
       return *this;
     }
 
@@ -3072,7 +3065,6 @@ namespace Legion {
       open_state = rhs.open_state;
       redop = rhs.redop;
       projections.swap(rhs.projections);
-      disjoint_shallow = rhs.disjoint_shallow;
       return *this;
     }
 
@@ -3255,63 +3247,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!projections.empty()); // should be in a projection mode
+      // should be in a projection mode
+      assert(is_projection_state());
+      assert(!projections.empty());
 #endif
       // This function is super important! It decides whether this new
       // projection info can be added to the current projection epoch, if
       // it can't then we will need a close operation to be inserted
       bool elide = true;
-      // We have two different paths corresponding to whether we are in
-      // a control replication context or not
-      if (info.sharding_function == NULL)
-      {
-        // If we don't have a sharding function, then we aren't in a 
-        // control replication context
-        // See if we are in a disjoint shallow complete mode
-        // If we're disjoint shallow then we can definitely always
-        // elide the close operation as we can do more writes or 
-        // reads on this epoch without any issues, for reductions
-        // though we can only go in the same epoch if we're reducing
-        // to a subset of the writes that have already been done
-        if (!disjoint_shallow || reduction)
-        {
-          // If we're not disjoint shallow complete we have more work to do
-          // Run through the list and see if all the index spaces
-          // are the same or dominate our index space and all the
-          // projection functions are the same as ours, if this is
-          // true then we know this is a totally data parallel
-          // computation and there is no need for a close
-          for (std::set<ProjectionSummary>::const_iterator it = 
-                projections.begin(); it != projections.end(); it++)
-          {
-            if (it->projection != info.projection)    
-            {
-              elide = false;
-              break;
-            }
-            if ((it->domain != info.projection_space) && 
-                !it->domain->dominates(info.projection_space))
-            {
-              elide = false;
-              break;
-            }
-          }
-          if (!elide)
-          {
-            // Next we're going to need to compute the actual interference
-            // sets so check to see if we've memoized the result or not
-            if (!info.projection->find_elide_close_result(info, projections,
-                                                node, elide, applied_events))
-            {
-              elide = expensive_elide_test(op, index, info, node, reduction);
-              // Now memoize the results for later
-              info.projection->record_elide_close_result(info, projections,
-                                               node, elide, applied_events);
-            }
-          }
-        }
-      }
-      else
+#ifndef LEGION_SPY
+      // Technically we only need to do this analysis to insert close operations
+      // if we're control replicated because close operations are the only way
+      // to enforce dependences between points in different shards. Without
+      // control replication, each index space operations guarantees that all
+      // its points are mapped before it is mapped so we get an implicit fence
+      // and there is no need for an explicit close operation. Legion Spy
+      // though doesn't make this distinction though and will check for the
+      // presence of a close operation no matter what.
+      if (info.sharding_function != NULL)
+#endif
       {
         // We have a sharding function so we are in a 
         // control replication context
@@ -3367,15 +3321,6 @@ namespace Legion {
                         RegionTreeNode *node, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      if (disjoint_shallow || projections.empty())
-      {
-        if ((info.sharding_function == NULL) && 
-            (info.projection->depth == 0) && !node->is_region() &&
-            node->are_all_children_disjoint())
-          disjoint_shallow = true;
-        else
-          disjoint_shallow = false;
-      }
       projections.insert(ProjectionSummary(info, applied_events));
     }
 
