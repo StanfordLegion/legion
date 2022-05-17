@@ -5498,10 +5498,10 @@ class Operation(object):
                  'collective_copies', 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
-                 'futures', 'index_owner', 'points', 'launch_shape', 'creator', 
-                 'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
-                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
-                 'cluster_name', 'generation', 'transitive_warning_issued', 
+                 'futures', 'index_owner', 'points', 'index_point', 'launch_shape',
+                 'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
+                 'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
+                 'node_name', 'cluster_name', 'generation', 'transitive_warning_issued',
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', "replayed", "restricted"]
                   # If you add a field here, you must update the merge method
@@ -5549,6 +5549,8 @@ class Operation(object):
         # Only valid for index operations 
         self.points = None
         self.launch_shape = None
+        # Only valid for point operations
+        self.index_point = None
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
@@ -5722,9 +5724,11 @@ class Operation(object):
         self.partition_node = node
         self.partition_kind = kind
 
-    def set_index_owner(self, owner):
+    def set_index_owner(self, owner, point):
         assert not self.index_owner
         self.index_owner = owner
+        assert not self.index_point
+        self.index_point = point
 
     def add_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
@@ -5732,8 +5736,8 @@ class Operation(object):
         if self.points is None:
             self.points = dict()
         point.op.set_name(self.name)
-        point.op.set_index_owner(self)
         index_point = point.point
+        point.op.set_index_owner(self, index_point)
         if index_point in self.points:
             self.points[index_point] = self.state.alias_index_points(point,
                                                   self.points[index_point])
@@ -5744,7 +5748,7 @@ class Operation(object):
 
     def add_point_op(self, op, point):
         op.kind = self.kind
-        op.set_index_owner(self)
+        op.set_index_owner(self, point)
         # Initialize if necessary
         if self.points is None:
             self.points = dict()
@@ -6331,17 +6335,14 @@ class Operation(object):
                         if req1.index == req2.index and \
                                 self.reqs[req1.index].projection_function is not None and \
                                 self.reqs[req1.index].projection_function.invertible:
-                            # This should only happen for tasks right now
-                            assert op1.task is not None
-                            assert op2.task is not None
                             # Check to make sure we find a dependence going one way or
                             # the other between the two operations
                             if op1.intra_space_dependences is not None and \
-                                    op2.task.point in op1.intra_space_dependences:
+                                    op2.index_point in op1.intra_space_dependences:
                                 order_points = True
                                 continue
                             if op2.intra_space_dependences is not None and \
-                                    op1.task.point in op2.intra_space_dependences:
+                                    op1.index_point in op2.intra_space_dependences:
                                 order_points = True
                                 continue
                             print(("Missing intra space dependence between requirements "+
@@ -6361,30 +6362,52 @@ class Operation(object):
             # them in an ordered dictionary so that whenever we iterate
             # over them we do them in an order consistent with their deps
             # This should only happen for index task kinds currently
-            assert self.kind == INDEX_TASK_KIND 
-            satisfied_deps = set()
-            remaining_tasks = dict()
-            for point,task in iteritems(self.points):
-                if task.op.intra_space_dependences is None:
-                    new_points[point] = task
-                    satisfied_deps.add(point)
-                else:
-                    remaining_tasks[point] = task
-            while remaining_tasks:
-                next_remaining = dict()
-                for point,task in iteritems(remaining_tasks):
-                    satisfied = True
-                    for dep in task.op.intra_space_dependences:
-                        if dep not in satisfied_deps:
-                            satisfied = False
-                            break
-                    if satisfied:
+            if self.kind == INDEX_TASK_KIND:
+                satisfied_deps = set()
+                remaining_tasks = dict()
+                for point,task in iteritems(self.points):
+                    if task.op.intra_space_dependences is None:
                         new_points[point] = task
                         satisfied_deps.add(point)
                     else:
-                        next_remaining[point] = task
-                remaining_tasks = next_remaining
-            
+                        remaining_tasks[point] = task
+                while remaining_tasks:
+                    next_remaining = dict()
+                    for point,task in iteritems(remaining_tasks):
+                        satisfied = True
+                        for dep in task.op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = task
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_tasks = next_remaining
+            else:
+                satisfied_deps = set()
+                remaining_ops = dict()
+                for point,op in iteritems(self.points):
+                    if op.intra_space_dependences is None:
+                        new_points[point] = op
+                        satisfied_deps.add(point)
+                    else:
+                        remaining_ops[point] = op
+                while remaining_ops:
+                    next_remaining = dict()
+                    for point,op in iteritems(remaining_ops):
+                        satisfied = True
+                        for dep in op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = op 
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_ops = next_remaining
         else:
             # Let's put things in order by their UID
             if self.kind == INDEX_TASK_KIND:
