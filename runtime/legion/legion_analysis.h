@@ -863,7 +863,6 @@ namespace Legion {
       OpenState open_state;
       ReductionOpID redop;
       std::set<ProjectionSummary> projections;
-      bool disjoint_shallow;
     };
 
     /**

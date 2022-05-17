@@ -18115,17 +18115,6 @@ namespace Legion {
           flush_logical_reductions(closer, state, reduction_flush_fields,
                        record_close_operations, no_next_child,new_states);
       }
-      // Figure out now if we can do disjoint closes at this level of
-      // the region tree. This applies to when we close directly to a
-      // disjoint partition in the region tree (only happens with
-      // projection functions). The rule for projection analysis is that 
-      // dirty data can only live at the leaves of the open tree. Therefore
-      // we must either being going into a disjoint shallow mode or any
-      // mode which is read only that permits us to go to disjoint shallow
-      // Also cannot have a sharding function for control replication
-      const bool disjoint_close = !is_region() && are_all_children_disjoint() &&
-        (proj_info.sharding_function == NULL) && 
-        (IS_READ_ONLY(closer.user.usage) || (proj_info.projection->depth == 0));
       // Now we can look at all the children
       for (LegionList<FieldState>::iterator it = 
             state.field_states.begin(); it != 
@@ -18265,27 +18254,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  // If we are doing a disjoint close, update the open
-                  // states with the appropriate new state
-                  if (disjoint_close)
-                  {
-                    // Record the fields are already open
-                    open_below |= overlap;
-                    // Make a new state with the default projection
-                    // function to indicate that we are open in 
-                    // disjoint shallow mode with read-write
-                    RegionUsage close_usage(LEGION_READ_WRITE, 
-                                            LEGION_EXCLUSIVE, 0);
-                    IndexSpaceNode *color_space = 
-                      as_partition_node()->row_source->color_space;
-                    FieldState new_state(close_usage, overlap,
-                        context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, 
-                        NULL/*sharding space*/, applied_events, this);
-                    new_states.emplace_back(std::move(new_state));
-                  }
-                  else
-                    closer.record_close_operation(overlap);
+                  closer.record_close_operation(overlap);
                 }
                 it->filter(current_mask);
                 if (!it->valid_fields())
@@ -18309,27 +18278,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  // If we're doing a disjoint close update the open
-                  // states accordingly 
-                  if (disjoint_close)
-                  {
-                    // Record the fields are already open
-                    open_below |= overlap;
-                    // Make a new state with the default projection
-                    // function to indicate that we are open in 
-                    // disjoint shallow mode with read-write
-                    RegionUsage close_usage(LEGION_READ_WRITE, 
-                                            LEGION_EXCLUSIVE, 0);
-                    IndexSpaceNode *color_space = 
-                      as_partition_node()->row_source->color_space;
-                    FieldState new_state(close_usage, overlap,
-                        context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, 
-                        NULL/*sharding space*/, applied_events, this);
-                    new_states.emplace_back(std::move(new_state));
-                  }
-                  else
-                    closer.record_close_operation(overlap);
+                  closer.record_close_operation(overlap);
                 }
                 it->filter(current_mask);
                 if (!it->valid_fields())
