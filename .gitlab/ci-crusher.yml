@@ -20,6 +20,7 @@ variables:
 .legion: &legion
   TEST_REGENT: "0"
   LEGION_WARNINGS_FATAL: "1"
+  DEBUG: "0"
 
 .regent: &regent
   TEST_LEGION_CXX: "0"
