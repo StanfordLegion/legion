@@ -13049,7 +13049,7 @@ namespace Legion {
 #endif
         // See if this field has been allocated or not yet
         if (!finder->second.size_ready.exists())
-          return finder->second.field_size;
+          return finder->second.serdez_id;
         wait_for = Runtime::protect_event(finder->second.size_ready);
       }
       if (!wait_for.has_triggered())
