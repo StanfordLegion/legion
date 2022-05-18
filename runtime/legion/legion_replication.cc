@@ -12259,9 +12259,6 @@ namespace Legion {
                             std::vector<IndirectRecord> &records)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(records.empty());
-#endif
       local_targets.swap(targets);
       all_records.swap(records);
       perform_collective_async();
@@ -12297,7 +12294,7 @@ namespace Legion {
       derez.deserialize(num_records);
       all_records.resize(offset + num_records);
       for (unsigned idx = 0; idx < num_records; idx++)
-        all_records[idx].deserialize(derez);
+        all_records[offset+idx].deserialize(derez);
     }
 
     //--------------------------------------------------------------------------

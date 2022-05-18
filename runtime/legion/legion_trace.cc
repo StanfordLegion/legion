@@ -4250,6 +4250,11 @@ namespace Legion {
       }
       prepare_parallel_replay(gen);
       push_complete_replays();
+      // After elide fences we can clear these views
+      op_views.clear();
+      copy_views.clear();
+      src_indirect_views.clear();
+      dst_indirect_views.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9138,8 +9143,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
-      assert(tpl.operations.front().find(owner) != 
-              tpl.operations.front().end());
 #endif
       executor->add_reference();
     }
