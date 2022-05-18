@@ -119,6 +119,7 @@ def build_llvm(source_dir, build_dir, install_dir, is_project_build, use_cmake, 
              '-DCMAKE_BUILD_TYPE=Release',
              '-DLLVM_ENABLE_ASSERTIONS=OFF',
              '-DLLVM_ENABLE_ZLIB=OFF',
+             '-DLLVM_ENABLE_LIBXML2=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
              '-DLLVM_ENABLE_LIBEDIT=OFF'] +
             extra_flags +
