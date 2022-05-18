@@ -2668,16 +2668,13 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(*src_mask, dst_fields);
       source_manager->compute_copy_offsets(*src_mask, src_fields);
-      std::map<Reservation,bool> reservations;
+      std::vector<Reservation> reservations;
       // If we're doing a reduction operation then set the reduction
       // information on the source-dst fields
       if (reduction_op_id > 0)
       {
         // Get the reservations
-        std::vector<Reservation> dst_reservations(copy_mask.pop_count());
-        dst_view->find_field_reservations(copy_mask, dst_reservations); 
-        for (unsigned idx = 0; idx < dst_reservations.size(); idx++)
-          reservations[dst_reservations[idx]] = true/*exclusive*/;
+        dst_view->find_field_reservations(copy_mask, reservations); 
         // Set the redop on the destination fields
         // Note that we can mark these as exclusive copies since
         // we are protecting them with the reservations
@@ -2685,8 +2682,8 @@ namespace Legion {
           dst_fields[idx].set_redop(reduction_op_id, false/*fold*/, 
                                     true/*exclusive*/);
       }
-      const ApEvent result = copy_expression->issue_copy(op, trace_info, 
-                                         dst_fields, src_fields, reservations,
+      const ApEvent result = copy_expression->issue_copy(trace_info, dst_fields,
+                                         src_fields, reservations,
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
 #endif

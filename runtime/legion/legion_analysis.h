@@ -205,26 +205,24 @@ namespace Legion {
                            ApEvent &lhs, IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::map<Reservation,bool>& reservations,
+                           const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
-      virtual void record_issue_indirect(const TraceLocalID &tlid,
-                           ApEvent &lhs, IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField>& src_fields,
-                           const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<CopyIndirection*> &indirections,
-                           const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier, 
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition) = 0;
-      virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
+      virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
+                           ApEvent collective_precondition, 
+                           ApEvent copy_precondition,
+                           ApEvent src_indirect_precondition,
+                           ApEvent dst_indirect_precondition,
+                           CopyAcrossExecutor *executor) = 0;
+      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied) = 0;
       virtual void record_indirect_views(ApEvent indirect_done,
                            ApEvent all_done, IndexSpaceExpression *expr,
@@ -286,7 +284,6 @@ namespace Legion {
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_VIEWS,
-        REMOTE_TRACE_ISSUE_INDIRECT,
         REMOTE_TRACE_INDIRECT_VIEWS,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_VIEWS,
@@ -340,26 +337,24 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::map<Reservation,bool> &reservations,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-      virtual void record_issue_indirect(const TraceLocalID &tlid, ApEvent &lhs,
+      virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
+                           ApEvent collective_precondition, 
+                           ApEvent copy_precondition,
+                           ApEvent src_indirect_precondition,
+                           ApEvent dst_indirect_precondition,
+                           CopyAcrossExecutor *executor);
+      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField>& src_fields,
-                           const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<CopyIndirection*> &indirections,
-                           const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition);
-      virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied);
       virtual void record_indirect_views(ApEvent indirect_done,ApEvent all_done,
                            IndexSpaceExpression *expr,
@@ -564,7 +559,7 @@ namespace Legion {
                           IndexSpaceExpression *expr,
                           const std::vector<CopySrcDstField>& src_fields,
                           const std::vector<CopySrcDstField>& dst_fields,
-                          const std::map<Reservation,bool> &reservations,
+                          const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
@@ -607,46 +602,30 @@ namespace Legion {
           rec->record_fill_views(lhs, expr, dsts, applied,
                                  reduction_initialization);
         }
-      inline void record_issue_indirect(ApEvent &result,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<CopyIndirection*> &indirections,
-                             const std::map<Reservation,bool> &reservations,
-#ifdef LEGION_SPY
-                             unsigned unique_indirections_identifier,
-#endif
-                             ApEvent precondition, PredEvent pred_guard,
-                             ApEvent tracing_precondition) const
+      inline void record_copy_views(ApEvent lhs, unsigned idx1, unsigned idx2,
+                                    PrivilegeMode mode1, PrivilegeMode mode2,
+                                    IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                    bool src_indirect, bool dst_indirect,
+                                    std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_issue_indirect(tlid, result, expr, src_fields,
-                                     dst_fields, indirections, reservations,
-#ifdef LEGION_SPY
-                                     unique_indirections_identifier,
-#endif
-                                     precondition, pred_guard,
-                                     tracing_precondition);
+          rec->record_copy_views(lhs, tlid, idx1, idx2, expr,
+                                 tracing_srcs, tracing_dsts, mode1, mode2,
+                                 src_indirect, dst_indirect, applied);
         }
       inline void record_copy_views(ApEvent lhs,
-                                    PrivilegeMode mode1, PrivilegeMode mode2,
                                     IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                     std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
-                                 mode1, mode2, applied);
-        }
-      inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    std::set<RtEvent> &applied) const
-        {
-          sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
-                                 LEGION_READ_PRIV, LEGION_WRITE_PRIV, applied);
+          rec->record_copy_views(lhs, tlid, index, dst_index, expr,
+                                 tracing_srcs, tracing_dsts,
+                                 LEGION_READ_PRIV, LEGION_WRITE_PRIV,
+                                 false/*indirect*/, false/*indrect*/, applied);
         }
       inline void record_indirect_views(ApEvent indirect_done, ApEvent all_done,
                                         IndexSpaceExpression *expr,

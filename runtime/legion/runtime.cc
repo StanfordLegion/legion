@@ -31698,6 +31698,11 @@ namespace Legion {
             Operation::handle_deferred_release(args);
             break;
           }
+        case LG_DEFER_COPY_ACROSS_TASK_ID:
+          {
+            CopyAcrossExecutor::handle_deferred_copy_across(args);
+            break;
+          }
         case LG_DEFER_DISJOINT_COMPLETE_TASK_ID:
           {
             ReplicateContext::handle_defer_disjoint_complete_response(runtime,

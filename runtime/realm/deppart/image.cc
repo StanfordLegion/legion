@@ -356,8 +356,14 @@ namespace Realm {
       return;
     }
 
-    // instance index spaces should always be valid
-    assert(inst_space.is_valid(true /*precise*/));
+    // Need valid data for the instance space
+    if (!inst_space.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N2,T2>::lookup(inst_space.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+        wait_count.fetch_add(1);
+    }
 
     // need valid data for each source
     for(size_t i = 0; i < sources.size(); i++) {
