@@ -3618,7 +3618,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    handle, precondition, result);
+                                    expr_id, precondition, result);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -3864,7 +3864,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    handle, precondition, result);
+                                    expr_id, precondition, result);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -4112,7 +4112,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    handle, precondition, result);
+                                    expr_id, precondition, result);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -4351,7 +4351,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    handle, precondition, result);
+                                    expr_id, precondition, result);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
