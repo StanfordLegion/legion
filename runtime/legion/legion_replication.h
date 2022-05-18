@@ -597,45 +597,25 @@ namespace Legion {
      * A class for doing an all-gather of indirect records for 
      * doing gather/scatter/full-indirect copy operations.
      */
-    class IndirectRecordExchange : public AllGatherCollective<false> {
-    public:
-      struct IndirectKey {
-      public:
-        IndirectKey(void) { }
-        IndirectKey(PhysicalInstance i, const Domain &d)
-          : inst(i), domain(d) { }
-      public:
-        inline bool operator<(const IndirectKey &rhs) const 
-        {
-          if (inst.id < rhs.inst.id)
-            return true;
-          if (inst.id > rhs.inst.id)
-            return false;
-          return (domain < rhs.domain);
-        }
-        inline bool operator==(const IndirectKey &rhs) const
-        {
-          if (inst.id != rhs.inst.id)
-            return false;
-          return (domain == rhs.domain);
-        }
-      public:
-        PhysicalInstance inst;
-        Domain domain;
-      };
+    class IndirectRecordExchange : public AllGatherCollective<true> {
     public:
       IndirectRecordExchange(ReplicateContext *ctx, CollectiveID id);
-      IndirectRecordExchange(const IndirectRecordExchange &rhs);
+      IndirectRecordExchange(const IndirectRecordExchange &rhs) = delete;
       virtual ~IndirectRecordExchange(void);
     public:
-      IndirectRecordExchange& operator=(const IndirectRecordExchange &rhs);
+      IndirectRecordExchange& operator=(
+          const IndirectRecordExchange &rhs) = delete;
     public:
-      void exchange_records(LegionVector<IndirectRecord> &records);
+      RtEvent exchange_records(
+          std::vector<std::vector<IndirectRecord>*> &targets,
+          std::vector<IndirectRecord> &local_records);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     protected:
-      LegionMap<IndirectKey,FieldMask> records;
+      std::vector<std::vector<IndirectRecord>*> local_targets;
+      std::vector<IndirectRecord> all_records;
     };
     
     /**
@@ -1627,12 +1607,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
-          const unsigned index, const ApEvent local_pre,
-          const ApEvent local_post, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
-          const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources);
+      virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
@@ -1647,8 +1622,8 @@ namespace Legion {
       ShardingFunction *sharding_function;
       std::vector<ApBarrier> pre_indirection_barriers;
       std::vector<ApBarrier> post_indirection_barriers;
-      std::vector<CollectiveID> src_collectives;
-      std::vector<CollectiveID> dst_collectives;
+      std::vector<IndirectRecordExchange*> src_collectives;
+      std::vector<IndirectRecordExchange*> dst_collectives;
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION
     public:

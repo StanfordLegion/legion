@@ -2682,8 +2682,8 @@ namespace Legion {
           dst_fields[idx].set_redop(reduction_op_id, false/*fold*/, 
                                     true/*exclusive*/);
       }
-      const ApEvent result = copy_expression->issue_copy(trace_info, dst_fields,
-                                         src_fields, reservations,
+      const ApEvent result = copy_expression->issue_copy(op, trace_info,
+                                         dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
 #endif

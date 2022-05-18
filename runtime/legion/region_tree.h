@@ -54,6 +54,9 @@ namespace Legion {
                      const InstanceSet &insts,
                      const DomainPoint &key);
     public:
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+    public:
       // In the same order as the fields for the actual copy
       std::vector<PhysicalInstance> instances;
 #ifdef LEGION_SPY

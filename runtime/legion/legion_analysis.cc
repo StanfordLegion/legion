@@ -624,18 +624,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_copy_views(ApEvent lhs, 
-                                                IndexSpaceExpression *expr,
+                                              const TraceLocalID &tlid,
+                                              unsigned src_idx,unsigned dst_idx,
+                                              IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                                PrivilegeMode src_mode,
-                                                PrivilegeMode dst_mode,
-                                                bool src_indirect,
-                                                bool dst_indirect,
-                                                std::set<RtEvent> &applied)
+                                              PrivilegeMode src_mode,
+                                              PrivilegeMode dst_mode,
+                                              bool src_indirect,
+                                              bool dst_indirect,
+                                              std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memoizable == memo);
       // Should never be recording indirect copies on remote nodes
       assert(!src_indirect);
       assert(!dst_indirect);
@@ -649,7 +650,10 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_COPY_VIEWS);
           rez.serialize(done);
+          tlid.serialize(rez);
           rez.serialize(lhs);
+          rez.serialize(src_idx);
+          rez.serialize(dst_idx);
           rez.serialize(src_mode);
           rez.serialize(dst_mode);
           expr->pack_expression(rez, origin_space);
@@ -672,13 +676,14 @@ namespace Legion {
         applied.insert(done);
       }
       else
-        remote_tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
+        remote_tpl->record_copy_views(lhs, tlid, src_idx, dst_idx, expr,
                 tracing_srcs, tracing_dsts, src_mode, dst_mode,
                 src_indirect, dst_indirect, applied);
-    } 
+    }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_across(Memoizable *memo,ApEvent &lhs,
+    void RemoteTraceRecorder::record_issue_across(const TraceLocalID &tlid,
+                                              ApEvent &lhs,
                                               ApEvent collective_precondition,
                                               ApEvent copy_precondition,
                                               ApEvent src_indirect_precondition,
@@ -1233,13 +1238,18 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApUserEvent lhs;
             derez.deserialize(lhs);
+            unsigned src_idx, dst_idx;
+            derez.deserialize(src_idx);
+            derez.deserialize(dst_idx);
             PrivilegeMode src_mode, dst_mode;
             derez.deserialize(src_mode);
             derez.deserialize(dst_mode);
             RegionTreeForest *forest = runtime->forest;
-            IndexSpaceExpression *expr = 
+            IndexSpaceExpression *expr =
               IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
             std::set<RtEvent> ready_events;
@@ -1272,7 +1282,7 @@ namespace Legion {
               FieldMask mask;
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
-            } 
+            }
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -1280,7 +1290,7 @@ namespace Legion {
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
+            tpl->record_copy_views(lhs, tlid, src_idx, dst_idx, expr,
                   tracing_srcs, tracing_dsts, src_mode, dst_mode,
                   false/*indirect*/, false/*indirect*/, ready_events);
             if (!ready_events.empty())
@@ -1297,7 +1307,7 @@ namespace Legion {
             derez.deserialize(indirect_done);
             derez.deserialize(all_done);
             RegionTreeForest *forest = runtime->forest;
-            IndexSpaceExpression *expr = 
+            IndexSpaceExpression *expr =
               IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<InstanceView> tracing_views;
             std::set<RtEvent> ready_events;

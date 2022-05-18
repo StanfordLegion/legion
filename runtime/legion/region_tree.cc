@@ -86,6 +86,42 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void IndirectRecord::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(domain);
+      rez.serialize(domain_ready);
+      rez.serialize<size_t>(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+        rez.serialize(instances[idx]);
+#ifdef LEGION_SPY
+      rez.serialize(index_space);
+      assert(instances.size() == instance_events.size());
+      for (unsigned idx = 0; idx < instance_events.size(); idx++)
+        rez.serialize(instance_events[idx]);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndirectRecord::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(domain);
+      derez.deserialize(domain_ready);
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      instances.resize(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+        derez.deserialize(instances[idx]);
+#ifdef LEGION_SPY
+      derez.deserialize(index_space);
+      instance_events.resize(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+        derez.deserialize(instance_events[idx]);
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
     /////////////////////////////////////////////////////////////
@@ -2501,8 +2537,7 @@ namespace Legion {
         across->dst_tree_id = dst_req.region.get_tree_id();
 #endif
         // Fill in the source fields 
-        InnerContext *src_context = 
-          op->find_physical_context(src_index, src_req);
+        InnerContext *src_context = op->find_physical_context(src_index);
         std::vector<InstanceView*> source_views;
         src_context->convert_target_views(src_targets, source_views);
         across->initialize_source_fields(this, src_req,
@@ -2682,7 +2717,7 @@ namespace Legion {
           Runtime::merge_events(&trace_info, local_preconditions);
       Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Initialize the destination fields
-      InnerContext *context = op->find_physical_context(dst_index, dst_req);
+      InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
       const bool exclusive_redop =
@@ -2727,16 +2762,14 @@ namespace Legion {
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
         // Get the src_views
-        InnerContext *src_context =
-          op->find_physical_context(src_index, src_req);
+        InnerContext *src_context = op->find_physical_context(src_index);
         std::vector<InstanceView*> source_views;
         src_context->convert_target_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
           src_views.insert(source_views[idx],
               src_targets[idx].get_valid_fields());
         // Get the idx views
-        InnerContext *idx_context =
-          op->find_physical_context(idx_index, idx_req); 
+        InnerContext *idx_context = op->find_physical_context(idx_index); 
         std::vector<InstanceView*> indirect_views;
         idx_context->convert_target_views(idx_targets, indirect_views);
         idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
@@ -2745,7 +2778,7 @@ namespace Legion {
           dst_views.insert(target_views[idx],
               dst_targets[idx].get_valid_fields());
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post, src_index,
+        trace_info.record_indirect_views(copy_post, collective_post,
             src_node, src_views, map_applied_events, LEGION_READ_PRIV);
         trace_info.record_copy_views(copy_post, idx_index, dst_index,
             LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr, idx_views,
@@ -2800,7 +2833,7 @@ namespace Legion {
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
       // Initialize the sources
-      InnerContext *context = op->find_physical_context(src_index, src_req);
+      InnerContext *context = op->find_physical_context(src_index);
       std::vector<InstanceView*> source_views;
       context->convert_target_views(src_targets, source_views);
       across->initialize_source_fields(this, src_req, src_targets,
@@ -2890,7 +2923,7 @@ namespace Legion {
             LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_views,
             idx_views, false/*indirect*/, true/*indirect*/,map_applied_events); 
         IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post, dst_index,
+        trace_info.record_indirect_views(copy_post, collective_post,
           dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
       }
       if (across->remove_reference())
@@ -3063,10 +3096,10 @@ namespace Legion {
               dst_targets[idx].get_valid_fields());
 
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post, src_index,
+        trace_info.record_indirect_views(copy_post, collective_post,
             src_node, src_views, map_applied_events, LEGION_READ_PRIV);
         IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post, dst_index,
+        trace_info.record_indirect_views(copy_post, collective_post,
            dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
         trace_info.record_copy_views(copy_post, src_idx_index, dst_idx_index,
             LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_idx_views,

@@ -1441,6 +1441,7 @@ namespace Legion {
           const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources); 
+      virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
@@ -3304,6 +3305,21 @@ namespace Legion {
       void perform_logging(void) const;
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;
+    protected:
+      void check_by_field(IndexPartition pid, LogicalRegion handle,
+                          LogicalRegion parent, FieldID fid) const;
+      void check_by_image(IndexPartition pid, LogicalPartition projection,
+                          LogicalRegion parent, FieldID fid) const;
+      void check_by_image_range(IndexPartition pid, LogicalPartition projection,
+                                LogicalRegion parent, FieldID fid) const;
+      void check_by_preimage(IndexPartition pid, IndexPartition proj,
+                             LogicalRegion handle, LogicalRegion parent,
+                             FieldID fid) const;
+      void check_by_preimage_range(IndexPartition pid, IndexPartition proj,
+                             LogicalRegion handle, LogicalRegion parent,
+                             FieldID fid) const;
+      void check_by_association(LogicalRegion domain,
+          LogicalRegion domain_parent, FieldID fid, IndexSpace range) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);

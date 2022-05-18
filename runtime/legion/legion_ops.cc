@@ -5621,8 +5621,8 @@ namespace Legion {
           copy_post = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
-              src_targets, dst_targets, this, index, trace_info.dst_index,
-              init_precondition, predication_guard,
+              src_targets, dst_targets, across_sources, this, index,
+              trace_info.dst_index, init_precondition, predication_guard,
               atomic_locks[index], trace_info, applied_conditions);
         }
         else
@@ -7493,11 +7493,7 @@ namespace Legion {
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.src_records.push_back(&records);
         if (src_indirect_records[index].size() == points.size())
-        {
-          for (unsigned idx = 0; idx < exchange.src_records.size(); idx++)
-            *exchange.src_records[idx] = src_indirect_records[index];
-          Runtime::trigger_event(exchange.src_ready);
-        }
+          return finalize_exchange(index, true/*sources*/);
         return exchange.src_ready;
       }
       else
@@ -7535,11 +7531,33 @@ namespace Legion {
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.dst_records.push_back(&records);
         if (dst_indirect_records[index].size() == points.size())
-        {
-          for (unsigned idx = 0; idx < exchange.dst_records.size(); idx++)
-            *exchange.dst_records[idx] = dst_indirect_records[index];
-          Runtime::trigger_event(exchange.dst_ready);
-        }
+          return finalize_exchange(index, false/*sources*/);
+        return exchange.dst_ready;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexCopyOp::finalize_exchange(const unsigned index,
+                                           const bool source)
+    //--------------------------------------------------------------------------
+    {
+      IndirectionExchange &exchange = collective_exchanges[index];
+      if (source)
+      {
+        const std::vector<IndirectRecord> &records =
+          src_indirect_records[index];
+        for (unsigned idx = 0; idx < exchange.src_records.size(); idx++)
+          *exchange.src_records[idx] = records;
+        Runtime::trigger_event(exchange.src_ready);
+        return exchange.src_ready;
+      }
+      else
+      {
+        const std::vector<IndirectRecord> &records =
+          dst_indirect_records[index];
+        for (unsigned idx = 0; idx < exchange.dst_records.size(); idx++)
+          *exchange.dst_records[idx] = records;
+        Runtime::trigger_event(exchange.dst_ready);
         return exchange.dst_ready;
       }
     }
@@ -15970,34 +15988,40 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(handle.get_field_space(), fid);
-        IndexSpace color_space = 
-          runtime->forest->get_index_partition_color_space(pid);
-        const size_t coord_size = 
-          runtime->forest->get_coordinate_size(color_space, false/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-field operation does not "
-              "match the size of the coordinate type of the color space "
-              "of the resulting partition. Field %d has size %zd bytes "
-              "but the coordinates of color space %d of partition %d are "
-              "%zd bytes for dependent partition operation (UID %lld) in "
-              "parent task %s (UID %lld).", fid, field_size, 
-              color_space.get_id(), pid.get_id(), coord_size, get_unique_id(),
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            handle.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-field "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_field(pid, handle, parent, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_field(IndexPartition pid,
+                  LogicalRegion handle, LogicalRegion parent, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = 
+        runtime->forest->get_field_size(handle.get_field_space(), fid);
+      IndexSpace color_space = 
+        runtime->forest->get_index_partition_color_space(pid);
+      const size_t coord_size = 
+        runtime->forest->get_coordinate_size(color_space, false/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for partition-by-field operation does not "
+            "match the size of the coordinate type of the color space "
+            "of the resulting partition. Field %d has size %zd bytes "
+            "but the coordinates of color space %d of partition %d are "
+            "%zd bytes for dependent partition operation (UID %lld) in "
+            "parent task %s (UID %lld).", fid, field_size, 
+            color_space.get_id(), pid.get_id(), coord_size, get_unique_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          handle.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to partition-by-field "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -16036,34 +16060,41 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(projection.get_field_space(), fid);
-        const IndexSpace pid_parent = 
-          runtime->forest->get_parent_index_space(pid);
-        const size_t coord_size = runtime->forest->get_coordinate_size(
-                                            pid_parent, false/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-image operation does not "
-              "match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).", 
-              fid, field_size, pid.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            projection.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-image "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_image(pid, projection, parent, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_image(IndexPartition pid,
+                                        LogicalPartition projection,
+                                        LogicalRegion parent, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = 
+        runtime->forest->get_field_size(projection.get_field_space(), fid);
+      const IndexSpace pid_parent = 
+        runtime->forest->get_parent_index_space(pid);
+      const size_t coord_size = runtime->forest->get_coordinate_size(
+                                          pid_parent, false/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for partition-by-image operation does not "
+            "match the size of the coordinate types of the projection "
+            "partition. Field %d has size %zd bytes but the coordinates "
+            "of the projection partition %d are %zd bytes for dependent "
+            "partition operation (UID %lld) in parent task %s (UID %lld).", 
+            fid, field_size, pid.get_id(), coord_size, 
+            get_unique_id(), parent_ctx->get_task_name(), 
+            parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          projection.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to partition-by-image "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -16103,34 +16134,40 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(projection.get_field_space(), fid);
-        const IndexSpace pid_parent =
-          runtime->forest->get_parent_index_space(pid);
-        const size_t coord_size = runtime->forest->get_coordinate_size(
-                                              pid_parent, true/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-image-range operation does not "
-              "match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).", 
-              fid, field_size, pid.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            projection.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-image-range "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_image_range(pid, projection, parent, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_image_range(IndexPartition pid,
+           LogicalPartition projection, LogicalRegion parent, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = 
+        runtime->forest->get_field_size(projection.get_field_space(), fid);
+      const IndexSpace pid_parent =
+        runtime->forest->get_parent_index_space(pid);
+      const size_t coord_size = runtime->forest->get_coordinate_size(
+                                            pid_parent, true/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for partition-by-image-range operation does not "
+            "match the size of the coordinate types of the projection "
+            "partition. Field %d has size %zd bytes but the coordinates "
+            "of the projection partition %d are %zd bytes for dependent "
+            "partition operation (UID %lld) in parent task %s (UID %lld).", 
+            fid, field_size, pid.get_id(), coord_size, 
+            get_unique_id(), parent_ctx->get_task_name(), 
+            parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          projection.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to partition-by-image-range "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -16166,34 +16203,41 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(handle.get_field_space(), fid);
-        const IndexSpace proj_parent = 
-          runtime->forest->get_parent_index_space(proj);
-        const size_t coord_size =
-          runtime->forest->get_coordinate_size(proj_parent, false/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-preimage operation does not "
-              "match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).",
-              fid, field_size, proj.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            handle.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-preimage "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_preimage(pid, proj, handle, parent, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_preimage(IndexPartition pid,
+                                      IndexPartition proj, LogicalRegion handle,
+                                      LogicalRegion parent, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = 
+        runtime->forest->get_field_size(handle.get_field_space(), fid);
+      const IndexSpace proj_parent = 
+        runtime->forest->get_parent_index_space(proj);
+      const size_t coord_size =
+        runtime->forest->get_coordinate_size(proj_parent, false/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for partition-by-preimage operation does not "
+            "match the size of the coordinate types of the projection "
+            "partition. Field %d has size %zd bytes but the coordinates "
+            "of the projection partition %d are %zd bytes for dependent "
+            "partition operation (UID %lld) in parent task %s (UID %lld).",
+            fid, field_size, proj.get_id(), coord_size, 
+            get_unique_id(), parent_ctx->get_task_name(), 
+            parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          handle.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to partition-by-preimage "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -16229,34 +16273,41 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size = 
-          runtime->forest->get_field_size(handle.get_field_space(), fid);
-        const IndexSpace proj_parent = 
-          runtime->forest->get_parent_index_space(proj);
-        const size_t coord_size = 
-          runtime->forest->get_coordinate_size(proj_parent, true/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for partition-by-preimage-range operation does "
-              "not match the size of the coordinate types of the projection "
-              "partition. Field %d has size %zd bytes but the coordinates "
-              "of the projection partition %d are %zd bytes for dependent "
-              "partition operation (UID %lld) in parent task %s (UID %lld).",
-              fid, field_size, proj.get_id(), coord_size, 
-              get_unique_id(), parent_ctx->get_task_name(), 
-              parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            handle.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to partition-by-preimage-range "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_preimage_range(pid, proj, handle, parent, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_preimage_range(IndexPartition pid,
+                                      IndexPartition proj, LogicalRegion handle,
+                                      LogicalRegion parent, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = 
+        runtime->forest->get_field_size(handle.get_field_space(), fid);
+      const IndexSpace proj_parent = 
+        runtime->forest->get_parent_index_space(proj);
+      const size_t coord_size = 
+        runtime->forest->get_coordinate_size(proj_parent, true/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for partition-by-preimage-range operation does "
+            "not match the size of the coordinate types of the projection "
+            "partition. Field %d has size %zd bytes but the coordinates "
+            "of the projection partition %d are %zd bytes for dependent "
+            "partition operation (UID %lld) in parent task %s (UID %lld).",
+            fid, field_size, proj.get_id(), coord_size, 
+            get_unique_id(), parent_ctx->get_task_name(), 
+            parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          handle.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to partition-by-preimage-range "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -16290,31 +16341,37 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-      {
-        const size_t field_size =
-          runtime->forest->get_field_size(domain.get_field_space(), fid);
-        const size_t coord_size = 
-          runtime->forest->get_coordinate_size(range, false/*range*/);
-        if (field_size != coord_size)
-          REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
-              "The field size for create-by-association operation does not "
-              "match the size of the range index space. Field %d has size "
-              "%zd bytes but the coordinates of the range index space %d "
-              "are %zd bytes for create-by-association operation (UID %lld) "
-              "in parent task %s (UID %lld).", fid, field_size,
-              range.get_id(), coord_size, get_unique_id(),
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        const CustomSerdezID serdez = runtime->forest->get_field_serdez(
-            domain.get_field_space(), fid);
-        if (serdez != 0)
-          REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
-              "Serdez fields are not permitted to be used for any "
-              "dependent partitioning calls. Field %d has serdez "
-              "function %d and was passed to create-by-association "
-              "operation (UID %lld) in parent task %s (UID %lld).",
-              fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id())
-      }
+        check_by_association(domain, domain_parent, fid, range);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_by_association(LogicalRegion domain,
+               LogicalRegion domain_parent, FieldID fid, IndexSpace range) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size =
+        runtime->forest->get_field_size(domain.get_field_space(), fid);
+      const size_t coord_size = 
+        runtime->forest->get_coordinate_size(range, false/*range*/);
+      if (field_size != coord_size)
+        REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
+            "The field size for create-by-association operation does not "
+            "match the size of the range index space. Field %d has size "
+            "%zd bytes but the coordinates of the range index space %d "
+            "are %zd bytes for create-by-association operation (UID %lld) "
+            "in parent task %s (UID %lld).", fid, field_size,
+            range.get_id(), coord_size, get_unique_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      const CustomSerdezID serdez = runtime->forest->get_field_serdez(
+          domain.get_field_space(), fid);
+      if (serdez != 0)
+        REPORT_LEGION_ERROR(ERROR_SERDEZ_FIELD_DISALLOWED,
+            "Serdez fields are not permitted to be used for any "
+            "dependent partitioning calls. Field %d has serdez "
+            "function %d and was passed to create-by-association "
+            "operation (UID %lld) in parent task %s (UID %lld).",
+            fid, serdez, get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------

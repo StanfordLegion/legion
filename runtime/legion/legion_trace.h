@@ -1088,6 +1088,7 @@ namespace Legion {
                            const std::vector<Instruction*> &instructions,
                            std::vector<Instruction*> &new_instructions,
                            std::vector<unsigned> &gen,
+                           std::set<RtEvent> &ready_events,
                            unsigned &merge_starts);
       void parallelize_replay_event(unsigned &event_to_check,
                            unsigned slice_index,
@@ -1479,7 +1480,7 @@ namespace Legion {
       virtual ~Instruction(void) {};
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                            std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,Memoizable*> &operations,
                            const bool recurrent_replay) = 0;
       typedef std::map<TraceLocalID,std::pair<unsigned,unsigned> > MemoEntries;
       virtual std::string to_string(const MemoEntries &memo_entires) = 0;
@@ -1591,6 +1592,7 @@ namespace Legion {
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,Memoizable*> &operations,
                            const bool recurrent_replay);
+      virtual std::string to_string(const MemoEntries &memo_entires);
 
       virtual InstructionKind get_kind(void)
         { return MERGE_EVENT; }

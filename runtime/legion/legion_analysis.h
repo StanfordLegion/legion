@@ -592,6 +592,18 @@ namespace Legion {
 #endif
                                  precondition, pred_guard);
         }
+      inline void record_issue_across(ApEvent &result,
+                                      ApEvent collective_precondition,
+                                      ApEvent copy_precondition,
+                                      ApEvent src_indirect_precondition,
+                                      ApEvent dst_indirect_precondition,
+                                      CopyAcrossExecutor *executor) const
+        {
+          sanity_check();
+          rec->record_issue_across(tlid, result, collective_precondition,
+                      copy_precondition, src_indirect_precondition,
+                      dst_indirect_precondition, executor);
+        }
       inline void record_fill_views(ApEvent lhs,
                                     IndexSpaceExpression *expr,
                                     const FieldMaskSet<InstanceView> &dsts,
