@@ -2674,6 +2674,7 @@ namespace Legion {
       if (reduction_op_id > 0)
       {
         // Get the reservations
+        reservations.resize(copy_mask.pop_count());
         dst_view->find_field_reservations(copy_mask, reservations); 
         // Set the redop on the destination fields
         // Note that we can mark these as exclusive copies since
