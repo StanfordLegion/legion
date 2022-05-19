@@ -6574,7 +6574,7 @@ namespace Legion {
         {
           // Compute new preimages and add them to the back of the queue
           ComputePreimagesHelper helper(this, op, 
-              dst_indirect_precondition, true/*source*/);
+              dst_indirect_precondition, false/*source*/);
           NT_TemplateHelper::demux<ComputePreimagesHelper>(
               dst_indirect_type, &helper);
           if (helper.result.exists())
