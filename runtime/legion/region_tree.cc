@@ -2397,24 +2397,6 @@ namespace Legion {
       IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
       IndexSpaceExpression *copy_expr = (idx_node == dst_node) ? dst_node :
         intersect_index_spaces(idx_node, dst_node);
-      // Easy out if we're not moving anything
-      if (copy_expr->is_empty())
-      {
-        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
-        return local_pre;
-      }
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations);
-      across->add_reference();
-      // Initialize the source indirection fields
-      const InstanceRef &idx_target = idx_targets[0];
-      across->initialize_source_indirections(this, src_records,
-          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
-          possible_src_out_of_range);
-#ifdef LEGION_SPY
-      across->src_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_use_event();
-#endif
       // Trigger the source precondition event when all our sources are ready
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
@@ -2430,6 +2412,22 @@ namespace Legion {
         local_precondition = 
           Runtime::merge_events(&trace_info, local_preconditions);
       Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      // Easy out if we're not moving anything
+      if (copy_expr->is_empty())
+        return local_pre;
+      CopyAcrossUnstructured *across = 
+        copy_expr->create_across_unstructured(reservations);
+      across->add_reference();
+      // Initialize the source indirection fields
+      const InstanceRef &idx_target = idx_targets[0];
+      across->initialize_source_indirections(this, src_records,
+          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
+          possible_src_out_of_range);
+#ifdef LEGION_SPY
+      across->src_indirect_instance_event = 
+        idx_target.get_physical_manager()->get_use_event();
+#endif
+      
       // Initialize the destination fields
       InnerContext *context = op->find_physical_context(dst_index, dst_req);
       std::vector<InstanceView*> target_views;
@@ -2542,12 +2540,24 @@ namespace Legion {
       IndexSpaceNode *idx_node = get_node(idx_req.region.get_index_space());
       IndexSpaceExpression *copy_expr = (idx_node == src_node) ? idx_node :
         intersect_index_spaces(src_node, idx_node);
+      // Trigger the source precondition event when all our sources are ready
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      {
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
+      }
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition =
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
-      {
-        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
         return local_pre;
-      }
       CopyAcrossUnstructured *across = 
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
@@ -2569,22 +2579,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         idx_target.get_physical_manager()->get_use_event();
-#endif
-      // Trigger the source precondition event when all our sources are ready
-      std::vector<ApEvent> local_preconditions;
-      if (init_precondition.exists())
-        local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
-      ApEvent local_precondition;
-      if (!local_preconditions.empty())
-        local_precondition =
-          Runtime::merge_events(&trace_info, local_preconditions);
-      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -2697,12 +2692,30 @@ namespace Legion {
         get_node(dst_idx_req.region.get_index_space());
       IndexSpaceExpression *copy_expr = (src_idx_node == dst_idx_node) ?
          src_idx_node : intersect_index_spaces(src_idx_node, dst_idx_node);
+      // Trigger the precondition event when all our srcs and dsts are ready
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+      {
+        const ApEvent ready = src_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
+      }
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      {
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
+      }
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition = 
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
-      {
-        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
         return local_pre;
-      }
       CopyAcrossUnstructured *across = 
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
@@ -2714,17 +2727,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         src_idx_target.get_physical_manager()->get_use_event();
-#endif
-      // Trigger the source precondition event when all our sources are ready
-      std::vector<ApEvent> local_preconditions;
-      if (init_precondition.exists())
-        local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+#endif 
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2737,19 +2740,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         dst_idx_target.get_physical_manager()->get_use_event();
-#endif
-      // Trigger the source precondition event when all our sources are ready
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
-      ApEvent local_precondition;
-      if (!local_preconditions.empty())
-        local_precondition = 
-          Runtime::merge_events(&trace_info, local_preconditions);
-      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
