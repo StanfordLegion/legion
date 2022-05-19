@@ -123,6 +123,7 @@ namespace Realm {
                                  TimeLimit work_until)
     {
       bool did_work = false;
+      std::string memcpy_kind;
 
       ReadSequenceCache rseqcache(this, 2 << 20);
       WriteSequenceCache wseqcache(this, 2 << 20);
@@ -170,19 +171,24 @@ namespace Realm {
             // pick the correct stream for any memcpy's we generate
             GPUStream *stream;
             if(in_gpu) {
-              if(out_gpu == in_gpu)
+              if(out_gpu == in_gpu) {
                 stream = in_gpu->get_next_d2d_stream();
-              else if(out_mapping)
+                memcpy_kind = "d2d";
+              } else if(out_mapping) {
                 stream = in_gpu->hipipc_streams[out_mapping->owner];
-              else if(!out_gpu)
+                memcpy_kind = "ipc";
+              } else if(!out_gpu) {
                 stream = in_gpu->device_to_host_stream;
-              else {
+                memcpy_kind = "d2h";
+              } else {
                 stream = in_gpu->peer_to_peer_streams[out_gpu->info->index];
                 assert(stream);
+                memcpy_kind = "p2p";
               }
             } else {
               assert(out_gpu);
               stream = out_gpu->host_to_device_stream;
+              memcpy_kind = "h2d";
             }
 
             AutoGPUContext agc(stream->get_gpu());
@@ -248,7 +254,8 @@ namespace Realm {
                 log_gpudma.info() << "gpu memcpy: dst="
                                   << std::hex << (out_base + out_offset)
                                   << " src=" << (in_base + in_offset) << std::dec
-                                  << " bytes=" << bytes << " stream=" << stream;
+                                  << " bytes=" << bytes << " stream=" << stream
+                                  << " kind=" << memcpy_kind;
 
                 in_alc.advance(0, bytes);
                 out_alc.advance(0, bytes);
@@ -334,7 +341,8 @@ namespace Realm {
                                     << std::hex << (in_base + in_offset) << std::dec
                                     << "+" << in_lstride
                                     << " bytes=" << bytes << " lines=" << lines
-                                    << " stream=" << stream;
+                                    << " stream=" << stream
+                                    << " kind=" << memcpy_kind;
 
                   in_alc.advance(id, lines * iscale);
                   out_alc.advance(od, lines * oscale);
@@ -423,7 +431,8 @@ namespace Realm {
                                     << "+" << in_pstride 
                                     << " bytes=" << bytes << " lines=" << lines
                                     << " planes=" << act_planes
-                                    << " stream=" << stream;
+                                    << " stream=" << stream
+                                    << " kind=" << memcpy_kind;
 
                   bytes = contig_bytes * lines * act_planes;
                   in_alc.advance(id, act_planes * iscale);
