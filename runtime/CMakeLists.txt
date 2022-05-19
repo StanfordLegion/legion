@@ -669,6 +669,10 @@ list(APPEND LEGION_SRC
   legion/runtime.h                        legion/runtime.cc
 )
 
+if(Legion_USE_HIP)
+  list(APPEND LEGION_SRC hip_cuda_compat/hip_cuda.h)
+endif()
+
 if(Legion_REDOP_HALF)
   list(APPEND LEGION_SRC mathtypes/half.h)
 endif()
@@ -677,7 +681,7 @@ if(Legion_REDOP_COMPLEX)
   list(APPEND LEGION_SRC mathtypes/complex.h)
 endif()
 
-if(Legion_USE_CUDA)
+if(Legion_USE_CUDA AND Legion_GPU_REDUCTIONS)
   list(APPEND LEGION_CUDA_SRC
     legion/legion_redop.cu
   )
