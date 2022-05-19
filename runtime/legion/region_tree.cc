@@ -2399,7 +2399,10 @@ namespace Legion {
         intersect_index_spaces(idx_node, dst_node);
       // Easy out if we're not moving anything
       if (copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
+      {
+        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
+        return local_pre;
+      }
       CopyAcrossUnstructured *across = 
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
@@ -2541,7 +2544,10 @@ namespace Legion {
         intersect_index_spaces(src_node, idx_node);
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
+      {
+        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
+        return local_pre;
+      }
       CopyAcrossUnstructured *across = 
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
@@ -2693,7 +2699,10 @@ namespace Legion {
          src_idx_node : intersect_index_spaces(src_idx_node, dst_idx_node);
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
+      {
+        Runtime::trigger_event(&trace_info, local_pre, init_precondition);
+        return local_pre;
+      }
       CopyAcrossUnstructured *across = 
         copy_expr->create_across_unstructured(reservations);
       across->add_reference();
