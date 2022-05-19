@@ -21,7 +21,7 @@
 #endif
 
 #ifdef REALM_USE_HIP
-#include <hip/hip_runtime.h>
+#include "hip_cuda_compat/hip_cuda.h"
 #include "realm/hip/hiphijack_api.h"
 #endif
 

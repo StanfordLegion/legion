@@ -9,21 +9,8 @@
 #endif
 
 #ifdef REALM_USE_HIP
-#include <hip/hip_runtime.h>
+#include "hip_cuda_compat/hip_cuda.h"
 #include "realm/hip/hiphijack_api.h"
-
-#define cudaDeviceProp hipDeviceProp_t
-#define cudaError_t hipError_t
-#define cudaEvent_t hipEvent_t
-
-#define cudaEventCreate hipEventCreate
-#define cudaEventDestroy hipEventDestroy
-#define cudaEventElapsedTime hipEventElapsedTime
-#define cudaEventRecord hipEventRecord
-#define cudaEventSynchronize hipEventSynchronize
-#define cudaGetDevice hipGetDevice
-#define cudaGetDeviceProperties hipGetDeviceProperties
-#define cudaSuccess hipSuccess
 #endif
 
 extern "C" {

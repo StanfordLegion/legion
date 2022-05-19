@@ -16,12 +16,8 @@
 #include "realm_saxpy.h"
 
 #ifdef REALM_USE_HIP
-#include <hip/hip_runtime.h>
+#include "hip_cuda_compat/hip_cuda.h"
 #include "realm/hip/hiphijack_api.h"
-#define cudaGetDevice hipGetDevice
-#define cudaMemAdvise hipMemAdvise
-#define cudaMemPrefetchAsync hipMemPrefetchAsync
-#define cudaMemAdviseSetReadMostly hipMemAdviseSetReadMostly
 #endif
 
 extern Logger log_app;
