@@ -20,6 +20,7 @@ variables:
 .legion: &legion
   TEST_REGENT: "0"
   LEGION_WARNINGS_FATAL: "1"
+  DEBUG: "0"
 
 .regent: &regent
   TEST_LEGION_CXX: "0"
@@ -27,6 +28,9 @@ variables:
   TEST_FUZZER: "0"
   NO_PRETTY: "1"
   CXXFLAGS: "-std=c++11 -D__HIP_PLATFORM_AMD__"
+
+.cmake: &cmake
+  USE_CMAKE: "1"
 
 .tests: &tests
   script:
@@ -59,6 +63,15 @@ legion:
   variables:
     <<: [*legion]
 
+legion_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*legion, *cmake]
+
 regent:
   <<: [*tests]
   stage: test
@@ -67,6 +80,15 @@ regent:
     - crusher
   variables:
     <<: [*regent]
+
+regent_cmake:
+  <<: [*tests]
+  stage: test
+  tags:
+    - slurm
+    - crusher
+  variables:
+    <<: [*regent, *cmake]
 
 clean:
   stage: clean

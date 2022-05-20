@@ -465,7 +465,7 @@ if(Legion_USE_HIP)
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
   
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_NVCC__")
+    target_compile_definitions(RealmRuntime PRIVATE __HIP_PLATFORM_NVIDIA__)
   endif()
 
   if (Legion_HIP_TARGET STREQUAL "ROCM")
@@ -474,12 +474,12 @@ if(Legion_USE_HIP)
     endif()
 
     set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
-    target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include ${HIP_ROOT_DIR}/../include)
+    target_include_directories(RealmRuntime PRIVATE ${HIP_INCLUDE_DIRS})
     target_link_libraries(RealmRuntime PRIVATE ${HIP_LIBRARIES})
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__")
+    target_compile_definitions(RealmRuntime PRIVATE __HIP_PLATFORM_AMD__)
   endif()
 endif()
 
@@ -669,6 +669,10 @@ list(APPEND LEGION_SRC
   legion/runtime.h                        legion/runtime.cc
 )
 
+if(Legion_USE_HIP)
+  list(APPEND LEGION_SRC hip_cuda_compat/hip_cuda.h)
+endif()
+
 if(Legion_REDOP_HALF)
   list(APPEND LEGION_SRC mathtypes/half.h)
 endif()
@@ -785,6 +789,7 @@ if(LEGION_HIP_SRC)
     # complex reduction ops bring in a public dependency on cuda headers
     if(Legion_REDOP_COMPLEX)
       target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_NVIDIA__)
     endif()
   endif()
 
@@ -811,7 +816,11 @@ if(LEGION_HIP_SRC)
       if(NOT DEFINED THRUST_PATH)
           set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
       endif()
-      target_include_directories(LegionRuntime PUBLIC ${THRUST_PATH})
+      target_include_directories(LegionRuntime PUBLIC ${HIP_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_AMD__)
+    else()
+      target_include_directories(LegionRuntime PRIVATE ${HIP_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PRIVATE __HIP_PLATFORM_AMD__)
     endif()
   endif()
 endif()

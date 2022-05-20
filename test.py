@@ -709,6 +709,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmdline.append('-DLegion_HIP_ARCH=%s' % env['GPU_ARCH'])
+    if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
+        cmdline.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
     cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))

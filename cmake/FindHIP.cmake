@@ -24,6 +24,13 @@ if(NOT DEFINED HIP_PATH)
 endif()
 include(${HIP_PATH}/cmake/FindHIP.cmake)
 
+if(NOT HIP_INCLUDE_DIRS)
+  list(APPEND HIP_INCLUDE_DIRS
+    ${HIP_THRUST_ROOT_DIR} ${HIP_ROOT_DIR}/include ${HIP_ROOT_DIR}/../include
+  )
+  set(HIP_INCLUDE_DIRS "${HIP_INCLUDE_DIRS}" CACHE STRING "List of HIP include paths")
+endif()
+
 ###############################################################################
 # (Internal) helper for manually added hip source files with specific targets
 ###############################################################################
