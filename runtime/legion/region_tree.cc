@@ -2237,7 +2237,7 @@ namespace Legion {
         // iterate over the source equivalence sets as we can just
         // build a standard CopyAcrossUnstructured object
         CopyAcrossUnstructured *across = 
-          copy_expr->create_across_unstructured(reservations);
+         copy_expr->create_across_unstructured(reservations,false/*preimages*/);
         across->add_reference();
 #ifdef LEGION_SPY
         across->src_tree_id = src_req.region.get_tree_id();
@@ -2382,7 +2382,8 @@ namespace Legion {
                                  const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                           const bool possible_src_out_of_range)
+                                           const bool possible_src_out_of_range,
+                                           const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2416,7 +2417,7 @@ namespace Legion {
       if (copy_expr->is_empty())
         return local_pre;
       CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations);
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
@@ -2524,7 +2525,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
-                                             const bool possible_dst_aliasing)
+                                             const bool possible_dst_aliasing,
+                                             const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2559,7 +2561,7 @@ namespace Legion {
       if (copy_expr->is_empty())
         return local_pre;
       CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations);
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
       across->add_reference();
       // Initialize the sources
       InnerContext *context = op->find_physical_context(src_index, src_req);
@@ -2671,7 +2673,8 @@ namespace Legion {
                               std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
-                              const bool possible_dst_aliasing)
+                              const bool possible_dst_aliasing,
+                              const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2717,7 +2720,7 @@ namespace Legion {
       if (copy_expr->is_empty())
         return local_pre;
       CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations);
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];

@@ -1199,7 +1199,8 @@ namespace Legion {
                            ApUserEvent local_post, ApEvent collective_pre, 
                            ApEvent collective_post, PredEvent g, RtUserEvent a,
                            InstanceSet *src, InstanceSet *dst,
-                           InstanceSet *gather, InstanceSet *scatter)
+                           InstanceSet *gather, InstanceSet *scatter,
+                           const bool preimages)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
             PhysicalTraceInfo(info), copy(op), index(idx),
             init_precondition(init), local_precondition(local_pre),
@@ -1207,7 +1208,7 @@ namespace Legion {
             collective_precondition(collective_pre), 
             collective_postcondition(collective_post), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
-            scatter_targets(scatter) 
+            scatter_targets(scatter), compute_preimages(preimages)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -1230,6 +1231,7 @@ namespace Legion {
         InstanceSet *const dst_targets;
         InstanceSet *const gather_targets;
         InstanceSet *const scatter_targets;
+        const bool compute_preimages;
       };
     public:
       CopyOp(Runtime *rt);
@@ -1305,7 +1307,8 @@ namespace Legion {
                                const InstanceSet *gather_targets,
                                const InstanceSet *scatter_targets,
                                const PhysicalTraceInfo &trace_info,
-                               std::set<RtEvent> &applied_conditions);
+                               std::set<RtEvent> &applied_conditions,
+                               const bool compute_preimages);
       void finalize_copy_profiling(void);
     public:
       static void handle_deferred_across(const void *args);

@@ -544,7 +544,8 @@ namespace Legion {
                             const std::map<Reservation,bool> &reservations,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &map_applied_events,
-                            const bool possible_src_out_of_range);
+                            const bool possible_src_out_of_range,
+                            const bool compute_preimages);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
@@ -564,7 +565,8 @@ namespace Legion {
                              const PhysicalTraceInfo &trace_info,
                              std::set<RtEvent> &map_applied_events,
                              const bool possible_dst_out_of_range,
-                             const bool possible_dst_aliasing);
+                             const bool possible_dst_aliasing,
+                             const bool compute_preimages);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
@@ -588,7 +590,8 @@ namespace Legion {
                               std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
-                              const bool possible_dst_aliasing);
+                              const bool possible_dst_aliasing,
+                              const bool compute_preimages);
       // This takes ownership of the value buffer
       ApEvent fill_fields(FillOp *op,
                           const RegionRequirement &req,
@@ -998,9 +1001,9 @@ namespace Legion {
         const bool recurrent_replay;
       };
     public:
-      CopyAcrossExecutor(Runtime *rt,
+      CopyAcrossExecutor(Runtime *rt, const bool preimages,
                          const std::map<Reservation,bool> &rsrvs)
-        : runtime(rt), reservations(rsrvs) { }
+        : runtime(rt), reservations(rsrvs), compute_preimages(preimages) { }
       virtual ~CopyAcrossExecutor(void) { }
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1019,6 +1022,8 @@ namespace Legion {
       // across and whether they need to be acquired with exclusive
       // permissions or not
       const std::map<Reservation,bool> reservations;
+      // Say whether we should be computing preimages or not
+      const bool compute_preimages;
     };
     
     /**
@@ -1027,9 +1032,9 @@ namespace Legion {
      */
     class CopyAcrossUnstructured : public CopyAcrossExecutor {
     public:
-      CopyAcrossUnstructured(Runtime *rt,
+      CopyAcrossUnstructured(Runtime *rt, const bool preimages,
                              const std::map<Reservation,bool> &rsrvs)
-        : CopyAcrossExecutor(rt, rsrvs) { }
+        : CopyAcrossExecutor(rt, preimages, rsrvs) { }
       virtual ~CopyAcrossUnstructured(void) { }
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1119,7 +1124,7 @@ namespace Legion {
         template<typename N2, typename T2>
         static inline void demux(ComputePreimagesHelper *helper)
           { helper->result = helper->unstructured->template 
-            compute_preimages<N2::N,T2>(helper->new_preimages,
+            perform_compute_preimages<N2::N,T2>(helper->new_preimages,
               helper->op, helper->precondition, helper->source); }
       public:
         std::vector<DomainT<DIM,T> > new_preimages;
@@ -1148,7 +1153,8 @@ namespace Legion {
                               IndexSpaceExpression *expr,
                               const DomainT<DIM,T> &domain,
                               ApEvent domain_ready,
-                              const std::map<Reservation,bool> &rsrvs);
+                              const std::map<Reservation,bool> &rsrvs,
+                              const bool compute_preimages);
       virtual ~CopyAcrossUnstructuredT(void);
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1161,7 +1167,7 @@ namespace Legion {
       virtual void record_trace_immutable_indirection(bool source);
     public:
       template<int D2, typename T2>
-      ApEvent compute_preimages(std::vector<DomainT<DIM,T> > &preimages, 
+      ApEvent perform_compute_preimages(std::vector<DomainT<DIM,T> > &preimages,
                 Operation *op, ApEvent precondition, const bool source); 
       template<int D2, typename T2>
       bool rebuild_indirections(const bool source);
@@ -1276,7 +1282,8 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
-                           const std::map<Reservation,bool> &reservations) = 0;
+                           const std::map<Reservation,bool> &reservations,
+                           const bool compute_preimages) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -1584,7 +1591,8 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
       virtual CopyAcrossUnstructured* create_across_unstructured(
-                           const std::map<Reservation,bool> &reservations);
+                           const std::map<Reservation,bool> &reservations,
+                           const bool compute_preimages);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -2498,7 +2506,8 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
       virtual CopyAcrossUnstructured* create_across_unstructured(
-                           const std::map<Reservation,bool> &reservations);
+                           const std::map<Reservation,bool> &reservations,
+                           const bool compute_preimages);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
