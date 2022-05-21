@@ -5288,8 +5288,7 @@ namespace Legion {
       }
       // Need to rebuild indirections in the first time through or if we
       // are computing preimages and not doing a recurrent replay
-      if ((!src_indirections.empty() || !dst_indirections.empty()) &&
-          (indirections.empty() || (!recurrent_replay && compute_preimages)))
+      if (indirections.empty() || (!recurrent_replay && compute_preimages))
       {
 #ifdef LEGION_SPY
         // Make a unique indirections identifier if necessary
@@ -5770,23 +5769,27 @@ namespace Legion {
         fields[fidx].indirect_index = indirect_index;
       }
 #ifdef LEGION_SPY
-      // Go through and fix-up all the indirections for execution
-      for (typename std::vector<const CopyIndirection*>::const_iterator it =
-            indirections.begin()+offset; it != indirections.end(); it++)
+      if (compute_preimages)
       {
-        UnstructuredIndirection *unstructured = 
-          const_cast<UnstructuredIndirection*>( 
-            static_cast<const UnstructuredIndirection*>(*it));
-        std::vector<PhysicalInstance> instances(nonempty_indexes.size());
-        unstructured->spaces.resize(nonempty_indexes.size());
-        std::vector<Realm::IndexSpace<D2,T2> > spaces(nonempty_indexes.size());
-        for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+        const size_t nonempty_size = nonempty_indexes.size();
+        // Go through and fix-up all the indirections for execution
+        for (typename std::vector<const CopyIndirection*>::const_iterator it =
+              indirections.begin()+offset; it != indirections.end(); it++)
         {
-          instances[idx] = unstructured->insts[nonempty_indexes[idx]];
-          unstructured->spaces[idx] = 
-            indirect_records[nonempty_indexes[idx]].domain;
+          UnstructuredIndirection *unstructured = 
+            const_cast<UnstructuredIndirection*>( 
+              static_cast<const UnstructuredIndirection*>(*it));
+          std::vector<PhysicalInstance> instances(nonempty_size);
+          unstructured->spaces.resize(nonempty_size);
+          std::vector<Realm::IndexSpace<D2,T2> > spaces(nonempty_size);
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+          {
+            instances[idx] = unstructured->insts[nonempty_indexes[idx]];
+            unstructured->spaces[idx] = 
+              indirect_records[nonempty_indexes[idx]].domain;
+          }
+          unstructured->insts.swap(instances);
         }
-        unstructured->insts.swap(instances);
       }
       return nonempty_indexes.empty();
 #else
