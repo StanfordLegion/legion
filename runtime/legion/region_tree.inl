@@ -1368,13 +1368,14 @@ namespace Legion {
     template<int DIM, typename T>
     CopyAcrossUnstructured* 
       IndexSpaceOperationT<DIM,T>::create_across_unstructured(
-                                  const std::map<Reservation,bool> &reservations)
+                                 const std::map<Reservation,bool> &reservations,
+                                 const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       return new CopyAcrossUnstructuredT<DIM,T>(context->runtime, this,
-                                      local_space, space_ready, reservations);
+                   local_space, space_ready, reservations, compute_preimages);
     }
 
     //--------------------------------------------------------------------------
@@ -5001,13 +5002,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     CopyAcrossUnstructured* IndexSpaceNodeT<DIM,T>::create_across_unstructured(
-                                  const std::map<Reservation,bool> &reservations)
+                                 const std::map<Reservation,bool> &reservations,
+                                 const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       return new CopyAcrossUnstructuredT<DIM,T>(context->runtime, this,
-                                      local_space, space_ready, reservations);
+                   local_space, space_ready, reservations, compute_preimages);
     }
 
     //--------------------------------------------------------------------------
@@ -5184,9 +5186,11 @@ namespace Legion {
     template<int DIM, typename T>
     CopyAcrossUnstructuredT<DIM,T>::CopyAcrossUnstructuredT(Runtime *rt,
                 IndexSpaceExpression *e, const DomainT<DIM,T> &domain, 
-                ApEvent ready, const std::map<Reservation,bool> &rsrvs)
-      : CopyAcrossUnstructured(rt, rsrvs), expr(e), copy_domain(domain),
-        copy_domain_ready(ready), need_src_indirect_precondition(true),
+                ApEvent ready, const std::map<Reservation,bool> &rsrvs,
+                const bool preimages)
+      : CopyAcrossUnstructured(rt, preimages, rsrvs), expr(e),
+        copy_domain(domain), copy_domain_ready(ready), 
+        need_src_indirect_precondition(true),
         need_dst_indirect_precondition(true), 
         src_indirect_immutable_for_tracing(false),
         dst_indirect_immutable_for_tracing(false), has_empty_preimages(false)
@@ -5232,7 +5236,7 @@ namespace Legion {
       if (stage == 0)
       {
         RtEvent src_preimages_ready, dst_preimages_ready;
-        if (!src_indirections.empty() && 
+        if (!src_indirections.empty() && compute_preimages &&
             (!src_indirect_immutable_for_tracing || !recurrent_replay))
         {
           // Compute new preimages and add the to the back of the queue
@@ -5248,7 +5252,7 @@ namespace Legion {
           src_preimage_preconditions.emplace_back(helper.result);
 #endif
         }
-        if (!dst_indirections.empty() &&
+        if (!dst_indirections.empty() && compute_preimages &&
             (!dst_indirect_immutable_for_tracing || !recurrent_replay))
         {
           // Compute new preimages and add them to the back of the queue
@@ -5282,7 +5286,9 @@ namespace Legion {
           return args.done_event;
         }
       }
-      if (!recurrent_replay)
+      // Need to rebuild indirections in the first time through or if we
+      // are computing preimages and not doing a recurrent replay
+      if (indirections.empty() || (!recurrent_replay && compute_preimages))
       {
 #ifdef LEGION_SPY
         // Make a unique indirections identifier if necessary
@@ -5309,6 +5315,7 @@ namespace Legion {
                   current_src_preimages.end(); it++)
               it->destroy(last_copy);
           }
+          if (compute_preimages)
           {
             // Get the next batch of src preimages to use
             AutoLock p_lock(preimage_lock);
@@ -5340,6 +5347,7 @@ namespace Legion {
                   current_dst_preimages.end(); it++)
               it->destroy(last_copy);
           }
+          if (compute_preimages)
           {
             // Get the next batch of dst preimages to use
             AutoLock p_lock(preimage_lock);
@@ -5530,7 +5538,7 @@ namespace Legion {
 #ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int D1, typename T1> template<int D2, typename T2>
-    ApEvent CopyAcrossUnstructuredT<D1,T1>::compute_preimages(
+    ApEvent CopyAcrossUnstructuredT<D1,T1>::perform_compute_preimages(
                      std::vector<DomainT<D1,T1> > &preimages, 
                      Operation *op, ApEvent precondition, const bool source)
     //--------------------------------------------------------------------------
@@ -5637,26 +5645,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<CopySrcDstField> &fields = source ? src_fields : dst_fields;
-      std::vector<DomainT<D1,T1> > &preimages = 
-        source ? current_src_preimages : current_dst_preimages;
       const std::vector<IndirectRecord> &indirect_records =
         source ? src_indirections : dst_indirections;
       std::vector<unsigned> nonempty_indexes;
-      for (unsigned idx = 0; idx < preimages.size(); idx++)
+      if (compute_preimages)
       {
-        DomainT<D1,T1> &preimage = preimages[idx];
-        DomainT<D1,T1> tightened = preimage.tighten();
-        if (tightened.empty())
+        std::vector<DomainT<D1,T1> > &preimages =
+          source ? current_src_preimages : current_dst_preimages;
+        for (unsigned idx = 0; idx < preimages.size(); idx++)
         {
-          // Reclaim any sparsity maps eagerly
-          preimage.destroy();
-          preimage = DomainT<D1,T1>::make_empty();
+          DomainT<D1,T1> &preimage = preimages[idx];
+          DomainT<D1,T1> tightened = preimage.tighten();
+          if (tightened.empty())
+          {
+            // Reclaim any sparsity maps eagerly
+            preimage.destroy();
+            preimage = DomainT<D1,T1>::make_empty();
+          }
+          else
+          {
+            preimage = tightened;
+            nonempty_indexes.push_back(idx);
+          }
         }
-        else
-        {
-          preimage = tightened;
-          nonempty_indexes.push_back(idx);
-        }
+      }
+      else
+      {
+        nonempty_indexes.resize(indirect_records.size());
+        for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+          nonempty_indexes[idx] = idx;
       }
       // Legion Spy doesn't understand preimages, so go through and build
       // indirections for everything even if we are empty
@@ -5752,23 +5769,27 @@ namespace Legion {
         fields[fidx].indirect_index = indirect_index;
       }
 #ifdef LEGION_SPY
-      // Go through and fix-up all the indirections for execution
-      for (typename std::vector<const CopyIndirection*>::const_iterator it =
-            indirections.begin()+offset; it != indirections.end(); it++)
+      if (compute_preimages)
       {
-        UnstructuredIndirection *unstructured = 
-          const_cast<UnstructuredIndirection*>( 
-            static_cast<const UnstructuredIndirection*>(*it));
-        std::vector<PhysicalInstance> instances(nonempty_indexes.size());
-        unstructured->spaces.resize(nonempty_indexes.size());
-        std::vector<Realm::IndexSpace<D2,T2> > spaces(nonempty_indexes.size());
-        for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+        const size_t nonempty_size = nonempty_indexes.size();
+        // Go through and fix-up all the indirections for execution
+        for (typename std::vector<const CopyIndirection*>::const_iterator it =
+              indirections.begin()+offset; it != indirections.end(); it++)
         {
-          instances[idx] = unstructured->insts[nonempty_indexes[idx]];
-          unstructured->spaces[idx] = 
-            indirect_records[nonempty_indexes[idx]].domain;
+          UnstructuredIndirection *unstructured = 
+            const_cast<UnstructuredIndirection*>( 
+              static_cast<const UnstructuredIndirection*>(*it));
+          std::vector<PhysicalInstance> instances(nonempty_size);
+          unstructured->spaces.resize(nonempty_size);
+          std::vector<Realm::IndexSpace<D2,T2> > spaces(nonempty_size);
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+          {
+            instances[idx] = unstructured->insts[nonempty_indexes[idx]];
+            unstructured->spaces[idx] = 
+              indirect_records[nonempty_indexes[idx]].domain;
+          }
+          unstructured->insts.swap(instances);
         }
-        unstructured->insts.swap(instances);
       }
       return nonempty_indexes.empty();
 #else
