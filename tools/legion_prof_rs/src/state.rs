@@ -561,19 +561,27 @@ impl Mem {
 #[derive(Debug)]
 pub struct MemProcAffinity {
     mem_id: MemID,
-    pub proc_ids: Vec<ProcID>,
+    bandwidth: u32,
+    latency: u32,
+    pub best_aff_proc: ProcID,
 }
 
 impl MemProcAffinity {
-    fn new(mem_id: MemID) -> Self {
+    fn new(mem_id: MemID, bandwidth: u32, latency: u32, best_aff_proc: ProcID) -> Self {
         MemProcAffinity {
             mem_id,
-            proc_ids: Vec::new(),
+            bandwidth,
+            latency,
+            best_aff_proc,
         }
     }
-    fn add_proc_id(&mut self, proc_id: ProcID) {
-        self.proc_ids.push(proc_id);
-    }
+    fn update_best_aff(&mut self, proc_id: ProcID, b: u32, l: u32) {
+        if b > self.bandwidth {
+           self.best_aff_proc = proc_id;
+           self.bandwidth = b;
+           self.latency = l;
+       }
+   }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -2229,12 +2237,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*mem_id)
                 .or_insert_with(|| Mem::new(*mem_id, kind, *capacity));
         }
-        Record::ProcMDesc { proc_id, mem_id } => {
+        Record::ProcMDesc { proc_id, mem_id, bandwidth, latency} => {
             state
                 .mem_proc_affinity
                 .entry(*mem_id)
-                .or_insert_with(|| MemProcAffinity::new(*mem_id))
-                .add_proc_id(*proc_id);
+                .or_insert_with(|| MemProcAffinity::new(*mem_id, *bandwidth, *latency, *proc_id))
+                .update_best_aff(*proc_id, *bandwidth, *latency);
         }
         Record::IndexSpacePointDesc {
             ispace_id,

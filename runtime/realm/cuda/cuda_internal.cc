@@ -1097,19 +1097,11 @@ namespace Realm {
                                                              out_span_start,
                                                              total_bytes));
 	  out_span_start += total_bytes;
-
-	  done = record_address_consumption(total_bytes, total_bytes);
         }
 
+        done = record_address_consumption(total_bytes, total_bytes);
+
         did_work = true;
-
-        output_control.remaining_count -= total_bytes;
-        if(output_control.control_port_idx >= 0)
-          done = ((output_control.remaining_count == 0) &&
-                  output_control.eos_received);
-
-        if(done)
-          iteration_completed.store_release(true);
 
         if(done || work_until.is_expired())
           break;

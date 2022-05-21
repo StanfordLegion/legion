@@ -219,20 +219,19 @@ namespace Legion {
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
-      virtual void record_issue_indirect(const TraceLocalID &tlid,
-                           ApEvent &lhs, IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField>& src_fields,
-                           const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<CopyIndirection*> &indirections,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier, 
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition) = 0;
-      virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
+      virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
+                           ApEvent collective_precondition, 
+                           ApEvent copy_precondition,
+                           ApEvent src_indirect_precondition,
+                           ApEvent dst_indirect_precondition,
+                           CopyAcrossExecutor *executor) = 0;
+      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied) = 0;
       virtual void record_indirect_views(ApEvent indirect_done,
                            ApEvent all_done, IndexSpaceExpression *expr,
@@ -273,9 +272,9 @@ namespace Legion {
                                       ApEvent &rhs) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent rhs) = 0;
-      virtual void record_reservations(const TraceLocalID &tlid, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks, 
-                              ApEvent precondition, ApEvent postcondition) = 0;
+      virtual void record_reservations(const TraceLocalID &tlid,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events) = 0;
     };
 
     /**
@@ -294,7 +293,6 @@ namespace Legion {
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_VIEWS,
-        REMOTE_TRACE_ISSUE_INDIRECT,
         REMOTE_TRACE_INDIRECT_VIEWS,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_VIEWS,
@@ -355,25 +353,24 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<Reservation>& reservations,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-      virtual void record_issue_indirect(const TraceLocalID &tlid, ApEvent &lhs,
+      virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
+                           ApEvent collective_precondition, 
+                           ApEvent copy_precondition,
+                           ApEvent src_indirect_precondition,
+                           ApEvent dst_indirect_precondition,
+                           CopyAcrossExecutor *executor);
+      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField>& src_fields,
-                           const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<CopyIndirection*> &indirections,
-#ifdef LEGION_SPY
-                           unsigned unique_indirections_identifier,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ApEvent tracing_precondition);
-      virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied);
       virtual void record_indirect_views(ApEvent indirect_done,ApEvent all_done,
                            IndexSpaceExpression *expr,
@@ -412,9 +409,9 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
       virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
-      virtual void record_reservations(const TraceLocalID &tlid, ApEvent &lhs,
-                              const std::map<Reservation,bool> &locks,
-                              ApEvent precondition, ApEvent postcondition);
+      virtual void record_reservations(const TraceLocalID &tlid,
+                                const std::map<Reservation,bool> &locks,
+                                std::set<RtEvent> &applied_events);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                     Runtime *runtime, const TraceLocalID &tlid);
@@ -533,13 +530,12 @@ namespace Legion {
           base_sanity_check();
           rec->record_complete_replay(tlid, ready_event);
         }
-      inline void record_reservations(ApEvent &lhs,
+      inline void record_reservations(const TraceLocalID &tlid,
                       const std::map<Reservation,bool> &reservations,
-                      ApEvent precondition, ApEvent postcondition) const
+                      std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_reservations(tlid, lhs, reservations, 
-                                   precondition, postcondition);
+          rec->record_reservations(tlid, reservations, applied);
         }
     public:
       inline RtEvent get_collect_event(void) const 
@@ -598,8 +594,8 @@ namespace Legion {
                           ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
-          rec->record_issue_copy(tlid, result, expr, src_fields, dst_fields,
-                                 reservations,
+          rec->record_issue_copy(tlid, result, expr, src_fields,
+                                 dst_fields, reservations,
 #ifdef LEGION_SPY
                                  src_tree_id, dst_tree_id,
 #endif
@@ -624,6 +620,18 @@ namespace Legion {
 #endif
                                  precondition, pred_guard);
         }
+      inline void record_issue_across(ApEvent &result,
+                                      ApEvent collective_precondition,
+                                      ApEvent copy_precondition,
+                                      ApEvent src_indirect_precondition,
+                                      ApEvent dst_indirect_precondition,
+                                      CopyAcrossExecutor *executor) const
+        {
+          sanity_check();
+          rec->record_issue_across(tlid, result, collective_precondition,
+                      copy_precondition, src_indirect_precondition,
+                      dst_indirect_precondition, executor);
+        }
       inline void record_fill_views(ApEvent lhs,
                                     IndexSpaceExpression *expr,
                                     const FieldMaskSet<InstanceView> &dsts,
@@ -634,45 +642,30 @@ namespace Legion {
           rec->record_fill_views(lhs, expr, dsts, applied,
                                  reduction_initialization);
         }
-      inline void record_issue_indirect(ApEvent &result,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<CopyIndirection*> &indirections,
-#ifdef LEGION_SPY
-                             unsigned unique_indirections_identifier,
-#endif
-                             ApEvent precondition, PredEvent pred_guard,
-                             ApEvent tracing_precondition) const
+      inline void record_copy_views(ApEvent lhs, unsigned idx1, unsigned idx2,
+                                    PrivilegeMode mode1, PrivilegeMode mode2,
+                                    IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                    bool src_indirect, bool dst_indirect,
+                                    std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_issue_indirect(tlid, result, expr, src_fields,
-                                     dst_fields, indirections,
-#ifdef LEGION_SPY
-                                     unique_indirections_identifier,
-#endif
-                                     precondition, pred_guard,
-                                     tracing_precondition);
+          rec->record_copy_views(lhs, tlid, idx1, idx2, expr,
+                                 tracing_srcs, tracing_dsts, mode1, mode2,
+                                 src_indirect, dst_indirect, applied);
         }
       inline void record_copy_views(ApEvent lhs,
-                                    PrivilegeMode mode1, PrivilegeMode mode2,
                                     IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                     std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
-                                 mode1, mode2, applied);
-        }
-      inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    std::set<RtEvent> &applied) const
-        {
-          sanity_check();
-          rec->record_copy_views(lhs, expr, tracing_srcs, tracing_dsts,
-                                 LEGION_READ_PRIV, LEGION_WRITE_PRIV, applied);
+          rec->record_copy_views(lhs, tlid, index, dst_index, expr,
+                                 tracing_srcs, tracing_dsts,
+                                 LEGION_READ_PRIV, LEGION_WRITE_PRIV,
+                                 false/*indirect*/, false/*indrect*/, applied);
         }
       inline void record_indirect_views(ApEvent indirect_done, ApEvent all_done,
                                         IndexSpaceExpression *expr,
@@ -889,7 +882,6 @@ namespace Legion {
       OpenState open_state;
       ReductionOpID redop;
       std::set<ProjectionSummary> projections;
-      bool disjoint_shallow;
     };
 
     /**
@@ -2341,6 +2333,18 @@ namespace Legion {
     };
 
     /**
+     * \struct SubscriberInvalidations
+     * A small helper class for tracking data associated with invalidating
+     * subscriptions by EqSetTrackers
+     */
+    struct SubscriberInvalidations : 
+      public LegionHeapify<SubscriberInvalidations> {
+      FieldMaskSet<EqSetTracker> subscribers;
+      std::vector<EqSetTracker*> finished;
+      bool delete_all;
+    };
+
+    /**
      * \class EqSetTracker
      * This is an abstract class that provides an interface for
      * recording the equivalence sets that result from ray tracing
@@ -2350,16 +2354,28 @@ namespace Legion {
     public:
       virtual ~EqSetTracker(void) { }
     public:
-      virtual void add_tracker_reference(unsigned cnt = 1) = 0;
-      virtual bool remove_tracker_reference(unsigned cnt = 1) = 0;
+      virtual void record_subscription(VersionManager *owner,
+                                       AddressSpaceID space) = 0;
+      virtual bool finish_subscription(VersionManager *owner,
+                                       AddressSpaceID space) = 0;
     public:
       virtual void record_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
-      virtual bool can_filter_context(ContextID filter_id) const = 0;
-      virtual void remove_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask) = 0;
+      virtual void remove_equivalence_sets(const FieldMask &mask,
+                  const FieldMaskSet<EquivalenceSet> &to_filter) = 0;
+    public:
+      void cancel_subscriptions(Runtime *runtime,
+       const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel);
+      static void finish_subscriptions(Runtime *runtime, VersionManager &source,
+          LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
+          const FieldMaskSet<EquivalenceSet> &to_filter,
+          std::set<RtEvent> &applied_events, bool remove_refs = false);
+      static void handle_cancel_subscription(Deserializer &derez,
+          Runtime *runtime, AddressSpaceID source);
+      static void handle_finish_subscription(Deserializer &derez,
+          Runtime *runtime, AddressSpaceID source);
     };
 
     /**
@@ -2577,13 +2593,6 @@ namespace Legion {
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
       void remove_reduction_fill_guard(CopyFillGuard *guard);
-      void record_tracker(EqSetTracker *tracker, const FieldMask &mask);
-      void remove_tracker(EqSetTracker *tracker, const FieldMask &mask);
-      void invalidate_trackers(const FieldMask &mask,
-                               std::set<RtEvent> &applied_events,
-                               const AddressSpaceID origin_space,
-                               const CollectiveMapping *collective_mapping,
-                               UniqueID context_uid = 0);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
                       const bool forward_to_owner,
@@ -2897,10 +2906,6 @@ namespace Legion {
       // logical owner space.
       ReplicatedOwnerState*                             replicated_owner_state;
     protected:
-      // Which EqSetTracker objects on this node are
-      // tracking this equivalence set and need to be invalidated
-      FieldMaskSet<EqSetTracker>                        recorded_trackers;
-    protected:
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets
       // are only used be a small number of nodes that is less than
@@ -3001,13 +3006,13 @@ namespace Legion {
         FieldMask waiting_mask;
         IndexSpaceExpression *expr;
         bool expr_covers;
-      };
+      }; 
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
-      VersionManager(const VersionManager &manager);
+      VersionManager(const VersionManager &manager) = delete;
       virtual ~VersionManager(void);
     public:
-      VersionManager& operator=(const VersionManager &rhs);
+      VersionManager& operator=(const VersionManager &rhs) = delete;
     public:
       inline bool has_versions(const FieldMask &mask) const 
         { return !(mask - equivalence_sets.get_valid_mask()); }
@@ -3030,15 +3035,18 @@ namespace Legion {
                                    const bool expr_covers,
                                    std::set<RtEvent> &ready_events) const;
     public:
-      virtual void add_tracker_reference(unsigned cnt = 1);
-      virtual bool remove_tracker_reference(unsigned cnt = 1);
-      virtual void record_equivalence_set(EquivalenceSet *set, 
+      virtual void record_subscription(VersionManager *owner,
+                                       AddressSpaceID space);
+      virtual bool finish_subscription(VersionManager *owner,
+                                       AddressSpaceID space);
+      bool cancel_subscription(EqSetTracker *tracker, AddressSpaceID space);
+      virtual void record_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual void record_pending_equivalence_set(EquivalenceSet *set, 
+      virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual bool can_filter_context(ContextID filter_id) const;
-      virtual void remove_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
+      virtual void remove_equivalence_sets(const FieldMask &mask,
+                  const FieldMaskSet<EquivalenceSet> &to_filter);
+    public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
     public:
@@ -3066,7 +3074,7 @@ namespace Legion {
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events);
       static void handle_compute_equivalence_sets_response(
-                      Deserializer &derez, Runtime *runtime);
+                  Deserializer &derez, Runtime *runtime, AddressSpaceID source);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
                              FieldMask &parent_mask,
                              std::set<RtEvent> &applied_events);
@@ -3086,22 +3094,29 @@ namespace Legion {
                                 const FieldMask &child_mask, 
                                 FieldMask &parent_mask,
                                 std::set<RtEvent> &applied_events);
-      void invalidate_refinement(InnerContext *context,
+      void invalidate_refinement(InnerContext &context,
                                  const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
                                  FieldMaskSet<EquivalenceSet> &to_untrack,
+                                 LegionMap<AddressSpaceID,
+                                  SubscriberInvalidations> &subscribers,
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_mapping_root=false);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-                 FieldMaskSet<EquivalenceSet> &to_untrack);
+               FieldMaskSet<EquivalenceSet> &to_untrack,
+               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-                FieldMaskSet<EquivalenceSet> &to_untrack);
+              FieldMaskSet<EquivalenceSet> &to_untrack,
+              LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void pack_manager(Serializer &rez, const bool invalidate, 
-                        std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                        FieldMaskSet<EquivalenceSet> &to_untrack,
-                        std::vector<DistributedCollectable*> &to_remove);
+                std::map<LegionColor,RegionTreeNode*> &to_traverse,
+                FieldMaskSet<EquivalenceSet> &to_untrack,
+                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
+                std::vector<DistributedCollectable*> &to_remove);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse);
+      void filter_refinement_subscriptions(const FieldMask &mask,
+               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -3135,6 +3150,21 @@ namespace Legion {
       // sure that there is only one call going out to the context
       // at a time for each field to make the equivalence sets.
       LegionMap<RtEvent,FieldMask> disjoint_complete_ready;
+      // Track all the equivalence set trackers that are tracking this
+      // refinement so that we can invalidate them whenever this refinement
+      // is invalidated. Note that we only need to record the fields that
+      // each tracker is following here because there is a one-to-one mapping
+      // between fields and equivalence sets in a node represeting a refinement
+      LegionMap<AddressSpaceID,
+                FieldMaskSet<EqSetTracker> > refinement_subscriptions;
+      // Keep track of our subscription owners
+      // Note that from the owners perspective it only has at most one
+      // reference to this subscriber at a time, but in practice the
+      // removal of references can be delayed arbitrarily so we need to
+      // keep a count of how many outstanding references there are for
+      // each owner so we know when it is done
+      std::map<std::pair<VersionManager*,AddressSpaceID>,
+               unsigned> subscription_owners;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 

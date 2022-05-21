@@ -402,6 +402,7 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
+      LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
       LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
@@ -527,6 +528,7 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
+        "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \
         "Defer Collective Instance Message",                      \
         "Defer Finalize Pending Equivalence Set",                 \
@@ -876,9 +878,10 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
+      SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
+      SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
-      SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
       SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
       SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
       SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION,
@@ -1121,9 +1124,10 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
+        "Send Cancel Equivalence Sets Subscription",                  \
+        "Send Finish Equivalence Sets Subscription",                  \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
-        "Send Equivalence Set Invalidate Trackers",                   \
         "Send Equivalence Set Replication Request",                   \
         "Send Equivalence Set Replication Response",                  \
         "Send Equivalence Set Replication Invalidation",              \
@@ -1802,7 +1806,7 @@ namespace Legion {
     class AssignFenceCompletion;
     class IssueCopy;
     class IssueFill;
-    class IssueIndirect;
+    class IssueAcross;
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class SetEffects;
@@ -1814,7 +1818,8 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
-    class CopyIndirection;
+    class CopyAcrossExecutor;
+    class CopyAcrossUnstructured;
     class IndexSpaceExpression;
     class IndexSpaceExprRef;
     class IndexSpaceOperation;
@@ -1845,6 +1850,7 @@ namespace Legion {
     class LogicalState;
     class EquivalenceSet;
     class PendingEquivalenceSet;
+    class EqSetTracker;
     class VersionManager;
     class VersionInfo;
     class RayTracer;

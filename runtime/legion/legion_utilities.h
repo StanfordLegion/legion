@@ -583,6 +583,7 @@ namespace Legion {
       uint8_t blocks[16];
       uint64_t h1, h2, len;
       uint8_t bytes;
+    public:
       const bool precise;
       const bool verify_every_call;
     public:

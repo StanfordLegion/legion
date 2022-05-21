@@ -85,11 +85,12 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATOR_REF = 27,
       FIELD_STATE_REF = 28,
-      CANONICAL_REF = 29,
-      DISJOINT_COMPLETE_REF = 30,
-      REPLICATION_REF = 31,
-      PHYSICAL_ANALYSIS_REF = 32,
-      LAST_SOURCE_REF = 33,
+      COPY_ACROSS_REF = 29,
+      CANONICAL_REF = 30,
+      DISJOINT_COMPLETE_REF = 31,
+      REPLICATION_REF = 32,
+      PHYSICAL_ANALYSIS_REF = 33,
+      LAST_SOURCE_REF = 34,
     };
 
     enum ReferenceKind {
@@ -129,6 +130,7 @@ namespace Legion {
       "Physical Trace Reference",                   \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Copy Across Executor Reference",             \
       "Canonical Index Space Expression Reference", \
       "Disjoint Complete Reference",                \
       "Replication Reference",                      \

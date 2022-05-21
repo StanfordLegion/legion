@@ -119,7 +119,10 @@ namespace Legion {
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
-      virtual bool perform_semantic_attach(bool &global);
+      virtual bool perform_semantic_attach(const char *func, unsigned kind,
+          const void *arg, size_t arglen, SemanticTag tag, const void *buffer,
+          size_t size, bool is_mutable, bool &global, 
+          const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
       // Interface to operations performed by a context
@@ -521,9 +524,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context) = 0;
+                      const std::vector<RegionNode*> &created_state,
+                      std::set<RtEvent> &applied_events, size_t num_shards) = 0;
       // This is called once all the effects from 
       // invalidate_region_tree_contexts have been applied 
       virtual void free_region_tree_context(void) = 0;
@@ -1009,9 +1011,6 @@ namespace Legion {
           const AddressSpaceID source, RtUserEvent ready_event);
       void invalidate_disjoint_complete_sets(RegionNode *region,
                                              const FieldMask &mask);
-      virtual void deduplicate_invalidate_trackers(
-                    const FieldMaskSet<EquivalenceSet> &to_untrack,
-                    std::set<RtEvent> &applied_events, bool local_only = false);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
@@ -1408,9 +1407,8 @@ namespace Legion {
       void invalidate_created_requirement_contexts(const bool is_top_level_task,
                             std::set<RtEvent> &applied, size_t num_shards = 0);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context);
+                          const std::vector<RegionNode*> &created_state,
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       void invalidate_region_tree_context(LogicalRegion handle,
                                       std::set<RtEvent> &applied_events,
                                       std::vector<EquivalenceSet*> &to_release);
@@ -1698,9 +1696,8 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context);
+                          const std::vector<RegionNode*> &created_state,
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
@@ -1869,6 +1866,13 @@ namespace Legion {
         REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE,
         REPLICATE_END_TASK,
         REPLICATE_FUTURE_FROM_VALUE,
+        REPLICATE_ATTACH_TASK_INFO,
+        REPLICATE_ATTACH_INDEX_SPACE_INFO,
+        REPLICATE_ATTACH_INDEX_PARTITION_INFO,
+        REPLICATE_ATTACH_FIELD_SPACE_INFO,
+        REPLICATE_ATTACH_FIELD_INFO,
+        REPLICATE_ATTACH_LOGICAL_REGION_INFO,
+        REPLICATE_ATTACH_LOGICAL_PARTITION_INFO,
       };
     public:
       class AttachDetachShardingFunctor : public ShardingFunctor {
@@ -2009,20 +2013,21 @@ namespace Legion {
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
-      virtual bool perform_semantic_attach(bool &global);
+      virtual bool perform_semantic_attach(const char *func, unsigned kind,
+          const void *arg, size_t arglen, SemanticTag tag, const void *buffer,
+          size_t size, bool is_mutable, bool &global, 
+          const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context);
+                          const std::vector<RegionNode*> &created_state,
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       virtual void free_region_tree_context(void);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
-                          std::set<RtEvent> &applied_events, size_t num_shards,
-                          InnerContext *source_context);
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
     public: 
@@ -2423,9 +2428,6 @@ namespace Legion {
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
           const AddressSpaceID source, RtUserEvent ready_event);
-      virtual void deduplicate_invalidate_trackers(
-                    const FieldMaskSet<EquivalenceSet> &to_untrack,
-                    std::set<RtEvent> &applied_events, bool local_only = false);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
@@ -2771,9 +2773,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context);
+                          const std::vector<RegionNode*> &created_state,
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
       virtual void free_region_tree_context(void);
@@ -3210,9 +3211,8 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                            const std::vector<RegionNode*> &created_state,
-                            std::set<RtEvent> &applied_events,size_t num_shards,
-                            InnerContext *source_context);
+                          const std::vector<RegionNode*> &created_state,
+                          std::set<RtEvent> &applied_events, size_t num_shards);
       virtual void free_region_tree_context(void);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,

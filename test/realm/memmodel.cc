@@ -38,12 +38,10 @@ void top_level_task(const void *args, size_t arglen,
   while (!primitives->test_triggered.has_triggered()) { }
   assert(x == 1729);
   // Make sure that barrier arrive and wait synchronize
-#if 0
   x = 6174;
   primitives->test_bar.arrive();
   primitives->test_bar.wait();
   assert(y == 23);
-#endif
   // Make sure that task completion events synchronize
   y = 2520;
 }
@@ -77,12 +75,10 @@ int main(int argc, char **argv)
   x = 1729;
   primitives.test_triggered.trigger();
   // Make sure that barrier arrive and wait synchronize
-#if 0
   y = 23;
   primitives.test_bar.arrive();
   primitives.test_bar.wait();
   assert(x == 6174);
-#endif
 
   // Make sure that task completion events synchronize
   e.external_wait();

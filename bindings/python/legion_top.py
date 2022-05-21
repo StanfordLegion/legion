@@ -54,7 +54,28 @@ top_level = threading.local()
 
 # This variable tracks all objects that need to be cleaned
 # up in any python process created by legion python
-cleanup_items = list()
+_cleanup_items = list()
+
+# This variable stores the set of loaded modules at the point when the latest
+# cleanup item was added. It allows us to compute the set of modules loaded
+# between cleanup items, so that at shutdown time we know to wait before
+# removing a module until all cleanup items that may need it have completed.
+_curr_modules = None
+
+
+def add_delta_module_cleanup():
+    global _curr_modules
+    prev_modules = _curr_modules
+    def cleanup():
+        for mod in set(sys.modules.keys()) - prev_modules:
+            del sys.modules[mod]
+    _cleanup_items.append(cleanup)
+    _curr_modules = set(sys.modules.keys())
+
+
+def add_cleanup_item(item):
+    add_delta_module_cleanup()
+    _cleanup_items.append(item)
 
 
 # Helper class for deduplicating output streams with control replication
@@ -260,9 +281,9 @@ def run_path(filename, run_name=None):
     del module
 
 
-# This method will ensure that a module is globally imported across all 
+# This method will ensure that a module is globally imported across all
 # Python processors in a Legion job before returning. It cannot be called
-# within an import statement though without creating a deadlock with 
+# within an import statement though without creating a deadlock with
 # Python's import locks. Alternatively, the user can set the 'block'
 # parameter to 'False' which will return a future for when the global
 # import is complete and the function will return a handle to a future
@@ -292,7 +313,7 @@ def import_global(module, check_depth=True, block=True):
             ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
     c.legion_future_destroy(future)
     assert num_python_procs > 0
-    # Launch an index space task across all the python 
+    # Launch an index space task across all the python
     # processors to import the module in every interpreter
     task_id = c.legion_runtime_generate_library_task_ids(
             top_level.runtime[0], _unique_name.encode('utf-8'), 3) + 1
@@ -308,9 +329,9 @@ def import_global(module, check_depth=True, block=True):
     args[0].args = array
     args[0].arglen = arglen
     argmap = c.legion_argument_map_create()
-    launcher = c.legion_index_launcher_create(task_id, domain, 
+    launcher = c.legion_index_launcher_create(task_id, domain,
             args[0], argmap, c.legion_predicate_true(), False, mapper, 0)
-    future = c.legion_index_launcher_execute_reduction(top_level.runtime[0], 
+    future = c.legion_index_launcher_execute_reduction(top_level.runtime[0],
             top_level.context[0], launcher, c.LEGION_REDOP_SUM_INT32)
     c.legion_index_launcher_destroy(launcher)
     c.legion_argument_map_destroy(argmap)
@@ -338,6 +359,9 @@ def is_control_replicated():
 
 
 def legion_python_main(raw_args, user_data, proc):
+    global _curr_modules
+    _curr_modules = set(sys.modules.keys())
+
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
 
@@ -409,10 +433,12 @@ def legion_python_main(raw_args, user_data, proc):
         sys.argv = list(args[start:])
         run_path(args[start], run_name='__main__')
 
+    add_delta_module_cleanup()
+
     if local_cleanup:
         # If we were control replicated then we just need to do our cleanup
         # Do it in reverse order so modules get FILO properties
-        for cleanup in reversed(cleanup_items):
+        for cleanup in reversed(_cleanup_items):
             cleanup()
     else:
         # Otherwise, run a task on every node to perform the cleanup
@@ -424,7 +450,7 @@ def legion_python_main(raw_args, user_data, proc):
                 ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
         c.legion_future_destroy(future)
         assert num_python_procs > 0
-        # Launch an index space task across all the python 
+        # Launch an index space task across all the python
         # processors to import the module in every interpreter
         task_id = c.legion_runtime_generate_library_task_ids(
                 top_level.runtime[0], _unique_name.encode('utf-8'), 3) + 2
@@ -436,7 +462,7 @@ def legion_python_main(raw_args, user_data, proc):
         args[0].args = ffi.NULL
         args[0].arglen = 0
         argmap = c.legion_argument_map_create()
-        launcher = c.legion_index_launcher_create(task_id, domain, 
+        launcher = c.legion_index_launcher_create(task_id, domain,
             args[0], argmap, c.legion_predicate_true(), False, mapper, 0)
         future_map = c.legion_index_launcher_execute(top_level.runtime[0],
                 top_level.context[0], launcher)
@@ -450,7 +476,7 @@ def legion_python_main(raw_args, user_data, proc):
     del top_level.context
     del top_level.task
 
-    # Force a garbage collection so that we know that all objects which can 
+    # Force a garbage collection so that we know that all objects which can
     # be collected are actually collected before we exit the top-level task
     gc.collect()
 
@@ -478,14 +504,14 @@ def legion_python_cleanup(raw_args, user_data, proc):
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
     # Do it in reverse order so modules get FILO properties
-    for cleanup in reversed(cleanup_items):
+    for cleanup in reversed(_cleanup_items):
         cleanup()
 
     del top_level.runtime
     del top_level.context
     del top_level.task
 
-    # Force a garbage collection so that we know that all objects which can 
+    # Force a garbage collection so that we know that all objects which can
     # be collected are actually collected before we exit this cleanup task
     gc.collect()
 
@@ -510,8 +536,8 @@ def legion_python_import_global(raw_args, user_data, proc):
 
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
-    # Get the name of the task 
-    module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])), 
+    # Get the name of the task
+    module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])),
             c.legion_task_get_arglen(task[0])).decode('utf-8')
     try:
         globals()[module_name] = importlib.import_module(module_name)
@@ -526,4 +552,3 @@ def legion_python_import_global(raw_args, user_data, proc):
     result = struct.pack('i',failures)
 
     c.legion_task_postamble(runtime[0], context[0], ffi.from_buffer(result), 4)
-

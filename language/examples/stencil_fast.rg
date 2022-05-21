@@ -27,9 +27,12 @@ local format = require("std/format")
 
 local common = require("stencil_common")
 
+local gpuhelper = require("regent/gpu/helper")
+local default_foreign = gpuhelper.check_gpu_available() and '0' or '1'
+
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '0') == '1'
+local USE_FOREIGN = (os.getenv('USE_FOREIGN') or default_foreign) == '1'
 
 local use_python_main = rawget(_G, "stencil_use_python_main") == true
 

@@ -16,10 +16,11 @@
 #ifndef REALM_HIP_REDOP_H
 #define REALM_HIP_REDOP_H
 
-#ifdef __HIPHCC__
-#include "hip/hip_runtime.h"
-#endif
 #include "realm/realm_config.h"
+
+#ifdef REALM_USE_HIP
+#include <hip/hip_runtime.h>
+#endif
 
 namespace Realm {
 

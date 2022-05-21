@@ -16,7 +16,7 @@
 
 local ast = require("regent/ast")
 local codegen_hooks = require("regent/codegen_hooks")
-local cudahelper = require("regent/cudahelper")
+local gpuhelper = require("regent/gpu/helper")
 local data = require("common/data")
 local log = require("common/log")
 local licm = require("regent/licm")
@@ -1493,7 +1493,7 @@ function ref:reduce(cx, value, op, expr_type, atomic)
            elseif cx.variant:is_cuda() and atomic then
              return quote
                for i = 0, N do
-                 [cudahelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
+                 [gpuhelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
                end
              end
            else
@@ -1510,7 +1510,7 @@ function ref:reduce(cx, value, op, expr_type, atomic)
              end
            elseif cx.variant:is_cuda() and atomic then
              return quote
-               [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+               [gpuhelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
              end
            else
              return quote
@@ -2102,7 +2102,7 @@ function rawref:reduce(cx, value, op, expr_type, atomic)
   elseif cx.variant:is_cuda() and atomic then
     actions = quote
       [actions];
-      [cudahelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [gpuhelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
       [cleanup];
     end
   else
@@ -8665,7 +8665,7 @@ function codegen.stat_for_list(cx, node)
       if node:is(ast.typed.expr.Call) then
         local value = node.fn.value
         if std.is_math_fn(value) then
-          return node { fn = node.fn { value = cudahelper.get_cuda_variant(value) } }
+          return node { fn = node.fn { value = gpuhelper.get_gpu_variant(value) } }
         elseif value == array or value == arrayof then
           return node
         else
@@ -8676,9 +8676,9 @@ function codegen.stat_for_list(cx, node)
       end
     end, block)
 
-    local cuda_cx = cudahelper.new_kernel_context(node)
+    local cuda_cx = gpuhelper.new_kernel_context(node)
     cx:add_codegen_context("cuda", cuda_cx)
-    block = cudahelper.optimize_loop(cuda_cx, node, block)
+    block = gpuhelper.optimize_loop(cuda_cx, node, block)
     if std.config["cuda-licm"] then
       block = licm.entry(node.symbol, block)
     end
@@ -8813,18 +8813,18 @@ function codegen.stat_for_list(cx, node)
         return terralib.newsymbol(c.coord_t, "cnt_" .. symbol.id)
       end)
       local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
-      local shared_mem_size = cudahelper.compute_reduction_buffer_size(cuda_cx, node, reductions)
+      local shared_mem_size = gpuhelper.compute_reduction_buffer_size(cuda_cx, node, reductions)
       local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble, buffer_cleanups =
-        cudahelper.generate_reduction_preamble(cuda_cx, reductions)
+        gpuhelper.generate_reduction_preamble(cuda_cx, reductions)
       local kernel_preamble, kernel_postamble =
-        cudahelper.generate_reduction_kernel(cuda_cx, reductions, device_ptrs_map)
+        gpuhelper.generate_reduction_kernel(cuda_cx, reductions, device_ptrs_map)
       local host_postamble =
-        cudahelper.generate_reduction_postamble(cuda_cx, reductions, device_ptrs_map, host_ptrs_map)
+        gpuhelper.generate_reduction_postamble(cuda_cx, reductions, device_ptrs_map, host_ptrs_map)
       args:insertall(lower_bounds)
       args:insertall(counts)
       args:insertall(device_ptrs)
 
-      local need_spiil = cudahelper.check_arguments_need_spill(args)
+      local need_spiil = gpuhelper.check_arguments_need_spill(args)
 
       local kernel_param_pack = quote end
       local kernel_param_unpack = quote end
@@ -8832,7 +8832,7 @@ function codegen.stat_for_list(cx, node)
       if need_spiil then
         local arg = nil
         kernel_param_pack, kernel_param_unpack, spill_cleanup, arg =
-          cudahelper.generate_argument_spill(args)
+          gpuhelper.generate_argument_spill(args)
         args = terralib.newlist({arg})
       else
         -- Sort arguments in descending order of sizes to avoid misalignment
@@ -8857,7 +8857,7 @@ function codegen.stat_for_list(cx, node)
         count = `([count] * [ counts[idx] ])
       end
       index_inits:insert(quote
-        var [tid] = [cudahelper.global_thread_id()]
+        var [tid] = [gpuhelper.global_thread_id()]
         if [tid] >= [count] then return end
       end)
       index_inits:insert(quote var [ offsets[1] ] = 1 end)
@@ -8881,7 +8881,7 @@ function codegen.stat_for_list(cx, node)
       end
 
       -- Register the kernel function to JIT
-      local kernel_name = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
+      cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
 
       if std.config["cuda-pretty-kernels"] then
         io.write("===== CUDA kernel @ " .. node.span.source .. ":" .. node.span.start.line .. " =====\n")
@@ -8890,7 +8890,7 @@ function codegen.stat_for_list(cx, node)
 
       local count = terralib.newsymbol(c.size_t, "count")
       local kernel_call =
-        cudahelper.codegen_kernel_call(cuda_cx, kernel_name, count, args, shared_mem_size, false)
+        gpuhelper.codegen_kernel_call(cuda_cx, kernel, count, args, shared_mem_size, false)
 
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
@@ -9891,7 +9891,7 @@ function codegen.stat_reduce(cx, node)
         std.as_read(node.rhs.expr_type))
       return lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions
     end
-    lhs_actions = cudahelper.generate_region_reduction(cuda_cx, cx.loop_symbol,
+    lhs_actions = gpuhelper.generate_region_reduction(cuda_cx, cx.loop_symbol,
         node, rhs_expr.value, node.lhs.expr_type, std.as_read(node.lhs.expr_type),
         generator)
   else
@@ -10373,9 +10373,9 @@ local function generate_parallel_prefix_gpu(cx, node)
   local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
   local total = terralib.newsymbol(uint64, "total")
 
-  local cuda_cx = cudahelper.new_kernel_context(node)
+  local cuda_cx = gpuhelper.new_kernel_context(node)
   local launch_actions =
-    cudahelper.generate_parallel_prefix_op(cuda_cx, cx.task_meta:get_cuda_variant(), total,
+    gpuhelper.generate_parallel_prefix_op(cuda_cx, cx.task_meta:get_cuda_variant(), total,
                                            lhs_write, lhs_read, rhs, lhs_base_pointer, rhs_base_pointer,
                                            res:getsymbol(), idx:getsymbol(), dir, node.op, elem_type)
   local preamble, postamble
@@ -11215,18 +11215,18 @@ function codegen.top(cx, node)
     end
 
     if node.annotations.cuda:is(ast.annotation.Demand) then
-      local available, error_message = cudahelper.check_cuda_available()
+      local available, error_message = gpuhelper.check_gpu_available()
       if available then
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
         std.register_variant(cuda_variant)
         task:set_cuda_variant(cuda_variant)
-      elseif std.config["cuda"] ~= 0 and
+      elseif gpuhelper.is_gpu_requested() and
              node.annotations.cuda:is(ast.annotation.Demand)
       then
         report.warn(node,
           "ignoring pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+          ":" .. tostring(node.span.start.line) .. " since " .. tostring(error_message))
       end
     end
 

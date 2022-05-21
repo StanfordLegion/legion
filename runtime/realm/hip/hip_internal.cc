@@ -789,6 +789,10 @@ namespace Realm {
               //  ranges - whatever we get can be assumed to be regular
               int out_dim = out_alc.get_dim();
 
+              // since HIP does not support 12/32 bit 2D memset, we need to
+              //  use the default path for them
+              int memset2d_flag = 0;
+
               // fast paths for 8/16/32 bit memsets exist for 1-D and 2-D
               switch(reduced_fill_size) {
               case 1: {
@@ -833,19 +837,8 @@ namespace Realm {
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
-                  size_t bytes = out_alc.remaining(0);
-                  size_t lines = out_alc.remaining(1);
-  #ifdef DEBUG_REALM
-                  assert((bytes & 1) == 0);
-                  assert((out_alc.get_stride(1) & 1) == 0);
-  #endif
-                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset),
-                                               out_alc.get_stride(1),
-                                               *reinterpret_cast<const uint8_t *>(fill_data),
-                                               bytes, lines,
-                                               stream->get_stream()) );
-                  out_alc.advance(1, lines);
-                  total_bytes += bytes * lines;
+                  memset2d_flag = 2;
+                  goto default_memset;
                 }
                 break;
               }
@@ -866,19 +859,8 @@ namespace Realm {
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
-                  size_t bytes = out_alc.remaining(0);
-                  size_t lines = out_alc.remaining(1);
-  #ifdef DEBUG_REALM
-                  assert((bytes & 3) == 0);
-                  assert((out_alc.get_stride(1) & 3) == 0);
-  #endif
-                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset),
-                                               out_alc.get_stride(1),
-                                               *reinterpret_cast<const uint8_t *>(fill_data),
-                                               bytes, lines,
-                                               stream->get_stream()) );
-                  out_alc.advance(1, lines);
-                  total_bytes += bytes * lines;
+                  memset2d_flag = 4;
+                  goto default_memset;
                 }
                 break;
               }
@@ -887,10 +869,25 @@ namespace Realm {
                 // more general approach - use strided 2d copies to fill the first
                 //  line, and then we can use logarithmic doublings to deal with
                 //  multiple lines and/or planes
+  default_memset:
                 size_t bytes = out_alc.remaining(0);
                 size_t elems = bytes / reduced_fill_size;
   #ifdef DEBUG_REALM
-                assert((bytes % reduced_fill_size) == 0);
+                switch(memset2d_flag) {
+                  case 2: {
+                    assert((bytes & 1) == 0);
+                    assert((out_alc.get_stride(1) & 1) == 0);
+                    break;
+                  }
+                  case 4: {
+                    assert((bytes & 3) == 0);
+                    assert((out_alc.get_stride(1) & 3) == 0);
+                    break;
+                  }
+                  default: {
+                    assert((bytes % reduced_fill_size) == 0);
+                  }
+		}
   #endif
                 size_t partial_bytes = 0;
                 // if((reduced_fill_size & 3) == 0) {
@@ -1022,19 +1019,11 @@ namespace Realm {
                                                                out_span_start,
                                                                total_bytes));
   	  out_span_start += total_bytes;
-
-  	  done = record_address_consumption(total_bytes, total_bytes);
           }
 
+  	  done = record_address_consumption(total_bytes, total_bytes);
+
           did_work = true;
-
-          output_control.remaining_count -= total_bytes;
-          if(output_control.control_port_idx >= 0)
-            done = ((output_control.remaining_count == 0) &&
-                    output_control.eos_received);
-
-          if(done)
-            iteration_completed.store_release(true);
 
           if(done || work_until.is_expired())
             break;

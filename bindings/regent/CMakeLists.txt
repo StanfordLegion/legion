@@ -35,6 +35,10 @@ if(Legion_USE_CUDA)
     regent_cudart_hijack.h regent_cudart_hijack.cc
     regent_cuda.cu
   )
+elseif(Legion_USE_HIP)
+  list(APPEND REGENT_SRC
+    regent_cuda.cu
+  )
 endif()
 
 # Bishop bindings
@@ -49,14 +53,27 @@ list(APPEND REGENT_SRC
 )
 
 if(Legion_USE_CUDA)
-  cuda_add_library(Regent ${REGENT_SRC})
+  cuda_add_library(Regent SHARED ${REGENT_SRC})
+elseif(Legion_USE_HIP)
+  hip_add_library(Regent SHARED ${REGENT_SRC})
 else()
-  add_library(Regent ${REGENT_SRC})
+  add_library(Regent SHARED ${REGENT_SRC})
 endif()
 target_link_libraries(Regent Legion::Legion)
 
 if(Legion_USE_CUDA)
   target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
+elseif(Legion_USE_HIP)
+  target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    target_compile_definitions(Regent PRIVATE __HIP_PLATFORM_NVIDIA__)
+  else()
+    target_compile_definitions(Regent PRIVATE __HIP_PLATFORM_AMD__)
+  endif()
+endif()
+
+if(Legion_USE_HIP)
+  target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
 endif()
 
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)

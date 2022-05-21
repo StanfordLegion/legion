@@ -2662,7 +2662,7 @@ namespace Legion {
         }
         // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask,
-            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
@@ -3071,11 +3071,11 @@ namespace Legion {
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
-                                  map_applied_conditions, to_release, repl_ctx);
+                                 *repl_ctx, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, map_applied_conditions, to_release, repl_ctx);
+            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
       // First propagate the refinements for the sharded regions and partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             sharded_partitions.begin(); it != sharded_partitions.end(); it++)
@@ -3902,9 +3902,20 @@ namespace Legion {
       pre_indirection_barriers.clear();
       post_indirection_barriers.clear();
       if (!src_collectives.empty())
+      {
+        for (std::vector<IndirectRecordExchange*>::const_iterator it =
+              src_collectives.begin(); it != src_collectives.end(); it++)
+          delete (*it);
         src_collectives.clear();
+      }
       if (!dst_collectives.empty())
+      {
+        for (std::vector<IndirectRecordExchange*>::const_iterator it =
+              dst_collectives.begin(); it != dst_collectives.end(); it++)
+          delete (*it);
         dst_collectives.clear();
+      }
+      unique_intra_space_deps.clear();
       deactivate_repl_collective_instance_creator();
       deactivate_index_copy();
       remove_launch_space_reference(shard_points);
@@ -4053,26 +4064,25 @@ namespace Legion {
       if (!local_space.exists())
       {
         // If we have indirections then we still need to participate in those
+        std::vector<RtEvent> done_events;
         if (!src_indirect_requirements.empty() &&
             collective_src_indirect_points)
         {
-          LegionVector<IndirectRecord> empty_records;
-          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          for (unsigned idx = 0; idx < collective_exchanges.size(); idx++)
           {
-            IndirectRecordExchange collective(repl_ctx, src_collectives[idx]);
-            collective.exchange_records(empty_records);
-            empty_records.clear();
+            const RtEvent done = finalize_exchange(idx, true/*source*/);
+            if (done.exists())
+              done_events.push_back(done);
           }
         }
         if (!dst_indirect_requirements.empty() && 
             collective_dst_indirect_points)
         {
-          LegionVector<IndirectRecord> empty_records;
-          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          for (unsigned idx = 0; idx < collective_exchanges.size(); idx++)
           {
-            IndirectRecordExchange collective(repl_ctx, dst_collectives[idx]);
-            collective.exchange_records(empty_records);
-            empty_records.clear();
+            const RtEvent done = finalize_exchange(idx, false/*source*/);
+            if (done.exists())
+              done_events.push_back(done);
           }
         }
         // Arrive on our indirection barriers if we have them
@@ -4108,7 +4118,10 @@ namespace Legion {
 #endif
         // We have no local points, so we can just trigger
         complete_mapping();
-        complete_execution();
+        if (!done_events.empty())
+          complete_execution(Runtime::merge_events(done_events));
+        else
+          complete_execution();
       }
       else // If we have any valid points do the base call
       {
@@ -4194,184 +4207,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::pair<ApEvent,ApEvent> ReplIndexCopyOp::exchange_indirect_records(
-        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
-        const PhysicalTraceInfo &trace_info, const InstanceSet &instances,
-        const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord> &records, const bool sources)
+    RtEvent ReplIndexCopyOp::finalize_exchange(const unsigned index, 
+                                               const bool source)
     //--------------------------------------------------------------------------
     {
-      if (sources && !collective_src_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
-                          trace_info, instances, space, key, records, sources);
-      if (!sources && !collective_dst_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
-                          trace_info, instances, space, key, records, sources);
-#ifdef DEBUG_LEGION
-      assert(local_pre.exists());
-      assert(local_post.exists());
-      assert(index < pre_indirection_barriers.size());
-      assert(pre_indirection_barriers[index].exists());
-      assert(index < post_indirection_barriers.size());
-      assert(post_indirection_barriers[index].exists());
-#endif
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        IndexSpaceNode *node = runtime->forest->get_node(space);
-        ApEvent domain_ready;
-        const Domain dom = node->get_domain(domain_ready, true/*tight*/);
-        bool done_all_exchanges = false;
-        // Take the lock and record our sets and instances
-        AutoLock o_lock(op_lock);
-        if (sources)
-        {
-          for (unsigned idx = 0; idx < instances.size(); idx++)
-          {
-            const InstanceRef &ref = instances[idx];
-            src_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_physical_manager(),
-                  key, space, dom));
-          }
-          if (index >= exchange_pre_events.size())
-            exchange_pre_events.resize(index+1);
-          exchange_pre_events[index].push_back(local_pre);
-          while (index >= pre_merged.size())
-          {
-            const size_t next = pre_merged.size();
-            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
-            Runtime::phase_barrier_arrive(
-              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
-            if (trace_info.recording)
-            {
-              const std::pair<size_t,size_t> key(trace_local_id, next);
-              trace_info.record_collective_barrier(
-                  pre_indirection_barriers[next], pre_merged.back(), key);
-            }
-          }
-          if (index >= exchange_post_events.size())
-            exchange_post_events.resize(index+1);
-          exchange_post_events[index].push_back(local_post);
-          while (index >= post_merged.size())
-          {
-            const size_t next = post_merged.size();
-            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
-            Runtime::phase_barrier_arrive(
-               post_indirection_barriers[next], 1/*count*/, post_merged.back());
-            if (trace_info.recording)
-            {
-              const std::pair<size_t,size_t> key(trace_local_id,
-                        pre_indirection_barriers.size() + next);
-              trace_info.record_collective_barrier(
-                  post_indirection_barriers[next], post_merged.back(), key);
-            }
-          }
-          if (!src_exchanged[index].exists())
-            src_exchanged[index] = Runtime::create_rt_user_event();
-          if (index >= src_exchanges.size())
-            src_exchanges.resize(index+1, 0);
-          if (++src_exchanges[index] == points.size())
-          {
-            to_trigger = src_exchanged[index];
-            if (dst_indirect_requirements.empty())
-              done_all_exchanges = true;
-          }
-          else
-            wait_on = src_exchanged[index];
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < instances.size(); idx++)
-          {
-            const InstanceRef &ref = instances[idx];
-            dst_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_physical_manager(),
-                  key, space, dom));
-          }
-          if (index >= exchange_pre_events.size())
-            exchange_pre_events.resize(index+1);
-          exchange_pre_events[index].push_back(local_pre);
-          while (index >= pre_merged.size())
-          {
-            const size_t next = pre_merged.size();
-            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
-            Runtime::phase_barrier_arrive(
-              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
-            if (trace_info.recording)
-            {
-              const std::pair<size_t,size_t> key(trace_local_id, next);
-              trace_info.record_collective_barrier(
-                  pre_indirection_barriers[next], pre_merged.back(), key);
-            }
-          }
-          if (index >= exchange_post_events.size())
-            exchange_post_events.resize(index+1);
-          exchange_post_events[index].push_back(local_post);
-          while (index >= post_merged.size())
-          {
-            const size_t next = post_merged.size();
-            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
-            Runtime::phase_barrier_arrive(
-               post_indirection_barriers[next], 1/*count*/, post_merged.back());
-            if (trace_info.recording)
-            {
-              const std::pair<size_t,size_t> key(trace_local_id,
-                        pre_indirection_barriers.size() + next);
-              trace_info.record_collective_barrier(
-                  post_indirection_barriers[next], post_merged.back(), key);
-            }
-          }
-          if (!dst_exchanged[index].exists())
-            dst_exchanged[index] = Runtime::create_rt_user_event();
-          if (index >= dst_exchanges.size())
-            dst_exchanges.resize(index+1, 0);
-          if (++dst_exchanges[index] == points.size())
-          {
-            to_trigger = dst_exchanged[index];
-            done_all_exchanges = true;
-          }
-          else
-            wait_on = dst_exchanged[index];
-        }
-        if (done_all_exchanges)
-        {
-          Runtime::trigger_event(&trace_info, pre_merged[index],
-              Runtime::merge_events(&trace_info, exchange_pre_events[index]));
-          Runtime::trigger_event(&trace_info, post_merged[index],
-              Runtime::merge_events(&trace_info, exchange_post_events[index]));
-        }
-      }
-      if (to_trigger.exists())
+      IndirectionExchange &exchange = collective_exchanges[index];
+      if (source)
       {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+        assert(index < src_collectives.size());
 #endif
-        // Perform the collective
-        if (sources)
+        const RtEvent ready = src_collectives[index]->exchange_records(
+                      exchange.src_records, src_indirect_records[index]);
+        if (exchange.src_ready.exists())
         {
-          IndirectRecordExchange collective(repl_ctx, src_collectives[index]);
-          collective.exchange_records(src_records[index]);
+          Runtime::trigger_event(exchange.src_ready, ready);
+          return exchange.src_ready;
         }
         else
-        {
-          IndirectRecordExchange collective(repl_ctx, dst_collectives[index]);
-          collective.exchange_records(dst_records[index]);
-        }
-        Runtime::trigger_event(to_trigger);
+          return ready;
       }
-      else if (!wait_on.has_triggered())
-        wait_on.wait();
-      // Once we wake up we can copy out the results
-      if (sources)
-        records = src_records[index];
       else
-        records = dst_records[index];
-      return std::pair<ApEvent,ApEvent>(
-          pre_indirection_barriers[index], post_indirection_barriers[index]);
+      {
+#ifdef DEBUG_LEGION
+        assert(index < dst_collectives.size());
+#endif
+        const RtEvent ready = dst_collectives[index]->exchange_records(
+                      exchange.dst_records, dst_indirect_records[index]);
+        if (exchange.dst_ready.exists())
+        {
+          Runtime::trigger_event(exchange.dst_ready, ready);
+          return exchange.dst_ready;
+        }
+        else
+          return ready;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4400,15 +4270,15 @@ namespace Legion {
       {
         src_collectives.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-          src_collectives[idx] = 
-            ctx->get_next_collective_index(COLLECTIVE_LOC_80); 
+          src_collectives[idx] = new IndirectRecordExchange(ctx,
+            ctx->get_next_collective_index(COLLECTIVE_LOC_80));
       }
       if (!dst_indirect_requirements.empty() && collective_dst_indirect_points)
       {
         dst_collectives.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-          dst_collectives[idx] = 
-            ctx->get_next_collective_index(COLLECTIVE_LOC_81);
+          dst_collectives[idx] = new IndirectRecordExchange(ctx,
+            ctx->get_next_collective_index(COLLECTIVE_LOC_81));
       }
       if (!src_indirect_requirements.empty() || 
           !dst_indirect_requirements.empty())
@@ -4436,6 +4306,98 @@ namespace Legion {
             next_indirection_index = 0;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexCopyOp::find_intra_space_dependence(
+                                                       const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      // Check to see if we already have it
+      std::map<DomainPoint,RtEvent>::const_iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+        return finder->second;  
+      // Make a temporary event and then do different things depending on 
+      // whether we own this point or whether a remote shard owns it
+      const RtUserEvent pending_event = Runtime::create_rt_user_event();
+      intra_space_dependences[point] = pending_event;
+      // If not, check to see if this is a point that we expect to own
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      Domain launch_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+      else
+        launch_space->get_launch_space_domain(launch_domain);
+      const ShardID point_shard = 
+        sharding_function->find_owner(point, launch_domain); 
+      if (point_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // A different shard owns it so send a message to that shard 
+        // requesting it to fill in the dependence
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(point_shard);
+        rez.serialize(context_index);
+        rez.serialize(point);
+        rez.serialize(pending_event);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+        repl_ctx->shard_manager->send_intra_space_dependence(point_shard, rez);
+      }
+      else // We own it so do the normal thing
+        pending_intra_space_dependences[point] = pending_event;
+      return pending_event; 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::record_intra_space_dependence(
+        const DomainPoint &point, const DomainPoint &next, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Determine if the next point is one that we own or is one that is
+      // going to be coming from a remote shard
+      Domain launch_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+      else
+        launch_space->get_launch_space_domain(launch_domain);
+      const ShardID next_shard = 
+        sharding_function->find_owner(next, launch_domain); 
+      if (next_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // Make sure we only send this to the repl_ctx once for each 
+        // unique shard ID that we see for this point task
+        const std::pair<DomainPoint,ShardID> key(point, next_shard); 
+        bool record_dependence = true;
+        {
+          AutoLock o_lock(op_lock);
+          std::set<std::pair<DomainPoint,ShardID> >::const_iterator finder = 
+            unique_intra_space_deps.find(key);
+          if (finder != unique_intra_space_deps.end())
+            record_dependence = false;
+          else
+            unique_intra_space_deps.insert(key);
+        }
+        if (record_dependence)
+          repl_ctx->record_intra_space_dependence(context_index, point, 
+                                                  point_mapped, next_shard);
+      }
+      else // The next shard is ourself, so we can do the normal thing
+        IndexCopyOp::record_intra_space_dependence(point, next, point_mapped);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5068,18 +5030,6 @@ namespace Legion {
                                                        RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            handle.get_field_space(), fid, false/*range*/, 
-            true/*use color space*/))
-      {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the color space elements for 'partition_by_field' "
-                      "call in task %s (UID %lld)", fid, ctx->get_task_name(),
-                      ctx->get_unique_id());
-        assert(false);
-      }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/); 
       // Start without the projection requirement, we'll ask
@@ -5107,6 +5057,8 @@ namespace Legion {
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+        check_by_field(pid, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5124,17 +5076,6 @@ namespace Legion {
                                                         RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            projection.get_field_space(), fid, false/*range*/))
-      {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the destination index space elements for "
-                      "'partition_by_image' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
-      }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -5171,6 +5112,8 @@ namespace Legion {
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+        check_by_image(pid, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5191,17 +5134,6 @@ namespace Legion {
                                                 RtBarrier &deppart_bar) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid, 
-            projection.get_field_space(), fid, true/*range*/))
-      {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the destination index space elements for "
-                      "'partition_by_image_range' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
-      }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -5239,6 +5171,8 @@ namespace Legion {
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+        check_by_image_range(pid, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5250,17 +5184,6 @@ namespace Legion {
                               const UntypedBuffer &marg, RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(proj,
-            handle.get_field_space(), fid, false/*range*/))
-      {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                      "of the range index space elements for "
-                      "'partition_by_preimage' call in task %s (UID %lld)",
-                      fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
-      }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -5288,6 +5211,8 @@ namespace Legion {
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+        check_by_preimage(pid, proj, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5300,17 +5225,6 @@ namespace Legion {
                               const UntypedBuffer &marg, RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(proj,
-            handle.get_field_space(), fid, true/*range*/))
-      {
-        log_run.error("ERROR: Field size of field %d does not match the size "
-                     "of the range index space elements for "
-                     "'partition_by_preimage_range' call in task %s (UID %lld)",
-                     fid, ctx->get_task_name(), ctx->get_unique_id());
-        assert(false);
-      }
-#endif
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
@@ -5338,6 +5252,8 @@ namespace Legion {
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+      if (runtime->check_privileges)
+        check_by_preimage_range(pid, proj, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -14143,56 +14059,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndirectRecordExchange::IndirectRecordExchange(
-                                              const IndirectRecordExchange &rhs)
-      : AllGatherCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     IndirectRecordExchange::~IndirectRecordExchange(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    IndirectRecordExchange& IndirectRecordExchange::operator=(
-                                              const IndirectRecordExchange &rhs)
+    RtEvent IndirectRecordExchange::exchange_records(
+                            std::vector<std::vector<IndirectRecord>*> &targets,
+                            std::vector<IndirectRecord> &records)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndirectRecordExchange::exchange_records(
-                                    LegionVector<IndirectRecord> &local_records)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(records.empty());
-#endif
-      for (LegionVector<IndirectRecord>::const_iterator it = 
-            local_records.begin(); it != local_records.end(); it++)
-      {
-        const IndirectKey key(it->inst, it->domain);
-        records[key] = it->fields;
-      }
-      perform_collective_sync();
-      local_records.resize(records.size());
-      unsigned index = 0;
-      for (LegionMap<IndirectKey,FieldMask>::const_iterator it = 
-            records.begin(); it != records.end(); it++, index++)
-      {
-        IndirectRecord &record = local_records[index];
-        record.inst = it->first.inst;
-        record.domain = it->first.domain;
-        record.fields = it->second;
-      }
+      local_targets.swap(targets);
+      all_records.swap(records);
+      perform_collective_async();
+      return perform_collective_wait(false/*block*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14200,14 +14081,9 @@ namespace Legion {
                                                        int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(records.size());
-      for (LegionMap<IndirectKey,FieldMask>::const_iterator it = 
-            records.begin(); it != records.end(); it++)
-      {
-        rez.serialize(it->first.inst);
-        rez.serialize(it->first.domain);
-        rez.serialize(it->second);
-      }
+      rez.serialize(all_records.size());
+      for (unsigned idx = 0; idx < all_records.size(); idx++)
+        all_records[idx].serialize(rez);
     }
 
     //--------------------------------------------------------------------------
@@ -14215,24 +14091,30 @@ namespace Legion {
                                                          int stage)
     //--------------------------------------------------------------------------
     {
+      // If we are not a participating stage then we already contributed our
+      // data into the output so we clear ourself to avoid double counting
+      if (!participating)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
+        all_records.clear();
+      }
+      const size_t offset = all_records.size();
       size_t num_records;
       derez.deserialize(num_records);
+      all_records.resize(offset + num_records);
       for (unsigned idx = 0; idx < num_records; idx++)
-      {
-        IndirectKey key;
-        derez.deserialize(key.inst);
-        derez.deserialize(key.domain);
-        LegionMap<IndirectKey,FieldMask>::iterator finder = 
-          records.find(key);
-        if (finder != records.end())
-        {
-          FieldMask mask;
-          derez.deserialize(mask);
-          finder->second |= mask;
-        }
-        else
-          derez.deserialize(records[key]);
-      }
+        all_records[offset+idx].deserialize(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndirectRecordExchange::post_complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < local_targets.size(); idx++)
+        *local_targets[idx] = all_records;
+      return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////

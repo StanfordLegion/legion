@@ -2171,6 +2171,17 @@ class PointSet(object):
     def __nonzero__(self):
         return len(self.points) > 0
 
+    def __eq__(self, other):
+        if len(self.points) != len(other.points):
+            return False
+        for point in self.points:
+            if point not in other.points:
+                return False
+        return True
+
+    def __neq__(self, other):
+        return not self == other
+
     # Set intersection
     def __and__(self, other):
         result = self.copy()
@@ -5733,9 +5744,9 @@ class Operation(object):
                  'context_index', 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'internal_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
-                 'futures', 'owner_shard', 'index_owner', 'points', 'launch_shape', 
-                 'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
-                 'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
+                 'futures', 'owner_shard', 'index_owner', 'index_point', 'points',
+                 'launch_shape', 'creator', 'realm_copies', 'realm_fills', 'realm_depparts',
+                 'version_numbers', 'internal_idx', 'partition_kind', 'partition_node',
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted']
@@ -5785,6 +5796,8 @@ class Operation(object):
         # Only valid for index operations 
         self.points = None
         self.launch_shape = None
+        # Only valid for point operations
+        self.index_point = None
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
@@ -5985,9 +5998,11 @@ class Operation(object):
         self.partition_node = node
         self.partition_kind = kind
 
-    def set_index_owner(self, owner):
+    def set_index_owner(self, owner, point):
         assert not self.index_owner
         self.index_owner = owner
+        assert not self.index_point
+        self.index_point = point
 
     def add_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
@@ -5995,8 +6010,8 @@ class Operation(object):
         if self.points is None:
             self.points = dict()
         point.op.set_name(self.name)
-        point.op.set_index_owner(self)
         index_point = point.point
+        point.op.set_index_owner(self, index_point)
         if index_point in self.points:
             self.points[index_point] = self.state.alias_index_points(point,
                                                   self.points[index_point])
@@ -6007,7 +6022,7 @@ class Operation(object):
 
     def add_point_op(self, op, point):
         op.kind = self.kind
-        op.set_index_owner(self)
+        op.set_index_owner(self, point)
         # Initialize if necessary
         if self.points is None:
             self.points = dict()
@@ -6353,15 +6368,14 @@ class Operation(object):
                 if not copy.indirections.has_group_instance(src_index,
                             src_inst, src_req.logical_node.index_space):
                     continue
-                if copy.index_expr.get_index_space() is not \
-                        src_idx_req.logical_node.index_space:
-                    continue
                 if not copy.indirections.has_indirect_instance(src_index,
                                             src_idx_inst, src_idx_field):
                     continue
+                src_copy_space = src_idx_req.logical_node.index_space
             else:
                 if src_inst is not copy.srcs[index]:
                     continue
+                src_copy_space = src_req.logical_node.index_space
             if dst_field is not copy.dst_fields[index]:
                 continue
             if dst_idx_req is not None:
@@ -6371,14 +6385,23 @@ class Operation(object):
                 if not copy.indirections.has_group_instance(dst_index,
                             dst_inst, dst_req.logical_node.index_space):
                     continue
-                if copy.index_expr.get_index_space() is not \
-                        dst_idx_req.logical_node.index_space:
-                    continue
                 if not copy.indirections.has_indirect_instance(dst_index,
                                             dst_idx_inst, dst_idx_field):
                     continue
+                dst_copy_space = dst_idx_req.logical_node.index_space
             else:
                 if dst_inst is not copy.dsts[index]:
+                    continue
+                dst_copy_space = dst_req.logical_node.index_space
+            # Check that the copy domain is equal to the intersection
+            # of the source and destination copy expressions
+            if src_copy_space is dst_copy_space:
+                if copy.index_expr.get_index_space() is not src_copy_space and \
+                    copy.index_expr.get_point_set() != src_copy_space.get_point_set():
+                    continue
+            else:
+                point_set = src_copy_space.get_point_set() & dst_copy_space.get_point_set()
+                if point_set != copy.index_expr.get_point_set():
                     continue
             if redop != copy.redops[index]:
                 continue
@@ -6454,15 +6477,14 @@ class Operation(object):
                     if not copy.indirections.has_group_instance(src_index,
                                 src_inst, src_req.logical_node.index_space):
                         continue
-                    if copy.index_expr.get_index_space() is not \
-                            src_idx_req.logical_node.index_space:
-                        continue
                     if not copy.indirections.has_indirect_instance(src_index,
                                                 src_idx_inst, src_idx_field):
                         continue
+                    src_copy_space = src_idx_req.logical_node.index_space
                 else:
                     if src_inst is not copy.srcs[index]:
                         continue
+                    src_copy_space = src_req.logical_node.index_space
                 if dst_field is not copy.dst_fields[index]:
                     continue
                 if dst_idx_req is not None:
@@ -6472,14 +6494,23 @@ class Operation(object):
                     if not copy.indirections.has_group_instance(dst_index,
                                 dst_inst, dst_req.logical_node.index_space):
                         continue
-                    if copy.index_expr.get_index_space() is not \
-                            dst_idx_req.logical_node.index_space:
-                        continue
                     if not copy.indirections.has_indirect_instance(dst_index,
                                                 dst_idx_inst, dst_idx_field):
                         continue
+                    dst_copy_space = dst_idx_req.logical_node.index_space
                 else:
                     if dst_inst is not copy.dsts[index]:
+                        continue
+                    dst_copy_space = dst_req.logical_node.index_space
+                # Check that the copy domain is equal to the intersection
+                # of the source and destination copy expressions
+                if src_copy_space is dst_copy_space:
+                    if copy.index_expr.get_index_space() is not src_copy_space and \
+                        copy.index_expr.get_point_set() != src_copy_space.get_point_set():
+                        continue
+                else:
+                    point_set = src_copy_space.get_point_set() & dst_copy_space.get_point_set()
+                    if point_set != copy.index_expr.get_point_set():
                         continue
                 if redop != copy.redops[index]:
                     continue
@@ -6576,23 +6607,20 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req1, req2)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Check for invertible projection functions which can 
                         # the runtime knows how to handle their dependences
                         if req1.index == req2.index and \
                                 self.reqs[req1.index].projection_function is not None and \
                                 self.reqs[req1.index].projection_function.invertible:
-                            # This should only happen for tasks right now
-                            assert op1.task is not None
-                            assert op2.task is not None
                             # Check to make sure we find a dependence going one way or
                             # the other between the two operations
                             if op1.intra_space_dependences is not None and \
-                                    op2.task.point in op1.intra_space_dependences:
+                                    op2.index_point in op1.intra_space_dependences:
                                 order_points = True
                                 continue
                             if op2.intra_space_dependences is not None and \
-                                    op1.task.point in op2.intra_space_dependences:
+                                    op1.index_point in op2.intra_space_dependences:
                                 order_points = True
                                 continue
                             print(("Missing intra space dependence between requirements "+
@@ -6612,30 +6640,52 @@ class Operation(object):
             # them in an ordered dictionary so that whenever we iterate
             # over them we do them in an order consistent with their deps
             # This should only happen for index task kinds currently
-            assert self.kind == INDEX_TASK_KIND 
-            satisfied_deps = set()
-            remaining_tasks = dict()
-            for point,task in iteritems(self.points):
-                if task.op.intra_space_dependences is None:
-                    new_points[point] = task
-                    satisfied_deps.add(point)
-                else:
-                    remaining_tasks[point] = task
-            while remaining_tasks:
-                next_remaining = dict()
-                for point,task in iteritems(remaining_tasks):
-                    satisfied = True
-                    for dep in task.op.intra_space_dependences:
-                        if dep not in satisfied_deps:
-                            satisfied = False
-                            break
-                    if satisfied:
+            if self.kind == INDEX_TASK_KIND:
+                satisfied_deps = set()
+                remaining_tasks = dict()
+                for point,task in iteritems(self.points):
+                    if task.op.intra_space_dependences is None:
                         new_points[point] = task
                         satisfied_deps.add(point)
                     else:
-                        next_remaining[point] = task
-                remaining_tasks = next_remaining
-            
+                        remaining_tasks[point] = task
+                while remaining_tasks:
+                    next_remaining = dict()
+                    for point,task in iteritems(remaining_tasks):
+                        satisfied = True
+                        for dep in task.op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = task
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_tasks = next_remaining
+            else:
+                satisfied_deps = set()
+                remaining_ops = dict()
+                for point,op in iteritems(self.points):
+                    if op.intra_space_dependences is None:
+                        new_points[point] = op
+                        satisfied_deps.add(point)
+                    else:
+                        remaining_ops[point] = op
+                while remaining_ops:
+                    next_remaining = dict()
+                    for point,op in iteritems(remaining_ops):
+                        satisfied = True
+                        for dep in op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = op 
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_ops = next_remaining
         else:
             # Let's put things in order by their UID
             if self.kind == INDEX_TASK_KIND:
@@ -6691,7 +6741,7 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req, other_req)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Only report this at least one is not a projection requirement
                         if req.projection_function is None or \
                             other_req.projection_function is None:
@@ -7390,6 +7440,16 @@ class Operation(object):
                       perform_checks, False, None, dst_versions):
                 return False
             if gather:
+                # Check to see if the copy space is empty
+                if idx_req.logical_node.index_space is not dst_req.logical_node.index_space:
+                    idx_points = idx_req.logical_node.index_space.get_point_set()
+                    dst_points = dst_req.logical_node.index_space.get_point_set()
+                    copy_points = idx_points & dst_points
+                    
+                else:
+                    copy_points = idx_points
+                if len(copy_points) == 0:
+                    continue
                 local_copies = set()
                 if perform_checks:
                     copy = self.find_verification_indirection_copy(src_field,
@@ -7418,10 +7478,17 @@ class Operation(object):
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, local_copies, dst_points,
+                        copy_redop, perform_checks, local_copies, copy_points,
                         dst_depth, dst_field, dst_req, dst_inst, dst_versions):
                     return False
             else:
+                # Check to see if the copy space is empty
+                if idx_req.logical_node.index_space is not src_req.logical_node.index_space:
+                    copy_points = idx_points & src_points
+                else:
+                    copy_points = idx_points
+                if len(copy_points) == 0:
+                    continue
                 local_copies = set()
                 if perform_checks:
                     copy = self.find_verification_indirection_copy(src_field,
@@ -7446,7 +7513,7 @@ class Operation(object):
                 else:
                     global_copies = local_copies 
                 if not src_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, local_copies, src_points,
+                        copy_redop, perform_checks, local_copies, copy_points,
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
@@ -7460,7 +7527,7 @@ class Operation(object):
                 dst_req.priv = REDUCE
                 dst_req.redop = copy_redop
         if not idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 idx_depth, idx_field, idx_req, idx_inst, idx_versions):
             return False
         return True
@@ -7494,6 +7561,13 @@ class Operation(object):
         dst_idx_field = dst_idx_req.fields[0] 
         dst_idx_inst = dst_idx_mappings[dst_idx_field.fid]
         assert not dst_idx_inst.is_virtual()
+        # Check to see if the copy space is empty
+        if src_idx_req.logical_node.index_space is not dst_idx_req.logical_node.index_space:
+            copy_points = src_idx_points & dst_idx_points
+        else:
+            copy_points = src_idx_points
+        if len(copy_points == 0):
+            return True
         # We just need to verify these region requirements one time
         src_idx_versions = dict()
         if not src_idx_req.logical_node.perform_physical_verification(
@@ -7578,11 +7652,11 @@ class Operation(object):
                 dst_req.priv = REDUCE
                 dst_req.redop = copy_redop
         if not src_idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, src_idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 src_idx_depth, src_idx_field, src_idx_req, src_idx_inst, src_idx_versions):
             return False
         if not dst_idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, dst_idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 dst_idx_depth, dst_idx_field, dst_idx_req, dst_idx_inst, dst_idx_versions):
             return False
         return True
@@ -10410,10 +10484,9 @@ class RealmFill(RealmBase):
         return self.eq_privileges
 
 class RealmDeppart(RealmBase):
-    __slots__ = ['index_space', 'node_name']
+    __slots__ = ['node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
-        self.index_space = None
         self.finish_event = finish
         if finish.exists():
             finish.add_incoming_deppart(self)
@@ -10439,14 +10512,15 @@ class RealmDeppart(RealmBase):
         assert new_creator is not self.creator
         self.creator = new_creator
 
-    def set_index_space(self, index_space):
-        self.index_space = index_space
+    def set_index_expr(self, index_expr):
+        self.index_expr = index_expr
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Deppart ("+str(self.realm_num)+") of "+self.index_space.html_safe_name
+            label = "Realm Deppart ("+str(self.realm_num)+") of "+\
+                    self.index_expr.point_space_graphviz_string()
         else:
-            label = "Realm Deppart of "+self.index_space.html_safe_name
+            label = "Realm Deppart ("+str(self.realm_num)+")"
         if self.creator is not None:
             label += " generated by "+self.creator.html_safe_name
         lines = [[{ "label" : label, "colspan" : 3 }]]
@@ -11268,8 +11342,8 @@ def parse_legion_spy_line(line, state):
         deppart.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         deppart.set_creator(op)
-        index_space = state.get_index_space(int(m.group('ispace')))
-        deppart.set_index_space(index_space) 
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        deppart.set_index_expr(index_expr) 
         return True
     m = barrier_arrive_pat.match(line)
     if m is not None:

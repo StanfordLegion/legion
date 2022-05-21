@@ -2254,6 +2254,9 @@ namespace Legion {
     public:
       virtual const DomainPoint& get_domain_point(void) const = 0;
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps) = 0;
+      virtual const Mappable* as_mappable(void) const = 0;
     }; 
 
     /**
@@ -2321,6 +2324,10 @@ namespace Legion {
       void check_inversion(const Task *task, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);
       void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
+      void check_inversion(const Mappable *mappable, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Mappable *mappable, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
     public:
       bool is_complete(RegionTreeNode *node, Operation *op, 
@@ -3324,9 +3331,11 @@ namespace Legion {
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
                                                   Serializer &rez);
+      void send_cancel_equivalence_sets_subscription(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_finish_equivalence_sets_subscription(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
-      void send_equivalence_set_invalidate_trackers(AddressSpaceID target,
-                                                    Serializer &rez);
       void send_equivalence_set_replication_request(AddressSpaceID target,
                                                     Serializer &rez);
       void send_equivalence_set_replication_response(AddressSpaceID target,
@@ -3652,7 +3661,12 @@ namespace Legion {
       void handle_remote_context_physical_response(Deserializer &derez);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
-      void handle_compute_equivalence_sets_response(Deserializer &derez);
+      void handle_compute_equivalence_sets_response(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_cancel_equivalence_sets_subscription(Deserializer &derez,
+                                                       AddressSpaceID source);
+      void handle_finish_equivalence_sets_subscription(Deserializer &derez,
+                                                       AddressSpaceID source);
       void handle_equivalence_set_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_equivalence_set_response(Deserializer &derez,
@@ -5828,11 +5842,13 @@ namespace Legion {
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE:
           break;
+        case SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION:
+          break;
+        case SEND_FINISH_EQUIVALENCE_SETS_SUBSCRIPTION:
+          break;
         case SEND_EQUIVALENCE_SET_REQUEST:
           break;
         case SEND_EQUIVALENCE_SET_RESPONSE:
-          break;
-        case SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS:
           break;
         case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
           break;

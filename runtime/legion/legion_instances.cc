@@ -1440,6 +1440,26 @@ namespace Legion {
     void PhysicalManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifndef DEBUG_LEGION
+      // In non-debug mode we can just add the valid reference to the
+      // owner without needing to check. While this isn't strictly necessary
+      // for correctness, it is an important performance optimization to help
+      // the garbage collector quickly detect when instances should not be
+      // eligible for collection early in the process before trying to do
+      // the whole distributed protocol.
+      if (!is_owner())
+      {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+        {
+          const AddressSpaceID parent =
+            collective_mapping->get_parent(owner_space, local_space);
+          send_remove_valid_increment(parent, mutator);
+        }
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
+#endif
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(!deferred_deletion.exists());
@@ -1581,18 +1601,21 @@ namespace Legion {
     void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(gc_state == VALID_GC_STATE);
       if (!is_owner())
       {
-        if ((collective_mapping != NULL) && 
+        if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
-          send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space, local_space), mutator);
+        {
+          const AddressSpaceID parent =
+            collective_mapping->get_parent(owner_space, local_space);
+          send_remote_valid_decrement(parent, mutator);
+        }
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(gc_state == VALID_GC_STATE);
 #endif
       if (pending_changes == 0)
       {

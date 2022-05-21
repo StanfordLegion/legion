@@ -972,7 +972,7 @@ namespace Realm {
 			<< (remote_waiters.empty() ? "" : " remote waiters");
       while(!current_local_waiters.empty()) {
 	EventWaiter *ew = current_local_waiters.pop_front();
-	log_event.fatal() << "  waiting on " << make_event(generation.load()) << ": " << ew;
+	log_event.fatal() << "  waiting on " << make_event(generation.load() + 1) << ": " << ew;
       }
       for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
 	  it != future_local_waiters.end();
@@ -1951,7 +1951,7 @@ namespace Realm {
       // and let the barrier rearm as many times as necessary without being released
       //impl->free_generation = (unsigned)-1;
 
-      log_barrier.info() << "barrier created: " << impl->me << "/" << impl->generation
+      log_barrier.info() << "barrier created: " << impl->me << "/" << impl->generation.load()
 			 << " base_count=" << impl->base_arrival_count << " redop=" << redopid;
 #ifdef EVENT_TRACING
       {
@@ -1965,11 +1965,11 @@ namespace Realm {
     }
 
     BarrierImpl::BarrierImpl(void)
-      : has_external_waiters(false)
+      : generation(0)
+      , gen_subscribed(0)
+      , has_external_waiters(false)
       , external_waiter_condvar(external_waiter_mutex)
     {
-      generation = 0;
-      gen_subscribed = 0;
       first_generation = /*free_generation =*/ 0;
       next_free = 0;
       remote_subscribe_gens.clear();
@@ -1993,8 +1993,7 @@ namespace Realm {
     {
       me = _me;
       owner = _init_owner;
-      generation = 0;
-      gen_subscribed = 0;
+      gen_subscribed.store(0);
       first_generation = /*free_generation =*/ 0;
       next_free = 0;
       remote_subscribe_gens.clear();
@@ -2004,6 +2003,7 @@ namespace Realm {
       initial_value = 0;
       value_capacity = 0;
       final_values = 0;
+      generation.store_release(0);
     }
 
     /*static*/ void BarrierAdjustMessage::handle_message(NodeID sender, const BarrierAdjustMessage &args,
@@ -2269,7 +2269,7 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// update whatever generation we're told to
 	{
-	  assert(barrier_gen > generation);
+	  assert(barrier_gen > generation.load());
 	  Generation *g;
 	  std::map<gen_t, Generation *>::iterator it = generations.find(barrier_gen);
 	  if(it != generations.end()) {
@@ -2285,36 +2285,38 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// if the update was to the next generation, it may cause one or more generations
 	//  to trigger
-	if(barrier_gen == (generation + 1)) {
+	if(barrier_gen == (generation.load() + 1)) {
 	  std::map<gen_t, Generation *>::iterator it = generations.begin();
 	  while((it != generations.end()) &&
-		(it->first == (generation + 1)) &&
+		(it->first == (generation.load() + 1)) &&
 		((base_arrival_count + it->second->unguarded_delta) == 0)) {
 	    // keep the list of local waiters to wake up once we release the lock
 	    local_notifications.absorb_append(it->second->local_waiters);
-	    trigger_gen = generation = it->first;
+	    trigger_gen = it->first;
+            generation.store_release(it->first);
 	    generation_updated = true;
+
 	    delete it->second;
 	    generations.erase(it);
 	    it = generations.begin();
 	  }
 
-	  // if any triggers occurred, figure out which remote nodes need notifications
-	  //  (i.e. any who have subscribed)
-	  if(generation >= barrier_gen) {
+	  // if any triggers occurred, figure out
+          //  which remote nodes need notifications (i.e. any who subscribed)
+	  if(trigger_gen >= barrier_gen) {
 	    std::map<unsigned, gen_t>::iterator it = remote_subscribe_gens.begin();
 	    while(it != remote_subscribe_gens.end()) {
 	      RemoteNotification rn;
 	      rn.node = it->first;
-	      if(it->second <= generation) {
+	      if(it->second <= trigger_gen) {
 		// we have fulfilled the entire subscription
 		rn.trigger_gen = it->second;
 		std::map<unsigned, gen_t>::iterator to_nuke = it++;
 		remote_subscribe_gens.erase(to_nuke);
 	      } else {
 		// subscription remains valid
-		rn.trigger_gen = generation;
-		it++;
+		rn.trigger_gen = trigger_gen;
+		++it;
 	      }
 	      // also figure out what the previous generation this node knew about was
 	      {
@@ -2341,7 +2343,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  //  (either arrivals or waiters or a subscription that will become a waiter)
 	  // finally (hah!), do not migrate barriers using reduction ops
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-	     generations.empty() && (gen_subscribed <= generation) &&
+	     generations.empty() && (gen_subscribed.load() <= generation.load()) &&
 	     (redop == 0) &&
              (NodeID(ID(me).barrier_creator_node()) == Network::my_node_id)) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
@@ -2349,7 +2351,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    owner = migration_target;
             // remember that we had up to date information up to this generation so that we don't try to
             //   subscribe to things we already know about
-            gen_subscribed = generation;
+            gen_subscribed.store(generation.load());
 	  }
 #endif
 	}
@@ -2452,13 +2454,13 @@ static void *bytedup(const void *data, size_t datalen)
       poisoned = POISON_FIXME;
 
       // no need to take lock to check current generation
-      if(needed_gen <= generation) return true;
+      if(needed_gen <= generation.load_acquire()) return true;
 
 #ifdef BARRIER_HAS_TRIGGERED_DOES_SUBSCRIBE
       // update the subscription (even on the local node), but do a
       //  quick test first to avoid taking a lock if the subscription is
       //  clearly already done
-      if(gen_subscribed < needed_gen) {
+      if(needed_gen > gen_subscribed.load()) {
 	// looks like it needs an update - take lock to avoid duplicate
 	//  subscriptions
 	gen_t previous_subscription;
@@ -2466,9 +2468,9 @@ static void *bytedup(const void *data, size_t datalen)
         NodeID cur_owner = (NodeID) -1;
 	{
 	  AutoLock<> a(mutex);
-	  previous_subscription = gen_subscribed;
-	  if(gen_subscribed < needed_gen) {
-	    gen_subscribed = needed_gen;
+	  previous_subscription = gen_subscribed.load();
+	  if(needed_gen > previous_subscription) {
+	    gen_subscribed.store(needed_gen);
 	    // test ownership while holding the mutex
 	    if(owner != Network::my_node_id) {
 	      send_subscription_request = true;
@@ -2494,7 +2496,7 @@ static void *bytedup(const void *data, size_t datalen)
       // update the subscription (even on the local node), but do a
       //  quick test first to avoid taking a lock if the subscription is
       //  clearly already done
-      if(gen_subscribed < subscribe_gen) {
+      if(subscribe_gen > gen_subscribed.load()) {
 	// looks like it needs an update - take lock to avoid duplicate
 	//  subscriptions
 	gen_t previous_subscription;
@@ -2502,9 +2504,9 @@ static void *bytedup(const void *data, size_t datalen)
         NodeID cur_owner = (NodeID) -1;
 	{
 	  AutoLock<> a(mutex);
-	  previous_subscription = gen_subscribed;
-	  if(gen_subscribed < subscribe_gen) {
-	    gen_subscribed = subscribe_gen;
+	  previous_subscription = gen_subscribed.load();
+	  if(previous_subscription < subscribe_gen) {
+	    gen_subscribed.store(subscribe_gen);
 	    // test ownership while holding the mutex
 	    if(owner != Network::my_node_id) {
 	      send_subscription_request = true;
@@ -2523,6 +2525,12 @@ static void *bytedup(const void *data, size_t datalen)
   
     void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
+      poisoned = POISON_FIXME;
+
+      // early out for now without taking lock (TODO: fix for poisoning)
+      if(gen_needed <= generation.load_acquire())
+        return;
+
       // make sure we're subscribed to a (potentially-remote) trigger
       this->subscribe(gen_needed);
 
@@ -2530,7 +2538,7 @@ static void *bytedup(const void *data, size_t datalen)
 	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
-	while(gen_needed > generation) {
+	while(gen_needed > generation.load()) {
 	  has_external_waiters = true;
           // must wait on external_waiter_condvar with external_waiter_mutex
           //  but NOT with base mutex - hand-over-hand lock on the way in,
@@ -2542,20 +2550,26 @@ static void *bytedup(const void *data, size_t datalen)
           external_waiter_mutex.unlock();
           mutex.lock();
 	}
-
-	poisoned = POISON_FIXME;
       }
     }
 
     bool BarrierImpl::external_timedwait(gen_t gen_needed, bool& poisoned,
 					 long long max_ns)
     {
+      poisoned = POISON_FIXME;
+
+      // early out for now without taking lock (TODO: fix for poisoning)
+      if(gen_needed <= generation.load_acquire()) return true;
+
+      // make sure we're subscribed to a (potentially-remote) trigger
+      this->subscribe(gen_needed);
+
       long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
       {
 	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
-	while(gen_needed > generation) {
+	while(gen_needed > generation.load()) {
 	  long long now = Clock::current_time_in_nanoseconds();
 	  if(now >= deadline)
 	    return false;  // trigger has not occurred
@@ -2572,8 +2586,6 @@ static void *bytedup(const void *data, size_t datalen)
           external_waiter_mutex.unlock();
           mutex.lock();
 	}
-
-	poisoned = POISON_FIXME;
       }
       return true;
     }
@@ -2587,7 +2599,7 @@ static void *bytedup(const void *data, size_t datalen)
       {
 	AutoLock<> a(mutex);
 
-	if(needed_gen > generation) {
+	if(needed_gen > generation.load()) {
 	  Generation *g;
 	  std::map<gen_t, Generation *>::iterator it = generations.find(needed_gen);
 	  if(it != generations.end()) {
@@ -2601,9 +2613,9 @@ static void *bytedup(const void *data, size_t datalen)
 
 	  // check to see if we need to subscribe
 	  if((owner != Network::my_node_id) &&
-	     (gen_subscribed < needed_gen)) {
-	    previous_subscription = gen_subscribed;
-	    gen_subscribed = needed_gen;
+	     (gen_subscribed.load() < needed_gen)) {
+	    previous_subscription = gen_subscribed.load();
+	    gen_subscribed.store(needed_gen);
 	    send_subscription_request = true;
 	    cur_owner = owner;
 	  }
@@ -2629,7 +2641,7 @@ static void *bytedup(const void *data, size_t datalen)
     {
       AutoLock<> a(mutex);
 
-      if(needed_gen <= generation) {
+      if(needed_gen <= generation.load()) {
 	// already triggered, so nothing to remove
 	return false;
       }
@@ -2686,7 +2698,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(it != impl->remote_subscribe_gens.end()) {
 	    // a valid subscription should always be for a generation that hasn't
 	    //  triggered yet
-	    assert(it->second > impl->generation);
+	    assert(it->second > impl->generation.load());
 	    if(it->second >= args.subscribe_gen)
 	      already_subscribed = true;
 	    else
@@ -2697,21 +2709,23 @@ static void *bytedup(const void *data, size_t datalen)
 	    // NOTE: remote_subscribe_gens should only hold subscriptions for
 	    //  generations that haven't triggered, so if we're subscribing to 
 	    //  an old generation, don't add it
-	    if(args.subscribe_gen > impl->generation)
+	    if(args.subscribe_gen > impl->generation.load())
 	      impl->remote_subscribe_gens[args.subscriber] = args.subscribe_gen;
 	  }
 	}
 
 	// as long as we're not already subscribed to this generation, check to see if
 	//  any trigger notifications are needed
-	if(!already_subscribed && (impl->generation > impl->first_generation)) {
+	if(!already_subscribed &&
+           (impl->generation.load() > impl->first_generation)) {
 	  std::map<unsigned, EventImpl::gen_t>::iterator it = impl->remote_trigger_gens.find(args.subscriber);
-	  if((it == impl->remote_trigger_gens.end()) || (it->second < impl->generation)) {
+	  if((it == impl->remote_trigger_gens.end()) ||
+             (it->second < impl->generation.load())) {
 	    previous_gen = ((it == impl->remote_trigger_gens.end()) ?
 			      impl->first_generation :
 			      it->second);
-	    trigger_gen = impl->generation;
-	    impl->remote_trigger_gens[args.subscriber] = impl->generation;
+	    trigger_gen = impl->generation.load();
+	    impl->remote_trigger_gens[args.subscriber] = impl->generation.load();
 
 	    if(impl->redop) {
 	      int rel_gen = previous_gen + 1 - impl->first_generation;
@@ -2780,7 +2794,7 @@ static void *bytedup(const void *data, size_t datalen)
 	// NOTE: it's ok for previous_gen to be earlier than our current generation - this
 	//  occurs with barrier migration because the new owner may not know which notifications
 	//  have already been performed
-	if(args.previous_gen <= impl->generation) {
+	if(args.previous_gen <= impl->generation.load()) {
 	  // see if we can pick up any of the held triggers too
 	  while(!impl->held_triggers.empty()) {
 	    std::map<EventImpl::gen_t, EventImpl::gen_t>::iterator it = impl->held_triggers.begin();
@@ -2793,8 +2807,8 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->held_triggers.erase(it);
 	  }
 
-	  if(trigger_gen > impl->generation) {
-	    impl->generation = trigger_gen;
+	  if(trigger_gen > impl->generation.load()) {
+	    impl->generation.store_release(trigger_gen);
 	    generation_updated = true;
 	  }
 
@@ -2811,7 +2825,7 @@ static void *bytedup(const void *data, size_t datalen)
 	} else {
 	  // hold this trigger until we get messages for the earlier generation(s)
 	  log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
-			   args.barrier_id, impl->generation, 
+			   args.barrier_id, impl->generation.load(), 
 			   args.previous_gen, trigger_gen);
 	  impl->held_triggers[args.previous_gen] = trigger_gen;
 	}
@@ -2862,11 +2876,11 @@ static void *bytedup(const void *data, size_t datalen)
 
     bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)
     {
+      // generation hasn't triggered yet?
+      if(result_gen > generation.load_acquire()) return false;
+
       // take the lock so we can safely see how many results (if any) are on hand
       AutoLock<> al(mutex);
-
-      // generation hasn't triggered yet?
-      if(result_gen > generation) return false;
 
       // if it has triggered, we should have the data
       int rel_gen = result_gen - first_generation;

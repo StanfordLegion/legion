@@ -19,7 +19,7 @@ from __future__ import print_function
 import argparse, os, platform, subprocess, sys
 
 def test(root_dir, install_only, debug, max_dim, short, no_pretty,
-         spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
+         spy, prof, gcov, hdf5, cuda, hip, openmp, python, jobs, env):
     if 'TRAVIS' in env:
         install_threads = ['-j', '2']
         test_threads = ['-j', '2']
@@ -72,7 +72,10 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
         if cuda:
-            extra_flags.append('--cuda')
+            extra_flags.append('--gpu=cuda')
+            test_threads = ['-j', '1']  # do not oversubscribe GPU
+        if hip:
+            extra_flags.append('--gpu=hip')
             test_threads = ['-j', '1']  # do not oversubscribe GPU
         if openmp: extra_flags.append('--openmp')
         if python: extra_flags.append('--python')
@@ -117,8 +120,9 @@ if __name__ == '__main__':
     gcov = env.get('TEST_GCOV') == '1'
     hdf5 = env.get('TEST_HDF') == '1'
     cuda = env.get('TEST_CUDA') == '1'
+    hip = env.get('TEST_HIP') == '1'
     openmp = env.get('TEST_OPENMP') == '1'
     python = env.get('TEST_PYTHON') == '1'
     jobs = int(env['REGENT_JOBS']) if 'REGENT_JOBS' in env else 1
     test(root_dir, args.install_only, debug, max_dim, short, no_pretty,
-         spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env)
+         spy, prof, gcov, hdf5, cuda, hip, openmp, python, jobs, env)
