@@ -48,6 +48,11 @@ def discover_conduit():
     else:
         raise Exception('Please set CONDUIT in your environment')
 
+def short_conduit(conduit):
+    if conduit is not None and conduit.startswith('ofi-'):
+        return 'ofi'
+    return conduit
+
 def gasnet_enabled():
     if 'USE_GASNET' in os.environ:
         return os.environ['USE_GASNET'] == '1'
@@ -202,8 +207,7 @@ def build_hdf(source_dir, install_dir, thread_count, is_cray):
 
 def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
                  gasnet_dir, llvm_dir, terra_dir, hdf_dir, conduit, thread_count):
-    if conduit is not None and conduit.startswith('ofi-'):
-        conduit = 'ofi'
+    conduit = short_conduit(conduit)
 
     env = dict(list(os.environ.items()) +
         ([('CONDUIT', conduit),
@@ -422,10 +426,11 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
         if not cache:
             conduit = discover_conduit()
+            conduit_short = short_conduit(conduit)
             gasnet_release_dir = os.path.join(gasnet_dir, 'release')
             gasnet_build_result = os.path.join(
-                gasnet_release_dir, '%s-conduit' % conduit,
-                'libgasnet-%s-par.a' % conduit)
+                gasnet_release_dir, '%s-conduit' % conduit_short,
+                'libgasnet-%s-par.a' % conduit_short)
             if not os.path.exists(gasnet_release_dir):
                 try:
                     build_gasnet(gasnet_dir, conduit)
