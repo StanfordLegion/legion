@@ -1454,7 +1454,7 @@ namespace Legion {
         {
           const AddressSpaceID parent =
             collective_mapping->get_parent(owner_space, local_space);
-          send_remove_valid_increment(parent, mutator);
+          send_remote_valid_increment(parent, mutator);
         }
         else
           send_remote_valid_increment(owner_space, mutator);
