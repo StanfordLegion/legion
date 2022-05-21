@@ -4253,8 +4253,28 @@ namespace Legion {
       // After elide fences we can clear these views
       op_views.clear();
       copy_views.clear();
-      src_indirect_views.clear();
-      dst_indirect_views.clear();
+      // Check to see if the indirection fields for any across copies are
+      // mutated during the execution of the trace. If they aren't then we
+      // know that we don't need to recompute preimages on back-to-back replays
+      if (!across_copies.empty())
+      {
+        for (std::vector<IssueAcross*>::const_iterator it =
+              across_copies.begin(); it != across_copies.end(); it++)
+        {
+          std::map<unsigned,ViewExprs>::iterator finder =
+            src_indirect_views.find((*it)->lhs);
+          if ((finder != src_indirect_views.end()) &&
+              are_read_only_users(finder->second))
+            (*it)->executor->record_trace_immutable_indirection(true/*src*/);
+          finder = dst_indirect_views.find((*it)->lhs);
+          if ((finder != dst_indirect_views.end()) &&
+              are_read_only_users(finder->second))
+            (*it)->executor->record_trace_immutable_indirection(false/*dst*/);
+        }
+        across_copies.clear();
+        src_indirect_views.clear();
+        dst_indirect_views.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6796,6 +6816,48 @@ namespace Legion {
         }
     }
 
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::are_read_only_users(ViewExprs &view_exprs)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (ViewExprs::const_iterator vit = 
+            view_exprs.begin(); vit != view_exprs.end(); vit++)
+      {
+        ViewUsers::const_iterator finder = view_users.find(vit->first);
+#ifdef DEBUG_LEGION
+        assert(finder != view_users.end());
+#endif
+        for (FieldMaskSet<ViewUser>::const_iterator uit =
+              finder->second.begin(); uit != finder->second.end(); uit++)
+        {
+          // If the user is read-only then we don't care
+          if (IS_READ_ONLY(uit->first->usage))
+            continue;
+          // If there are no overlapping fields then there is nothing
+          // to care about
+          if (uit->second * vit->second.get_valid_mask())
+            continue;
+          // Now check all the expressions and see if they are independent
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+          {
+            // If there are no overlapping fields then we are good
+            if (uit->second * it->second)
+              continue;
+            // Last chance: check to see if the expressions are independent
+            IndexSpaceExpression *intersect = 
+              forest->intersect_index_spaces(uit->first->expr, it->first);
+            if (intersect->is_empty())
+              continue;
+            // Not immutable
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
     /////////////////////////////////////////////////////////////
     // ShardedPhysicalTemplate
     /////////////////////////////////////////////////////////////
@@ -7547,6 +7609,75 @@ namespace Legion {
               }
             }
             derez.deserialize(done);
+            break;
+          }
+        case READ_ONLY_USERS_REQUEST:
+          {
+            ShardID source_shard;
+            derez.deserialize(source_shard);
+#ifdef DEBUG_LEGION
+            assert(source_shard != repl_ctx->owner_shard->shard_id);
+#endif
+            ViewExprs view_exprs;
+            size_t num_views;
+            derez.deserialize(num_views);
+            std::vector<RtEvent> ready_events;
+            RegionTreeForest *forest = trace->runtime->forest;
+            for (unsigned vidx = 0; vidx < num_views; vidx++)
+            {
+              DistributedID view_did;
+              derez.deserialize(view_did);
+              RtEvent view_ready;
+              InstanceView *view = static_cast<InstanceView*>(
+                runtime->find_or_request_logical_view(view_did, view_ready));
+              if (view_ready.exists())
+                ready_events.push_back(view_ready);
+              FieldMaskSet<IndexSpaceExpression> &exprs = view_exprs[view];
+              size_t num_exprs;
+              derez.deserialize(num_exprs);
+              for (unsigned idx = 0; idx < num_exprs; idx++)
+              {
+                IndexSpaceExpression *expr = 
+                 IndexSpaceExpression::unpack_expression(derez, forest, source);
+                FieldMask mask;
+                derez.deserialize(mask);
+                exprs.insert(expr, mask);
+              }
+            }
+            std::atomic<bool> *result;
+            derez.deserialize(result);
+            derez.deserialize(done);
+            ShardManager *manager = repl_ctx->shard_manager;
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            if (!PhysicalTemplate::are_read_only_users(view_exprs))
+            {
+              Serializer rez;
+              rez.serialize(manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize(template_index);
+              rez.serialize(READ_ONLY_USERS_RESPONSE);
+              rez.serialize(result);
+              rez.serialize(done);
+              manager->send_trace_update(source_shard, rez);
+              // Make sure we don't double trigger
+              done = RtUserEvent::NO_RT_USER_EVENT;
+            }
+            // Otherwise we can just fall through and trigger the event
+            break;
+          }
+        case READ_ONLY_USERS_RESPONSE:
+          {
+            std::atomic<bool> *result;
+            derez.deserialize(result);
+            result->store(false);
+            RtUserEvent done;
+            derez.deserialize(done);
+            Runtime::trigger_event(done);
             break;
           }
         case TEMPLATE_BARRIER_REFRESH:
@@ -8720,6 +8851,69 @@ namespace Legion {
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedPhysicalTemplate::are_read_only_users(ViewExprs &view_exprs)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ShardID,ViewExprs> shard_view_exprs;
+      for (ViewExprs::iterator vit = 
+            view_exprs.begin(); vit != view_exprs.end(); vit++)
+      {
+        const ShardID owner_shard = find_view_owner(vit->first); 
+        shard_view_exprs[owner_shard][vit->first].swap(vit->second);
+      }
+      std::atomic<bool> result(true);
+      std::vector<RtEvent> done_events;
+      ShardManager *manager = repl_ctx->shard_manager;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      for (std::map<ShardID,ViewExprs>::iterator sit = 
+            shard_view_exprs.begin(); sit != shard_view_exprs.end(); sit++)
+      {
+        if (sit->first != local_shard)
+        {
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          const AddressSpaceID target = manager->get_shard_space(sit->first);
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(sit->first);
+          rez.serialize(template_index);
+          rez.serialize(READ_ONLY_USERS_REQUEST);
+          rez.serialize(local_shard);
+          rez.serialize<size_t>(sit->second.size());
+          for (ViewExprs::const_iterator vit = 
+                sit->second.begin(); vit != sit->second.end(); vit++)
+          {
+            rez.serialize(vit->first->did);
+            rez.serialize<size_t>(vit->second.size());
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              it->first->pack_expression(rez, target);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(&result);
+          rez.serialize(done);
+          manager->send_trace_update(sit->first, rez);
+          done_events.push_back(done);
+        }
+        else if (!PhysicalTemplate::are_read_only_users(sit->second))
+        {
+          // Still need to wait for anyone else to write to result if 
+          // they end up finding out that they are not read-only
+          result.store(false);
+          break;
+        }
+      }
+      if (!done_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(done_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      return result.load();
     }
 
     //--------------------------------------------------------------------------

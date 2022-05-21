@@ -1083,6 +1083,8 @@ namespace Legion {
                                    const FieldMask &mask,
                                    std::set<unsigned> &users,
                                    std::set<RtEvent> &ready_events);
+      // Check to see if any users are mutating these fields and expressions
+      virtual bool are_read_only_users(ViewExprs &view_exprs);
       void rewrite_preconditions(unsigned &precondition,
                            std::set<unsigned> &users,
                            const std::vector<Instruction*> &instructions,
@@ -1216,6 +1218,8 @@ namespace Legion {
         FIND_LAST_USERS_RESPONSE,
         FIND_FRONTIER_REQUEST,
         FIND_FRONTIER_RESPONSE,
+        READ_ONLY_USERS_REQUEST,
+        READ_ONLY_USERS_RESPONSE,
         TEMPLATE_BARRIER_REFRESH,
         FRONTIER_BARRIER_REFRESH,
       };
@@ -1380,6 +1384,7 @@ namespace Legion {
                                    const FieldMask &mask,
                                    std::set<unsigned> &users,
                                    std::set<RtEvent> &ready_events);
+      virtual bool are_read_only_users(ViewExprs &view_exprs);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
