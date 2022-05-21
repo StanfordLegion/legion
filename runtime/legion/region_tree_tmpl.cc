@@ -110,7 +110,7 @@ namespace Legion {
 				     const std::vector<FieldDataDescriptor> &, \
 				     ApEvent); \
   template ApEvent CopyAcrossUnstructuredT<INST_N1,T1>:: \
-    compute_preimages<INST_N2,T2>(std::vector<DomainT<INST_N1,T1> >&, \
+    perform_compute_preimages<INST_N2,T2>(std::vector<DomainT<INST_N1,T1> >&, \
                                      Operation*, \
                                      ApEvent, \
                                      const bool); \

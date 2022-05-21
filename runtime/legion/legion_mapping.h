@@ -917,6 +917,13 @@ namespace Legion {
        * structure with the kind of measurements desired. The priority
        * with which this information is sent back to the mapper can be 
        * set with 'profiling_priority'.
+       *
+       * The mapper can say whether or not the runtime should compute preimages
+       * for any indirection fields in the copy operation. This will incur an
+       * additional latency in the copy operation, but can reduce the number
+       * of instances that must be investigated for performing the indirect
+       * copies which can improve overall performance and scalability. The
+       * default is not to compute the preimages.
        */
       struct MapCopyInput {
         std::vector<std::vector<PhysicalInstance> >   src_instances;
@@ -939,6 +946,7 @@ namespace Legion {
         std::set<unsigned>                            untracked_valid_ind_dsts;
         ProfilingRequest                              profiling_requests;
         TaskPriority                                  profiling_priority;
+        bool                                          compute_preimages;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
