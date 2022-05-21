@@ -489,6 +489,15 @@ function cudahelper.generate_atomic_update(op, typ)
     end
   end
 
+  if typ ~= float and get_cuda_version() < 60 then
+    -- For older hardware (Kepler/Maxwell), we need to generate the
+    -- slow atomic since LLVM cannot generate the right instructions
+    -- for these GPUs.
+    local atomic_op = common.generate_slow_atomic(op, typ)
+    assert(atomic_op)
+    return atomic_op
+  end
+
   local atomic_op = common.generate_atomic_update(op, typ)
   assert(atomic_op)
   return atomic_op
