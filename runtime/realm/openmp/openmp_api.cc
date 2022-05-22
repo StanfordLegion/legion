@@ -1264,6 +1264,7 @@ namespace Realm {
        (wi->num_threads == 1) ||
        ((incr > 0) && (*plower > *pupper)) ||
        ((incr < 0) && (*plower < *pupper))) {
+      *pstride = *pupper - *plower + ((incr > 0) ? 1 : -1);
       return;
     }
 
@@ -1275,8 +1276,10 @@ namespace Realm {
 	T iters;
 	if(incr > 0) {
 	  iters = 1 + (*pupper - *plower) / incr;
+          *pstride = *pupper - *plower + 1;
 	} else {
 	  iters = 1 + (*plower - *pupper) / -incr;
+          *pstride = *pupper - *plower - 1;
 	}
 	T whole = iters / wi->num_threads;
 	T leftover = iters - (whole * wi->num_threads);
