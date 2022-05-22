@@ -935,7 +935,7 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
     public:
       // For collective instance creation
-      virtual bool supports_collective_instances(void) const { return true; }
+      virtual bool supports_collective_instances(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual RtEvent acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,

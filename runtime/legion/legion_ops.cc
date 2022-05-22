@@ -9648,6 +9648,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PointCopyOp::supports_collective_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We only support collective instances if we don't have any 
+      // intra-index launch mapping dependences. Check to see if any
+      // of our destination region requirements are invertible
+      for (unsigned idx = 0; idx < owner->dst_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = owner->dst_requirements[idx];
+        if (!IS_WRITE(req))
+          continue;
+        // If the projection functions are invertible then we don't have to 
+        // worry about interference because the runtime knows how to hook
+        // up those kinds of dependences
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+          return false;
+        ProjectionFunction *func =
+          runtime->find_projection_function(req.projection);   
+        if (!func->is_invertible)
+          continue;
+        return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     DomainPoint PointCopyOp::get_collective_instance_point(void) const
     //--------------------------------------------------------------------------
     {

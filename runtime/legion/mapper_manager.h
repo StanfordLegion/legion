@@ -25,18 +25,19 @@ namespace Legion {
     class MappingCallInfo {
     public:
       MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      Operation *op = NULL); 
+                      Operation *op, bool supports_collectives); 
     public:
       MapperManager*const               manager;
       RtUserEvent                       resume;
-      MappingCallKind                   kind;
-      Operation*                        operation;
+      const MappingCallKind             kind;
+      Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
       unsigned                          collective_count;
       bool                              reentrant_disabled;
-      bool                              supports_collectives;
+      const bool                        supports_collectives;
+      const bool                        operation_supports_collectives;
     };
 
     /**
@@ -295,7 +296,8 @@ namespace Legion {
     protected:
       friend class Runtime;
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
+          Operation *op, RtEvent &precondition, 
+          bool prioritize = false, bool supports_collectives = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
@@ -610,7 +612,8 @@ namespace Legion {
       int find_local_MPI_rank(void);
     protected:
       // Both these must be called while holding the lock
-      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op);
+      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op,
+                                          bool supports_collectives);
       void free_call_info(MappingCallInfo *info);
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
@@ -668,7 +671,8 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition, bool prioritize = false);
+          Operation *op, RtEvent &precondition, 
+          bool prioritize = false, bool supports_collectives = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
@@ -726,7 +730,8 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition, bool prioritize = false);
+          Operation *op, RtEvent &precondition,
+          bool prioritize = false, bool supports_collectives = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
