@@ -6945,6 +6945,21 @@ namespace Legion {
         result = ApEvent(copy_domain.create_subspaces_by_preimage(
               descriptors, targets, preimages, requests, precondition));
       }
+      std::vector<ApEvent> valid_events;
+      // We also need to make sure that all the sparsity maps are valid
+      // on this node before we test them
+      for (unsigned idx = 0; idx < preimages.size(); idx++)
+      {
+        const ApEvent valid(preimages[idx].make_valid());
+        if (valid.exists())
+          valid_events.push_back(valid);
+      }
+      if (!valid_events.empty())
+      {
+        if (result.exists())
+          valid_events.push_back(result);
+        result = Runtime::merge_events(NULL, valid_events);
+      }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
