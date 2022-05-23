@@ -5,6 +5,7 @@ set -x
 
 # job directory
 JOB_WORKDIR="${EXTERNAL_WORKDIR}_${CI_JOB_ID}"
+rm -rf $JOB_WORKDIR
 cp -r $EXTERNAL_WORKDIR $JOB_WORKDIR
 cd $JOB_WORKDIR
 echo "Running tests in $JOB_WORKDIR"
