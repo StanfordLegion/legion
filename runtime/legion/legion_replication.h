@@ -2389,9 +2389,10 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual size_t get_collective_local_arrivals(void) const;
       virtual CollectiveMapping* get_collective_mapping(void);

@@ -4375,20 +4375,105 @@ namespace Legion {
       else
       {
         InstanceView *inst_view = src_view->as_instance_view();
-        update_fields |= src_mask;
-        FieldMaskSet<Update> &updates = sources[dst_view];
-        record_view(dst_view);
-        record_view(inst_view);
-        CopyUpdate *update = 
-          new CopyUpdate(inst_view, src_mask, expr, redop, helper);
-        if (helper == NULL)
-          updates.insert(update, src_mask);
-        else
-          updates.insert(update, helper->convert_src_to_dst(src_mask));
-        if (tracing_eq != NULL)
-          update_tracing_valid_views(tracing_eq, inst_view, dst_view, 
-                                     src_mask, expr, redop, applied);
+        DomainPoint src_point;
+        if (inst_view->manager->is_collective_manager())
+        {
+          std::vector<InstanceView*> src_views(1, inst_view);
+          const SelectSourcesResult &result = 
+            select_sources(dst_view, src_views);
+#ifdef DEBUG_LEGION
+          assert(result.ranking.size() == 1);
+#endif
+          std::map<unsigned,DomainPoint>::const_iterator finder =
+            result.collective_keys.find(0);
+          if (finder != result.collective_keys.end())
+            src_point = finder->second;
+        }
+        record_instance_update(dst_view, inst_view, src_mask, src_point,
+                               expr, tracing_eq, applied, redop, helper);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_instance_update(InstanceView *dst_view,
+                                                  InstanceView *src_view,
+                                                  const FieldMask &src_mask,
+                                                  const DomainPoint &src_point,
+                                                  IndexSpaceExpression *expr,
+                                                  EquivalenceSet *tracing_eq,
+                                                  std::set<RtEvent> &applied,
+                                                  ReductionOpID redop,
+                                                  CopyAcrossHelper *helper)
+    //--------------------------------------------------------------------------
+    {
+      update_fields |= src_mask;
+      record_view(dst_view);
+      record_view(src_view);
+      CopyUpdate *update = 
+        new CopyUpdate(src_view, src_mask, src_point, expr, redop, helper);
+      FieldMaskSet<Update> &updates = sources[dst_view];
+      if (helper == NULL)
+        updates.insert(update, src_mask);
+      else
+        updates.insert(update, helper->convert_src_to_dst(src_mask));
+      if (tracing_eq != NULL)
+        update_tracing_valid_views(tracing_eq, src_view, dst_view, 
+                                   src_mask, expr, redop, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    const CopyFillAggregator::SelectSourcesResult& 
+        CopyFillAggregator::select_sources(InstanceView *dst_view, 
+                                    const std::vector<InstanceView*> &src_views)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dst_view != NULL);
+      assert(!src_views.empty());
+#endif
+      std::map<InstanceView*,std::vector<SelectSourcesResult> >::iterator
+        finder = mapper_queries.find(dst_view);
+      if (finder != mapper_queries.end())
+      {
+        for (std::vector<SelectSourcesResult>::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+          if (it->matches(src_views))
+            return *it;
+      }
+      else
+        finder = mapper_queries.insert(
+            std::make_pair(dst_view,std::vector<SelectSourcesResult>())).first;
+      // If we didn't find the query result we need to do it for ourself
+      std::vector<unsigned> ranking;
+      std::map<unsigned,DomainPoint> keys;
+      // Always use the source index for selecting sources
+      op->select_sources(src_index, dst_view, src_views ,ranking, keys);
+      // Check to make sure that the ranking has sound output
+      unsigned count = 0;
+      std::vector<bool> unique_indexes(src_views.size(), false);
+      for (std::vector<unsigned>::iterator it =
+            ranking.begin(); it != ranking.end(); /*nothing*/)
+      {
+        if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
+        {
+          unique_indexes[*it] = true;
+          count++;
+          it++;
+        }
+        else // remove duplicates and out of bound entries
+          it = ranking.erase(it);
+      }
+      if (count < unique_indexes.size())
+      {
+        for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
+          if (!unique_indexes[idx])
+            ranking.push_back(idx);
+      }
+      // Save the result for the future
+      finder->second.emplace_back(SelectSourcesResult(
+            std::vector<InstanceView*>(src_views)/*make a copy*/,
+            std::move(ranking), std::move(keys)));
+      return finder->second.back();
     }
 
     //--------------------------------------------------------------------------
@@ -4407,37 +4492,12 @@ namespace Legion {
       assert(!src_views.empty());
       assert(!expr->is_empty());
 #endif
-      update_fields |= src_mask;
-      FieldMaskSet<Update> &updates = sources[dst_view];
-      record_view(dst_view);
       if (src_views.size() == 1)
       {
-        const LogicalView *view = src_views.begin()->first;
-        const FieldMask record_mask = 
-          src_views.get_valid_mask() & src_mask;
-        if (!!record_mask)
-        {
-          if (view->is_instance_view())
-          {
-            InstanceView *inst = view->as_instance_view();
-            record_view(inst);
-            CopyUpdate *update = 
-              new CopyUpdate(inst, record_mask, expr, redop, helper);
-            if (helper == NULL)
-              updates.insert(update, record_mask);
-            else
-              updates.insert(update, helper->convert_src_to_dst(record_mask));
-            if (tracing_eq != NULL)
-              update_tracing_valid_views(tracing_eq, inst, dst_view, 
-                                         record_mask, expr, redop, applied);
-          }
-          else
-          {
-            DeferredView *def = view->as_deferred_view();
-            def->flatten(*this, dst_view, record_mask, expr, 
-                         tracing_eq, applied, helper);
-          }
-        }
+        LogicalView *src_view = src_views.begin()->first;
+        const FieldMask record_mask = src_views.get_valid_mask() & src_mask;
+        record_update(dst_view, src_view, record_mask, expr,
+                      tracing_eq, applied, redop, helper);
       }
       else
       {
@@ -4452,28 +4512,10 @@ namespace Legion {
           if (vit->elements.size() == 1)
           {
             // Easy case, just one view so do it  
-            const LogicalView *view = *(vit->elements.begin());
+            LogicalView *src_view = *(vit->elements.begin());
             const FieldMask &record_mask = vit->set_mask;
-            if (view->is_instance_view())
-            {
-              InstanceView *inst = view->as_instance_view();
-              record_view(inst);
-              CopyUpdate *update = 
-                new CopyUpdate(inst, record_mask, expr, redop, helper);
-              if (helper == NULL)
-                updates.insert(update, record_mask);
-              else
-                updates.insert(update, helper->convert_src_to_dst(record_mask));
-              if (tracing_eq != NULL)
-                update_tracing_valid_views(tracing_eq, inst, dst_view, 
-                                           record_mask, expr, redop, applied);
-            }
-            else
-            {
-              DeferredView *def = view->as_deferred_view();
-              def->flatten(*this, dst_view, record_mask, expr,
-                           tracing_eq, applied, helper);
-            }
+            record_update(dst_view, src_view, record_mask, expr,
+                          tracing_eq, applied, redop, helper); 
           }
           else
           {
@@ -4509,111 +4551,33 @@ namespace Legion {
             {
               if (instances.size() == 1)
               {
-                // Easy, just one instance to use
-                InstanceView *inst = instances.back();
-                record_view(inst);
-                CopyUpdate *update = 
-                  new CopyUpdate(inst, vit->set_mask, expr, redop, helper);
-                if (helper == NULL)
-                  updates.insert(update, vit->set_mask);
-                else
-                  updates.insert(update, 
-                      helper->convert_src_to_dst(vit->set_mask));
-                if (tracing_eq != NULL)
-                  update_tracing_valid_views(tracing_eq, inst, dst_view,
-                                   vit->set_mask, expr, redop, applied);
+                // Easy, just one instance to use and no collective instances
+                InstanceView *src_view = instances.back();
+                record_update(dst_view, src_view, vit->set_mask, expr,
+                              tracing_eq, applied, redop, helper);
               }
               else
               {
                 // Hard, multiple potential sources,
                 // ask the mapper which one to use
-                // First though check to see if we've already asked it
-                bool found = false;
-                std::map<InstanceView*,LegionVector<SourceQuery>>::
-                  const_iterator finder = mapper_queries.find(dst_view);
-                if (finder != mapper_queries.end())
+                const SelectSourcesResult &result = 
+                  select_sources(dst_view, instances);
+#ifdef DEBUG_LEGION
+                assert(result.ranking.size() == instances.size());
+#endif
+                const unsigned first = result.ranking.front();
+                InstanceView *src_view = instances[first];
+                // Find the source point if it is a collective instance
+                DomainPoint src_point;
+                if (src_view->manager->is_collective_manager())
                 {
-                  for (LegionVector<SourceQuery>::const_iterator qit = 
-                        finder->second.begin(); qit != 
-                        finder->second.end(); qit++)
-                  {
-                    if (qit->matches(vit->set_mask, instances))
-                    {
-                      found = true;
-                      InstanceView *result = instances[qit->ranking.front()];
-                      record_view(result);
-                      CopyUpdate *update = new CopyUpdate(result,
-                                    qit->query_mask, expr, redop, helper);
-                      if (helper == NULL)
-                        updates.insert(update, qit->query_mask);
-                      else
-                        updates.insert(update, 
-                            helper->convert_src_to_dst(qit->query_mask));
-                      if (tracing_eq != NULL)
-                        update_tracing_valid_views(tracing_eq, result,
-                          dst_view, qit->query_mask, expr, redop, applied);
-                      break;
-                    }
-                  }
+                  std::map<unsigned,DomainPoint>::const_iterator 
+                    key_finder = result.collective_keys.find(first);
+                  if (key_finder != result.collective_keys.end())
+                    src_point = key_finder->second;
                 }
-                if (!found)
-                {
-                  // If we didn't find the query result we need to do
-                  // it for ourself, start by constructing the inputs
-                  InstanceRef dst(dst_view->get_manager(),
-                      helper == NULL ? vit->set_mask : 
-                        helper->convert_src_to_dst(vit->set_mask));
-                  InstanceSet sources(instances.size());
-                  unsigned src_idx = 0;
-                  for (std::vector<InstanceView*>::const_iterator it = 
-                        instances.begin(); it != instances.end(); it++)
-                    sources[src_idx++] = InstanceRef((*it)->get_manager(),
-                                                     vit->set_mask);
-                  std::vector<unsigned> ranking;
-                  // Always use the source index for selecting sources
-                  op->select_sources(src_index, dst, sources, ranking);
-                  // Check to make sure that the ranking has sound output
-                  unsigned count = 0;
-                  std::vector<bool> unique_indexes(instances.size(), false);
-                  for (std::vector<unsigned>::iterator it =
-                        ranking.begin(); it != ranking.end(); /*nothing*/)
-                  {
-                    if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
-                    {
-                      unique_indexes[*it] = true;
-                      count++;
-                      it++;
-                    }
-                    else // remove duplicates and out of bound entries
-                      it = ranking.erase(it);
-                  }
-                  if (count < unique_indexes.size())
-                  {
-                    for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
-                      if (!unique_indexes[idx])
-                        ranking.push_back(idx);
-                  }
-                  // We know that which ever one was chosen first is
-                  // the one that satisfies all our fields since all
-                  // these instances are valid for all fields
-                  InstanceView *result = instances[ranking.front()];
-                  // Record the update
-                  record_view(result);
-                  CopyUpdate *update = new CopyUpdate(result, vit->set_mask,
-                                                      expr, redop, helper);
-                  if (helper == NULL)
-                    updates.insert(update, vit->set_mask);
-                  else
-                    updates.insert(update, 
-                        helper->convert_src_to_dst(vit->set_mask));
-                  if (tracing_eq != NULL)
-                    update_tracing_valid_views(tracing_eq, result, dst_view,
-                                       vit->set_mask, expr, redop, applied);
-                  // Save the result for the future
-                  mapper_queries[dst_view].push_back(
-                      SourceQuery(std::move(instances), 
-                        std::move(ranking), vit->set_mask));
-                }
+                record_instance_update(dst_view, src_view, vit->set_mask,
+                    src_point, expr, tracing_eq, applied, redop, helper);
               }
             }
             else
@@ -4727,76 +4691,33 @@ namespace Legion {
       if (!instances.empty())
       {
         std::vector<unsigned> ranking;
-        if (instances.size() > 1)
+        std::map<unsigned,DomainPoint> keys;
+        // Need to ask the mapper which instances it prefers if there are
+        // multiple choices or we have a collective instance to pick from
+        if ((instances.size() > 1) ||
+            instances.back()->manager->is_collective_manager())
         {
-          // Check to see if we can find it, if not then we'll need to
-          // ask the mapper to compute it
-          bool found = false;
-          std::map<InstanceView*,LegionVector<SourceQuery>>::
-            const_iterator finder = mapper_queries.find(dst_view);
-          if (finder != mapper_queries.end())
-          {
-            for (LegionVector<SourceQuery>::const_iterator qit = 
-                  finder->second.begin(); qit != 
-                  finder->second.end(); qit++)
-            {
-              if (qit->matches(src_mask, instances))
-              {
-                found = true;
-                ranking = qit->ranking;
-                break;
-              }
-            }
-          }
-          if (!found)
-          {
-            InstanceRef dst(dst_view->get_manager(), 
-                            remainders.get_valid_mask());
-            InstanceSet sources(instances.size());
-            unsigned src_idx = 0;
-            for (std::vector<InstanceView*>::const_iterator it = 
-                  instances.begin(); it != instances.end(); it++)
-            {
-              LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
-                const_iterator finder = src_views.find(*it);
-#ifdef DEBUG_LEGION
-              assert(finder != src_views.end());
-#endif
-              sources[src_idx++] = InstanceRef((*it)->get_manager(),
-                 finder->second.get_valid_mask() & remainders.get_valid_mask());
-            }
-            // Always use the source index for selecting sources
-            op->select_sources(src_index, dst, sources, ranking);
-            // Check to make sure that the ranking has sound output
-            unsigned count = 0;
-            std::vector<bool> unique_indexes(instances.size(), false);
-            for (std::vector<unsigned>::iterator it =
-                  ranking.begin(); it != ranking.end(); /*nothing*/)
-            {
-              if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
-              {
-                unique_indexes[*it] = true;
-                count++;
-                it++;
-              }
-              else // remove duplicates and out of bound entries
-                it = ranking.erase(it);
-            }
-            if (count < unique_indexes.size())
-            {
-              for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
-                if (!unique_indexes[idx])
-                  ranking.push_back(idx);
-            }
-          }
+          const SelectSourcesResult &result = 
+            select_sources(dst_view, instances);
+          ranking = result.ranking;
+          keys = result.collective_keys;
         }
         else
           ranking.push_back(0);
         for (unsigned idx = 0; idx < ranking.size(); idx++)
         {
-          InstanceView *inst = instances[ranking[idx]];
+          InstanceView *src_view = instances[ranking[idx]];
+          // Find the source key if this is a collective instance
+          DomainPoint src_point;
+          if (src_view->manager->is_collective_manager())
+          {
+            std::map<unsigned,DomainPoint>::const_iterator key_finder =
+              keys.find(ranking[idx]);
+            if (key_finder != keys.end())
+              src_point = key_finder->second;
+          }
           LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
-              const_iterator finder = src_views.find(inst);
+              const_iterator finder = src_views.find(src_view);
 #ifdef DEBUG_LEGION
           assert(finder != src_views.end());
 #endif
@@ -4825,11 +4746,11 @@ namespace Legion {
             if (overlap_size < it->first.first->get_volume())
             {
               if (overlap_size == it->first.second->get_volume())
-                record_update(dst_view, inst, it->second, it->first.second, 
-                                tracing_eq, applied, redop, across_helper);
+                record_instance_update(dst_view, src_view, it->second,src_point,
+                    it->first.second, tracing_eq, applied, redop,across_helper);
               else
-                record_update(dst_view, inst, it->second, overlap, 
-                              tracing_eq, applied, redop, across_helper);
+                record_instance_update(dst_view, src_view, it->second,src_point,
+                    overlap, tracing_eq, applied, redop, across_helper);
               // Compute the difference
               IndexSpaceExpression *diff_expr = 
                 forest->subtract_index_spaces(it->first.first, overlap);
@@ -4837,8 +4758,8 @@ namespace Legion {
             }
             else // completely covers remainder expression
             {
-              record_update(dst_view, inst, it->second, it->first.first, 
-                            tracing_eq, applied, redop, across_helper);
+              record_instance_update(dst_view, src_view, it->second, src_point,
+                  it->first.first, tracing_eq, applied, redop, across_helper);
               if (remainders.empty())
                 return;
               need_tighten = true;
@@ -4975,8 +4896,22 @@ namespace Legion {
 #endif
         record_view(it->first);
         const ReductionOpID redop = it->first->get_redop();
-        CopyUpdate *update =
-          new CopyUpdate(it->first,src_mask,it->second,redop,across_helper);
+        DomainPoint src_point;
+        if (it->first->manager->is_collective_manager())
+        {
+          std::vector<InstanceView*> src_views(1, it->first);
+          const SelectSourcesResult &result =
+            select_sources(dst_view, src_views);
+#ifdef DEBUG_LEGION
+          assert(result.ranking.size() == 1);
+#endif
+          std::map<unsigned,DomainPoint>::const_iterator finder =
+            result.collective_keys.find(0);
+          if (finder != result.collective_keys.end())
+            src_point = finder->second;
+        }
+        CopyUpdate *update = new CopyUpdate(it->first, src_mask, src_point,
+                                            it->second, redop, across_helper);
         // Ignore shadows when tracing, we only care about the normal
         // preconditions and postconditions for the copies
         if (tracing_eq != NULL)
@@ -5364,9 +5299,9 @@ namespace Legion {
                                     source->get_manager(), precondition,
                                     predicate_guard, update->redop, copy_expr,
                                     op, manage_dst_events ? dst_index
-                                      : src_index,
-                                    copy_mask, trace_info, recorded_events,
-                                    effects, cit->second[0]->across_helper,
+                                      : src_index, copy_mask, update->point,
+                                    trace_info, recorded_events, effects, 
+                                    cit->second[0]->across_helper, 
                                     manage_dst_events, restricted_output,
                                     track_events);
           if (result.exists())
@@ -5391,7 +5326,10 @@ namespace Legion {
 #endif
           // Have to group by source instances in order to merge together
           // different index space expressions for the same copy
-          std::map<InstanceView*,std::set<IndexSpaceExpression*> > fused_exprs;
+          // For collective instances we also need to group by the source
+          // point of the collective instance to use
+          std::map<std::pair<InstanceView*,DomainPoint>,
+                   std::set<IndexSpaceExpression*> > fused_exprs;
           const ReductionOpID redop = cit->second[0]->redop;
           for (std::vector<CopyUpdate*>::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
@@ -5404,18 +5342,22 @@ namespace Legion {
             // Should also have the same across helper as the first one
             assert(cit->second[0]->across_helper == (*it)->across_helper);
 #endif
-            fused_exprs[(*it)->source].insert((*it)->expr);
+            const std::pair<InstanceView*,DomainPoint> 
+              key((*it)->source, (*it)->point);
+            fused_exprs[key].insert((*it)->expr);
           }
-          for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
-               iterator it = fused_exprs.begin(); it != fused_exprs.end(); it++)
+          for (std::map<std::pair<InstanceView*,DomainPoint>,
+                        std::set<IndexSpaceExpression*> >::const_iterator it =
+               fused_exprs.begin(); it != fused_exprs.end(); it++)
           {
             IndexSpaceExpression *copy_expr = (it->second.size() == 1) ?
                 *(it->second.begin()) : forest->union_index_spaces(it->second);
-            const ApEvent result = target_manager->copy_from(it->first, target,
-                                    it->first->get_manager(), precondition,
-                                    predicate_guard, redop, copy_expr, op,
-                                    manage_dst_events ? dst_index : 
-                                      src_index, copy_mask, trace_info, 
+            const ApEvent result = target_manager->copy_from(it->first.first, 
+                                    target, it->first.first->get_manager(), 
+                                    precondition, predicate_guard, redop,
+                                    copy_expr, op, manage_dst_events ? 
+                                      dst_index : src_index, copy_mask, 
+                                    it->first.second, trace_info, 
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,

@@ -8311,9 +8311,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8323,8 +8324,7 @@ namespace Legion {
       std::vector<unsigned> remote_ranking;
       for (unsigned idx = 0; idx < sources.size(); idx++)
       {
-        const InstanceRef &ref = sources[idx];
-        PhysicalManager *manager = ref.get_physical_manager();
+        PhysicalManager *manager = sources[idx]->get_manager();
         if (manager->is_external_instance())
           continue;
         if (manager->owner_space == runtime->address_space)

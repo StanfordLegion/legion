@@ -1116,9 +1116,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::select_sources(const unsigned index,
-                                   const InstanceRef &target,
-                                   const InstanceSet &sources,
-                                   std::vector<unsigned> &ranking)
+                                   InstanceView *target,
+                                   const std::vector<InstanceView*> &sources,
+                                   std::vector<unsigned> &ranking,
+                                   std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -1953,14 +1954,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::prepare_for_mapping(const InstanceRef &ref,
+    /*static*/ void Operation::prepare_for_mapping(InstanceView *view,
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!ref.is_virtual_ref());
-#endif
-      instance = ref.get_mapping_instance();
+      instance = MappingInstance(view->get_manager());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(
+                                      const std::vector<InstanceView*> &views, 
+                                      std::vector<MappingInstance> &input_valid)
+    //--------------------------------------------------------------------------
+    {
+      unsigned offset = input_valid.size();
+      input_valid.resize(offset + views.size());
+      for (unsigned idx = 0; idx < views.size(); idx++)
+      {
+        MappingInstance &inst = input_valid[offset+idx];
+        inst = MappingInstance(views[idx]->get_manager());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2004,9 +2017,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::compute_ranking(MapperManager *mapper,
-                              const std::deque<MappingInstance> &output,
-                              const InstanceSet &sources,
-                              std::vector<unsigned> &ranking) const
+                            const std::deque<MappingInstance> &output,
+                            const std::vector<InstanceView*> &sources,
+                            std::vector<unsigned> &ranking,
+                            const std::map<MappingInstance,DomainPoint> &points,
+                            std::map<unsigned,DomainPoint> &keys) const
     //--------------------------------------------------------------------------
     {
       ranking.reserve(output.size());
@@ -2017,10 +2032,28 @@ namespace Legion {
         bool found = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
-          if (manager == sources[idx].get_manager())
+          if (manager == sources[idx]->get_manager())
           {
             found = true;
             ranking.push_back(idx);
+            if (manager->is_collective_manager())
+            {
+              std::map<MappingInstance,DomainPoint>::const_iterator finder =
+                points.find(*it);
+              if (finder != points.end())
+              {
+                CollectiveManager *collective =
+                  manager->as_collective_manager();
+                if (collective->contains_point(finder->second))
+                  keys[idx] = finder->second;
+                else
+                  REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_INVALID_INSTANCE,
+                      "Ignoring invalid source collective instance point "
+                      "from mapper %s for select source call on  %s (UID %lld)",
+                      mapper->get_mapper_name(), get_logging_name(), 
+                      get_unique_op_id())
+              }
+            }
             break;
           }
         }
@@ -2028,7 +2061,7 @@ namespace Legion {
         if (!found)
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_INVALID_INSTANCE,
               "Ignoring invalid instance output from mapper %s for "
-              "select copy sources call on Operation %s (UID %lld)",
+              "select sources call on %s (UID %lld)",
               mapper->get_mapper_name(), get_logging_name(), get_unique_op_id())
       }
     }
@@ -4818,9 +4851,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapOp::select_sources(const unsigned index,
-                               const InstanceRef &target,
-                               const InstanceSet &sources,
-                               std::vector<unsigned> &ranking)
+                               InstanceView *target,
+                               const std::vector<InstanceView*> &sources,
+                               std::vector<unsigned> &ranking,
+                               std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4836,7 +4870,8 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     } 
 
     //--------------------------------------------------------------------------
@@ -7249,9 +7284,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyOp::select_sources(const unsigned index,
-                                const InstanceRef &target,
-                                const InstanceSet &sources,
-                                std::vector<unsigned> &ranking)
+                                InstanceView *target,
+                                const std::vector<InstanceView*> &sources,
+                                std::vector<unsigned> &ranking,
+                                std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCopySrcInput input;
@@ -7301,7 +7337,8 @@ namespace Legion {
       }
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -11883,9 +11920,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::select_sources(const unsigned index,
-                                     const InstanceRef &target,
-                                     const InstanceSet &sources,
-                                     std::vector<unsigned> &ranking)
+                                     InstanceView *target,
+                                     const std::vector<InstanceView*> &sources,
+                                     std::vector<unsigned> &ranking,
+                                     std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11901,7 +11939,8 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -14495,9 +14534,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReleaseOp::select_sources(const unsigned index,
-                                   const InstanceRef &target,
-                                   const InstanceSet &sources,
-                                   std::vector<unsigned> &ranking)
+                                   InstanceView *target,
+                                   const std::vector<InstanceView*> &sources,
+                                   std::vector<unsigned> &ranking,
+                                   std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14513,7 +14553,8 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -18971,9 +19012,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::select_sources(const unsigned index,
-                                              const InstanceRef &target,
-                                              const InstanceSet &sources,
-                                              std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18989,7 +19031,8 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -23318,9 +23361,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DetachOp::select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking)
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -25098,15 +25142,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteMapOp::select_sources(const unsigned index,
-                                     const InstanceRef &target,
-                                     const InstanceSet &sources,
-                                     std::vector<unsigned> &ranking)
+                                     InstanceView *target,
+                                     const std::vector<InstanceView*> &sources,
+                                     std::vector<unsigned> &ranking,
+                                     std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25119,7 +25164,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -25228,15 +25274,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCopyOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
       Mapper::SelectCopySrcInput input;
@@ -25254,7 +25301,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -25363,15 +25411,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCloseOp::select_sources(const unsigned index,
-                                       const InstanceRef &target,
-                                       const InstanceSet &sources,
-                                       std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25384,7 +25433,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -25490,17 +25540,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ACQUIRE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteAcquireOp::select_sources(const unsigned index,
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -25610,15 +25649,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteReleaseOp::select_sources(const unsigned index,
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25631,7 +25671,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -25736,17 +25777,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return FILL_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteFillOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -25862,15 +25892,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemotePartitionOp::select_sources(const unsigned index,
-                                           const InstanceRef &target,
-                                           const InstanceSet &sources,
-                                           std::vector<unsigned> &ranking)
+                                     InstanceView *target,
+                                     const std::vector<InstanceView*> &sources,
+                                     std::vector<unsigned> &ranking,
+                                     std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25883,7 +25914,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -25986,17 +26018,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::select_sources(const unsigned index,
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteAttachOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -26091,9 +26112,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::select_sources(const unsigned index,
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       // TODO: invoke the mapper
@@ -26193,17 +26215,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::select_sources(const unsigned index, 
-                                          const InstanceRef &target,
-                                          const InstanceSet &sources,
-                                          std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteDeletionOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -26297,17 +26308,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::select_sources(const unsigned index, 
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteReplayOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -26398,17 +26398,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TRACE_SUMMARY_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteSummaryOp::select_sources(const unsigned index, 
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------

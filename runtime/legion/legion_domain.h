@@ -232,6 +232,8 @@ namespace Legion {
     coord_t get_index(void) const;
     __CUDA_HD__
     int get_dim(void) const;
+    __CUDA_HD__
+    inline bool exists(void) const { return (get_dim() > 0); }
 
     template <int DIM>
     LegionRuntime::Arrays::Point<DIM> get_point(void) const; 

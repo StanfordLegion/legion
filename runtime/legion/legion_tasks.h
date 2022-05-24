@@ -218,9 +218,10 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
@@ -369,9 +370,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);

@@ -688,6 +688,7 @@ namespace Legion {
       };
       struct SelectTaskSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>  collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_task_sources(const MapperContext        ctx,
@@ -703,7 +704,7 @@ namespace Legion {
         PhysicalInstance                        destination_instance;
       };
       struct CreateTaskTemporaryOutput {
-        PhysicalInstance                        temporary_instance;
+        PhysicalInstance                        temporary_instance; 
       };
 
       /**
@@ -855,6 +856,7 @@ namespace Legion {
       };
       struct SelectInlineSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>  collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_inline_sources(const MapperContext        ctx,
@@ -995,6 +997,7 @@ namespace Legion {
       };
       struct SelectCopySrcOutput {
         std::deque<PhysicalInstance>                  chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>        collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_copy_sources(const MapperContext          ctx,
@@ -1109,6 +1112,7 @@ namespace Legion {
       };
       struct SelectCloseSrcOutput {
         std::deque<PhysicalInstance>                chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>      collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_close_sources(const MapperContext        ctx,
@@ -1300,6 +1304,7 @@ namespace Legion {
       };
       struct SelectReleaseSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>  collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_release_sources(const MapperContext       ctx,
@@ -1472,6 +1477,7 @@ namespace Legion {
       };
       struct SelectPartitionSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
+        std::map<PhysicalInstance,DomainPoint>  collective_points;
       };
       //------------------------------------------------------------------------
       virtual void select_partition_sources(

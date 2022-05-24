@@ -879,9 +879,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::select_sources(const unsigned index,
-                                const InstanceRef &target,
-                                const InstanceSet &sources,
-                                std::vector<unsigned> &ranking)
+                                InstanceView *target,
+                                const std::vector<InstanceView*> &sources,
+                                std::vector<unsigned> &ranking,
+                                std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -895,7 +896,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------
@@ -2107,15 +2109,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTaskOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
+                                      InstanceView *target,
+                                      const std::vector<InstanceView*> &sources,
+                                      std::vector<unsigned> &ranking,
+                                      std::map<unsigned,DomainPoint> &keys)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, keys);
         return;
       }
       Mapper::SelectTaskSrcInput input;
@@ -2126,7 +2129,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
+                      output.collective_points, keys);
     }
 
     //--------------------------------------------------------------------------

@@ -479,9 +479,10 @@ namespace Legion {
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
     public:
       // Collective instance support
       virtual bool supports_collective_instances(void) const { return false; }
@@ -687,8 +688,10 @@ namespace Legion {
       // Support for operations that compute futures
       void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
     public: // Support for mapping operations
-      static void prepare_for_mapping(const InstanceRef &ref,
+      static void prepare_for_mapping(InstanceView *view,
                                       MappingInstance &instance);
+      static void prepare_for_mapping(const std::vector<InstanceView*> &views,
+                           std::vector<MappingInstance> &input_valid);
       static void prepare_for_mapping(const InstanceSet &valid,
                            std::vector<MappingInstance> &input_valid);
       static void prepare_for_mapping(const InstanceSet &valid,
@@ -696,8 +699,10 @@ namespace Legion {
                            std::vector<MappingInstance> &input_valid);
       void compute_ranking(MapperManager            *mapper,
           const std::deque<MappingInstance>         &output,
-          const InstanceSet                         &sources,
-          std::vector<unsigned>                     &ranking) const;
+          const std::vector<InstanceView*>          &sources,
+          std::vector<unsigned>                     &ranking,
+          const std::map<MappingInstance,DomainPoint> &collective_points,
+          std::map<unsigned,DomainPoint>            &collective_keys) const;
 #ifdef DEBUG_LEGION
     protected:
       virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -1319,9 +1324,10 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
@@ -1497,9 +1503,10 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
@@ -2194,9 +2201,10 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -2556,9 +2564,10 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -3600,9 +3609,10 @@ namespace Legion {
       void deactivate_dependent(void);
     public:
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -4221,9 +4231,10 @@ namespace Legion {
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -4498,11 +4509,6 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const = 0;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
-      // This should be the only mapper call that we need to handle
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking) = 0;
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void report_uninitialized_usage(const unsigned index,
@@ -4564,9 +4570,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking); 
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4595,9 +4602,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4626,9 +4634,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4656,10 +4665,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4688,9 +4693,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4718,10 +4724,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4751,9 +4753,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4782,10 +4785,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4813,9 +4812,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  InstanceView *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,DomainPoint> &keys);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4842,10 +4842,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4874,10 +4870,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -4906,10 +4898,6 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);

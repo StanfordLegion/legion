@@ -1362,10 +1362,12 @@ namespace Legion {
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
         CopyUpdate(InstanceView *src, const FieldMask &mask,
+                   const DomainPoint &src_point,
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
                    CopyAcrossHelper *helper = NULL)
-          : Update(expr, mask, helper), source(src), redop(red) { }
+          : Update(expr, mask, helper), 
+            source(src), point(src_point), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
         CopyUpdate(const CopyUpdate &rhs)
@@ -1381,6 +1383,7 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
+        const DomainPoint point; // which point instance in collective instance
         const ReductionOpID redop;
       };
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
@@ -1428,7 +1431,7 @@ namespace Legion {
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
-                          CopyAcrossHelper *across_helper = NULL);
+                          CopyAcrossHelper *across_helper = NULL); 
       void record_updates(InstanceView *dst_view, 
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
@@ -1481,6 +1484,18 @@ namespace Legion {
             LogicalView *src, LogicalView *dst, const FieldMask &mask,
             IndexSpaceExpression *expr, ReductionOpID redop,
             std::set<RtEvent> &applied_events) const;
+      void record_instance_update(InstanceView *dst_view,
+                          InstanceView *src_view,
+                          const FieldMask &src_mask,
+                          const DomainPoint &src_point,
+                          IndexSpaceExpression *expr,
+                          EquivalenceSet *tracing_eq,
+                          std::set<RtEvent> &applied,
+                          ReductionOpID redop,
+                          CopyAcrossHelper *across_helper);
+      struct SelectSourcesResult;
+      const SelectSourcesResult& select_sources(InstanceView *target,
+                          const std::vector<InstanceView*> &sources);
       void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
                            const PhysicalTraceInfo &trace_info,
@@ -1543,19 +1558,16 @@ namespace Legion {
       // to be tracking them
       std::set<ApEvent> events;
     protected:
-      struct SourceQuery {
+      struct SelectSourcesResult {
       public:
-        SourceQuery(void) { }
-        SourceQuery(std::vector<InstanceView*> &&srcs,
-                    std::vector<unsigned> &&rank,
-                    const FieldMask &src_mask)
-          : sources(srcs), ranking(rank), query_mask(src_mask) { }
+        SelectSourcesResult(void) { }
+        SelectSourcesResult(std::vector<InstanceView*> &&srcs,
+                            std::vector<unsigned> &&rank,
+                            std::map<unsigned,DomainPoint> &&keys)
+          : sources(srcs), ranking(rank), collective_keys(keys) { }
       public:
-        inline bool matches(const FieldMask &mask,
-                            const std::vector<InstanceView*> &srcs) const
+        inline bool matches(const std::vector<InstanceView*> &srcs) const
           {
-            if (mask != query_mask)
-              return false;
             if (srcs.size() != sources.size())
               return false;
             for (unsigned idx = 0; idx < sources.size(); idx++)
@@ -1566,10 +1578,10 @@ namespace Legion {
       public:
         std::vector<InstanceView*> sources;
         std::vector<unsigned> ranking;
-        FieldMask query_mask;
+        std::map<unsigned,DomainPoint> collective_keys;
       };
       // Cached calls to the mapper for selecting sources
-      std::map<InstanceView*,LegionVector<SourceQuery> > mapper_queries;
+      std::map<InstanceView*,std::vector<SelectSourcesResult> > mapper_queries;
     };
 
     /**
