@@ -199,7 +199,7 @@ end)
 
 local supported_archs = {
   ["fermi"]   = 20,
-  ["kepler"]  = 30,
+  ["kepler"]  = 32,
   ["k20"]     = 35,
   ["maxwell"] = 52,
   ["pascal"]  = 60,
