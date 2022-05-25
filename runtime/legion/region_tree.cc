@@ -8700,6 +8700,11 @@ namespace Legion {
                                    const bool above /* = false */)
     //--------------------------------------------------------------------------
     {
+      // Do a quick check to see if we already decided to send this
+      for (std::vector<SendNodeRecord>::const_iterator it = 
+            nodes_to_send.begin(); it != nodes_to_send.end(); it++)
+        if (it->node == this)
+          return true;
       // If we're not the owner continue up the tree to see if anyone is
       // and check whether they are still valid
       if (!is_owner())
@@ -8748,11 +8753,6 @@ namespace Legion {
         {
           if (tree_valid)
           {
-            // Do a quick check that it's not in our set already
-            for (std::vector<SendNodeRecord>::const_iterator it =
-                  nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-              if (it->node == this)
-                return true;
             // Still need to record the effects so this is not collected early
             std::map<AddressSpaceID,RtEvent>::iterator finder =
               send_effects.find(target);
@@ -10841,6 +10841,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
 #endif
+      // Do a quick check to see if we already decided to send this
+      for (std::vector<SendNodeRecord>::const_iterator it = 
+            nodes_to_send.begin(); it != nodes_to_send.end(); it++)
+        if (it->node == this)
+          return true;
       if (!is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -10850,22 +10855,6 @@ namespace Legion {
         if (!parent->send_node(target, done, send_precondition,
                                nodes_to_send, true/*above*/))
           return false;
-        // Do a quick check to see if the color space is from our same
-        // tree and if it is whether it is above us in the tree. If it
-        // is then we can skip sending it since we already would have
-        // done the analysis for it.
-        if (color_space->handle.get_tree_id() == handle.get_tree_id())
-        {
-          IndexSpaceNode *upabove = parent;
-          while (true)
-          {
-            if (color_space == upabove)
-              return true;
-            if (upabove->parent == NULL)
-              break;
-            upabove = upabove->parent->parent;
-          }
-        }
         RtEvent temp_precondition;
         color_space->send_node(target, done, temp_precondition,
                                nodes_to_send, false/*above*/);
@@ -10890,11 +10879,6 @@ namespace Legion {
           return false;
         if (has_remote_instance(target))
         {
-          // Do a quick check that it's not in our set already
-          for (std::vector<SendNodeRecord>::const_iterator it =
-                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-            if (it->node == this)
-              return true;
           // Still need to record the effects so this is not collected early
           std::map<AddressSpaceID,RtEvent>::iterator finder =
             send_effects.find(target);
@@ -10929,22 +10913,6 @@ namespace Legion {
           send_done = RtUserEvent::NO_RT_USER_EVENT;
         }
         return false;
-      }
-      // Do a quick check to see if the color space is from our same
-      // tree and if it is whether it is above us in the tree. If it
-      // is then we can skip sending it since we already would have
-      // done the analysis for it.
-      if (color_space->handle.get_tree_id() == handle.get_tree_id())
-      {
-        IndexSpaceNode *upabove = parent;
-        while (true)
-        {
-          if (color_space == upabove)
-            return true;
-          if (upabove->parent == NULL)
-            break;
-          upabove = upabove->parent->parent;
-        }
       }
       RtEvent temp_precondition;
       color_space->send_node(target, done, temp_precondition,
