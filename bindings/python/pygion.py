@@ -1498,7 +1498,7 @@ class Partition(object):
             assert isinstance(parent, Region)
             assert isinstance(ipartition, Ipartition)
             handle = c.legion_logical_partition_create(
-                _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
+                _my.ctx.runtime, parent.raw_value(), ipartition.raw_value())
 
         # Important: Copy handle. Do NOT assume ownership.
         assert handle is not None
