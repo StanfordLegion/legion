@@ -13,7 +13,10 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:gpu", "1"]]
+-- [
+--   ["-ll:gpu", "1", "-ll:csize", "1500", "-ll:fsize", "1500", "-ll:zsize", "256",
+--    "-npp", "500", "-wpp", "2000", "-l", "50", "-p", "80", "-pps", "10", "-prune", "30"]
+-- ]
 
 package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../examples/?.rg"
 

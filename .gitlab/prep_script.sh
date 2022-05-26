@@ -8,6 +8,12 @@ git clean -fxd
 rm -rfv language/terra.build gasnet Thrust
 git status
 
+# setup workdir
+mkdir -p $(dirname $EXTERNAL_WORKDIR)
+rm -rf $EXTERNAL_WORKDIR
+cp -r $CI_PROJECT_DIR $EXTERNAL_WORKDIR
+cd $EXTERNAL_WORKDIR
+
 # setup environment
 if [[ "$LMOD_SYSTEM_NAME" = crusher ]]; then
     cat >>env.sh <<EOF
@@ -16,7 +22,7 @@ module load rocm/$ROCM_VERSION
 export CC=cc
 export CXX=CC
 if [[ "\$REALM_NETWORKS" != "" ]]; then
-    RANKS_PER_NODE=1
+    RANKS_PER_NODE=4
     export LAUNCHER="srun -n\$(( RANKS_PER_NODE * SLURM_JOB_NUM_NODES )) --cpus-per-task \$(( 64 / RANKS_PER_NODE )) --gpus-per-task 1 --cpu-bind cores"
 fi
 EOF
@@ -68,7 +74,3 @@ export GASNET_ROOT="\$EXTERNAL_WORKDIR/gasnet/release"
 EOF
     fi
 fi
-
-# setup workdir
-mkdir -p $(dirname $EXTERNAL_WORKDIR)
-cp -r $CI_PROJECT_DIR $EXTERNAL_WORKDIR
