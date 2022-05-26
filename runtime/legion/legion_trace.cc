@@ -4873,6 +4873,13 @@ namespace Legion {
                     crossing_counts, crossing_instructions);
                 break;
               }
+            case BARRIER_ARRIVAL:
+              {
+                parallelize_replay_event(inst->as_barrier_arrival()->rhs,
+                    slice_index, gen, slice_indices_by_inst,
+                    crossing_counts, crossing_instructions);
+                break;
+              }
             default:
               {
                 break;
