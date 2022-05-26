@@ -1094,21 +1094,41 @@ namespace Legion {
       ignore_result(fread(string, string_length, 1, f));
       // Now convert the hex string back into the value
       unsigned byte_index = 0;
-      unsigned *target = (unsigned*)tunable->tunable_value;
-      for (unsigned word_idx = 0; 
-            word_idx < (tunable->tunable_size/4); word_idx++)
       {
-        unsigned next_word = 0;
-        for (unsigned i = 0; i < (8*sizeof(next_word)/4); i++, byte_index++)
+        unsigned *target = (unsigned*)tunable->tunable_value;
+        for (unsigned word_idx = 0;
+             word_idx < (tunable->tunable_size/4); word_idx++)
         {
-          unsigned next = 0;
-          if (string[byte_index] >= 'A')
-            next = (string[byte_index] - 'A') + 10;
-          else
-            next = string[byte_index] - '0';
-          next_word |= (next << (i*4));
+          unsigned next_word = 0;
+          for (unsigned i = 0; i < (8*sizeof(next_word)/4); i++, byte_index++)
+          {
+            unsigned next = 0;
+            if (string[byte_index] >= 'A')
+              next = (string[byte_index] - 'A') + 10;
+            else
+              next = string[byte_index] - '0';
+            next_word |= (next << (i*4));
+          }
+          target[word_idx] = next_word;
         }
-        target[word_idx] = next_word;
+      }
+      {
+        char *target = (char*)tunable->tunable_value;
+        for (unsigned char_idx = (tunable->tunable_size/4)*4;
+             char_idx < tunable->tunable_size; ++char_idx)
+        {
+          char next_char = 0;
+          for (unsigned i = 0; i < 2; i++, byte_index++)
+          {
+            char next = 0;
+            if (string[byte_index] >= 'A')
+              next = (string[byte_index] - 'A') + 10;
+            else
+              next = string[byte_index] - '0';
+            next_char |= (next << (i*4));
+          }
+          target[char_idx] = next_char;
+        }
       }
 
       free(string);
