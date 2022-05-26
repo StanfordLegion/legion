@@ -34,11 +34,15 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
-local function get_partition_symbol(expr)
-  if expr:is(ast.typed.expr.Projection) then
-    return expr.region.value.value
+local function get_base_partition_symbol(node)
+  if node:is(ast.typed.expr.Projection) then
+    return node.region.value.value
   end
-  return expr.value.value
+  node = util.get_base_indexed_node(node)
+  if std.is_cross_product(std.as_read(node.expr_type)) then
+    return std.as_read(node.expr_type).partition_symbols[1]
+  end
+  return node.value
 end
 
 local function get_partition_dim(expr)
@@ -492,11 +496,16 @@ end
 
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
-  local region_type = std.as_read(arg.expr_type)
   local is_disjoint = partition_type and partition_type:is_disjoint()
   if is_disjoint then
-    local index =
-      (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
+    local index
+    if arg:is(ast.typed.expr.Projection) then
+      index = arg.region.index
+    else
+      local _
+      _, index = util.get_base_indexed_node(arg)
+    end
+
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
       return true, false
@@ -880,8 +889,8 @@ local function analyze_is_projectable(cx, arg)
   end
 
   -- 3. And as long as `p` is loop-invariant (we have to index from
-  -- the same partition every time).
-  if not analyze_is_loop_invariant(cx, arg.value) then
+  -- the same partition or base cross product every time).
+  if not analyze_is_loop_invariant(cx, util.get_base_indexed_node(arg)) then
     return false
   end
 
@@ -1109,6 +1118,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     local free_vars_base = terralib.newlist()
     free_vars_base:insertall(loop_cx.free_variables)
+
     for i, arg in ipairs(args) do
       if not analyze_is_side_effect_free(loop_cx, arg) then
         report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
@@ -1137,8 +1147,9 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           if arg:is(ast.typed.expr.Projection) then
             partition_type = std.as_read(arg.region.value.expr_type)
           else
-            partition_type = std.as_read(arg.value.expr_type)
+            partition_type = std.as_read(util.get_base_indexed_node(arg).expr_type):partition()
           end
+          assert(std.is_partition(partition_type))
           arg_projectable = true
         end
 
@@ -1180,7 +1191,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
               for _, failure in pairs(failures_i) do
                 if not (arg:is(ast.typed.expr.IndexAccess) and
                         args[failure]:is(ast.typed.expr.IndexAccess) and
-                        get_partition_symbol(arg) == get_partition_symbol(args[failure]))
+                        get_base_partition_symbol(arg) == get_base_partition_symbol(args[failure]))
                 then
                   report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                        " interferes with argument " .. tostring(failure))
@@ -1296,16 +1307,16 @@ local function collapse_projection_functor(pf, dim, bounds)
 end
 
 local function collect_and_sort_args(args, call_args, task, param_region_types)
-  -- Collect all args of the same partition together
+  -- Collect all args of the same partition or cross product together
   local collected = {}
   for _, arg in pairs(args) do
     if type(arg) == "number" then
-      local psym = get_partition_symbol(call_args[arg])
+      local psym = get_base_partition_symbol(call_args[arg])
       collected[psym] = collected[psym] or {}
       collected[psym][arg] = true
     else
       -- Cross-check args are pairs
-      local psym = get_partition_symbol(call_args[arg[1]])
+      local psym = get_base_partition_symbol(call_args[arg[1]])
       collected[psym] = collected[psym] or {}
       collected[psym][arg[1]] = true
       collected[psym][arg[2]] = true
@@ -1382,7 +1393,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(get_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(util.get_base_indexed_node(call_args[args[1]]).value), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(
@@ -1411,15 +1422,11 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       local duplicates_check = terralib.newlist()
       index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
 
-      local index_expr
-      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        index_expr = call_args[arg].index.arg
+      local _, index_expr
+      if call_args[arg]:is(ast.typed.expr.Projection) then
+        _, index_expr = util.get_base_indexed_node(call_args[arg].region)
       else
-        if call_args[arg]:is(ast.typed.expr.Projection) then
-          index_expr = call_args[arg].region.index
-        else
-          index_expr = call_args[arg].index
-        end
+        _, index_expr = util.get_base_indexed_node(call_args[arg])
       end
 
       -- Assign: value = collapse(index_expr)
@@ -1504,6 +1511,133 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   return util.mk_stat_block(util.mk_block(check))
 end
 
+local function find_invariant_prefix(cx, node, parent, height)
+  if not node:is(ast.typed.expr.IndexAccess) then
+    return false
+  end
+  if not analyze_is_loop_invariant(cx, node) then
+    return find_invariant_prefix(cx, node.value, node, height + 1)
+  end
+  return true, parent, height
+end
+
+local function get_node_at_height(arg, height)
+  if height == 0 then
+    return arg
+  end
+  return get_node_at_height(arg.value, height - 1)
+end
+
+local function hoist_call_args(cx, hoisted, call_args)
+  local collected = {}
+  for i, arg in pairs(call_args) do
+    if arg:is(ast.typed.expr.IndexAccess) and std.is_region(arg.expr_type) then
+      local base = tostring(get_base_partition_symbol(arg))
+      collected[base] = collected[base] or terralib.newlist()
+      collected[base]:insert(i)
+    end
+  end
+
+  for _, indices in pairs(collected) do
+    if not indices:find(
+      function(i)
+        return std.is_partition(std.as_read(
+          util.get_base_indexed_node(call_args[i]).expr_type))
+      end)
+    then
+      local heights = indices:map(function(i)
+          local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
+          if not has_invariant_prefix then
+            return -1
+          end
+          return height
+        end)
+
+      for i = 1, #heights do
+        if heights[i] == -1 then return end
+      end
+
+      -- Every argument deriving from the same base cross product must have
+      -- the same type. E.g. cp[i][i] and cp[i] are not allowed together.
+      local licm_height = heights:reduce(math.max)
+
+      if licm_height == 0 then
+        -- Hoist the entire IndexAccess AST
+        indices:app(function(i)
+          local invariant = std.newsymbol(call_args[i].expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, call_args[i].expr_type, call_args[i]))
+          call_args[i] = util.mk_expr_id(invariant)
+        end)
+      else
+        -- Hoist only a part of the IndexAccess AST
+        indices:app(function(i)
+          local parent = get_node_at_height(call_args[i], licm_height - 1)
+          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+          parent.value = util.mk_expr_id(invariant)
+        end)
+      end
+    end
+  end
+end
+
+-- This function does not detect all possible index launches,
+-- just those we want to do LICM on.
+local function maybe_index_launch(node)
+  if #node.block.stats == 0 then
+    return false
+  end
+
+  for i = 1, #node.block.stats - 1 do
+    local stat = node.block.stats[i]
+    if not stat:is(ast.typed.stat.Var) then
+      return false
+    end
+  end
+
+  local body = node.block.stats[#node.block.stats]
+  if (body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call)) or
+     (body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call))
+  then
+    return true
+  end
+  return false
+end
+
+local function licm(cx, node)
+  local hoisted = terralib.newlist()
+
+  if not maybe_index_launch(node) then
+    return hoisted
+  end
+
+  local loop_cx = cx:new_local_scope()
+  loop_cx:set_loop_index(node.symbol)
+  loop_cx:add_loop_variable(node.symbol)
+
+  for i = 1, #node.block.stats - 1 do
+    local stat = node.block.stats[i]
+    if analyze_is_loop_invariant(loop_cx, stat) then
+      hoisted:insert(stat)
+      node.block.stats[i] = false
+    else
+      loop_cx:add_loop_variable(stat.symbol)
+    end
+  end
+
+  node.block.stats = node.block.stats:filter(function(stat) return stat end)
+
+  local body = node.block.stats[#node.block.stats]
+  if body then
+    if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
+      hoist_call_args(loop_cx, hoisted, body.expr.args)
+    elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
+      hoist_call_args(loop_cx, hoisted, body.rhs.args)
+    end
+  end
+  return hoisted
+end
+
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
   local report_fail = report.info
@@ -1531,11 +1665,18 @@ function optimize_index_launch.stat_for_num(cx, node)
     return node
   end
 
+  local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    return node {
+    local node_ = node {
       block = optimize_index_launches.block(cx, node.block),
     }
+    if #hoisted_stmts == 0 then
+      return node_
+    end
+    -- Retain LICM even if we can't index launch
+    hoisted_stmts:insert(node_)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
   -- If we reach here then either the self interference test failed,
@@ -1557,12 +1698,23 @@ function optimize_index_launch.stat_for_num(cx, node)
   }
 
   if #body.args_need_dynamic_check == 0 then
-    return index_launch_ast
-  else
-    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+    if #hoisted_stmts == 0 then
+      return index_launch_ast
+    end
+    hoisted_stmts:insert(index_launch_ast)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
+  end
+
+  local dynamic_check = insert_dynamic_check(
+    is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
+
+  if #hoisted_stmts == 0 then
+    return dynamic_check
   end
+  hoisted_stmts:insert(dynamic_check)
+  return util.mk_stat_block(util.mk_block(hoisted_stmts))
 end
 
 function optimize_index_launch.stat_for_list(cx, node)
@@ -1593,11 +1745,18 @@ function optimize_index_launch.stat_for_list(cx, node)
     return node
   end
 
+  local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    return node {
+    local node_ = node {
       block = optimize_index_launches.block(cx, node.block),
     }
+    if #hoisted_stmts == 0 then
+      return node_
+    end
+    -- Retain LICM even if we can't index launch
+    hoisted_stmts:insert(node_)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
   -- If we reach here then either the self interference test failed,
@@ -1619,12 +1778,23 @@ function optimize_index_launch.stat_for_list(cx, node)
   }
 
   if #body.args_need_dynamic_check == 0 then
-    return index_launch_ast
-  else
-    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+    if #hoisted_stmts == 0 then
+      return index_launch_ast
+    end
+    hoisted_stmts:insert(index_launch_ast)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
+  end
+
+  local dynamic_check = insert_dynamic_check(
+    is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
+
+  if #hoisted_stmts == 0 then
+    return dynamic_check
   end
+  hoisted_stmts:insert(dynamic_check)
+  return util.mk_stat_block(util.mk_block(hoisted_stmts))
 end
 
 local function do_nothing(cx, node) return node end
