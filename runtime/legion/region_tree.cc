@@ -72,7 +72,7 @@ namespace Legion {
           PhysicalManager *manager = ref.get_physical_manager();
           instances[fidx] = manager->get_instance(key);
 #ifdef LEGION_SPY
-          instance_events[fidx] = manager->get_use_event();
+          instance_events[fidx] = manager->get_unique_event();
 #endif
 #ifdef DEBUG_LEGION
           found = true;
@@ -2426,7 +2426,7 @@ namespace Legion {
           possible_src_out_of_range);
 #ifdef LEGION_SPY
       across->src_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_use_event();
+        idx_target.get_physical_manager()->get_unique_event();
 #endif
       
       // Initialize the destination fields
@@ -2580,7 +2580,7 @@ namespace Legion {
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
-        idx_target.get_physical_manager()->get_use_event();
+        idx_target.get_physical_manager()->get_unique_event();
 #endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
@@ -2729,7 +2729,7 @@ namespace Legion {
           both_are_range, possible_src_out_of_range);
 #ifdef LEGION_SPY
       across->src_indirect_instance_event = 
-        src_idx_target.get_physical_manager()->get_use_event();
+        src_idx_target.get_physical_manager()->get_unique_event();
 #endif 
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
@@ -2742,7 +2742,7 @@ namespace Legion {
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
-        dst_idx_target.get_physical_manager()->get_use_event();
+        dst_idx_target.get_physical_manager()->get_unique_event();
 #endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
