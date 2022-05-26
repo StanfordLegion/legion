@@ -8048,7 +8048,7 @@ function codegen.expr_import_cross_product(cx, node)
     [actions];
     var ip = c.legion_terra_index_cross_product_get_partition(value.value)
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], lr.impl, ip)
+      [cx.runtime], lr.impl, ip)
   end
 
   return values.value(node,
