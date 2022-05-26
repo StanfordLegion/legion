@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+// Useful for IDEs 
+#include "legion/region_tree.h"
+
 namespace Legion {
   namespace Internal {
 

@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+// Useful for IDEs
+#include "legion_domain.h"
+
 namespace Legion {
 
   //----------------------------------------------------------------------------
