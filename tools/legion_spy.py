@@ -9630,13 +9630,17 @@ class RealmCopy(RealmBase):
             point_set = self.index_expr.get_point_set()
             if self.is_across():
                 # Copy-across case
-                # Check for any indirections
-                if self.src_indirections is None:
-                    assert len(self.src_fields) == len(self.src_indirections)
-                    for idx in range(len(self.src_indirections)):
+                for fidx in range(len(self.src_fields)):
+                    field = self.src_fields[fidx]
+                    # Check for any indirections
+                    if self.src_indirections is None or self.src_indirections[fidx] is None:
+                        for point in point_set.iterator():
+                            key = (point,field,self.src_tree_id)
+                            assert key not in self.eq_privileges
+                            self.eq_privileges[key] = READ_ONLY
+                    else:
                         # Do the source instances first
-                        field = self.src_fields[idx]
-                        index = self.src_indirections[idx]
+                        index = self.src_indirections[fidx]
                         for off in range(self.indirections.get_group_size(index)):
                             inst,space = self.indirections.groups[index][off]
                             for point in space.get_point_set().iterator():
@@ -9648,19 +9652,16 @@ class RealmCopy(RealmBase):
                         for point in point_set.iterator():
                             key = (point,field,inst.tree_id)
                             self.eq_privileges[key] = READ_ONLY
-                else:
-                    for point in point_set.iterator():
-                        for field in self.src_fields:
-                            key = (point,field,self.src_tree_id)
+                    field = self.dst_fields[fidx]
+                    redop = self.redops[fidx]
+                    if self.dst_indirections is None or self.dst_indirections[fidx] is None:
+                        for point in point_set.iterator():
+                            key = (point,field,self.dst_tree_id)
                             assert key not in self.eq_privileges
-                            self.eq_privileges[key] = READ_ONLY
-                if self.dst_indirections is None:
-                    assert len(self.dst_fields) == len(self.dst_indirections)
-                    for idx in range(len(self.dst_indirections)):
+                            self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
+                    else:
                         # Do the destination instances first
-                        field = self.dst_fields[idx]
-                        index = self.dst_indirections[idx]
-                        redop = self.redops(idx)
+                        index = self.dst_indirections[fidx]
                         for off in range(self.indirections.get_group_size(index)):
                             inst,space in self.indirections.groups[index][off]
                             for point in space.get_point_set().iterator():
@@ -9672,14 +9673,6 @@ class RealmCopy(RealmBase):
                         for point in point_set.iterator():
                             key = (point,field,inst.tree_id)
                             self.eq_privileges[key] = READ_ONLY
-                else:
-                    for point in point_set.iterator():
-                        for index in range(len(self.dst_fields)):
-                            field = self.dst_fields[index]
-                            redop = self.redops[index]
-                            key = (point,field,self.dst_tree_id)
-                            assert key not in self.eq_privileges
-                            self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
             else:
                 # Normal copy case
                 for point in point_set.iterator():
