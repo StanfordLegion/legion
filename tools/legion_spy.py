@@ -5568,7 +5568,11 @@ class EquivalenceSet(object):
                     # They look racy to Legion Spy but they are what the user
                     # controls so it's up to the user to specify them
                     if isinstance(bad,RealmCopy) and \
-                            copy.creator.index_owner is bad.creator.index_owner:
+                            ((copy.creator.index_owner is bad.creator.index_owner) or \
+                             ((copy.creator.index_owner is not None) and \
+                              (bad.creator.index_owner is not None) and \
+                              (copy.creator.index_owner.context_index == \
+                               bad.creator.index_owner.context_index))):
                         continue
                     print("ERROR: Missing indirect precondition for "+str(copy)+
                           " on field "+str(field)+" for "+str(op)+" on "+str(bad))
