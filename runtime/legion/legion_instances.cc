@@ -1517,10 +1517,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::try_collection(AddressSpaceID source, RtEvent &ready,
-                                         bool &already_collected)
+    bool PhysicalManager::can_collect(AddressSpaceID source,
+                                      bool &already_collected)
     //--------------------------------------------------------------------------
     {
+      // This is a lightweight test that shouldn't involve any communication
+      // or commitment to performing a collection. It's just for finding
+      // instances that we know are locally collectable
       already_collected = false;
       AutoLock i_lock(inst_lock);
       // Do a quick to check to see if we can do a collection on the local node
@@ -1529,97 +1532,14 @@ namespace Legion {
       // If it's already collected then we're done
       if (gc_state == COLLECTED_GC_STATE)
       {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
         already_collected = true;
         return false;
       }
-      if (is_owner())
-      {
-        // Check to see if anyone is already performing a deletion
-        // on this manager, if so then deduplicate
-        if (gc_state == COLLECTABLE_GC_STATE)
-        {
-#ifdef DEBUG_LEGION
-          assert(pending_changes == 0);
-#endif
-          gc_state = PENDING_COLLECTED_GC_STATE;
-          const size_t needed_guards = count_remote_instances();
-          if (needed_guards > 0)
-          {
-            remaining_collection_guards.store(needed_guards);
-            struct AcquireFunctor {
-              AcquireFunctor(DistributedID d, Runtime *rt, 
-                             std::atomic<unsigned> *c)
-                : did(d), runtime(rt), count(c) { }
-              inline void apply(AddressSpaceID target)
-              {
-                if (target == runtime->address_space)
-                  return;
-                const RtUserEvent ready_event = Runtime::create_rt_user_event();
-                Serializer rez;
-                {
-                  RezCheck z(rez);
-                  rez.serialize(did);
-                  rez.serialize(count);
-                  rez.serialize(ready_event);
-                }
-                runtime->send_gc_acquire(target, rez);
-                ready_events.push_back(ready_event);
-              }
-              const DistributedID did;
-              Runtime *const runtime;
-              std::atomic<unsigned> *const count;
-              std::vector<RtEvent> ready_events;
-            };
-            AcquireFunctor functor(did, runtime, &remaining_collection_guards);
-            map_over_remote_instances(functor);
-            collection_ready = Runtime::merge_events(functor.ready_events);
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(gc_state == PENDING_COLLECTED_GC_STATE); 
-          // Should alaready have outstanding changes for this deletion
-          assert(pending_changes > 0);
-#endif
-        }
-        pending_changes++;
-        ready = collection_ready;
-      }
-      else
-      {
-        if (source != owner_space)
-        {
-          // No longer need the lock here since we're just sending a message
-          i_lock.release();
-          // Send the message to the owner to perform the collection
-          std::atomic<bool> result(false);
-          std::atomic<bool> collected(false);
-          const RtUserEvent ready_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(ready_event);
-            rez.serialize(&result);
-            rez.serialize(&collected);
-            rez.serialize(&ready);
-          }
-          runtime->send_gc_request(owner_space, rez);
-          ready_event.wait();
-          already_collected = collected.load();
-          return result.load();
-        }
-        else
-        {
-          // We can setup the guard now
-#ifdef DEBUG_LEGION
-          assert((gc_state == COLLECTABLE_GC_STATE) ||
-                  (gc_state == PENDING_COLLECTED_GC_STATE));
-#endif
-          gc_state = PENDING_COLLECTED_GC_STATE;
-        }
-      }
+      if (!is_owner() && (source == owner_space))
+        gc_state = PENDING_COLLECTED_GC_STATE;
       return true;
     }
 
@@ -1631,13 +1551,12 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtUserEvent done;
-      derez.deserialize(done);
-      std::atomic<bool> *result, *collected;
+      std::atomic<bool> *result;
       derez.deserialize(result);
-      derez.deserialize(collected);
       RtEvent *target;
       derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->weak_find_distributed_collectable(did));
@@ -1647,7 +1566,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z2(rez);
-          rez.serialize(collected);
+          rez.serialize(result);
           rez.serialize(target);
           rez.serialize(RtEvent::NO_RT_EVENT);
           rez.serialize(done);
@@ -1656,12 +1575,8 @@ namespace Legion {
         return;
       }
       RtEvent ready;
-      bool already_collected = false;
-      if (manager->try_collection(source, ready, already_collected))
+      if (manager->collect(ready))
       {
-        // Add a reference to ensure it is still there when 
-        // we do the check or release
-        manager->add_base_resource_ref(PENDING_COLLECTIVE_REF);
         Serializer rez;
         {
           RezCheck z2(rez);
@@ -1672,20 +1587,7 @@ namespace Legion {
         }
         runtime->send_gc_response(source, rez);
       }
-      else if (already_collected)
-      {
-        // This was already collected, so indicate that
-        Serializer rez;
-        {
-          RezCheck z2(rez);
-          rez.serialize(collected);
-          rez.serialize(target);
-          rez.serialize(RtEvent::NO_RT_EVENT);
-          rez.serialize(done);
-        }
-        runtime->send_gc_response(source, rez);
-      }
-      else
+      else // Couldn't collect so we are done
         Runtime::trigger_event(done);
       if (manager->remove_base_resource_ref(RUNTIME_REF))
         delete manager;
@@ -1729,7 +1631,7 @@ namespace Legion {
         ready.wait();
 
       bool dummy_collected = false;
-      if (manager->try_collection(source, ready, dummy_collected))
+      if (manager->can_collect(source, dummy_collected))
       {
         Serializer rez;
         {
@@ -1767,64 +1669,6 @@ namespace Legion {
       assert(prev > 0);
 #endif
       Runtime::trigger_event(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::release_collection(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
-      {
-        AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-        assert(pending_changes > 0); 
-        // Can be in any state but collectable
-        assert(gc_state != COLLECTABLE_GC_STATE);
-#endif
-        if (--pending_changes == 0)
-        {
-          if ((gc_state == ACQUIRED_GC_STATE) ||
-              (gc_state == PENDING_COLLECTED_GC_STATE))
-          {
-            // Reset back to collectable state
-            gc_state = COLLECTABLE_GC_STATE;
-            prune_gc_events();
-          }
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(source == runtime->address_space);
-#endif
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-        }
-        runtime->send_gc_release(owner_space, rez);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_release(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-
-      PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      manager->release_collection(source);
-      // Remove the reference added by the successful remote request
-      manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF);
-      if (manager->remove_base_resource_ref(RUNTIME_REF))
-        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -1882,12 +1726,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::verify_collection(RtEvent &ready)
+    bool PhysicalManager::collect(RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+      AutoLock i_lock(inst_lock);
+      // Do a quick to check to see if we can do a collection on the local node
+      if ((gc_state == ACQUIRED_GC_STATE) || (gc_state == VALID_GC_STATE))
+        return false;
+      // If it's already collected then we're done
+      if (gc_state == COLLECTED_GC_STATE)
+        return true;
       if (is_owner())
       {
-        AutoLock i_lock(inst_lock);
+        // Check to see if anyone is already performing a deletion
+        // on this manager, if so then deduplicate
+        if (gc_state == COLLECTABLE_GC_STATE)
+        {
+#ifdef DEBUG_LEGION
+          assert(pending_changes == 0);
+#endif
+          gc_state = PENDING_COLLECTED_GC_STATE;
+          const size_t needed_guards = count_remote_instances();
+          if (needed_guards > 0)
+          {
+            remaining_collection_guards.store(needed_guards);
+            struct AcquireFunctor {
+              AcquireFunctor(DistributedID d, Runtime *rt, 
+                             std::atomic<unsigned> *c)
+                : did(d), runtime(rt), count(c) { }
+              inline void apply(AddressSpaceID target)
+              {
+                if (target == runtime->address_space)
+                  return;
+                const RtUserEvent ready_event = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  rez.serialize(count);
+                  rez.serialize(ready_event);
+                }
+                runtime->send_gc_acquire(target, rez);
+                ready_events.push_back(ready_event);
+              }
+              const DistributedID did;
+              Runtime *const runtime;
+              std::atomic<unsigned> *const count;
+              std::vector<RtEvent> ready_events;
+            };
+            AcquireFunctor functor(did, runtime, &remaining_collection_guards);
+            map_over_remote_instances(functor);
+            collection_ready = Runtime::merge_events(functor.ready_events);
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(gc_state == PENDING_COLLECTED_GC_STATE); 
+          // Should alaready have outstanding changes for this deletion
+          assert(pending_changes > 0);
+#endif
+        }
+        pending_changes++;
+        const RtEvent wait_on = collection_ready;
+        if (!wait_on.has_triggered())
+        {
+          i_lock.release();
+          wait_on.wait();
+          i_lock.reacquire();
+        }
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
 #endif
@@ -1955,6 +1862,8 @@ namespace Legion {
       }
       else
       {
+        // No longer need the lock here since we're just sending a message
+        i_lock.release();
         // Send it to the owner to check
         std::atomic<bool> result(false);
         const RtUserEvent done = Runtime::create_rt_user_event();
@@ -1966,69 +1875,10 @@ namespace Legion {
           rez.serialize(&ready);
           rez.serialize(done);
         }
-        runtime->send_gc_verification(owner_space, rez);
+        runtime->send_gc_request(owner_space, rez);
         done.wait();
         return result.load();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_verification(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      std::atomic<bool> *result;
-      derez.deserialize(result);
-      RtEvent *ready;
-      derez.deserialize(ready);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      RtEvent local_ready;
-      if (manager->verify_collection(local_ready))
-      {
-        Serializer rez;
-        {
-          RezCheck z2(rez);
-          rez.serialize(result);
-          rez.serialize(ready);
-          rez.serialize(local_ready);
-          rez.serialize(done);
-        }
-        runtime->send_gc_verified(source, rez);
-      }
-      else // Failed and flag is already set, so just trigger done
-        Runtime::trigger_event(done);
-      // Remove the reference added by the successful remote request
-      manager->remove_base_resource_ref(PENDING_COLLECTIVE_REF);
-      if (manager->remove_base_resource_ref(RUNTIME_REF))
-        delete manager;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_garbage_collection_verified(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      std::atomic<bool> *result;
-      derez.deserialize(result);
-      RtEvent *ready;
-      derez.deserialize(ready);
-      derez.deserialize(*ready);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      result->store(true);
-      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -2998,6 +2848,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualManager::get_instance_pointers(Memory memory,
+                                         std::vector<uintptr_t> &pointers) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(memory == instance.get_location());
+#endif
+      void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
+      pointers.push_back(uintptr_t(inst_ptr));
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent IndividualManager::perform_deletion(AddressSpaceID source,
                                                 AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
@@ -3394,6 +3257,23 @@ namespace Legion {
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp(instances[0]);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::get_instance_pointers(Memory memory,
+                                         std::vector<uintptr_t> &pointers) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < memories.size(); idx++)
+      {
+        if (memories[idx]->memory != memory)
+          continue;
+        void *ptr = instances[idx].pointer_untyped(0/*offset*/, 0/*elem size*/);
+        pointers.push_back(uintptr_t(ptr));
+      }
+#ifdef DEBUG_LEGION
+      assert(!pointers.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------

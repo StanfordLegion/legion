@@ -1358,6 +1358,15 @@ namespace Legion {
     }; 
 
     /**
+     * \class GCHole
+     * A helper class for tracking ranges of instance allocations
+     * for aiding in intelligent garbage collection
+     */
+    class GCHole {
+
+    };
+
+    /**
      * \class MemoryManager
      * The goal of the memory manager is to keep track of all of
      * the physical instances that the runtime knows about in various
@@ -1556,9 +1565,7 @@ namespace Legion {
                                                MapperID mapper_id,
                                                Processor target_proc,
                                                GCPriority priority);
-      void check_instance_deletions(const std::vector<PhysicalManager*> &to_del,
-                                    const std::vector<RtEvent> &ready_events,
-                                    std::vector<RtEvent> &delete_effects);
+      void check_instance_deletions(const std::vector<PhysicalManager*> &del);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -1569,7 +1576,8 @@ namespace Legion {
                                           LayoutConstraintKind *unsat_kind,
                                           unsigned *unsat_index,
                                           CollectiveManager *collective = NULL,
-                                          DomainPoint *collective_point = NULL); 
+                                          DomainPoint *collective_point = NULL);
+      void remove_collectable(GCPriority priority, PhysicalManager *manager);
     public:
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
@@ -1623,13 +1631,21 @@ namespace Legion {
       // Lock for controlling access to the data
       // structures in this memory manager
       mutable LocalLock manager_lock;
-      // Precondition event for performing collections
-      std::atomic<RtEvent> gc_precondition;
+      // Lock for ordering garbage collection
+      // This lock should always be taken before the manager lock
+      mutable LocalLock collection_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
+      // For collectable instances they have non-NULL GCHole that 
+      // represents a range of memory that can be collected
+      // This data structure is protected by the manager_lock
       typedef LegionMap<PhysicalManager*,GCPriority,
                         MEMORY_INSTANCES_ALLOC> TreeInstances;
       std::map<RegionTreeID,TreeInstances> current_instances;
+      // Keep track of all groupings of instances based on their 
+      // garbage collection priorities and placement in memory
+      std::map<GCPriority,std::set<PhysicalManager*>,
+               std::greater<GCPriority> > collectable_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
@@ -1647,33 +1663,10 @@ namespace Legion {
     protected:
       class GarbageCollector {
       public:
-        // If that didn't work then we need to try to delete instances in order
-        // to make space for performing the allocation. We sort instances on
-        // three dimensions: GC Priority, collectable state, and size. The 
-        // mapper controls GC priority to determine which order we attempt
-        // to delete instances. After that we prefer to delete instances which
-        // are collectable first over ones that still have outstanding users.
-        // Finally, we prefer to delete instances that are closest in size to 
-        // the target instance size, but bigger ones over smaller ones. After
-        // we've succeeded in deleting enough instances with the same total size
-        // as the footprint we'll try to do another allocation. If that doesn't
-        // succeed then we'll continue deleting until we succeed or we exhaust
-        // the set of instances eligible for deletion.
-        struct GCEntry {
-        public:
-          inline GCEntry(void)
-            : manager(NULL), diff(0), abs_diff(0) { }
-          GCEntry(PhysicalManager *man, size_t needed, RtEvent r);
-          bool operator<(const GCEntry &rhs) const;
-        public:
-          PhysicalManager *manager;
-          RtEvent ready;
-          long diff;
-          size_t abs_diff;
-        };
-      public:
-        GarbageCollector(LocalLock &manager_lock, AddressSpaceID local,
-                         size_t needed, std::atomic<RtEvent> &gc_precondition,
+        GarbageCollector(LocalLock &collection_lock, LocalLock &manager_lock,
+                         AddressSpaceID local, Memory memory, size_t needed,
+                         std::map<GCPriority,std::set<PhysicalManager*>,
+                                 std::greater<GCPriority> > &collectables,
                          std::map<RegionTreeID,TreeInstances> &instances);
         GarbageCollector(const GarbageCollector &rhs) = delete;
         ~GarbageCollector(void);
@@ -1681,16 +1674,34 @@ namespace Legion {
         GarbageCollector& operator=(const GarbageCollector &rhs) = delete;
       public:
         RtEvent perform_collection(void);
-        inline bool collection_complete(void) const { return eligible.empty(); }
+        inline bool collection_complete(void) const 
+          { return (current_priority == LEGION_GC_NEVER_PRIORITY); }
       protected:
+        struct Range {
+        public:
+          Range(void) : size(0) { }
+          Range(PhysicalManager *m); 
+          std::set<PhysicalManager*> managers;
+          size_t size;
+        };
+      protected:
+        AutoLock collection_lock;
         LocalLock &manager_lock;
+        std::map<GCPriority,std::set<PhysicalManager*>,
+                 std::greater<GCPriority> > &collectable_instances;
         std::map<RegionTreeID,TreeInstances> &current_instances;
-        std::map<GCPriority,std::vector<GCEntry> > eligible;
-        std::vector<PhysicalManager*> deleted;
-        const RtUserEvent gc_event;
+        const Memory memory;
         const AddressSpaceID local_space;
         const size_t needed_size;
-        bool sorted;
+      protected:
+        std::vector<PhysicalManager*> small_holes, perfect_holes;
+        std::map<size_t,std::vector<PhysicalManager*> > large_holes;
+        std::map<uintptr_t,Range> ranges;
+        PhysicalManager *small_manager;
+        std::vector<uintptr_t> pointers;
+        std::set<PhysicalManager*> deleted;
+        GCPriority current_priority;
+        bool sort_current_priority;
       };
     }; 
 
@@ -3304,9 +3315,6 @@ namespace Legion {
       void send_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_acquire(AddressSpaceID target, Serializer &rez);
       void send_gc_acquired(AddressSpaceID target, Serializer &rez);
-      void send_gc_release(AddressSpaceID target, Serializer &rez);
-      void send_gc_verification(AddressSpaceID target, Serializer &rez);
-      void send_gc_verified(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
@@ -3600,9 +3608,6 @@ namespace Legion {
       void handle_gc_response(Deserializer &derez);
       void handle_gc_acquire(Deserializer &derez, AddressSpaceID source);
       void handle_gc_acquired(Deserializer &derez);
-      void handle_gc_release(Deserializer &derez, AddressSpaceID source);
-      void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
-      void handle_gc_verified(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
@@ -5725,12 +5730,6 @@ namespace Legion {
         case SEND_GC_ACQUIRE:
           break;
         case SEND_GC_ACQUIRED:
-          break;
-        case SEND_GC_RELEASE:
-          break;
-        case SEND_GC_VERIFICATION:
-          break;
-        case SEND_GC_VERIFIED:
           break;
         case SEND_GC_DEBUG_REQUEST:
           break;

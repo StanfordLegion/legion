@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+// Useful for IDEs 
+#include "legion/legion_redop.h"
+
 #include <array>
 
 #ifndef __MAX__

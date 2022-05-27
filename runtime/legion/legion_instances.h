@@ -309,12 +309,12 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
-      bool try_collection(AddressSpaceID source, RtEvent &ready, 
-                          bool &already_collected);
-      bool verify_collection(RtEvent &collected);
-      void release_collection(AddressSpaceID source);
+      bool can_collect(AddressSpaceID source, bool &already_collected);
+      bool collect(RtEvent &collected);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
+      virtual void get_instance_pointers(Memory memory, 
+                                    std::vector<uintptr_t> &pointers) const = 0;
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL) = 0;
       virtual void force_deletion(void) = 0;
@@ -372,11 +372,6 @@ namespace Legion {
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_acquired(Deserializer &derez);
-      static void handle_garbage_collection_release(Runtime *runtime,
-          Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_verification(Runtime *runtime,
-          Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_verified(Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_request(Runtime *runtime,
@@ -582,6 +577,8 @@ namespace Legion {
           LayoutConstraints *constraints, ApEvent use_event,
           InstanceKind kind, ReductionOpID redop, GarbageCollectionState state);
     public:
+      virtual void get_instance_pointers(Memory memory, 
+                                    std::vector<uintptr_t> &pointers) const;
       virtual RtEvent perform_deletion(AddressSpaceID source, 
                                        AutoLock *i_lock = NULL);
       virtual void force_deletion(void);
@@ -696,6 +693,8 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
+      virtual void get_instance_pointers(Memory memory, 
+                                    std::vector<uintptr_t> &pointers) const;
       virtual RtEvent perform_deletion(AddressSpaceID source,
                                        AutoLock *i_lock = NULL);
       virtual void force_deletion(void);
