@@ -2948,9 +2948,10 @@ end
 
 local function wrap_partition_internal(node, parent)
   node.value = ast.typed.expr.Internal {
-    value = values.value(node.value,
-              expr.just(quote end, { impl = parent }),
-              node.value.expr_type),
+    value = values.value(
+      node.value,
+      expr.just(quote end, node.value.expr_type { impl = parent }),
+      node.value.expr_type),
     expr_type = node.value.expr_type,
     annotations = node.annotations,
     span = node.span
@@ -2971,7 +2972,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   if is_identity_projection(expr, loop_index) and
      std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type))
   then
-    return 0
+    return 0 -- Identity projection functor.
   end
 
   local index = expr.index
