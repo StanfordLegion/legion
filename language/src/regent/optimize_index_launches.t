@@ -1118,7 +1118,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     local free_vars_base = terralib.newlist()
     free_vars_base:insertall(loop_cx.free_variables)
-
     for i, arg in ipairs(args) do
       if not analyze_is_side_effect_free(loop_cx, arg) then
         report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
@@ -1545,7 +1544,8 @@ local function hoist_call_args(cx, hoisted, call_args)
           util.get_base_indexed_node(call_args[i]).expr_type))
       end)
     then
-      local heights = indices:map(function(i)
+      local heights = indices:map(
+        function(i)
           local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
           if not has_invariant_prefix then
             return -1
@@ -1706,7 +1706,8 @@ function optimize_index_launch.stat_for_num(cx, node)
   end
 
   local dynamic_check = insert_dynamic_check(
-    is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+    is_demand, body.args_need_dynamic_check, index_launch_ast,
+    node {
       block = optimize_index_launches.block(cx, node.block),
     })
 
