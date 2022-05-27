@@ -45,6 +45,16 @@ extern "C" {
   }
 
   REALM_PUBLIC_API
+  int omp_get_num_places(void)
+  {
+    // Some newer versions of the OpenMP runtime enable control over OpenMP
+    // threads ploacement onto different sockets or cores. This sort of thing
+    // is controlled by Realm in our implementation, so just return the number
+    // of threads allocated to this worker pool.
+    return omp_get_num_threads();
+  }
+
+  REALM_PUBLIC_API
   int omp_get_max_threads(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
