@@ -9663,7 +9663,7 @@ class RealmCopy(RealmBase):
                         # Do the destination instances first
                         index = self.dst_indirections[fidx]
                         for off in range(self.indirections.get_group_size(index)):
-                            inst,space in self.indirections.groups[index][off]
+                            inst,space = self.indirections.groups[index][off]
                             for point in space.get_point_set().iterator():
                                 key = (point,field,inst.tree_id)
                                 self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
