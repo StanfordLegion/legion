@@ -1997,6 +1997,7 @@ namespace Legion {
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,
+                             std::set<IndexTreeNode*> &visited,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false) = 0;
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
@@ -2194,6 +2195,7 @@ namespace Legion {
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,
+                             std::set<IndexTreeNode*> &visited,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
@@ -3276,6 +3278,7 @@ namespace Legion {
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,
+                             std::set<IndexTreeNode*> &visited,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
