@@ -13,15 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_dereference_bounded_type.rg:25: dereference of non-pointer type int1d($is)
---   return @x
+-- type_mismatch_dereference_bounded_type2.rg:24: ptr expected region(int32) as argument 2, got region(ispace(int1d), int32)
+--   return @p
 --          ^
 
 import "regent"
 
-task f()
-  var is : ispace(int1d, 5)
-  var x : int1d(is)
-  return @x
+task sum(r : region(ispace(int1d), int), p : ptr(int, r))
+where reads(r) do
+  return @p
 end
-f:compile()
+sum:compile()
