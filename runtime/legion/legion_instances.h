@@ -514,7 +514,8 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
                         ApEvent use_event, InstanceKind kind,
-                        const ReductionOp *op = NULL);
+                        const ReductionOp *op = NULL,
+                        ApEvent producer_event = ApEvent::NO_AP_EVENT);
       IndividualManager(const IndividualManager &rhs) = delete;
       virtual ~IndividualManager(void);
     public:
