@@ -3355,14 +3355,19 @@ namespace Legion {
               OffsetConstraint(finder->first, finder->second));
         }
 
-#ifdef DEBUG_LEGION
-        assert(single_task_termination.exists());
-#endif
+        ApEvent unique_instance_event;
+        if (runtime->legion_spy_enabled)
+        {
+          // Only need a unique instance event for legion spy
+          ApUserEvent fresh_event = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, fresh_event);
+          unique_instance_event = fresh_event;
+        }
         // Create a physical manager that is not bound to any instance
         PhysicalManager *manager =
           memory_manager->create_unbound_instance(req.region,
                                                   constraints,
-                                                  single_task_termination,
+                                                  unique_instance_event,
                                                   map_id,
                                                   target_proc,
                                                   0/*priority*/);
