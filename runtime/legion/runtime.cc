@@ -4199,8 +4199,7 @@ namespace Legion {
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
         is_owner(m.address_space() == rt->address_space),
-        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
-        gc_precondition(RtEvent::NO_RT_EVENT)
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -4269,12 +4268,8 @@ namespace Legion {
       if (!is_owner)
         return;
       // This is a kind of deletion so make sure it is ordered
-      const RtUserEvent gc_event = Runtime::create_rt_user_event();
-      RtEvent precondition = gc_precondition.exchange(gc_event);
-      if (!precondition.has_triggered())
-        precondition.wait();
+      AutoLock c_lock(collection_lock);
       // This a collection so make sure we're ordered with other collections
-      std::vector<RtEvent> ready_events;
       std::vector<PhysicalManager*> to_delete, delete_now;
       {
         AutoLock m_lock(manager_lock);
@@ -4291,18 +4286,16 @@ namespace Legion {
               it->first->remove_base_valid_ref(NEVER_GC_REF);
               it->second = 0;
             }
-            RtEvent ready;
             bool already_collected = false;
-            if (it->first->try_collection(runtime->address_space,
-                                          ready, already_collected))
+            if (it->first->can_collect(runtime->address_space,
+                                       already_collected))
             {
               to_delete.push_back(it->first);
-              if (ready.exists())
-                ready_events.push_back(ready);
             }
             else if (already_collected)
             {
               delete_now.push_back(it->first);
+              remove_collectable(it->second, it->first);
               TreeInstances::iterator delete_it = it++;
               cit->second.erase(delete_it);
               continue;
@@ -4318,14 +4311,8 @@ namespace Legion {
             cit++;
         }
       }
-      std::vector<RtEvent> delete_effects;
       if (!to_delete.empty())
-        check_instance_deletions(to_delete, ready_events, delete_effects);
-      // We can trigger as soon as we're done with our pass
-      if (!delete_effects.empty())
-        Runtime::trigger_event(gc_event, Runtime::merge_events(delete_effects));
-      else
-        Runtime::trigger_event(gc_event);
+        check_instance_deletions(to_delete);
       for (std::vector<PhysicalManager*>::const_iterator it =
             delete_now.begin(); it != delete_now.end(); it++)
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -4334,28 +4321,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::check_instance_deletions(
-                                const std::vector<PhysicalManager*> &to_delete,
-                                const std::vector<RtEvent> &ready_events,
-                                std::vector<RtEvent> &delete_effects)
+                                 const std::vector<PhysicalManager*> &to_delete)
     //--------------------------------------------------------------------------
     {
       std::vector<PhysicalManager*> deleted;
-      // Wait for any ready events
-      if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
       for (std::vector<PhysicalManager*>::const_iterator it =
             to_delete.begin(); it != to_delete.end(); it++)
       {
         RtEvent deletion_done;
-        if (!(*it)->verify_collection(deletion_done))
+        if (!(*it)->collect(deletion_done))
           continue;
         deleted.push_back(*it);
-        if (deletion_done.exists())
-          delete_effects.push_back(deletion_done);
       }
       if (!deleted.empty())
       {
@@ -4372,11 +4348,30 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != tree_finder->second.end());
 #endif
+          remove_collectable(finder->second, finder->first);
           tree_finder->second.erase(finder);
           if (tree_finder->second.empty())
             current_instances.erase(tree_finder);
           if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
             delete (*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::remove_collectable(GCPriority priority,
+                                           PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      if (priority != LEGION_GC_NEVER_PRIORITY)
+      {
+        std::map<GCPriority,std::set<PhysicalManager*> >::iterator finder =
+          collectable_instances.find(priority);
+        if (finder != collectable_instances.end())
+        {
+          finder->second.erase(manager);
+          if (finder->second.empty())
+            collectable_instances.erase(finder);
         }
       }
     }
@@ -5154,11 +5149,7 @@ namespace Legion {
       // wait until we do a garbage collection
       // This is a collection so we need to order it with respect to
       // to other collections
-      const RtUserEvent gc_event = Runtime::create_rt_user_event();
-      const RtEvent wait_on = gc_precondition.exchange(gc_event);
-      if (!wait_on.has_triggered())
-        wait_on.wait();
-      std::vector<RtEvent> ready_events;
+      AutoLock c_lock(collection_lock);
       std::vector<PhysicalManager*> to_delete, delete_now;
       {
         AutoLock m_lock(manager_lock);
@@ -5175,18 +5166,16 @@ namespace Legion {
               it->first->remove_base_valid_ref(NEVER_GC_REF);
               it->second = 0;
             }
-            RtEvent ready;
             bool already_collected = false;
-            if (it->first->try_collection(runtime->address_space, 
-                                          ready, already_collected))
+            if (it->first->can_collect(runtime->address_space, 
+                                       already_collected))
             {
               to_delete.push_back(it->first);
-              if (ready.exists())
-                ready_events.push_back(ready);
             }
             else if (already_collected)
             {
               delete_now.push_back(it->first);
+              remove_collectable(it->second, it->first);
               TreeInstances::iterator delete_it = it++;
               finder->second.erase(delete_it);
               continue;
@@ -5197,13 +5186,8 @@ namespace Legion {
             current_instances.erase(finder);
         }
       }
-      std::vector<RtEvent> delete_effects;
       if (!to_delete.empty())
-        check_instance_deletions(to_delete, ready_events, delete_effects);
-      if (!delete_effects.empty())
-        Runtime::trigger_event(gc_event, Runtime::merge_events(delete_effects));
-      else
-        Runtime::trigger_event(gc_event);
+        check_instance_deletions(to_delete);
       for (std::vector<PhysicalManager*>::const_iterator it =
             delete_now.begin(); it != delete_now.end(); it++)
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -5218,6 +5202,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
+      AutoLock c_lock(collection_lock);
       AutoLock m_lock(manager_lock);
       std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
         current_instances.find(manager->tree_id);
@@ -5228,7 +5213,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != tree_finder->second.end());
 #endif
+      remove_collectable(finder->second, manager);
       finder->second = priority;
+      if (priority != LEGION_GC_NEVER_PRIORITY)
+        collectable_instances[priority].insert(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -6251,234 +6239,246 @@ namespace Legion {
         *footprint = needed_size;
       if ((result != NULL) || (needed_size == 0))
         return result;
-      // Make sure that garbage collection is atomic and only allocator
+      // Make sure that garbage collection is atomic and only one allocator
       // is attempting to delete instances at a time
-      const RtUserEvent gc_event = Runtime::create_rt_user_event();
-      const RtEvent wait_on = gc_precondition.exchange(gc_event);
-      if (!wait_on.has_triggered())
-        wait_on.wait();
-      // If that didn't work then we need to try to delete instances in order
-      // to make space for performing the allocation. We sort instances on
-      // three dimensions: GC Priority, collectable state, and size. The 
-      // mapper controls GC priority to determine which order we attempt
-      // to delete instances. After that we prefer to delete instances which
-      // are collectable first over ones that still have outstanding users.
-      // Finally, we prefer to delete instances that are closest in size to 
-      // the target instance size, but bigger ones over smaller ones. After
-      // we've succeeded in deleting enough instances with the same total size
-      // as the footprint we'll try to do another allocation. If that doesn't
-      // succeed then we'll continue deleting until we succeed or we exhaust
-      // the set of instances eligible for deletion.
-      struct GCEntry {
-      public:
-        inline GCEntry(void)
-          : manager(NULL), diff(0), abs_diff(0) { }
-        inline GCEntry(PhysicalManager *man, size_t needed, RtEvent r)
-          : manager(man), ready(r)
-        {
-          if (needed <= manager->instance_footprint)
-          {
-            diff = manager->instance_footprint - needed;
-            abs_diff = diff;
-          }
-          else
-          {
-            abs_diff = needed - manager->instance_footprint;
-            diff = -long(abs_diff);
-          }
-        }
-        inline bool operator<(const GCEntry &rhs) const
-        {
-          // Prefer instances that are closest in size to the needed size
-          if (abs_diff < rhs.abs_diff)
-            return false;
-          if (abs_diff > rhs.abs_diff)
-            return true;
-          // If they're the same relative distance, then prefer larger ones
-          if (diff < rhs.diff)
-            return false;
-          if (diff > rhs.diff)
-            return true;
-          // Prefer instances for which we don't have to wait for ready
-          if (!ready.exists() && rhs.ready.exists())
-            return false;
-          if (ready.exists() && !rhs.ready.exists())
-            return true;
-          // Make sure they're not the same manager
-          return std::less<PhysicalManager*>()(manager, rhs.manager); 
-        }
-      public:
-        PhysicalManager *manager;
-        RtEvent ready;
-        long diff;
-        size_t abs_diff;
-      };
-      std::vector<PhysicalManager*> delete_now;
-      std::map<GCPriority,std::vector<GCEntry> > eligible;
+      AutoLock c_lock(collection_lock);
+      // Iterate over the lists of managers for each collection level
+      for (std::map<GCPriority,std::set<PhysicalManager*>,
+                    std::greater<GCPriority> >::iterator pit = 
+            collectable_instances.begin(); pit != 
+            collectable_instances.end(); /*nothing*/)
       {
-        AutoLock m_lock(manager_lock);
-        for (std::map<RegionTreeID,TreeInstances>::iterator cit =
-              current_instances.begin(); cit != 
-              current_instances.end(); /*nothing*/)
+        std::set<PhysicalManager*> deleted;
+        std::vector<PhysicalManager*> small_holes;
+        std::map<size_t,std::vector<PhysicalManager*> > large_holes;
+        for (std::set<PhysicalManager*>::iterator it = 
+              pit->second.begin(); it != pit->second.end(); /*nothing*/)
         {
-          for (TreeInstances::iterator it =
-                cit->second.begin(); it != cit->second.end(); /*nothing*/)
+          bool already_collected = false;
+          if ((*it)->can_collect(runtime->address_space, already_collected))
           {
-            // Don't even both checking ones that have never-collect priority
-            if (it->second == LEGION_GC_NEVER_PRIORITY)
+            if ((*it)->instance_footprint == needed_size)
             {
-              it++;
-              continue;
-            }
-            RtEvent ready;
-            bool already_collected = false;
-            if (it->first->try_collection(runtime->address_space,
-                                          ready, already_collected))
-            {
-              eligible[it->second].emplace_back(
-                  GCEntry(it->first, needed_size, ready));
-            }
-            else if (already_collected)
-            {
-              delete_now.push_back(it->first);
-              TreeInstances::iterator delete_it = it++;
-              cit->second.erase(delete_it);
-              continue;
-            }
-            it++;
-          }
-          if (cit->second.empty())
-          {
-            std::map<RegionTreeID,TreeInstances>::iterator delete_it = cit++;
-            current_instances.erase(delete_it);
-          }
-          else
-            cit++;
-        }
-      }
-      std::vector<PhysicalManager*> deleted;
-      while (!eligible.empty())
-      {
-        // Collect from the highest priority to the lowest
-        std::map<GCPriority,std::vector<GCEntry> >::iterator eit = 
-          --eligible.end();
-        if (result == NULL)
-        {
-          // Sort the managers here so the ones we most want to start with 
-          // are at the end of the vector and we can pop them off the back
-          std::sort(eit->second.begin(), eit->second.end(), 
-                    std::less<GCEntry>());
-          // Then go through and try to delete them, once we've deleted enough
-          // then we can try to do an allocation until we've exhausted everything
-          while (!eit->second.empty())
-          {
-            // Pop the next one off the back
-            const GCEntry first = eit->second.back();
-            eit->second.pop_back();
-            if (first.ready.exists() && !first.ready.has_triggered())
-              first.ready.wait();
-            RtEvent delete_done;
-            if (!first.manager->verify_collection(delete_done))
-              continue;
-            deleted.push_back(first.manager);
-            std::vector<RtEvent> deletions_done;
-            if (delete_done.exists())
-              deletions_done.push_back(delete_done);
-            size_t hole_size = first.manager->instance_footprint; 
-            while ((hole_size < needed_size) && !eit->second.empty())
-            {
-              // Greedily find as few instances as we can to get the needed size
-              // Find either the smallest one that exceeds the hole size or the
-              // biggest one that doesn't. 
-              int best = eit->second.size() - 1;
-              size_t best_size = hole_size + 
-                eit->second[best].manager->instance_footprint;
-              bool under = (best_size < needed_size);
-              for (int idx = best-1; idx >= 0; idx--)
+              // If we see another perfectly sized instance, try to 
+              // collect it right now and hopefully realm will see the hole
+              RtEvent collected;
+              if ((*it)->collect(collected))
               {
-                size_t next_size = hole_size + 
-                  eit->second[idx].manager->instance_footprint;
-                if (next_size < needed_size)
-                {
-                  if (under && (best_size <= next_size))
-                  {
-                    best = idx;
-                    best_size = next_size;
-                  }
-                }
-                else
-                {
-                  if (under || (next_size <= best_size))
-                  {
-                    best = idx;
-                    best_size = next_size;
-                  }
-                }
-              }
-              const GCEntry next = eit->second[best];
-              eit->second.erase(eit->second.begin() + best);
-              if (next.ready.exists() && !next.ready.has_triggered())
-                next.ready.wait();
-              if (next.manager->verify_collection(delete_done))
-              {
-                deleted.push_back(next.manager);
-                hole_size = best_size;
-                if (delete_done.exists())
-                  deletions_done.push_back(delete_done);
+                pit->second.erase(*it);
+                deleted.insert(*it);
+                result = builder.create_physical_instance(runtime->forest,
+                   collective, point, unsat_kind, unsat_index, NULL, collected);
+                if (result != NULL)
+                  break;
               }
             }
-            // Try to perform the allocation now
-            if (!deletions_done.empty())
-              delete_done = Runtime::merge_events(deletions_done);
-            result = builder.create_physical_instance(runtime->forest,
-                collective, point, unsat_kind, unsat_index, NULL, delete_done);
-            if (result == NULL)
-              continue;
-            // If we succeed then unlock the deletions for the remainder 
-            for (std::vector<GCEntry>::const_iterator it =
-                  eit->second.begin(); it != eit->second.end(); it++)
-              it->manager->release_collection(runtime->address_space);
-            break;
+            else if ((*it)->instance_footprint < needed_size)
+              small_holes.push_back(*it);
+            else
+              large_holes[(*it)->instance_footprint].push_back(*it);
           }
+          else if (already_collected)
+          {
+            deleted.insert(*it);
+            std::set<PhysicalManager*>::iterator delete_it = it++;
+            pit->second.erase(delete_it);
+            continue;
+          }
+          it++;
+        }
+        // Try deleting the large holes first from the smallest to 
+        // the largest to see if we can make a space
+        if ((result == NULL) && !large_holes.empty())
+        {
+          for (std::map<size_t,std::vector<PhysicalManager*> >::const_iterator
+                sit = large_holes.begin(); sit != large_holes.end(); sit++)
+          {
+            for (std::vector<PhysicalManager*>::const_reverse_iterator it =
+                  sit->second.rbegin(); it != sit->second.rend(); it++)
+            {
+              RtEvent collected;
+              if (!(*it)->collect(collected))
+                continue;
+              pit->second.erase(*it);
+              deleted.insert(*it);
+              result = builder.create_physical_instance(runtime->forest,
+                  collective, point, unsat_kind, unsat_index, NULL, collected);
+              if (result != NULL)
+                break;
+            }
+            if (result != NULL)
+              break;
+          }
+        }
+        if ((result == NULL) && !small_holes.empty())
+        {
+          // If we still didn't delete anything then group the small
+          // holes together into chunks that are either as big as 
+          // possible or as big as the hole we need and try deleting them
+          struct Range {
+          public:
+            Range(void) : size(0) { }
+            Range(PhysicalManager *m) 
+              : size(m->instance_footprint) { managers.insert(m); }
+            std::set<PhysicalManager*> managers;
+            size_t size;
+          };
+          std::map<uintptr_t,Range> ranges;
+          for (std::vector<PhysicalManager*>::const_iterator sit =
+                small_holes.begin(); sit != small_holes.end(); sit++)
+          {
+            // Get the instance pointer(s) for this memory
+            std::vector<uintptr_t> pointers;
+            (*sit)->get_instance_pointers(memory, pointers);
+            for (std::vector<uintptr_t>::const_iterator
+                  uit = pointers.begin(); uit != pointers.end(); uit++)
+            {
+              // Insert our range
+              std::map<uintptr_t,Range>::iterator rit = 
+                ranges.insert(std::make_pair(*uit, Range(*sit))).first;
+              // Check if we can join it with the one before or after
+              if (rit != ranges.begin())
+              {
+                std::map<uintptr_t,Range>::iterator prev = std::prev(rit);
+                if ((prev->first + prev->second.size) == rit->first)
+                {
+                  // Merge rit into prev
+                  prev->second.size += rit->second.size;
+                  prev->second.managers.insert(
+                      rit->second.managers.begin(), rit->second.managers.end());
+                  ranges.erase(rit);
+                  rit = prev;
+                }
+              }
+              if (std::next(rit) != ranges.end())
+              {
+                std::map<uintptr_t,Range>::iterator next= std::next(rit);
+                if ((rit->first + rit->second.size) == next->first)
+                {
+                  // Merge next into rit
+                  rit->second.size += next->second.size;
+                  rit->second.managers.insert(
+                    next->second.managers.begin(), next->second.managers.end());
+                  ranges.erase(next);
+                }
+              }
+              // See if it is is big enough to try an allocation
+              if (needed_size <= rit->second.size)
+              {
+                // Try deleting all the managers in the range
+                std::vector<RtEvent> collected_events;
+                for (std::set<PhysicalManager*>::const_iterator it =
+                      rit->second.managers.begin(); it != 
+                      rit->second.managers.end(); it++)
+                {
+                  RtEvent collected;
+                  if (!(*it)->collect(collected))
+                    continue;
+                  pit->second.erase(*it);
+                  deleted.insert(*it);
+                  if (collected.exists())
+                    collected_events.push_back(collected);
+                }
+                // We no longer need this range
+                ranges.erase(rit);
+                // Wait for the deletions to be done
+                RtEvent collected;
+                if (!collected_events.empty())
+                  collected = Runtime::merge_events(collected_events);
+                // Try to do another allocation
+                result = builder.create_physical_instance(runtime->forest,
+                   collective, point, unsat_kind, unsat_index, NULL, collected);
+                if (result != NULL)
+                  break;
+              }
+            }
+            if (result != NULL)
+              break;
+          }
+          if ((result == NULL) && !ranges.empty())
+          {
+            // At this point, things look pretty hopeless, so just
+            // go through and start deleting ranges until we've freed
+            // up enough memory for the needed size until we run out
+            // of stuff to delete
+            size_t freed_size = 0;
+            std::vector<RtEvent> collected_events;
+            for (std::map<uintptr_t,Range>::const_iterator rit =
+                  ranges.begin(); rit != ranges.end(); rit++)
+            {
+              for (std::set<PhysicalManager*>::const_iterator it =
+                    rit->second.managers.begin(); it != 
+                    rit->second.managers.end(); it++)
+              {
+                RtEvent collected;
+                if (!(*it)->collect(collected))
+                  continue;
+                pit->second.erase(*it);
+                deleted.insert(*it);
+                if (collected.exists())
+                  collected_events.push_back(collected);
+              }
+              freed_size += rit->second.size;
+              if (needed_size <= freed_size)
+              {
+                RtEvent collected;
+                if (!collected_events.empty())
+                  collected = Runtime::merge_events(collected_events);
+                // Try to do another allocation
+                result = builder.create_physical_instance(runtime->forest,
+                   collective, point, unsat_kind, unsat_index, NULL, collected);
+                if (result != NULL)
+                  break;
+                // Otherwise reset
+                freed_size = 0;
+                collected_events.clear();
+              }
+            }
+            if ((result == NULL) && (freed_size > 0))
+            {
+              // One last shot in this priority generation
+              RtEvent collected;
+              if (!collected_events.empty())
+                collected = Runtime::merge_events(collected_events);
+              // Try to do another allocation
+              result = builder.create_physical_instance(runtime->forest,
+                 collective, point, unsat_kind, unsat_index, NULL, collected);
+            }
+          }
+        }
+        if (!deleted.empty())
+        {
+          AutoLock m_lock(manager_lock);
+          for (std::set<PhysicalManager*>::const_iterator it =
+                deleted.begin(); it != deleted.end(); it++)
+          {
+            std::map<RegionTreeID,TreeInstances>::iterator current_finder =
+              current_instances.find((*it)->tree_id);
+#ifdef DEBUG_LEGION
+            assert(current_finder != current_instances.end());
+#endif
+            TreeInstances::iterator finder = current_finder->second.find(*it);
+#ifdef DEBUG_LEGION
+            assert(finder != current_finder->second.end());
+#endif
+            current_finder->second.erase(finder);
+            if (current_finder->second.empty())
+              current_instances.erase(current_finder);
+            if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+              delete (*it);
+          }
+        }
+        if (pit->second.empty())
+        {
+          std::map<GCPriority,std::set<PhysicalManager*> >::iterator 
+            delete_it = pit++;
+          collectable_instances.erase(delete_it);
         }
         else
-        {
-          // We already found our manager so we're just releasing here
-          for (std::vector<GCEntry>::const_iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
-            it->manager->release_collection(runtime->address_space);
-        }
-        eligible.erase(eit);
+          pit++;
+        if (result != NULL)
+          break;
       }
-      // Remove the deleted instances from the current instances
-      if (!deleted.empty())
-      {
-        AutoLock m_lock(manager_lock);
-        for (std::vector<PhysicalManager*>::const_iterator it =
-              deleted.begin(); it != deleted.end(); it++)
-        {
-          std::map<RegionTreeID,TreeInstances>::iterator current_finder =
-            current_instances.find((*it)->tree_id);
-#ifdef DEBUG_LEGION
-          assert(current_finder != current_instances.end());
-#endif
-          TreeInstances::iterator finder = current_finder->second.find(*it);
-#ifdef DEBUG_LEGION
-          assert(finder != current_finder->second.end());
-#endif
-          current_finder->second.erase(finder);
-          if (current_finder->second.empty())
-            current_instances.erase(current_finder);
-          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            delete (*it);
-        }
-      }
-      // Trigger the event showing we're done with the collection
-      Runtime::trigger_event(gc_event);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            delete_now.begin(); it != delete_now.end(); it++)
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (*it);
       return result;
     }
 
@@ -6515,12 +6515,15 @@ namespace Legion {
         manager->add_base_valid_ref(NEVER_GC_REF);
       // Record the manager here as being eligible for collection
       {
+        AutoLock c_lock(collection_lock);
         AutoLock m_lock(manager_lock);
         TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
         assert(insts.find(manager) == insts.end());
 #endif
         insts[manager] = priority;
+        if (priority != LEGION_GC_NEVER_PRIORITY)
+          collectable_instances[priority].insert(manager);
       }
     }
 
@@ -8315,21 +8318,6 @@ namespace Legion {
           case SEND_GC_ACQUIRED:
             {
               runtime->handle_gc_acquired(derez);
-              break;
-            }
-          case SEND_GC_RELEASE:
-            {
-              runtime->handle_gc_release(derez, remote_address_space);
-              break;
-            }
-          case SEND_GC_VERIFICATION:
-            {
-              runtime->handle_gc_verification(derez, remote_address_space);
-              break;
-            }
-          case SEND_GC_VERIFIED:
-            {
-              runtime->handle_gc_verified(derez);
               break;
             }
           case SEND_GC_DEBUG_REQUEST:
@@ -16996,29 +16984,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_gc_release(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_GC_RELEASE>(rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_gc_verification(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_GC_VERIFICATION>(rez,
-                                                      true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_gc_verified(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_GC_VERIFIED>(rez,
-                                 true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_gc_debug_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -18719,29 +18684,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_acquired(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_gc_release(Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalManager::handle_garbage_collection_release(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_gc_verification(Deserializer &derez,
-                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalManager::handle_garbage_collection_verification(this, derez, 
-                                                              source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_gc_verified(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalManager::handle_garbage_collection_verified(derez);
     }
 
     //--------------------------------------------------------------------------
