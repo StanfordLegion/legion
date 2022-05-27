@@ -7082,12 +7082,10 @@ namespace Legion {
             source ? false/*no aliasing*/ : possible_dst_aliasing;
           unstructured->subfield_offset = 0;
           unstructured->insts.swap(instances);
-#ifndef LEGION_SPY
           unstructured->spaces.resize(nonempty_indexes.size());
           for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
             unstructured->spaces[idx] =
               indirect_records[nonempty_indexes[idx]].domain;
-#endif
           indirect_index = indirections.size();
           indirections.push_back(unstructured);
 #ifdef LEGION_SPY
@@ -7116,14 +7114,8 @@ namespace Legion {
             const_cast<UnstructuredIndirection*>( 
               static_cast<const UnstructuredIndirection*>(*it));
           std::vector<PhysicalInstance> instances(nonempty_size);
-          unstructured->spaces.resize(nonempty_size);
-          std::vector<Realm::IndexSpace<D2,T2> > spaces(nonempty_size);
           for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
-          {
             instances[idx] = unstructured->insts[nonempty_indexes[idx]];
-            unstructured->spaces[idx] = 
-              indirect_records[nonempty_indexes[idx]].domain;
-          }
           unstructured->insts.swap(instances);
         }
       }
