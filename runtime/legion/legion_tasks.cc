@@ -3515,6 +3515,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(single_task_termination.exists());
 #endif
+
         // Create a physical manager that is not bound to any instance
         PhysicalManager *manager =
           memory_manager->create_unbound_instance(req.region,

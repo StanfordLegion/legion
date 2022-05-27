@@ -18,6 +18,8 @@
 #include "legion/arrays.h"
 #include "legion/accessor.h"
 #include "legion/legion_utilities.h"
+// Useful for IDEs 
+#include "legion/legion_stl.h"
 
 namespace Legion {
   namespace STL {

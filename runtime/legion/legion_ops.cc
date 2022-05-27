@@ -9047,7 +9047,7 @@ namespace Legion {
         }
         if (exchange.local_postconditions.size() < points.size())
         {
-          exchange.local_postconditions.insert(local_pre);
+          exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
             Runtime::trigger_event(&trace_info, exchange.collective_post, 
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
@@ -9085,7 +9085,7 @@ namespace Legion {
         }
         if (exchange.local_postconditions.size() < points.size())
         {
-          exchange.local_postconditions.insert(local_pre);
+          exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
             Runtime::trigger_event(&trace_info, exchange.collective_post,
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
@@ -23091,8 +23091,9 @@ namespace Legion {
       this->region = region; 
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for
-      // all prior users of this particular region
-      requirement.privilege = LEGION_READ_WRITE;
+      // all prior users of this particular region unless we're not flushing
+      // in which case we can make the privileges write-discard
+      requirement.privilege = flush ? LEGION_READ_WRITE : LEGION_WRITE_DISCARD;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
       const size_t future_size = 0;

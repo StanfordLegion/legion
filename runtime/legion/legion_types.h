@@ -914,9 +914,6 @@ namespace Legion {
       SEND_GC_RESPONSE,
       SEND_GC_ACQUIRE,
       SEND_GC_FAILED,
-      SEND_GC_RELEASE,
-      SEND_GC_VERIFICATION,
-      SEND_GC_VERIFIED,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
       SEND_ACQUIRE_REQUEST,
@@ -1160,9 +1157,6 @@ namespace Legion {
         "Send GC Response",                                           \
         "Send GC Acquire Request",                                    \
         "Send GC Acquire Failed",                                     \
-        "Send GC Release",                                            \
-        "Send GC Verification Request",                               \
-        "Send GC Verification Response",                              \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \
         "Send Acquire Request",                                       \
