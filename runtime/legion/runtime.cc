@@ -9767,11 +9767,15 @@ namespace Legion {
       // Create an individual manager with a null instance
       DistributedID did = runtime->get_available_distributed_id();
 
-      // Create a unique ready event for the instance. The producer event
-      // triggers this ready event, as the unbound manager is not ready
-      // until the producer finishes
-      ApUserEvent unique_instance_event = Runtime::create_ap_user_event(NULL);
-      Runtime::trigger_event(NULL, unique_instance_event, producer_event);
+      ApEvent ready_event = producer_event;
+      if (runtime->legion_spy_enabled)
+      {
+        // When Legion Spy is enabled, we want the ready event to be unique.
+        // So we create a fresh event and trigger it with the producer event
+        ApUserEvent unique_event = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, unique_event, producer_event);
+        ready_event = unique_event;
+      }
 
       IndividualManager *manager =
         new IndividualManager(runtime->forest, did,
@@ -9786,7 +9790,7 @@ namespace Legion {
                               layout,
                               0/*redop id*/, true/*register now*/,
                               -1U/*instance_footprint*/,
-                              unique_instance_event,
+                              ready_event,
                               PhysicalManager::UNBOUND_INSTANCE_KIND,
                               NULL/*op*/,
                               producer_event);
