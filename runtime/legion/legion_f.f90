@@ -3190,7 +3190,7 @@ contains
     type(FLogicalRegion), intent(in)  :: parent
     type(FIndexPartition), intent(in) :: handle
 
-    legion_runtime_get_logical_partition%lp = legion_logical_partition_create_f(this%runtime, ctx%context, &
+    legion_runtime_get_logical_partition%lp = legion_logical_partition_create_f(this%runtime, &
                                                 parent%lr, handle%ip)
   end function legion_runtime_get_logical_partition
 
