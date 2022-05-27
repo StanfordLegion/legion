@@ -4410,6 +4410,8 @@ class LogicalState(object):
                       "a close operation that we normally would have expected. This "+
                       "is likely a runtime bug. Re-run with logical checks "+
                       "to confirm.") % (op, str(op.uid)))
+            if self.node.state.bad_graph_on_error:
+                self.node.state.dump_bad_graph(op.context, req.logical_node.tree_id, self.field)
             if self.node.state.assert_on_error:
                 assert False
         return close
@@ -5562,6 +5564,12 @@ class EquivalenceSet(object):
             for copy in copies:
                 bad = check_preconditions(preconditions, copy)
                 if bad is not None:
+                    # Handle a special case here of collective scatter copies
+                    # They look racy to Legion Spy but they are what the user
+                    # controls so it's up to the user to specify them
+                    if isinstance(bad,RealmCopy) and \
+                            copy.creator.index_owner is bad.creator.index_owner:
+                        continue
                     print("ERROR: Missing indirect precondition for "+str(copy)+
                           " on field "+str(field)+" for "+str(op)+" on "+str(bad))
                     if op.state.eq_graph_on_error:
@@ -10269,14 +10277,14 @@ class RealmCopy(RealmBase):
                             else:
                                 line.append('^')
                         if has_dst_indirect:
-                            idx_inst = self.indirections.get_group_instance(dst_index, row)
-                            if idx_inst is not None:
-                                line.append(str(idx_inst))
-                            else:
-                                line.append('^')
                             if row == 0:
                                 line.append(str(
                                     self.indirections.get_indirect_instance(dst_index)))
+                            else:
+                                line.append('^')
+                            idx_inst = self.indirections.get_group_instance(dst_index, row)
+                            if idx_inst is not None:
+                                line.append(str(idx_inst))
                             else:
                                 line.append('^')
                         else:
@@ -10338,19 +10346,65 @@ class RealmCopy(RealmBase):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
             point_set = self.index_expr.get_point_set()
-            for point in point_set.iterator():
-                for field in self.src_fields:
-                    key = (point,field,self.src_tree_id)
-                    assert key not in self.eq_privileges
-                    self.eq_privileges[key] = READ_ONLY
-            # If this is a copy across record that we 
-            # are writing to the destination fields
             if self.is_across():
+                # Copy-across case
+                # Check for any indirections
+                if self.src_indirections is None:
+                    assert len(self.src_fields) == len(self.src_indirections)
+                    for idx in range(len(self.src_indirections)):
+                        # Do the source instances first
+                        field = self.src_fields[idx]
+                        index = self.src_indirections[idx]
+                        for off in range(self.indirections.get_group_size(index)):
+                            inst,space = self.indirections.groups[index][off]
+                            for point in space.get_point_set().iterator():
+                                key = (point,field,inst.tree_id)
+                                self.eq_privileges[key] = READ_ONLY
+                        # Then do the indirection field
+                        inst = self.indirections.get_indirect_instance(index)
+                        field = self.indirections.get_indirect_field(index)
+                        for point in point_set.iterator():
+                            key = (point,field,inst.tree_id)
+                            self.eq_privileges[key] = READ_ONLY
+                else:
+                    for point in point_set.iterator():
+                        for field in self.src_fields:
+                            key = (point,field,self.src_tree_id)
+                            assert key not in self.eq_privileges
+                            self.eq_privileges[key] = READ_ONLY
+                if self.dst_indirections is None:
+                    assert len(self.dst_fields) == len(self.dst_indirections)
+                    for idx in range(len(self.dst_indirections)):
+                        # Do the destination instances first
+                        field = self.dst_fields[idx]
+                        index = self.dst_indirections[idx]
+                        redop = self.redops(idx)
+                        for off in range(self.indirections.get_group_size(index)):
+                            inst,space in self.indirections.groups[index][off]
+                            for point in space.get_point_set().iterator():
+                                key = (point,field,inst.tree_id)
+                                self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
+                        # Then do the indirection field
+                        inst = self.indirections.get_indirect_instance(index)
+                        field = self.indirections.get_indirect_field(index)
+                        for point in point_set.iterator():
+                            key = (point,field,inst.tree_id)
+                            self.eq_privileges[key] = READ_ONLY
+                else:
+                    for point in point_set.iterator():
+                        for index in range(len(self.dst_fields)):
+                            field = self.dst_fields[index]
+                            redop = self.redops[index]
+                            key = (point,field,self.dst_tree_id)
+                            assert key not in self.eq_privileges
+                            self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
+            else:
+                # Normal copy case
                 for point in point_set.iterator():
-                    for field in self.dst_fields:
-                        key = (point,field,self.dst_tree_id)
+                    for field in self.src_fields:
+                        key = (point,field,self.src_tree_id)
                         assert key not in self.eq_privileges
-                        self.eq_privileges[key] = WRITE_ONLY
+                        self.eq_privileges[key] = READ_ONLY
         return self.eq_privileges 
 
 class RealmFill(RealmBase):

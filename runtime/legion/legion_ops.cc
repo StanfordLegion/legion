@@ -7484,7 +7484,7 @@ namespace Legion {
         }
         if (exchange.local_postconditions.size() < points.size())
         {
-          exchange.local_postconditions.insert(local_pre);
+          exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
             Runtime::trigger_event(&trace_info, exchange.collective_post, 
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
@@ -7522,7 +7522,7 @@ namespace Legion {
         }
         if (exchange.local_postconditions.size() < points.size())
         {
-          exchange.local_postconditions.insert(local_pre);
+          exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
             Runtime::trigger_event(&trace_info, exchange.collective_post,
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
