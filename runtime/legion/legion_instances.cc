@@ -2415,7 +2415,8 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
                         ApEvent u_event, InstanceKind k,
-                        const ReductionOp *op /*= NULL*/)
+                        const ReductionOp *op /*= NULL*/,
+                        ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
@@ -2426,8 +2427,7 @@ namespace Legion {
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL),
-        producer_event(
-            (k == UNBOUND_INSTANCE_KIND) ? u_event : ApEvent::NO_AP_EVENT)
+        producer_event(p_event)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,

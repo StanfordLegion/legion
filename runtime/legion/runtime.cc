@@ -9731,7 +9731,7 @@ namespace Legion {
     PhysicalManager* MemoryManager::create_unbound_instance(
                                                LogicalRegion region,
                                                LayoutConstraintSet &constraints,
-                                               ApEvent ready_event,
+                                               ApEvent producer_event,
                                                MapperID mapper_id,
                                                Processor target_proc,
                                                GCPriority priority)
@@ -9766,6 +9766,13 @@ namespace Legion {
 
       // Create an individual manager with a null instance
       DistributedID did = runtime->get_available_distributed_id();
+
+      // Create a unique ready event for the instance. The producer event
+      // triggers this ready event, as the unbound manager is not ready
+      // until the producer finishes
+      ApUserEvent unique_instance_event = Runtime::create_ap_user_event(NULL);
+      Runtime::trigger_event(NULL, unique_instance_event, producer_event);
+
       IndividualManager *manager =
         new IndividualManager(runtime->forest, did,
                               runtime->address_space,
@@ -9779,9 +9786,10 @@ namespace Legion {
                               layout,
                               0/*redop id*/, true/*register now*/,
                               -1U/*instance_footprint*/,
-                              ready_event,
+                              unique_instance_event,
                               PhysicalManager::UNBOUND_INSTANCE_KIND,
-                              NULL/*op*/);
+                              NULL/*op*/,
+                              producer_event);
 
       // Register the instance to make it visible to downstream tasks
       record_created_instance(manager,
