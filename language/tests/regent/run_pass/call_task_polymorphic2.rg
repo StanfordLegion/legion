@@ -92,19 +92,25 @@ task main()
   var x = dynamic_cast(ptr(fs, r), 2)
   var cs = ispace(int1d, 5, 1)
   var p = partition(equal, r, cs)
+  fill(r.{i, v.{_x, _y}}, 0)
 
+  __demand(__index_launch)
   for c in cs do
     t1(p[c].{v})
   end
+  __demand(__index_launch)
   for c in cs do
     t2(p[c].{i})
   end
+  __demand(__index_launch)
   for c in cs do
     t3(p[c].{c=i})
   end
+  __demand(__index_launch)
   for c in cs do
     t4(p[c].{a=v._x, b=i}, c)
   end
+  __demand(__index_launch)
   for c in cs do
     t4(p[c].{[names1]=[field_paths1]}, c)
   end
