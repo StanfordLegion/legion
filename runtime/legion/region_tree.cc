@@ -8696,15 +8696,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::send_node(AddressSpaceID target, RtEvent done,
                                    RtEvent &send_precondition,
+                                   std::set<IndexTreeNode*> &visited,
                                    std::vector<SendNodeRecord> &nodes_to_send,
                                    const bool above /* = false */)
     //--------------------------------------------------------------------------
     {
-      // Do a quick check to see if we already decided to send this
-      for (std::vector<SendNodeRecord>::const_iterator it = 
-            nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-        if (it->node == this)
-          return true;
+      // Do a quick check to see if we already visited this node
+      if (!visited.insert(this).second)
+        return true;
       // If we're not the owner continue up the tree to see if anyone is
       // and check whether they are still valid
       if (!is_owner())
@@ -8718,8 +8717,8 @@ namespace Legion {
               return false;
             send_references++;
           }
-          const bool result = parent->send_node(target, done, send_precondition,
-                                                nodes_to_send, true/*above*/);
+          const bool result = parent->send_node(target, done,
+              send_precondition, visited, nodes_to_send, true/*above*/);
           // Remove the reference
           bool remove_reference = false;
           {
@@ -8804,8 +8803,8 @@ namespace Legion {
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
       if (still_valid && (parent != NULL) &&
-          !parent->send_node(target, done, send_precondition, 
-                             nodes_to_send, true/*above*/))
+          !parent->send_node(target, done, send_precondition,
+            visited, nodes_to_send, true/*above*/))
       {
         if (above)
         {
@@ -9019,8 +9018,10 @@ namespace Legion {
       if (target != NULL)
       {
         RtEvent send_precondition;
+        std::set<IndexTreeNode*> visited;
         std::vector<SendNodeRecord> nodes_to_send;
-        target->send_node(source, to_trigger, send_precondition, nodes_to_send);
+        target->send_node(source, to_trigger,
+                          send_precondition, visited, nodes_to_send);
         // Now send back the results
         Serializer rez;
         {
@@ -10834,6 +10835,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool IndexPartNode::send_node(AddressSpaceID target, RtEvent done,
                                   RtEvent &send_precondition,
+                                  std::set<IndexTreeNode*> &visited,
                                   std::vector<SendNodeRecord> &nodes_to_send,
                                   const bool above /* = false */)
     //--------------------------------------------------------------------------
@@ -10841,11 +10843,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
 #endif
-      // Do a quick check to see if we already decided to send this
-      for (std::vector<SendNodeRecord>::const_iterator it = 
-            nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-        if (it->node == this)
-          return true;
+      // Do a quick check to see if we already visited this
+      if (!visited.insert(this).second)
+        return true;
       if (!is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -10853,11 +10853,11 @@ namespace Legion {
 #endif
         // See if anything above or the color space needs to be sent
         if (!parent->send_node(target, done, send_precondition,
-                               nodes_to_send, true/*above*/))
+                               visited, nodes_to_send, true/*above*/))
           return false;
         RtEvent temp_precondition;
         color_space->send_node(target, done, temp_precondition,
-                               nodes_to_send, false/*above*/);
+                               visited, nodes_to_send, false/*above*/);
         if (temp_precondition.exists())
         {
           if (send_precondition.exists())
@@ -10900,8 +10900,8 @@ namespace Legion {
         send_count++;
         update_remote_instances(target);
       }
-      if (!parent->send_node(target, done, send_precondition, 
-                             nodes_to_send, true/*above*/))
+      if (!parent->send_node(target, done, send_precondition,
+                             visited, nodes_to_send, true/*above*/))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10916,7 +10916,7 @@ namespace Legion {
       }
       RtEvent temp_precondition;
       color_space->send_node(target, done, temp_precondition,
-                             nodes_to_send, false/*above*/);
+                             visited, nodes_to_send, false/*above*/);
       if (temp_precondition.exists())
       {
         if (send_precondition.exists())
@@ -11077,10 +11077,11 @@ namespace Legion {
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       RtEvent send_precondition;
+      std::set<IndexTreeNode*> visited;
       std::vector<SendNodeRecord> nodes_to_send;
       if ((target != NULL) &&
-          target->send_node(source, to_trigger, 
-                            send_precondition, nodes_to_send))
+          target->send_node(source, to_trigger, send_precondition,
+                            visited, nodes_to_send))
       {
         // Now send back the results
         Serializer rez;
