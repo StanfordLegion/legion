@@ -34,11 +34,15 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
-local function get_base_partition_symbol(node)
+local function strip_projection(node)
   if node:is(ast.typed.expr.Projection) then
-    return node.region.value.value
+    node = node.region
   end
-  node = util.get_base_indexed_node(node)
+  return node
+end
+
+local function get_base_partition_symbol(node)
+  node = util.get_base_indexed_node(strip_projection(node))
   if std.is_cross_product(std.as_read(node.expr_type)) then
     return std.as_read(node.expr_type).partition_symbols[1]
   end
@@ -46,11 +50,7 @@ local function get_base_partition_symbol(node)
 end
 
 local function get_partition_dim(expr)
-  if expr:is(ast.typed.expr.Projection) then
-    return std.as_read(expr.region.value.expr_type):colors().dim
-  else
-    return std.as_read(expr.value.expr_type):colors().dim
-  end
+  return std.as_read(strip_projection(expr).value.expr_type):colors().dim
 end
 
 function context:__index (field)
@@ -498,16 +498,9 @@ local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
   local is_disjoint = partition_type and partition_type:is_disjoint()
   if is_disjoint then
-    local index
-    if arg:is(ast.typed.expr.Projection) then
-      index = arg.region.index
-    else
-      local _
-      _, index = util.get_base_indexed_node(arg)
-    end
+    local _, index = util.get_base_indexed_node(strip_projection(arg))
 
-    if analyze_index_noninterference_self(index, cx, loop_vars)
-    then
+    if analyze_index_noninterference_self(index, cx, loop_vars) then
       return true, false
     end
   end
@@ -871,9 +864,7 @@ local function analyze_is_simple_index_expression(cx, node)
 end
 
 local function analyze_is_projectable(cx, arg)
-  if arg:is(ast.typed.expr.Projection) then
-    arg = arg.region
-  end
+  arg = strip_projection(arg)
 
   -- 1. We can project any index access `p[...]`
   if not arg:is(ast.typed.expr.IndexAccess) then
@@ -1143,11 +1134,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       -- Tests for conformance to index launch requirements.
       if std.is_region(arg_type) then
         if analyze_is_projectable(loop_cx, arg) then
-          if arg:is(ast.typed.expr.Projection) then
-            partition_type = std.as_read(arg.region.value.expr_type)
-          else
-            partition_type = std.as_read(util.get_base_indexed_node(arg).expr_type):partition()
-          end
+          partition_type = std.as_read(
+            util.get_base_indexed_node(strip_projection(arg)).expr_type):partition()
           assert(std.is_partition(partition_type))
           arg_projectable = true
         end
@@ -1421,12 +1409,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       local duplicates_check = terralib.newlist()
       index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
 
-      local _, index_expr
-      if call_args[arg]:is(ast.typed.expr.Projection) then
-        _, index_expr = util.get_base_indexed_node(call_args[arg].region)
-      else
-        _, index_expr = util.get_base_indexed_node(call_args[arg])
-      end
+      local _, index_expr = util.get_base_indexed_node(strip_projection(call_args[arg]))
 
       -- Assign: value = collapse(index_expr)
       duplicates_check:insert(
