@@ -8071,7 +8071,7 @@ namespace Legion {
           // Do this first to add a resource reference
           result = MappingInstance(manager);
           // Only record this now if it is not a collective instance
-          // since we don't know if the whoel collective instance was
+          // since we don't know if the whole collective instance was
           // successfully created yet or not
           if (target == NULL)
             record_created_instance(manager, acquire, priority, remote);
@@ -8204,7 +8204,7 @@ namespace Legion {
           // Do this first to add a resource reference
           result = MappingInstance(manager);
           // Only record this now if it is not a collective instance
-          // since we don't know if the whoel collective instance was
+          // since we don't know if the whole collective instance was
           // successfully created yet or not
           if (target == NULL)
             record_created_instance(manager, acquire, priority, remote);

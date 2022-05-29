@@ -9097,7 +9097,8 @@ namespace Legion {
         const AddressSpaceID origin = mapping->get_origin();
         std::vector<AddressSpaceID> children;
         mapping->get_children(origin, local_space, children);
-        replicated_owner_state = new ReplicatedOwnerState(local_space);
+        replicated_owner_state =
+          new ReplicatedOwnerState(local_space, true/*all agree on owner*/);
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
           replicated_owner_state->nodes.insert(*it);
@@ -10754,8 +10755,7 @@ namespace Legion {
 #endif
         const CollectiveMapping &mapping = *analysis.get_replicated_mapping();
         // Check to see if we have a replicated owner node
-        if ((replicated_owner_state == NULL) ||
-            !replicated_owner_state->nodes.contains(local_space))
+        if (replicated_owner_state == NULL)
         {
           // If we don't then we need to get an update on the 
           // logical owner space so we can ensure that all copies
@@ -10763,15 +10763,14 @@ namespace Legion {
           // actually perform the traversal of the equivalence set
           // See if we already have an outstanding request in flight
           // Check to see if we already have a request in flight
-          if (replicated_owner_state == NULL)
-            request_replicated_owner_space(&mapping);
-          // Defer this until we get the response
-          if (!replicated_owner_state->ready.has_triggered())
-          {
-            analysis.defer_traversal(replicated_owner_state->ready, this, mask,
-                                     deferral_events, applied_events);
-            return true;
-          }
+          request_replicated_owner_space(&mapping);
+        }
+        // Defer this until we get the response
+        if (!replicated_owner_state->ready.has_triggered())
+        {
+          analysis.defer_traversal(replicated_owner_state->ready, this, mask,
+                                   deferral_events, applied_events);
+          return true;
         }
         // Now figure out which analysis is going to perform the traversal
         // If an analysis is already local to an equivalence set then we'll
@@ -10812,8 +10811,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(AddressSpaceID s)
-      : ready(Runtime::create_rt_user_event())
+    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(
+        AddressSpaceID s, bool logical_owner)
+      : ready(logical_owner ? RtUserEvent::NO_RT_USER_EVENT : 
+              Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       nodes.insert(s);
@@ -10827,13 +10828,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(replicated_owner_state == NULL);
 #endif
-      replicated_owner_state = new ReplicatedOwnerState(local_space);
+      replicated_owner_state =
+        new ReplicatedOwnerState(local_space, is_logical_owner());
       if (mapping != NULL)
       {
         if (is_logical_owner())
         {
           replicated_owner_state->nodes.insert(local_space);
-          Runtime::trigger_event(replicated_owner_state->ready);
           return;
         }
         // Check to see if we're the origin of the mapping or not
@@ -10895,7 +10896,8 @@ namespace Legion {
                !replicated_owner_state->nodes.contains(source));
 #endif
         if (replicated_owner_state == NULL)
-          replicated_owner_state = new ReplicatedOwnerState(local_space);
+          replicated_owner_state =
+            new ReplicatedOwnerState(local_space, true/*logical owner*/);
         replicated_owner_state->nodes.insert(source);
         Serializer rez;
         {

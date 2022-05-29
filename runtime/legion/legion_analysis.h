@@ -2436,7 +2436,7 @@ namespace Legion {
     public:
       struct ReplicatedOwnerState : public LegionHeapify<ReplicatedOwnerState> {
       public:
-        ReplicatedOwnerState(AddressSpaceID source);
+        ReplicatedOwnerState(AddressSpaceID source, bool logical_owner);
       public:
         NodeSet nodes;
         const RtUserEvent ready;

@@ -10450,8 +10450,9 @@ namespace Legion {
     {
       const DeferCollectiveManagerArgs *dargs = 
         (const DeferCollectiveManagerArgs*)args; 
-      IndexSpaceNode *point_space = 
-        runtime->forest->get_node(dargs->point_space);
+      IndexSpaceNode *point_space = NULL;
+      if (dargs->point_space.exists())
+        point_space = runtime->forest->get_node(dargs->point_space);
       IndexSpaceExpression *inst_domain = dargs->local_expr;
       if (inst_domain == NULL)
         inst_domain = runtime->forest->find_remote_expression(dargs->pending);
