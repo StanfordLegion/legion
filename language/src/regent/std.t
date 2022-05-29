@@ -1316,7 +1316,7 @@ function std.check_read(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1337,7 +1337,7 @@ function std.check_write(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1362,7 +1362,7 @@ function std.check_reduce(cx, op, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1990,6 +1990,13 @@ function std.generate_conditional_metamethods_for_bounded_type(ty)
   return methods
 end
 
+-- This function is equivalent to writing ty:bounds(node), but makes
+-- it more clear that we're *CHECKING* the bounds, i.e., this will
+-- fail with an error if it doesn't work.
+function std.check_bounds(node, ty)
+  return ty:bounds(node)
+end
+
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
 --
@@ -2059,7 +2066,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     return self.points_to_type ~= false
   end
 
-  function st:bounds()
+  function st:bounds(node)
     local bounds = data.newtuple()
     local is_ispace = false
     local is_region = false
@@ -2071,9 +2078,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if not (terralib.types.istype(bound) and
               (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
-        return nil, tostring(self.index_type) ..
-                    " expected an ispace or region as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound)
+        local message = tostring(self.index_type) ..
+          " expected an ispace or region as argument " ..
+          tostring(i+1) .. ", got " .. tostring(bound)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       if std.is_region(bound) then
         if not std.type_eq(bound:ispace().index_type, self.index_type) or
@@ -2086,9 +2095,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
           if not std.type_eq(self.index_type, std.ptr) then
             index_message = tostring(self.index_type) .. ", "
           end
-          return nil, tostring(self.index_type) .. " expected region(" ..
-                      index_message .. tostring(self.points_to_type) .. ") as argument " ..
-                      tostring(i+1) .. ", got " .. tostring(bound)
+          local message = tostring(self.index_type) .. " expected region(" ..
+            index_message .. tostring(self.points_to_type) .. ") as argument " ..
+            tostring(i+1) .. ", got " .. tostring(bound)
+          if node then report.error(node, message) end
+          assert(false, message)
         end
       end
       if std.is_ispace(bound) then is_ispace = true end
@@ -2096,8 +2107,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       bounds:insert(bound)
     end
     if is_ispace and is_region then
-      --report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
-      return nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions"
+      local message = tostring(self.index_type) .. " bounds may not mix ispaces and regions"
+      if node then report.error(node, message) end
+      assert(false, message)
     end
     return bounds
   end
@@ -3033,23 +3045,22 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   st.impl_type = legion_vptr_t
   st.vec_type = vec
 
-  function st:bounds()
+  function st:bounds(node)
     local bounds = terralib.newlist()
     for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        --report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
-        --            ", got " .. tostring(region.type))
-        return nil, "vptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region.type)
+        local message = "vptr expected a region as argument " .. tostring(i+1) ..
+          ", got " .. tostring(region.type)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       if not std.type_eq(region.fspace_type, points_to_type) then
-        --report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
-        --            ") as argument " .. tostring(i+1) ..
-        --            ", got " .. tostring(region))
-        return nil, "vptr expected region(" .. tostring(points_to_type) ..
-                    ") as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region)
+        local message = "vptr expected region(" .. tostring(points_to_type) ..
+          ") as argument " .. tostring(i+1) ..
+          ", got " .. tostring(region)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       bounds:insert(region)
     end
@@ -3135,8 +3146,8 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   st.bounds_symbols = pointer_type.bounds_symbols
   st.field_path = data.newtuple(...)
 
-  function st:bounds()
-    return self.pointer_type:bounds()
+  function st:bounds(node)
+    return self.pointer_type:bounds(node)
   end
 
   if std.config["debug"] then

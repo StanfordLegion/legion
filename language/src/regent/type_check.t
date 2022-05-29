@@ -1447,10 +1447,7 @@ function type_check.expr_dynamic_cast(cx, node)
       report.error(node, "type mismatch in dynamic_cast: expected a pointer to " .. tostring(node.expr_type.points_to_type) .. ", got " .. tostring(value_type.points_to_type))
     end
 
-    local ok, message = node.expr_type:bounds() -- check bounds validity
-    if not ok then
-      report.error(node, message)
-    end
+    std.check_bounds(node, node.expr_type)
 
   elseif std.is_partition(node.expr_type) then
     if not std.is_partition(value_type) then
@@ -1546,7 +1543,7 @@ function type_check.expr_unsafe_cast(cx, node)
   if not std.is_bounded_type(expr_type) then
     report.error(node, "unsafe_cast requires ptr type as argument 1, got " .. tostring(expr_type))
   end
-  if #expr_type:bounds() ~= 1 then
+  if #std.check_bounds(node, expr_type) ~= 1 then
     report.error(node, "unsafe_cast requires single ptr type as argument 1, got " .. tostring(expr_type))
   end
   if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
@@ -3357,7 +3354,7 @@ function type_check.expr_deref(cx, node)
 
   if not (value_type:ispointer() or
           (std.is_bounded_type(value_type) and
-           std.is_region(value_type:bounds()[1])))
+           std.is_region(std.check_bounds(node, value_type)[1])))
   then
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
@@ -4233,10 +4230,7 @@ function type_check.stat_var(cx, node)
       report.error(node, "variable of type " .. tostring(var_type) .. " must be initialized")
     end
     if std.is_bounded_type(var_type) then
-      local ok, message = var_type:bounds() -- check bounds validity
-      if not ok then
-        report.error(node, message)
-      end
+      std.check_bounds(node, var_type)
     end
   else
     if not value then

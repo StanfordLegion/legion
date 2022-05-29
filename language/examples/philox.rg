@@ -20,8 +20,6 @@
 -- Lua/Terra implementation of DE Shaw's Philox 2x32 PRNG
 -- (http://dx.doi.org/10.1145/2063384.2063405)
 
-printf = terralib.includec("stdio.h").printf
-
 -- helper function to just stamp out n copies of some terra block
 local repblk = function(n, blk)
   local rblk = blk
