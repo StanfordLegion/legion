@@ -14,12 +14,14 @@
 
 import "regent"
 
+local format = require("std/format")
+
 local c = regentlib.c
 
 task hello()
   var args = c.legion_runtime_get_input_args()
   regentlib.assert(args.argc > 0, "no args")
-  c.printf("hello world from %s\n", args.argv[0])
+  format.println("hello world from {}", args.argv[0])
 end
 
 task main()

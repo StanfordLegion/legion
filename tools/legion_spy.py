@@ -4778,35 +4778,54 @@ class DataflowTraverser(object):
         if isinstance(node, RealmCopy):
             self.post_visit_copy(node, eq_key)
 
-    def traverse_node(self, node, eq_key, first = True):
-        if node.version_numbers and eq_key in node.version_numbers and \
-                node.version_numbers[eq_key] != self.state.version_number:
-            # We can't traverse this node if it's from a previous version number
-            # because that is not the same value of the equivalence class
-            # Skip this check on the first node though for things like copy across
-            return False
-        if not self.visit_node(node, eq_key):
-            return False
-        eq_privileges = node.get_equivalence_privileges()
-        privilege = eq_privileges[eq_key]
-        # We can't traverse past any operation that writes this field 
-        # unless this is the first operation which we're trying to
-        # traverse backwards from
-        if privilege == READ_ONLY or first:
-            # Check to see if the version number is the same, if this
-            # is an operation from a previous version then we can't traverse it
-            if node.eq_incoming and eq_key in node.eq_incoming:
-                incoming = node.eq_incoming[eq_key]
-                if incoming:
-                    for next_node in incoming:
-                        # Short-circuit if we're done for better or worse
-                        if self.traverse_node(next_node, eq_key, first=False):
-                            # Still need to do the post visit call
-                            self.post_visit_node(node, eq_key)
-                            return True
-        self.post_visit_node(node, eq_key)
-        # See if we are done
-        return self.failed_analysis or self.verified(eq_key)
+    def run(self, first, eq_key):
+        # Do this with DFS since we care about paths
+        nodes = list()
+        nodes.append((first,True))
+        while nodes:
+            node,first_pass = nodes[-1]
+            if first_pass:
+                if node.version_numbers and eq_key in node.version_numbers and \
+                        node.version_numbers[eq_key] != self.state.version_number:
+                    # We can't traverse this node if it's from a previous version number
+                    # because that is not the same value of the equivalence class
+                    # Skip this check on the first node though for things like copy across
+                    nodes.pop()
+                    continue
+                if not self.visit_node(node, eq_key):
+                    nodes.pop()
+                    continue
+                eq_privileges = node.get_equivalence_privileges()
+                privilege = eq_privileges[eq_key]
+                # We can't traverse past any operation that writes this field 
+                # unless this is the first operation which we're trying to
+                # traverse backwards from
+                if privilege == READ_ONLY or node is first:
+                    # Check to see if the version number is the same, if this
+                    # is an operation from a previous version then we can't traverse it
+                    if node.eq_incoming and eq_key in node.eq_incoming:
+                        incoming = node.eq_incoming[eq_key]
+                        if incoming:
+                            # Record that we haven't run the post-visit method yet
+                            nodes[-1] = (node,False)
+                            # Add these nodes to the stack
+                            for next_node in incoming:
+                                nodes.append((next_node,True))
+                            # Can't run the post visit method yet
+                            continue
+            self.post_visit_node(node, eq_key)
+            nodes.pop()
+            # See if we are done
+            if self.failed_analysis or self.verified(eq_key):
+                break
+        # Unwind the stack in case we finished early
+        while nodes:
+            node,first_pass = nodes.pop()
+            # Skip any nodes that we finished early for
+            if first_pass:
+                continue
+            # Run the post visit method for any ndoes on the stack
+            self.post_visit_node(node, eq_key)
 
     def visit_copy(self, copy, eq_key):
         # We should never traverse through indirection copies here
@@ -5051,7 +5070,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = copy.get_equivalence_privileges()
                         if src_key in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(copy, dst_key)
+                            self.run(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
                         if copy.is_across():
@@ -5065,11 +5084,11 @@ class DataflowTraverser(object):
                                     continue
                                 eq_privileges = node.get_equivalence_privileges()
                                 if src_key in eq_privileges:
-                                    self.traverse_node(node, src_key)
+                                    self.run(node, src_key)
                         else:
                             eq_privileges = copy.get_equivalence_privileges()
                             if src_key in eq_privileges:
-                                self.traverse_node(copy, src_key)
+                                self.run(copy, src_key)
             # Only need to traverse fills directly for across cases as the 
             # non-accross ones will be traverse by the normal copy traversasl
             if op.realm_fills:
@@ -5081,7 +5100,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key not in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(fill, dst_key)
+                            self.run(fill, dst_key)
                 else:
                     for fill in op.realm_fills:
                         # Skip across fills
@@ -5089,7 +5108,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key in eq_privileges:
-                            self.traverse_node(fill, src_key)
+                            self.run(fill, src_key)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
@@ -5100,12 +5119,12 @@ class DataflowTraverser(object):
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
                     if src_key in eq_privileges:
-                        self.traverse_node(copy, src_key)
+                        self.run(copy, src_key)
             if op.realm_fills:
                 for fill in op.realm_fills:
                     eq_privileges = fill.get_equivalence_privileges()
                     if src_key in eq_privileges:
-                        self.traverse_node(fill, src_key)
+                        self.run(fill, src_key)
         elif restricted:
             assert not self.across
             # If this is restricted, do the traversal from the copies
@@ -5119,10 +5138,10 @@ class DataflowTraverser(object):
                     if self.target in copy.dsts and \
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dst_fields:
-                        self.traverse_node(copy, src_key)
+                        self.run(copy, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.traverse_node(op, src_key)
+            self.run(op, src_key)
         return self.verified(ver_key, True)
 
 class EquivalenceSet(object):
@@ -6303,7 +6322,7 @@ class Operation(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
-            traverser.visit_event(self.start_event)
+            traverser.run(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
@@ -6313,7 +6332,7 @@ class Operation(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
-            traverser.visit_event(self.finish_event)
+            traverser.run(self.finish_event)
             # Keep everything symmetric
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
@@ -9940,7 +9959,7 @@ class RealmBase(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
-            traverser.visit_event(self.start_event)
+            traverser.run(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
@@ -9950,7 +9969,7 @@ class RealmBase(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
-            traverser.visit_event(self.finish_event)
+            traverser.run(self.finish_event)
             # Keep everything symmetric
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
@@ -10599,136 +10618,92 @@ class EventGraphTraverser(object):
         self.forwards = forwards
         self.use_gen = use_gen
         self.generation = generation
-        self.event_fn = event_fn
-        self.op_fn = op_fn
-        self.copy_fn = copy_fn
-        self.fill_fn = fill_fn
-        self.deppart_fn = deppart_fn
-        self.post_event_fn = post_event_fn
-        self.post_op_fn = post_op_fn
-        self.post_copy_fn = post_copy_fn
-        self.post_fill_fn = post_fill_fn
-        self.post_deppart_fn = post_deppart_fn
+        self.functions = list()
+        self.functions.append(event_fn)
+        self.functions.append(op_fn)
+        self.functions.append(copy_fn)
+        self.functions.append(fill_fn)
+        self.functions.append(deppart_fn)
+        self.post_functions = list()
+        self.post_functions.append(post_event_fn)
+        self.post_functions.append(post_op_fn)
+        self.post_functions.append(post_copy_fn)
+        self.post_functions.append(post_fill_fn)
+        self.post_functions.append(post_deppart_fn)
 
-    def visit_event(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.event_fn is not None:
-            do_next = self.event_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.outgoing is not None:
-                for event in node.outgoing:
-                    self.visit_event(event)
-            if node.outgoing_ops is not None:
-                for op in node.outgoing_ops:
-                    self.visit_op(op)
-            if node.outgoing_fills is not None:
-                for fill in node.outgoing_fills:
-                    self.visit_fill(fill)
-            if node.outgoing_copies is not None:
-                for copy in node.outgoing_copies:
-                    self.visit_copy(copy)
-        else:
-            if node.incoming is not None:
-                for event in node.incoming:
-                    self.visit_event(event)
-            if node.incoming_ops is not None:
-                for op in node.incoming_ops:
-                    self.visit_op(op)
-            if node.incoming_fills is not None:
-                for fill in node.incoming_fills:
-                    self.visit_fill(fill)
-            if node.incoming_copies is not None:
-                for copy in node.incoming_copies:
-                    self.visit_copy(copy)
-        if self.post_event_fn is not None:
-            self.post_event_fn(node, self)
+    def run(self, event):
+        nodes = list()
+        nodes.append((event,0,True))
+        while nodes:
+            node,kind,first_pass = nodes[-1]
+            if first_pass:
+                if self.use_gen:
+                    if node.generation == self.generation:
+                        nodes.pop()
+                        continue
+                    else:
+                        node.generation = self.generation
+                do_next = True
+                if self.functions[kind] is not None:
+                    do_next = self.functions[kind](node, self)
+                if not do_next:
+                    nodes.pop()
+                    continue
+                if kind == 0:
+                    # Event 
+                    # We'll just assume all events have some kind of children
+                    # which will be true in most cases
+                    nodes[-1] = (node,0,False)
+                    if self.forwards:
+                        if node.outgoing is not None:
+                            for event in node.outgoing:
+                                nodes.append((event,0,True))
+                        if node.outgoing_ops is not None:
+                            for op in node.outgoing_ops:
+                                nodes.append((op,1,True))
+                        if node.outgoing_copies is not None:
+                            for copy in node.outgoing_copies:
+                                nodes.append((copy,2,True))
+                        if node.outgoing_fills is not None:
+                            for fill in node.outgoing_fills:
+                                nodes.append((fill,3,True))
+                        if node.outgoing_depparts is not None:
+                            for deppart in node.outgoing_depparts:
+                                nodes.append((deppart,4,True))
+                    else:
+                        if node.incoming is not None:
+                            for event in node.incoming:
+                                nodes.append((event,0,True))
+                        if node.incoming_ops is not None:
+                            for op in node.incoming_ops:
+                                nodes.append((op,1,True))
+                        if node.incoming_copies is not None:
+                            for copy in node.incoming_copies:
+                                nodes.append((copy,2,True))
+                        if node.incoming_fills is not None:
+                            for fill in node.incoming_fills:
+                                nodes.append((fill,3,True))
+                        if node.incoming_depparts is not None:
+                            for deppart in node.incoming_depparts:
+                                nodes.append((deppart,4,True))
+                    # We assumed we have children so keep going 
+                    continue
+                else:
+                    # Something with just a start and finish event
+                    if self.forwards:
+                        if node.finish_event.exists():
+                            nodes[-1] = (node,kind,False)
+                            nodes.append((node.finish_event,0,True))
+                            continue
+                    else:
+                        if node.start_event.exists():
+                            nodes[-1] = (node,kind,False)
+                            nodes.append((node.start_event,0,True))
+                            continue
+            if self.post_functions[kind] is not None:
+                self.post_functions[kind](node, self)
+            nodes.pop()
 
-    def visit_op(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.op_fn is not None:
-            do_next = self.op_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_op_fn is not None:
-            self.post_op_fn(node, self)
-
-    def visit_fill(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.fill_fn is not None:
-            do_next = self.fill_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_fill_fn is not None:
-            self.post_fill_fn(node, self)
-
-    def visit_copy(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.copy_fn is not None:
-            do_next = self.copy_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_copy_fn is not None:
-            self.post_copy_fn(node, self)
-
-    def visit_deppart(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.deppart_fn is not None:
-            do_next = self.deppart_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_deppart_fn is not None:
-            self.post_deppart_fn(node, self)
 
 class PhysicalTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -10739,28 +10714,36 @@ class PhysicalTraverser(object):
         self.node_fn = node_fn
         self.post_node_fn = post_node_fn
 
-    def visit_node(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                assert node.generation < self.generation
-                node.generation = self.generation
-        do_next = True
-        if self.node_fn is not None:
-            do_next = self.node_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.physical_outgoing is not None:
-                for next_node in node.physical_outgoing:
-                    self.visit_node(next_node)
-        else:
-            if node.physical_incoming is not None:
-                for next_node in node.physical_incoming:
-                    self.visit_node(next_node)
-        if self.post_node_fn is not None:
-            self.post_node_fn(node, self)
+    def run(self, node):
+        # Do this with DFS for reachability
+        nodes = list()
+        nodes.append((node,True))
+        while nodes:
+            node,first_pass = nodes[-1]
+            if first_pass:
+                if self.use_gen:
+                    if node.generation == self.generation:
+                        nodes.pop()
+                        continue
+                    else:
+                        assert node.generation < self.generation
+                        node.generation = self.generation
+                do_next = True
+                if self.node_fn is not None:
+                    do_next = self.node_fn(node, self)
+                if not do_next:
+                    nodes.pop()
+                    continue
+                children = node.physical_outgoing if self.forwards else node.physical_incoming
+                if children is not None:
+                    nodes[-1] = (node,False)
+                    for next_node in children:
+                        nodes.append((next_node,True))
+                    # We have children to traverse so we're not done with this node yet
+                    continue
+            if self.post_node_fn is not None:
+                self.post_node_fn(node, self)
+            nodes.pop()
 
 class GraphPrinter(object):
     # Static member so we only issue this warning once
@@ -12461,16 +12444,16 @@ class State(object):
         # Traverse all the sources 
         for op in self.unique_ops:
             if not op.physical_incoming:
-                topological_sorter.visit_node(op)
+                topological_sorter.run(op)
         for copy in itervalues(self.copies):
             if not copy.physical_incoming:
-                topological_sorter.visit_node(copy)
+                topological_sorter.run(copy)
         for fill in itervalues(self.fills):
             if not fill.physical_incoming:
-                topological_sorter.visit_node(fill)
+                topological_sorter.run(fill)
         for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
-                topological_sorter.visit_node(deppart)
+                topological_sorter.run(deppart)
         # Now that we have everything sorted based on topology
         # Do the simplification in postorder so we simplify
         # the smallest subgraphs first and only do the largest
@@ -12662,16 +12645,16 @@ class State(object):
             # Traverse all the sources 
             for op in self.unique_ops:
                 if not op.physical_incoming:
-                    topological_sorter.visit_node(op)
+                    topological_sorter.run(op)
             for copy in itervalues(self.copies):
                 if not copy.physical_incoming:
-                    topological_sorter.visit_node(copy)
+                    topological_sorter.run(copy)
             for fill in itervalues(self.fills):
                 if not fill.physical_incoming:
-                    topological_sorter.visit_node(fill)
+                    topological_sorter.run(fill)
             for deppart in itervalues(self.depparts):
                 if not deppart.physical_incoming:
-                    topological_sorter.visit_node(deppart)
+                    topological_sorter.run(deppart)
             postorder = topological_sorter.postorder
         # Transitively reduce the equivalence set graphs 
         # We do this in one pass to avoid try and maximize efficiency
