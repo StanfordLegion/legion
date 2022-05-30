@@ -2950,7 +2950,7 @@ local function wrap_partition_internal(node, parent)
   node.value = ast.typed.expr.Internal {
     value = values.value(
       node.value,
-      expr.just(quote end, node.value.expr_type { impl = parent }),
+      expr.just(quote end, { impl = parent }),
       node.value.expr_type),
     expr_type = node.value.expr_type,
     annotations = node.annotations,
