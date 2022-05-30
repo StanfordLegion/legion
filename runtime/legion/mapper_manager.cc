@@ -2209,7 +2209,7 @@ namespace Legion {
         success = ctx->operation->finalize_pending_collective_instance(
           ctx->kind, ctx->collective_count - 1, success);
         finalize_collective_point(result, collective->did, point, success,
-                                  target_memory, priority, acquire);
+                                  target_memory, acquire);
         if (collective->remove_reference())
           delete collective;
       }
@@ -2357,7 +2357,7 @@ namespace Legion {
         success = ctx->operation->finalize_pending_collective_instance(
           ctx->kind, ctx->collective_count - 1, success);
         finalize_collective_point(result, collective->did, point, success,
-                                  target_memory, priority, acquire);
+                                  target_memory, acquire);
         if (collective->remove_reference())
           delete collective;
       }
@@ -2522,7 +2522,7 @@ namespace Legion {
           success = ctx->operation->finalize_pending_collective_instance(
                     ctx->kind, collective_index, success);
           finalize_collective_point(result, collective->did, collective_point,
-                                    success, target_memory, priority, acquire);
+                                    success, target_memory, acquire);
           created = success;
           if (collective->remove_reference())
             delete collective;
@@ -2730,7 +2730,7 @@ namespace Legion {
           success = ctx->operation->finalize_pending_collective_instance(
                     ctx->kind, collective_index, success);
           finalize_collective_point(result, collective->did, collective_point,
-                                    success, target_memory, priority, acquire);
+                                    success, target_memory, acquire);
           created = success;
           if (collective->remove_reference())
             delete collective;
@@ -3594,9 +3594,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::finalize_collective_point(MappingInstance &result,
-                                    DistributedID did, const DomainPoint &point,
-                                    bool success, Memory target_memory,
-                                    GCPriority priority, bool acquire)
+                               DistributedID did, const DomainPoint &point,
+                               bool success, Memory target_memory, bool acquire)
     //--------------------------------------------------------------------------
     {
       // Check to see if we're remote or not
@@ -3615,7 +3614,6 @@ namespace Legion {
           rez.serialize(point);
           rez.serialize<bool>(success);
           rez.serialize<bool>(acquire);
-          rez.serialize(priority);
           rez.serialize(done);
         }
         runtime->send_collective_instance_creation(target, rez);
@@ -3646,7 +3644,7 @@ namespace Legion {
         // Local to the memory where the point instance was made
         // We can do the call directly here
         CollectiveManager *manager = result.impl->as_collective_manager();
-        if (manager->finalize_point_instance(point, success, acquire, priority))
+        if (manager->finalize_point_instance(point, success, acquire))
           delete manager;
         if (!success)
           result = MappingInstance();

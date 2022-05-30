@@ -897,7 +897,7 @@ namespace Legion {
                                  ApEvent ready_event);
       bool finalize_point_instance(const DomainPoint &point,
                                    bool success, bool acquire, 
-                                   GCPriority priority, bool remote = false);
+                                   bool remote = false);
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual ApEvent get_unique_event(const DomainPoint &point) const;

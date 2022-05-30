@@ -1544,6 +1544,11 @@ namespace Legion {
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     GCPriority priority, bool remote);
+      void record_pending_collective_instance(CollectiveManager *collective,
+                                              GCPriority priority);
+      void finalize_pending_collective_instance(CollectiveManager *collective,
+                                                bool acquire, bool remote);
+      bool remove_pending_collective_instance(CollectiveManager *collective);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
@@ -1679,6 +1684,10 @@ namespace Legion {
       // garbage collection priorities and placement in memory
       std::map<GCPriority,std::set<PhysicalManager*>,
                std::greater<GCPriority> > collectable_instances;
+      // A set of pending collective managers that still need to 
+      // check whether the full collective allocation was successful
+      std::map<CollectiveManager*,
+                std::pair<GCPriority,unsigned> > pending_collective_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;

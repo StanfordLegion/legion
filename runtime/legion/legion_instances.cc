@@ -4700,7 +4700,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool CollectiveManager::finalize_point_instance(const DomainPoint &point,
-                   bool success, bool acquire, GCPriority priority, bool remote)
+                                        bool success, bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4724,12 +4724,18 @@ namespace Legion {
           memories[idx]->free_legion_instance(instances[idx],
                                               RtEvent::NO_RT_EVENT);
 #endif
+          return memories[idx]->remove_pending_collective_instance(this);
         }
         else
-          memories[idx]->record_created_instance(this,acquire,priority,remote);
-        break;
+        {
+          memories[idx]->finalize_pending_collective_instance(this,
+                                                  acquire, remote);
+          return false;
+        }
       }
-      return remove_base_resource_ref(MAPPING_ACQUIRE_REF);
+      // Should never get here
+      assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4750,13 +4756,11 @@ namespace Legion {
       bool success, acquire;
       derez.deserialize<bool>(success);
       derez.deserialize<bool>(acquire);
-      GCPriority priority;
-      derez.deserialize(priority);
       RtUserEvent done;
       derez.deserialize(done);
 
       if (manager->finalize_point_instance(point, success, acquire,
-                                           priority, true/*remote*/))
+                                           true/*remote*/))
         delete manager;
       if (done.exists())
         Runtime::trigger_event(done);

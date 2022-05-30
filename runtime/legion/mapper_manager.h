@@ -466,8 +466,7 @@ namespace Legion {
                                      InstanceManager *manager);
       void finalize_collective_point(MappingInstance &result, DistributedID did,
                                      const DomainPoint &point, bool success,
-                                     Memory target_memory, GCPriority priority, 
-                                     bool acquire);
+                                     Memory target_memory, bool acquire);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
       bool perform_acquires(MappingCallInfo *info,

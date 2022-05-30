@@ -8070,15 +8070,16 @@ namespace Legion {
           }
           // Do this first to add a resource reference
           result = MappingInstance(manager);
-          // Only record this now if it is not a collective instance
-          // since we don't know if the whole collective instance was
-          // successfully created yet or not
-          if (target == NULL)
-            record_created_instance(manager, acquire, priority, remote);
+          // We don't know if this collective instance allocation is going
+          // to fully succeed or not yet, so if this is a collective manager
+          // then record that is it just pending and will be finalized later
+          if (target != NULL)
+          {
+            CollectiveManager *collective = manager->as_collective_manager();
+            record_pending_collective_instance(collective, priority);
+          }
           else
-            // add a reference to keep this alive until we get the
-            // CollectiveManager::finalize_point_instance call
-            manager->add_base_resource_ref(MAPPING_ACQUIRE_REF);
+            record_created_instance(manager, acquire, priority, remote);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8203,15 +8204,16 @@ namespace Legion {
           }
           // Do this first to add a resource reference
           result = MappingInstance(manager);
-          // Only record this now if it is not a collective instance
-          // since we don't know if the whole collective instance was
-          // successfully created yet or not
-          if (target == NULL)
-            record_created_instance(manager, acquire, priority, remote);
+          // We don't know if this collective instance allocation is going
+          // to fully succeed or not yet, so if this is a collective manager
+          // then record that is it just pending and will be finalized later
+          if (target != NULL)
+          {
+            CollectiveManager *collective = manager->as_collective_manager();
+            record_pending_collective_instance(collective, priority);
+          }
           else
-            // add a reference to keep this alive until we get the
-            // CollectiveManager::finalize_point_instance call
-            manager->add_base_resource_ref(MAPPING_ACQUIRE_REF);
+            record_created_instance(manager, acquire, priority, remote);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8807,13 +8809,37 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
       std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
         current_instances.find(manager->tree_id);
+      if (tree_finder == current_instances.end())
+      {
+        // Collective managers might not have been fully registered yet
 #ifdef DEBUG_LEGION
-      assert(tree_finder != current_instances.end());
+        assert(manager->is_collective_manager());
 #endif
+        CollectiveManager *collective = manager->as_collective_manager();
+        std::map<CollectiveManager*,std::pair<GCPriority,unsigned> >::iterator
+          collective_finder = pending_collective_instances.find(collective);
+#ifdef DEBUG_LEGION
+        assert(collective_finder != pending_collective_instances.end());
+#endif
+        collective_finder->second.first = priority;
+        return;
+      }
       TreeInstances::iterator finder = tree_finder->second.find(manager);
+      if (finder == tree_finder->second.end())
+      {
+        // Collective managers might not have been fully registered yet
 #ifdef DEBUG_LEGION
-      assert(finder != tree_finder->second.end());
+        assert(manager->is_collective_manager());
 #endif
+        CollectiveManager *collective = manager->as_collective_manager();
+        std::map<CollectiveManager*,std::pair<GCPriority,unsigned> >::iterator
+          collective_finder = pending_collective_instances.find(collective);
+#ifdef DEBUG_LEGION
+        assert(collective_finder != pending_collective_instances.end());
+#endif
+        collective_finder->second.first = priority;
+        return;
+      }
       remove_collectable(finder->second, manager);
       finder->second = priority;
       if (priority != LEGION_GC_NEVER_PRIORITY)
@@ -10255,6 +10281,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner);
+      assert(!manager->is_collective_manager());
 #endif
       // Add references first to prevent races with collection
       if (acquire)
@@ -10277,30 +10304,103 @@ namespace Legion {
       // If we're setting the priority to min priority and this is the
       // owner then add the reference for the manager
       if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
-        manager->acquire_instance(NEVER_GC_REF, NULL/*mutator*/);
+        manager->add_base_valid_ref(NEVER_GC_REF);
       // Record the manager here as being eligible for collection
       {
         AutoLock c_lock(collection_lock);
         AutoLock m_lock(manager_lock);
         TreeInstances &insts = current_instances[manager->tree_id];
-        // Look for duplicates with collective instances that have
-        // multiple copies in the same memory
-        if (insts.find(manager) == insts.end())
-        {
-          insts[manager] = priority;
-          if (priority != LEGION_GC_NEVER_PRIORITY)
-            collectable_instances[priority].insert(manager);
-          return;
-        }
-      }
-      // If we get here then we've got duplicate instances
 #ifdef DEBUG_LEGION
-      assert(manager->is_collective_manager());
+        assert(insts.find(manager) == insts.end());
 #endif
-      // Remove the duplicate references
-      if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
-        manager->remove_base_valid_ref(NEVER_GC_REF);
-      manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
+        insts[manager] = priority;
+        if (priority != LEGION_GC_NEVER_PRIORITY)
+          collectable_instances[priority].insert(manager);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::record_pending_collective_instance(
+                             CollectiveManager *collective, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<CollectiveManager*,std::pair<GCPriority,unsigned> >::iterator 
+        finder = pending_collective_instances.find(collective);
+      if (finder == pending_collective_instances.end())
+      {
+        collective->add_base_resource_ref(MEMORY_MANAGER_REF);
+        pending_collective_instances[collective] = 
+          std::pair<GCPriority,unsigned>(priority, 1);
+      }
+      else 
+      {
+        // If mappers race here with different priorities that is their problem
+        finder->second.first = priority;
+        finder->second.second++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::finalize_pending_collective_instance(
+                       CollectiveManager *collective, bool acquire, bool remote)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      // Add references first to prevent races with collection
+      if (acquire)
+      {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const bool result =
+#endif
+#endif
+        collective->acquire_instance(
+            remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/);
+#ifdef DEBUG_LEGION
+        assert(result);
+#endif
+      }
+      else if (remote)
+        collective->add_base_resource_ref(REMOTE_DID_REF);
+      AutoLock c_lock(collection_lock);
+      AutoLock m_lock(manager_lock);
+      std::map<CollectiveManager*,std::pair<GCPriority,unsigned> >::iterator
+        finder = pending_collective_instances.find(collective);
+      // Not the first one here then we are done
+      if (finder == pending_collective_instances.end())
+        return;
+      if ((finder->second.first == LEGION_GC_NEVER_PRIORITY) && 
+          collective->is_owner())
+        collective->add_base_valid_ref(NEVER_GC_REF);
+      TreeInstances &insts = current_instances[collective->tree_id];
+#ifdef DEBUG_LEGION
+      assert(insts.find(collective) == insts.end());
+#endif
+      insts[collective] = finder->second.first;
+      if (finder->second.first != LEGION_GC_NEVER_PRIORITY)
+        collectable_instances[finder->second.first].insert(collective);
+      pending_collective_instances.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::remove_pending_collective_instance(
+                                                  CollectiveManager *collective)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<CollectiveManager*,std::pair<GCPriority,unsigned> >::iterator
+        finder = pending_collective_instances.find(collective);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_collective_instances.end());
+#endif
+      // Not the last one so no deletion
+      if (--finder->second.second > 0)
+        return false;
+      pending_collective_instances.erase(finder);
+      return collective->remove_base_resource_ref(MEMORY_MANAGER_REF);
     }
 
     //--------------------------------------------------------------------------
