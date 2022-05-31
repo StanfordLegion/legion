@@ -9093,16 +9093,8 @@ namespace Legion {
       // If we have a collective mapping then we know that everyone agrees
       // on who the current logical owner is
       if (mapping != NULL)
-      {
-        const AddressSpaceID origin = mapping->get_origin();
-        std::vector<AddressSpaceID> children;
-        mapping->get_children(origin, local_space, children);
         replicated_owner_state =
-          new ReplicatedOwnerState(local_space, true/*all agree on owner*/);
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
-          replicated_owner_state->nodes.insert(*it);
-      }
+          new ReplicatedOwnerState(mapping->get_unique_spaces());
       // Add the gc ref here with the requirement that the owner is guaranteed
       // to become valid at some point and therefore remove it eventually
       if (!is_owner())
@@ -10781,11 +10773,22 @@ namespace Legion {
         // (assuming some degree of locality).
         if (!mapping.contains(logical_owner_space))
         {
+          // If we're on the logical owner then that means we're the analysis
+          // that already got migrated to the logical owner
+          if (is_logical_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(analysis.original_source ==
+                mapping.find_nearest(local_space));
+            assert(analysis.collective_first_local);
+#endif
+            return false;
+          }
           // There aren't any analyses that will be local to the
           // logical owner space so we need to pick the closest one
           if ((local_space == mapping.find_nearest(logical_owner_space)) &&
               analysis.collective_first_local)
-            return false;
+            analysis.record_remote(this, mask, logical_owner_space);
         }
         else 
         {
@@ -10808,6 +10811,13 @@ namespace Legion {
         else
           return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(const NodeSet &n)
+      : nodes(n), ready(RtUserEvent::NO_RT_USER_EVENT)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------

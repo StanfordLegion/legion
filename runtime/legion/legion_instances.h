@@ -127,6 +127,8 @@ namespace Legion {
 #endif
       inline unsigned find_index(const AddressSpaceID space) const
         { return unique_sorted_spaces.find_index(space); }
+      inline const NodeSet& get_unique_spaces(void) const 
+        { return unique_sorted_spaces; }
       inline size_t size(void) const { return total_spaces; }
       inline AddressSpaceID get_origin(void) const 
 #ifdef DEBUG_LEGION
