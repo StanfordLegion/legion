@@ -3551,10 +3551,10 @@ function type_check.expr_import_cross_product(cx, node)
 
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.as_read(colors.expr_type)
-  if not std.validate_implicit_cast(colors_type, uint32[#partitions]) then
+  if not std.validate_implicit_cast(colors_type, std.c.legion_color_t[#partitions]) then
     report.error(colors,
       "type mismatch in argument " .. tostring(#partitions + 1) ..
-        ": expected uint32[" .. #partitions ..  "] but got " ..  tostring(colors_type))
+        ": expected legion_color_t[" .. #partitions ..  "] but got " ..  tostring(colors_type))
   end
 
   local value = type_check.expr(cx, node.value)
