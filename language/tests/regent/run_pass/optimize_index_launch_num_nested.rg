@@ -17,15 +17,9 @@ import "regent"
 -- This tests the various loop optimizations supported by the
 -- compiler.
 
-local c = regentlib.c
-
 task g(r : region(int)) : int
-where reads(r), writes(r) do
+where reads writes(r) do
   return 5
-end
-
-terra compute_index(i : int, j : int)
-  return i
 end
 
 task main()
