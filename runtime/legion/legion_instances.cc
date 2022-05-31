@@ -614,6 +614,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(const NodeSet &spaces, size_t r)
+      : unique_sorted_spaces(spaces), total_spaces(spaces.pop_count()), radix(r)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(const CollectiveMapping &rhs)
       : Collectable(), unique_sorted_spaces(rhs.unique_sorted_spaces),
         total_spaces(rhs.total_spaces), radix(rhs.radix)

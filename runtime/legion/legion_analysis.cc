@@ -10670,38 +10670,38 @@ namespace Legion {
       // Note that this is only safe because we know that there is an
       // exclusive user here without any collective mapping which means that
       // they are blocking the mapping of all other potential users so its
-      // safe for them to perform the invalidation
+      // safe for them to perform the invalidation asynchronously
       if (replicated_owner_state != NULL)
       {
 #ifdef DEBUG_LEGION
         assert(analysis.exclusive && covers);
         assert(analysis.collective_mapping == NULL); 
 #endif
-        // Send out invalidations to all the replicated owner nodes and
-        // make sure nothing else can map until they are done
         // Note this is only safe because of the check above stating that
         // the analysis is exclusive and not collective
-        struct {
-          AddressSpaceID local;
-          DistributedID did;
-          Runtime *runtime;
-          std::set<RtEvent> &applied;
-          inline void apply(AddressSpaceID space)
+        // Send out invalidations to all the replicated owner nodes and
+        // make sure nothing else can map until they are done
+        // Make a collective mapping for all the nodes that share the
+        // replicated owner space and send out invalidations
+        CollectiveMapping mapping(replicated_owner_state->nodes, 
+                                  runtime->legion_collective_radix);
+        std::vector<AddressSpaceID> children;
+        mapping.get_children(local_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            if (space == local)
-              return;
-            RtUserEvent done = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(done);
-            }
-            runtime->send_equivalence_set_replication_invalidation(space, rez);
-            applied.insert(done);
+            RezCheck z(rez);
+            rez.serialize(did);
+            mapping.pack(rez);
+            rez.serialize(local_space);
+            rez.serialize(done);
           }
-        } functor = { local_space, did, runtime, applied_events }; 
-        replicated_owner_state->nodes.map(functor);
+          runtime->send_equivalence_set_replication_invalidation(*it, rez);
+          applied_events.insert(done);
+        }
         delete replicated_owner_state;
         replicated_owner_state = NULL;
       }
@@ -10963,46 +10963,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_invalidation(RtUserEvent done)
+    void EquivalenceSet::process_replication_invalidation(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RtEvent> applied_events;
-      {
-        AutoLock eq(eq_lock);
+      AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
-        assert(replicated_owner_state != NULL);
-        assert(replicated_owner_state->ready.has_triggered());
+      assert(replicated_owner_state != NULL);
+      assert(replicated_owner_state->ready.has_triggered());
 #endif
-        // Send out any invalidations
-        struct {
-          AddressSpaceID local;
-          DistributedID did;
-          Runtime *runtime;
-          std::vector<RtEvent> &applied;
-          inline void apply(AddressSpaceID space)
-          {
-            if (space == local)
-              return;
-            RtUserEvent done = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(done);
-            }
-            runtime->send_equivalence_set_replication_invalidation(space, rez);
-            applied.push_back(done);
-          }
-        } functor = { local_space, did, runtime, applied_events }; 
-        replicated_owner_state->nodes.map(functor);
-
-        delete replicated_owner_state;
-        replicated_owner_state = NULL;
-      }
-      if (!applied_events.empty())
-        Runtime::trigger_event(done, Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done);
+      delete replicated_owner_state;
+      replicated_owner_state = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -15218,12 +15188,42 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping mapping(derez, num_spaces);
+      AddressSpaceID owner_space;
+      derez.deserialize(owner_space);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
+      // Forward on this message to anything later
+      std::vector<RtEvent> applied_events;
+      std::vector<AddressSpaceID> children;
+      mapping.get_children(owner_space, runtime->address_space, children);
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          mapping.pack(rez);
+          rez.serialize(owner_space);
+          rez.serialize(done);
+        }
+        runtime->send_equivalence_set_replication_invalidation(*it, rez);
+        applied_events.push_back(done);
+      }
+
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_invalidation(done_event);
+      set->process_replication_invalidation();
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

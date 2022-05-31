@@ -2774,7 +2774,7 @@ namespace Legion {
       void process_replication_request(AddressSpaceID source,
                                        const CollectiveMapping *mapping);
       void process_replication_response(AddressSpaceID owner);
-      void process_replication_invalidation(RtUserEvent done);
+      void process_replication_invalidation(void);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
             IndexSpaceExpression *expr, const bool expr_covers,
