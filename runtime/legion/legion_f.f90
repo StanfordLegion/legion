@@ -3181,12 +3181,11 @@ contains
   end function legion_runtime_create_partition_by_restriction_transform_3x3
 #endif
 
-  function legion_runtime_get_logical_partition(this, ctx, parent, handle)
+  function legion_runtime_get_logical_partition(this, parent, handle)
     implicit none
 
     type(FLogicalPartition)           :: legion_runtime_get_logical_partition
     class(FRuntime), intent(in)       :: this
-    type(FContext), intent(in)        :: ctx
     type(FLogicalRegion), intent(in)  :: parent
     type(FIndexPartition), intent(in) :: handle
 
