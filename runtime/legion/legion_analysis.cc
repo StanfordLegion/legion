@@ -9093,8 +9093,11 @@ namespace Legion {
       // If we have a collective mapping then we know that everyone agrees
       // on who the current logical owner is
       if (mapping != NULL)
-        replicated_owner_state =
-          new ReplicatedOwnerState(mapping->get_unique_spaces());
+      {
+        replicated_owner_state = new ReplicatedOwnerState(true/*valid*/);
+        mapping->get_children(owner_space, local_space,
+                              replicated_owner_state->children);
+      }
       // Add the gc ref here with the requirement that the owner is guaranteed
       // to become valid at some point and therefore remove it eventually
       if (!is_owner())
@@ -10681,22 +10684,15 @@ namespace Legion {
         // the analysis is exclusive and not collective
         // Send out invalidations to all the replicated owner nodes and
         // make sure nothing else can map until they are done
-        // Make a collective mapping for all the nodes that share the
-        // replicated owner space and send out invalidations
-        CollectiveMapping mapping(replicated_owner_state->nodes, 
-                                  runtime->legion_collective_radix);
-        std::vector<AddressSpaceID> children;
-        mapping.get_children(local_space, local_space, children);
         for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+              replicated_owner_state->children.begin(); it !=
+              replicated_owner_state->children.end(); it++)
         {
           const RtUserEvent done = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            mapping.pack(rez);
-            rez.serialize(local_space);
             rez.serialize(done);
           }
           runtime->send_equivalence_set_replication_invalidation(*it, rez);
@@ -10747,19 +10743,11 @@ namespace Legion {
 #endif
         const CollectiveMapping &mapping = *analysis.get_replicated_mapping();
         // Check to see if we have a replicated owner node
-        if (replicated_owner_state == NULL)
+        if (!replicate_logical_owner_space(local_space, &mapping))
         {
-          // If we don't then we need to get an update on the 
-          // logical owner space so we can ensure that all copies
-          // of this analysis can agree on which one is going to 
-          // actually perform the traversal of the equivalence set
-          // See if we already have an outstanding request in flight
-          // Check to see if we already have a request in flight
-          request_replicated_owner_space(&mapping);
-        }
-        // Defer this until we get the response
-        if (!replicated_owner_state->ready.has_triggered())
-        {
+#ifdef DEBUG_LEGION
+          assert(replicated_owner_state->ready.exists());
+#endif
           analysis.defer_traversal(replicated_owner_state->ready, this, mask,
                                    deferral_events, applied_events);
           return true;
@@ -10814,116 +10802,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(const NodeSet &n)
-      : nodes(n), ready(RtUserEvent::NO_RT_USER_EVENT)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(
-        AddressSpaceID s, bool logical_owner)
-      : ready(logical_owner ? RtUserEvent::NO_RT_USER_EVENT : 
+    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(bool valid)
+      : ready(valid ? RtUserEvent::NO_RT_USER_EVENT : 
               Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
-      nodes.insert(s);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::request_replicated_owner_space(
-                                               const CollectiveMapping *mapping)
+    bool EquivalenceSet::replicate_logical_owner_space(
+                        AddressSpaceID source, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(replicated_owner_state == NULL);
-#endif
-      replicated_owner_state =
-        new ReplicatedOwnerState(local_space, is_logical_owner());
-      if (mapping != NULL)
+      if (replicated_owner_state == NULL)
       {
-        if (is_logical_owner())
+        replicated_owner_state = new ReplicatedOwnerState(is_logical_owner());
+        if (!is_logical_owner())
         {
-          replicated_owner_state->nodes.insert(local_space);
-          return;
+          // Send the request to the next parent in the map
+          if (mapping != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(mapping->contains(local_space));
+#endif
+            const AddressSpaceID origin = mapping->get_origin();
+            if (local_space != origin)
+            {
+              const AddressSpaceID parent =
+                mapping->get_parent(origin, local_space);
+              // Send the request on to our parent space
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                mapping->pack(rez);
+              }
+              runtime->send_equivalence_set_replication_request(parent, rez);
+            }
+            else
+            {
+              // Send the request on to whomever we thought was the previous owner
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize<size_t>(0); // no mapping
+              }
+              runtime->send_equivalence_set_replication_request(
+                                        logical_owner_space, rez);
+            }
+          }
+          else
+          {
+            // Send the request on to whomever we thought was the previous owner
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize<size_t>(0); // no mapping
+            }
+            runtime->send_equivalence_set_replication_request(
+                                      logical_owner_space, rez);
+          }
         }
-        // Check to see if we're the origin of the mapping or not
-        const AddressSpaceID origin = mapping->get_origin();
-        if (local_space != origin)
+      }
+      if (source != local_space)
+        replicated_owner_state->children.push_back(source);
+      if (replicated_owner_state->is_valid())
+      {
+        // If we're already replicated send back the response now
+        if (source != local_space)
         {
-          const AddressSpaceID parent = mapping->get_parent(origin,local_space);
-          // Send the request on to our parent space
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            mapping->pack(rez);
+            rez.serialize(logical_owner_space);
           }
-          runtime->send_equivalence_set_replication_request(parent, rez);
+          runtime->send_equivalence_set_replication_response(source, rez);
         }
-        else
-        {
-          // Send the request on to whomever we thought was the previous owner
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize<size_t>(0); // no mapping
-          }
-          runtime->send_equivalence_set_replication_request(logical_owner_space,
-                                                            rez);
-        }
+        return true;
       }
       else
-      {
-#ifdef DEBUG_LEGION
-        assert(!is_logical_owner());
-#endif
-        // Send the request on to whomever we thought was the previous owner
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize<size_t>(0); // no mapping
-        }
-        runtime->send_equivalence_set_replication_request(logical_owner_space,
-                                                          rez);
-      }
-    }
+        return false;
 
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_request(AddressSpaceID source,
-                                               const CollectiveMapping *mapping)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock);
-      // Check to see if we are the owner
-      if (is_logical_owner())
-      {
-        // We're the owner, so record that we have replicated owners elsewhere
-#ifdef DEBUG_LEGION
-        assert((replicated_owner_state == NULL) ||
-               !replicated_owner_state->nodes.contains(source));
-#endif
-        if (replicated_owner_state == NULL)
-          replicated_owner_state =
-            new ReplicatedOwnerState(local_space, true/*logical owner*/);
-        replicated_owner_state->nodes.insert(source);
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(local_space);
-        }
-        runtime->send_equivalence_set_replication_response(source, rez);
-      }
-      else
-      {
-        // If we don't already have an outstanding request then make one
-        if (replicated_owner_state == NULL)
-          request_replicated_owner_space(mapping);
-        replicated_owner_state->nodes.insert(source);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -10937,40 +10899,52 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!is_logical_owner());
         assert(replicated_owner_state != NULL);
+        assert(!replicated_owner_state->is_valid());
 #endif
         // Send out messages to all the other nodes that requested them
-        struct {
-          AddressSpaceID local, owner;
-          DistributedID did;
-          Runtime *runtime;
-          inline void apply(AddressSpaceID space) const
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              replicated_owner_state->children.begin(); it !=
+              replicated_owner_state->children.end(); it++)
+        {
+          Serializer rez;
           {
-            if (space == local)
-              return;
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(owner);
-            }
-            runtime->send_equivalence_set_replication_response(space, rez);
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(owner);
           }
-        } functor = { local_space, owner, did, runtime };
-        replicated_owner_state->nodes.map(functor);
+          runtime->send_equivalence_set_replication_response(*it, rez);
+        }
         to_trigger = replicated_owner_state->ready;
+        replicated_owner_state->ready = RtUserEvent::NO_RT_USER_EVENT;
       }
       Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_invalidation(void)
+    void EquivalenceSet::process_replication_invalidation(
+                                           std::vector<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(replicated_owner_state != NULL);
-      assert(replicated_owner_state->ready.has_triggered());
+      assert(replicated_owner_state->is_valid());
 #endif
+      // Forward on this message to any children
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            replicated_owner_state->children.begin(); it !=
+            replicated_owner_state->children.end(); it++)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(done);
+        }
+        runtime->send_equivalence_set_replication_invalidation(*it, rez);
+        applied_events.push_back(done);
+      }
       delete replicated_owner_state;
       replicated_owner_state = NULL;
     }
@@ -15153,7 +15127,7 @@ namespace Legion {
       }
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_request(source, mapping);
+      set->replicate_logical_owner_space(source, mapping);
       if ((mapping != NULL) && mapping->remove_reference())
         delete mapping;
     }
@@ -15188,37 +15162,13 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
-      size_t num_spaces;
-      derez.deserialize(num_spaces);
-      CollectiveMapping mapping(derez, num_spaces);
-      AddressSpaceID owner_space;
-      derez.deserialize(owner_space);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      // Forward on this message to anything later
       std::vector<RtEvent> applied_events;
-      std::vector<AddressSpaceID> children;
-      mapping.get_children(owner_space, runtime->address_space, children);
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          mapping.pack(rez);
-          rez.serialize(owner_space);
-          rez.serialize(done);
-        }
-        runtime->send_equivalence_set_replication_invalidation(*it, rez);
-        applied_events.push_back(done);
-      }
-
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_invalidation();
+      set->process_replication_invalidation(applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event,
             Runtime::merge_events(applied_events));

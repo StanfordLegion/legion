@@ -2436,11 +2436,12 @@ namespace Legion {
     public:
       struct ReplicatedOwnerState : public LegionHeapify<ReplicatedOwnerState> {
       public:
-        ReplicatedOwnerState(const NodeSet &nodes);
-        ReplicatedOwnerState(AddressSpaceID source, bool logical_owner);
+        ReplicatedOwnerState(bool valid);
       public:
-        NodeSet nodes;
-        const RtUserEvent ready;
+        inline bool is_valid(void) const { return !ready.exists(); }
+      public:
+        std::vector<AddressSpaceID> children;
+        RtUserEvent ready;
       };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
@@ -2770,11 +2771,10 @@ namespace Legion {
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events, bool covers);
       void update_owner(const AddressSpaceID new_logical_owner); 
-      void request_replicated_owner_space(const CollectiveMapping *mapping);
-      void process_replication_request(AddressSpaceID source,
-                                       const CollectiveMapping *mapping);
+      bool replicate_logical_owner_space(AddressSpaceID source, 
+                                         const CollectiveMapping *mapping);
       void process_replication_response(AddressSpaceID owner);
-      void process_replication_invalidation(void);
+      void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
             IndexSpaceExpression *expr, const bool expr_covers,
