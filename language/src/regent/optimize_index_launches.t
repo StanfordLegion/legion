@@ -1493,6 +1493,8 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   return util.mk_stat_block(util.mk_block(check))
 end
 
+-- Height is the distance from the leaves up to the lowest parent
+-- which is invariant within the loop.
 local function find_invariant_prefix(cx, node, parent, height)
   local node = strip_projection(node)
   if not node:is(ast.typed.expr.IndexAccess) then
@@ -1512,18 +1514,16 @@ local function get_node_at_height(arg, height)
 end
 
 local function hoist_call_args(cx, hoisted, call_args)
-  local collected = {}
+  local collected = data.new_default_map(function() return terralib.newlist() end)
   for i, arg in pairs(call_args) do
     if strip_projection(arg):is(ast.typed.expr.IndexAccess) and
        std.is_region(strip_projection(arg).expr_type)
     then
-      local base = tostring(get_base_partition_symbol(arg))
-      collected[base] = collected[base] or terralib.newlist()
-      collected[base]:insert(i)
+      collected[get_base_partition_symbol(arg)]:insert(i)
     end
   end
 
-  for _, indices in pairs(collected) do
+  for _, indices in collected:values() do
     if not indices:find(
       function(i)
         return std.is_partition(std.as_read(

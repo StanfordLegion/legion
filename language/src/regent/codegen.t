@@ -2947,16 +2947,17 @@ local function is_identity_projection(expr, loop_index)
 end
 
 local function wrap_partition_internal(node, parent)
-  node.value = ast.typed.expr.Internal {
-    value = values.value(
-      node.value,
-      expr.just(quote end, { impl = parent }),
-      node.value.expr_type),
-    expr_type = node.value.expr_type,
-    annotations = node.annotations,
-    span = node.span
+  return node {
+    value = ast.typed.expr.Internal {
+      value = values.value(
+        node.value,
+        expr.just(quote end, { impl = parent }),
+        node.value.expr_type),
+      expr_type = node.value.expr_type,
+      annotations = node.annotations,
+      span = node.span
+    }
   }
-  return node
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
@@ -3029,6 +3030,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     if std.is_partition(base_type) then
       expr = wrap_partition_internal(expr, parent)
     else
+      -- No wrap_partition_internal in this case because we capture
+      -- the cross-product as a closure, rather than getting it
+      -- through the projection functor arguments.
       assert(std.is_cross_product(base_type))
       depth = #base_type.partition_symbols - 1
     end
@@ -3428,9 +3432,10 @@ local function expr_call_setup_partition_arg(
   free_vars_setup:insertall(loop_vars_setup)
 
   -- Cross products always need the full-blown partition_functor
-  local needs_non_identity_functor = not (is_identity_projection(arg_value, loop_index) and
-                                          std.is_partition(std.as_read(
-                                            util.get_base_indexed_node(arg_value).expr_type)))
+  local needs_non_identity_functor = not (
+    is_identity_projection(arg_value, loop_index) and
+    std.is_partition(
+      std.as_read(util.get_base_indexed_node(arg_value).expr_type)))
   local proj_args_set = nil
   if needs_non_identity_functor and #free_vars > 0 then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
