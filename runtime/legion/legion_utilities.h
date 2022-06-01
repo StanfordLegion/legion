@@ -355,7 +355,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective_radix > 0);
+      assert(participants > 0);
+      assert(collective_radix > 1);
 #endif
       const int MultiplyDeBruijnBitPosition[32] = 
       {
@@ -364,7 +365,20 @@ namespace Legion {
       };
       // First adjust the radix based on the number of nodes if necessary
       if (collective_radix > participants)
-        collective_radix = participants;
+      {
+        if (participants == 1)
+        {
+          // Handle the unsual case of a single participant
+          collective_radix = 0;
+          collective_log_radix = 0;
+          collective_stages = 0;
+          participating_spaces = 1;
+          collective_last_radix = 0;
+          return (local_space == 0);
+        }
+        else
+          collective_radix = participants;
+      }
       // Adjust the radix to the next smallest power of 2
       uint32_t radix_copy = collective_radix;
       for (int i = 0; i < 5; i++)
