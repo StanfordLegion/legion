@@ -343,8 +343,8 @@ contains
     extent = FRect1D(-2, block_size+1)
     ghost_ip = runtime%create_partition_by_restriction(ctx, is, color_is, transform, extent)
     
-    disjoint_lp = runtime%get_logical_partition(ctx, stencil_lr, disjoint_ip)
-    ghost_lp = runtime%get_logical_partition(ctx, stencil_lr, ghost_ip)
+    disjoint_lp = runtime%get_logical_partition(stencil_lr, disjoint_ip)
+    ghost_lp = runtime%get_logical_partition(stencil_lr, ghost_ip)
     
     arg_map = FArgumentMap()
     !init task
