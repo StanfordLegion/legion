@@ -41,6 +41,13 @@ local function strip_projection(node)
   return node
 end
 
+local function replace_projection(node, replacement)
+  if node:is(ast.typed.expr.Projection) then
+    return node { region = replacement }
+  end
+  return replacement
+end
+
 local function get_base_partition_symbol(node)
   node = util.get_base_indexed_node(strip_projection(node))
   if std.is_cross_product(std.as_read(node.expr_type)) then
@@ -1513,9 +1520,16 @@ local function get_node_at_height(arg, height)
   return get_node_at_height(arg.value, height - 1)
 end
 
-local function hoist_call_args(cx, hoisted, call_args)
+local function replace_at_height(arg, height, replacement)
+  if height == 0 then
+    return replacement
+  end
+  return arg { value = replace_at_height(arg.value, height - 1, replacement) }
+end
+
+local function hoist_call_args(cx, hoisted, call)
   local collected = data.new_default_map(function() return terralib.newlist() end)
-  for i, arg in pairs(call_args) do
+  for i, arg in ipairs(call.args) do
     if strip_projection(arg):is(ast.typed.expr.IndexAccess) and
        std.is_region(strip_projection(arg).expr_type)
     then
@@ -1523,16 +1537,18 @@ local function hoist_call_args(cx, hoisted, call_args)
     end
   end
 
+  local new_args = terralib.newlist()
+  new_args:insertall(call.args)
   for _, indices in collected:values() do
     if not indices:find(
       function(i)
         return std.is_partition(std.as_read(
-          util.get_base_indexed_node(strip_projection(call_args[i])).expr_type))
+          util.get_base_indexed_node(strip_projection(new_args[i])).expr_type))
       end)
     then
       local heights = indices:map(
         function(i)
-          local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
+          local has_invariant_prefix, _, height = find_invariant_prefix(cx, new_args[i], true, 0)
           if not has_invariant_prefix then
             return -1
           end
@@ -1550,21 +1566,25 @@ local function hoist_call_args(cx, hoisted, call_args)
       if licm_height == 0 then
         -- Hoist the entire IndexAccess AST
         indices:app(function(i)
-          local invariant = std.newsymbol(call_args[i].expr_type, "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, call_args[i].expr_type, call_args[i]))
-          call_args[i] = util.mk_expr_id(invariant)
+          local invariant = std.newsymbol(new_args[i].expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, new_args[i].expr_type, new_args[i]))
+          new_args[i] = util.mk_expr_id(invariant)
         end)
       else
         -- Hoist only a part of the IndexAccess AST
         indices:app(function(i)
-          local parent = get_node_at_height(strip_projection(call_args[i]), licm_height - 1)
+          local parent = get_node_at_height(strip_projection(new_args[i]), licm_height - 1)
           local invariant = std.newsymbol(parent.value.expr_type, "invariant")
           hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
-          parent.value = util.mk_expr_id(invariant)
+          new_args[i] = replace_projection(
+            new_args[i],
+            replace_at_height(
+              strip_projection(new_args[i]), licm_height, util.mk_expr_id(invariant)))
         end)
       end
     end
   end
+  return call { args = new_args }
 end
 
 -- This function does not detect all possible index launches,
@@ -1594,34 +1614,36 @@ local function licm(cx, node)
   local hoisted = terralib.newlist()
 
   if not maybe_index_launch(node) then
-    return hoisted
+    return node, hoisted
   end
 
   local loop_cx = cx:new_local_scope()
   loop_cx:set_loop_index(node.symbol)
   loop_cx:add_loop_variable(node.symbol)
 
+  local new_stats = terralib.newlist()
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
     if analyze_is_loop_invariant(loop_cx, stat) then
       hoisted:insert(stat)
-      node.block.stats[i] = false
     else
+      new_stats:insert(stat)
       loop_cx:add_loop_variable(stat.symbol)
     end
   end
 
-  node.block.stats = node.block.stats:filter(function(stat) return stat end)
-
   local body = node.block.stats[#node.block.stats]
-  if body then
-    if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
-      hoist_call_args(loop_cx, hoisted, body.expr.args)
-    elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
-      hoist_call_args(loop_cx, hoisted, body.rhs.args)
-    end
+  if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
+    new_stats:insert(body { expr = hoist_call_args(loop_cx, hoisted, body.expr) })
+  elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
+    new_stats:insert(body { rhs = hoist_call_args(loop_cx, hoisted, body.rhs) })
+  else
+    assert(false)
   end
-  return hoisted
+
+  node = node { block = node.block { stats = new_stats } }
+
+  return node, hoisted
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
@@ -1651,7 +1673,8 @@ function optimize_index_launch.stat_for_num(cx, node)
     return node
   end
 
-  local hoisted_stmts = licm(cx, node)
+  local hoisted_stmts
+  node, hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     local node_ = node {
@@ -1732,7 +1755,8 @@ function optimize_index_launch.stat_for_list(cx, node)
     return node
   end
 
-  local hoisted_stmts = licm(cx, node)
+  local hoisted_stmts
+  node, hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     local node_ = node {
