@@ -1381,8 +1381,8 @@ function parser.expr_prefix(p)
     local list = parser.expr_list(p)
     p:expect(")")
 
-    if #list < 4 then
-      p:error("__import_cross_product needs at least 4 arguments, got " .. #list)
+    if #list < 3 then
+      p:error("__import_cross_product needs at least 3 arguments, got " .. #list)
     end
 
     return ast.unspecialized.expr.ImportCrossProduct {

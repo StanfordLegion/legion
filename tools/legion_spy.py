@@ -4658,10 +4658,8 @@ class LogicalState(object):
             if replay_op is not None and prev_op is replay_op:
                 # If it is a previous registration of ourself, skip it
                 # This will only happen during replays
-                if prev_req.index == req.index:
-                    dominates = False
-                    continue
-                assert False
+                dominates = False
+                continue
             # Close operations from the same creator can never depend on eachother
             if op.is_close() and prev_op.is_close() and op.creator is prev_op.creator:
                 continue

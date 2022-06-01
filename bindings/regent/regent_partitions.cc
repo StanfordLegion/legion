@@ -234,12 +234,28 @@ legion_terra_index_cross_product_create_multi(
                              partitions[0],
                              partitions.begin() + 1, partitions.end(), colors, 0);
 
-  colors_[0] = runtime->get_index_partition_color(ctx, partitions[0]);
+  colors_[0] = runtime->get_index_partition_color(partitions[0]);
   std::copy(colors.begin(), colors.end(), colors_+1);
 
   legion_terra_index_cross_product_t result;
   result.partition = CObjectWrapper::wrap(partitions[0]);
   result.other_color = colors[0];
+  return result;
+}
+
+legion_terra_index_cross_product_t
+legion_terra_index_cross_product_import(
+  legion_runtime_t runtime_,
+  legion_index_partition_t partition_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexPartition partition = CObjectWrapper::unwrap(partition_);
+
+  Color color = runtime->get_index_partition_color(partition);
+
+  legion_terra_index_cross_product_t result;
+  result.partition = CObjectWrapper::wrap(partition);
+  result.other_color = color;
   return result;
 }
 
