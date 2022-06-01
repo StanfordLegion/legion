@@ -2216,6 +2216,7 @@ namespace Legion {
       assert(pending_matches.empty());
       assert(pending_finalizes.empty());
       assert(pending_verifications.empty());
+      assert(pending_counts.empty());
 #endif
     }
 

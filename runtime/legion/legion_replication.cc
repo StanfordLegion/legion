@@ -404,6 +404,7 @@ namespace Legion {
     {
       shard_mapping.store(NULL);
       first_entry.store(true);
+      collectives_done = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -481,16 +482,68 @@ namespace Legion {
     void ReplCollectiveInstanceCreator<OP>::register_handler(void)
     //--------------------------------------------------------------------------
     {
+      if (first_entry.exchange(false))
+      {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(this->get_context());
-      assert(repl_ctx != NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(this->get_context());
+        assert(repl_ctx != NULL);
 #else
-      ReplicateContext *repl_ctx =
-        static_cast<ReplicateContext*>(this->get_context());
+        ReplicateContext *repl_ctx =
+          static_cast<ReplicateContext*>(this->get_context());
 #endif
-      repl_ctx->register_collective_instance_handler(
-                      this->get_context_index(), this);
+        repl_ctx->register_collective_instance_handler(
+                        this->get_context_index(), this);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::finalize_collective(void)
+    //--------------------------------------------------------------------------
+    {
+      if (this->runtime->unsafe_mapper)
+        return;
+      RtUserEvent to_trigger;
+      {
+        AutoLock o_lock(this->op_lock);
+        if (collectives_done.exists() && this->pending_privileges.empty() &&
+            this->pending_collectives.empty() && 
+            this->pending_matches.empty() && this->pending_finalizes.empty() && 
+            this->pending_verifications.empty() && this->pending_counts.empty())
+          to_trigger = collectives_done;
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      // In safe mapper mode make sure the we've finished our collectives
+      RtEvent wait_on;
+      if (!this->runtime->unsafe_mapper)
+      {
+        AutoLock o_lock(this->op_lock);
+        if (!this->pending_privileges.empty() || 
+            !this->pending_collectives.empty() ||
+            !this->pending_matches.empty() ||
+            !this->pending_finalizes.empty() ||
+            !this->pending_verifications.empty() || 
+            !this->pending_counts.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(!collectives_done.exists());
+#endif
+          collectives_done = Runtime::create_rt_user_event();
+          wait_on = collectives_done;
+        }
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      OP::trigger_commit();
     }
 
     //--------------------------------------------------------------------------
@@ -500,8 +553,7 @@ namespace Legion {
                      MappingCallKind mapper_call, unsigned index, Memory target)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::acquire_collective_allocation_privileges(mapper_call,
                                                           index, target);
     }
@@ -514,8 +566,7 @@ namespace Legion {
                                  const std::set<Memory> &targets, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::acquire_collective_allocation_privileges(mapper_call, index,
                                                           targets, points);
     }
@@ -527,8 +578,7 @@ namespace Legion {
                      MappingCallKind mapper_call, unsigned index, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       OP::release_collective_allocation_privileges(mapper_call, index, points);
     }
 
@@ -544,8 +594,7 @@ namespace Legion {
                  size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::create_pending_collective_manager(mapper_call, index,
           collective_tag, constraints, regions, memory_space, 
           bad_constraint, bad_index, bad_regions);
@@ -560,8 +609,7 @@ namespace Legion {
          LayoutConstraintKind &bad_kind, size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       OP::create_pending_collective_managers(mapper_call, index, instances,
           collectives, points, bad_kind, bad_index, bad_regions);
     }
@@ -573,8 +621,7 @@ namespace Legion {
              std::vector<MappingInstance> &instances)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       OP::match_collective_instances(mapper_call, index,
                                      collective_tag, instances);
     }
@@ -586,8 +633,7 @@ namespace Legion {
        std::map<size_t,std::vector<DistributedID> > &instances, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       OP::match_collective_instances(mapper_call, index, instances, points);
     }
 
@@ -599,8 +645,7 @@ namespace Legion {
                                     bool success, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::finalize_pending_collective_instance(mapper_call, index,
                                                       success, points);
     }
@@ -612,8 +657,7 @@ namespace Legion {
                MappingCallKind mapper_call, unsigned total_calls, size_t points) 
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::verify_total_collective_instance_calls(mapper_call,
                                                         total_calls, points);
     }
@@ -625,8 +669,7 @@ namespace Legion {
                    unsigned index, LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       return OP::count_collective_region_occurrences(index, region, inst_did);
     }
 
@@ -636,8 +679,7 @@ namespace Legion {
                     unsigned index, RegionInstanceCounts &counts, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (first_entry.exchange(false))
-        register_handler();
+      AutoCheck check(this);
       OP::count_collective_region_occurrences(index, counts, points);
     }
 

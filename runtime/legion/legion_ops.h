@@ -942,7 +942,7 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned count); 
       void return_count_collective_region_occurrences(unsigned index,
                                   RegionInstanceCounts &counts);
-    private:
+    protected:
       typedef std::pair<MappingCallKind,unsigned> InstanceKey;
       struct PendingPrivilege {
       public:
@@ -957,7 +957,7 @@ namespace Legion {
         RtUserEvent to_trigger;
       };
       std::map<InstanceKey,PendingPrivilege> pending_privileges; 
-    private:
+    protected:
       struct PendingCollectives {
       public:
         PendingCollectives(size_t points, RtUserEvent ready)
@@ -973,7 +973,7 @@ namespace Legion {
         bool bad_regions;
       };
       std::map<InstanceKey,PendingCollectives> pending_collectives;
-    private:
+    protected:
       struct PendingMatch {
       public:
         PendingMatch(size_t points, RtUserEvent ready)
@@ -984,7 +984,7 @@ namespace Legion {
         RtUserEvent ready_event;
       };
       std::map<InstanceKey,PendingMatch> pending_matches;
-    private:
+    protected:
       struct PendingFinalize {
       public:
         PendingFinalize(bool succeeded, size_t points, RtUserEvent ready)
@@ -995,7 +995,7 @@ namespace Legion {
         bool success;
       };
       std::map<InstanceKey,PendingFinalize> pending_finalizes;
-    private:
+    protected:
       struct PendingVerification {
       public:
         PendingVerification(size_t calls, size_t points, RtUserEvent ready)
@@ -1006,7 +1006,7 @@ namespace Legion {
         RtUserEvent ready_event;
       };
       std::map<MappingCallKind,PendingVerification> pending_verifications;
-    private:
+    protected:
       struct PendingCounts {
       public:
         PendingCounts(size_t points, RtUserEvent ready)

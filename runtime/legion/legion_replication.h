@@ -1365,7 +1365,7 @@ namespace Legion {
         REPL_COLLECTIVE_FINALIZE_COLLECTIVE_INSTANCE,
         REPL_COLLECTIVE_VERIFY_TOTAL_CALLS,
         REPL_COLLECTIVE_COUNT_REGION_OCCURRENCES,
-      };
+      }; 
     public:
       ReplCollectiveInstanceCreator(Runtime *rt);
       ReplCollectiveInstanceCreator(
@@ -1380,6 +1380,10 @@ namespace Legion {
       // the sharded mapping
       virtual size_t get_total_collective_instance_points(void);
       virtual void handle_collective_instance_message(Deserializer &derez);
+      // Hook the commit method for all these operations to handle the
+      // case where we might have outstanding collective operations in
+      // flight even though all our point operations are done
+      virtual void trigger_commit(void);
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;
       // Shard ownership for each operation based on its context
@@ -1388,6 +1392,15 @@ namespace Legion {
       // maps onto (hopefully)
       ShardID get_collective_instance_origin_shard(void);
       void register_handler(void);
+      void finalize_collective(void);
+      class AutoCheck {
+      public:
+        AutoCheck(ReplCollectiveInstanceCreator<OP> *o)
+          : op(o) { op->register_handler(); }
+        ~AutoCheck(void) { op->finalize_collective(); }
+      private:
+        ReplCollectiveInstanceCreator<OP> *const op;
+      };
     public:
       // hook all entry points so we can register ourselves on the first call 
       virtual RtEvent acquire_collective_allocation_privileges(
@@ -1467,6 +1480,7 @@ namespace Legion {
     protected:
       std::atomic<ShardedMapping*> shard_mapping;
       std::atomic<bool> first_entry;
+      RtUserEvent collectives_done;
     };
 
     /**
