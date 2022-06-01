@@ -502,8 +502,6 @@ namespace Legion {
     void ReplCollectiveInstanceCreator<OP>::finalize_collective(void)
     //--------------------------------------------------------------------------
     {
-      if (this->runtime->unsafe_mapper)
-        return;
       RtUserEvent to_trigger;
       {
         AutoLock o_lock(this->op_lock);
@@ -524,7 +522,6 @@ namespace Legion {
     {
       // In safe mapper mode make sure the we've finished our collectives
       RtEvent wait_on;
-      if (!this->runtime->unsafe_mapper)
       {
         AutoLock o_lock(this->op_lock);
         if (!this->pending_privileges.empty() || 
