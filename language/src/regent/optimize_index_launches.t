@@ -1531,7 +1531,7 @@ local function hoist_call_args(cx, hoisted, call)
   local collected = data.new_default_map(function() return terralib.newlist() end)
   for i, arg in ipairs(call.args) do
     if strip_projection(arg):is(ast.typed.expr.IndexAccess) and
-       std.is_region(strip_projection(arg).expr_type)
+       std.is_region(std.as_read(strip_projection(arg).expr_type))
     then
       collected[get_base_partition_symbol(arg)]:insert(i)
     end
@@ -1566,7 +1566,7 @@ local function hoist_call_args(cx, hoisted, call)
       if licm_height == 0 then
         -- Hoist the entire IndexAccess AST
         indices:app(function(i)
-          local invariant = std.newsymbol(new_args[i].expr_type, "invariant")
+          local invariant = std.newsymbol(std.as_read(new_args[i].expr_type), "invariant")
           hoisted:insert(util.mk_stat_var(invariant, new_args[i].expr_type, new_args[i]))
           new_args[i] = util.mk_expr_id(invariant)
         end)
@@ -1574,7 +1574,7 @@ local function hoist_call_args(cx, hoisted, call)
         -- Hoist only a part of the IndexAccess AST
         indices:app(function(i)
           local parent = get_node_at_height(strip_projection(new_args[i]), licm_height - 1)
-          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+          local invariant = std.newsymbol(std.as_read(parent.value.expr_type), "invariant")
           hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
           new_args[i] = replace_projection(
             new_args[i],
