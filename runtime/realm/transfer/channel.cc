@@ -2647,20 +2647,6 @@ namespace Realm {
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
 
-        // subtract bytes written from the pending count - if that causes it to
-        //  go to zero, we can mark the transfer completed and update progress
-        //  in case the xd is just waiting for that
-        if(inc_amt > 0) {
-          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
-          if(prev > 0)
-            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                          << " remaining=" << (prev - inc_amt);
-          if(inc_amt == static_cast<size_t>(prev)) {
-            transfer_completed.store_release(true);
-            update_progress();
-          }
-        }
-
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
 	  if(out_port->needs_pbt_update.load() &&
@@ -2682,6 +2668,25 @@ namespace Realm {
 	    // TODO: mode to send non-contiguous updates?
 	  }
 	}
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        // NOTE: as soon as we set `transfer_completed`, the other references
+        //  to this xd may be removed, so do this last, and hold a reference of
+        //  our own long enough to call update_progress
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            add_reference();
+            transfer_completed.store_release(true);
+            update_progress();
+            remove_reference();
+          }
+        }
       }
 
 #if 0
@@ -4131,20 +4136,6 @@ namespace Realm {
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
 
-        // subtract bytes written from the pending count - if that causes it to
-        //  go to zero, we can mark the transfer completed and update progress
-        //  in case the xd is just waiting for that
-        if(inc_amt > 0) {
-          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
-          if(prev > 0)
-            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                          << " remaining=" << (prev - inc_amt);
-          if(inc_amt == static_cast<size_t>(prev)) {
-            transfer_completed.store_release(true);
-            update_progress();
-          }
-        }
-
 	// pre_bytes_write update was handled in the remote AM handler
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
@@ -4157,6 +4148,25 @@ namespace Realm {
 						    out_port->peer_port_idx,
 						    out_port->local_bytes_total);
 	  }
+        }
+
+        // subtract bytes written from the pending count - if that causes it to
+        //  go to zero, we can mark the transfer completed and update progress
+        //  in case the xd is just waiting for that
+        // NOTE: as soon as we set `transfer_completed`, the other references
+        //  to this xd may be removed, so do this last, and hold a reference of
+        //  our own long enough to call update_progress
+        if(inc_amt > 0) {
+          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+          if(prev > 0)
+            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                          << " remaining=" << (prev - inc_amt);
+          if(inc_amt == static_cast<size_t>(prev)) {
+            add_reference();
+            transfer_completed.store_release(true);
+            update_progress();
+            remove_reference();
+          }
         }
       }
 
