@@ -1555,8 +1555,8 @@ local function hoist_call_args(cx, hoisted, call)
           return height
         end)
 
-      for i = 1, #heights do
-        if heights[i] == -1 then return end
+      for _, height in ipairs(heights) do
+        if height == -1 then return end
       end
 
       -- Every argument deriving from the same base cross product must have
@@ -1677,14 +1677,14 @@ function optimize_index_launch.stat_for_num(cx, node)
   node, hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    local node_ = node {
+    node = node {
       block = optimize_index_launches.block(cx, node.block),
     }
     if #hoisted_stmts == 0 then
-      return node_
+      return node
     end
     -- Retain LICM even if we can't index launch
-    hoisted_stmts:insert(node_)
+    hoisted_stmts:insert(node)
     return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
@@ -1759,14 +1759,14 @@ function optimize_index_launch.stat_for_list(cx, node)
   node, hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    local node_ = node {
+    node = node {
       block = optimize_index_launches.block(cx, node.block),
     }
     if #hoisted_stmts == 0 then
-      return node_
+      return node
     end
     -- Retain LICM even if we can't index launch
-    hoisted_stmts:insert(node_)
+    hoisted_stmts:insert(node)
     return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
