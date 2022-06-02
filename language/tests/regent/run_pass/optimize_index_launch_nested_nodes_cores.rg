@@ -53,7 +53,7 @@ end
 task nested_launch(data : region(ispace(int1d), fs),
                    data_by_core : partition(disjoint, data, ispace(int1d)))
 where reads writes(data) do
-  -- __demand(__index_launch)
+  __demand(__index_launch)
   for core in data_by_core.colors do
     flat_launch(data_by_core[core])
   end
@@ -135,7 +135,7 @@ task main()
 
   -- Nested launch. Note this doesn't work with tracing (no way to trace the
   -- second level), so not the most useful pattern. But still, it works.
-  -- __demand(__index_launch)
+  __demand(__index_launch)
   for node in nodes do
     nested_launch(data_by_node[node], cp2[node])
   end
@@ -152,7 +152,7 @@ task main()
   -- Note: this does **NOT** work with the static/dynamic interference checks
   -- we have right now, so we need to -foverride-demand-index launch on this
   -- one.
-  -- __demand(__index_launch)
+  __demand(__index_launch)
   for i in nodes_cores do
     flat_launch(cp2[i.x][i.y])
   end
@@ -162,7 +162,7 @@ task main()
   -- Note: I haven't bothered to set up proper boundary conditions here so I
   -- just use max/min to make sure we don't go out of bounds. In a real
   -- implementation you'd use empty boundary regions around the edges (or similar).
-  -- __demand(__index_launch)
+  __demand(__index_launch)
   for i in nodes_cores do
     flat_stencil(cp2[i.x][i.y], cp3[i.x][max(i.y-1,0)][0], cp3[i.x][min(i.y+1,2)][1])
   end

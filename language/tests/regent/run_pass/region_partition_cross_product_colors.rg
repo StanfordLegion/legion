@@ -14,26 +14,12 @@
 
 import "regent"
 
--- This tests the various loop optimizations supported by the
--- compiler.
-
-task g(r : region(int)) : int
-where reads writes(r) do
-  return 5
-end
-
 task main()
-  var n = 5
-  var r = region(ispace(ptr, n), int)
-  var p = partition(equal, r, ispace(int1d, 2))
-  var q = partition(equal, r, ispace(int1d, 2))
-  var s = cross_product(p, q)
-
-  for i = 0, 2 do
-    __demand(__index_launch)
-    for j = 0, 2 do
-      g(s[i][j])
-    end
-  end
+  var c = ispace(int1d, 12)
+  var r = region(c, int1d)
+  var p = partition(equal, r, ispace(int1d, 4))
+  var q = partition(equal, r, ispace(int1d, 3))
+  var u = cross_product(p, q)
+  regentlib.assert(u.colors.volume == 4, "test failed")
 end
 regentlib.start(main)

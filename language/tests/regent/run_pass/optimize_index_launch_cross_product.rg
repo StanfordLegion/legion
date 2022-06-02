@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,26 +14,33 @@
 
 import "regent"
 
--- This tests the various loop optimizations supported by the
--- compiler.
-
-task g(r : region(int)) : int
-where reads writes(r) do
-  return 5
+task foo(r : region(ispace(int1d), int))
+where reads(r) do
+  var sum = 0
+  for i in r do
+    sum += i
+  end
+  return sum
 end
 
 task main()
-  var n = 5
-  var r = region(ispace(ptr, n), int)
-  var p = partition(equal, r, ispace(int1d, 2))
-  var q = partition(equal, r, ispace(int1d, 2))
-  var s = cross_product(p, q)
-
-  for i = 0, 2 do
-    __demand(__index_launch)
-    for j = 0, 2 do
-      g(s[i][j])
-    end
+  var R = region(ispace(int1d, 20), int)
+  for i in R do
+    R[i] = i
   end
+
+  var p = partition(equal, R, ispace(int1d, 2))
+  var q = partition(equal, R, ispace(int1d, 5))
+  var r = partition(equal, R, ispace(int1d, 10))
+  var cp = cross_product(p, q, r)
+
+  var sum = 0
+  __demand(__index_launch)
+  for i in p.colors do
+    sum += foo(cp[i][i][i])
+  end
+
+  regentlib.assert(sum == 1, "test failed")
 end
 regentlib.start(main)
+
