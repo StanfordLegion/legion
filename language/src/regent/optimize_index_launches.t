@@ -1555,32 +1555,35 @@ local function hoist_call_args(cx, hoisted, call)
           return height
         end)
 
+      local continue = true
       for _, height in ipairs(heights) do
-        if height == -1 then return end
+        if height == -1 then continue = false end
       end
 
-      -- Every argument deriving from the same base cross product must have
-      -- the same type. E.g. cp[i][i] and cp[i] are not allowed together.
-      local licm_height = heights:reduce(math.max)
+      if continue then
+        -- Every argument deriving from the same base cross product must have
+        -- the same type. E.g. cp[i][i] and cp[i] are not allowed together.
+        local licm_height = heights:reduce(math.max)
 
-      if licm_height == 0 then
-        -- Hoist the entire IndexAccess AST
-        indices:app(function(i)
-          local invariant = std.newsymbol(std.as_read(new_args[i].expr_type), "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, new_args[i].expr_type, new_args[i]))
-          new_args[i] = util.mk_expr_id(invariant)
-        end)
-      else
-        -- Hoist only a part of the IndexAccess AST
-        indices:app(function(i)
-          local parent = get_node_at_height(strip_projection(new_args[i]), licm_height - 1)
-          local invariant = std.newsymbol(std.as_read(parent.value.expr_type), "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
-          new_args[i] = replace_projection(
-            new_args[i],
-            replace_at_height(
-              strip_projection(new_args[i]), licm_height, util.mk_expr_id(invariant)))
-        end)
+        if licm_height == 0 then
+          -- Hoist the entire IndexAccess AST
+          indices:app(function(i)
+            local invariant = std.newsymbol(std.as_read(new_args[i].expr_type), "invariant")
+            hoisted:insert(util.mk_stat_var(invariant, new_args[i].expr_type, new_args[i]))
+            new_args[i] = util.mk_expr_id(invariant)
+          end)
+        else
+          -- Hoist only a part of the IndexAccess AST
+          indices:app(function(i)
+            local parent = get_node_at_height(strip_projection(new_args[i]), licm_height - 1)
+            local invariant = std.newsymbol(std.as_read(parent.value.expr_type), "invariant")
+            hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+            new_args[i] = replace_projection(
+              new_args[i],
+              replace_at_height(
+                strip_projection(new_args[i]), licm_height, util.mk_expr_id(invariant)))
+          end)
+        end
       end
     end
   end
