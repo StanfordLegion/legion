@@ -15,6 +15,7 @@
 -- Regent Code Generation
 
 local ast = require("regent/ast")
+local util = require("regent/ast_util")
 local codegen_hooks = require("regent/codegen_hooks")
 local gpuhelper = require("regent/gpu/helper")
 local data = require("common/data")
@@ -2335,7 +2336,7 @@ function codegen.expr_field_access(cx, node)
       node,
       expr.just(actions, volume),
       expr_type)
-  elseif std.is_partition(value_type) and field_name == "colors" then
+  elseif (std.is_partition(value_type) or std.is_cross_product(value_type)) and field_name == "colors" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
     local is = terralib.newsymbol(c.legion_index_space_t, "colors")
@@ -2933,8 +2934,7 @@ local function strip_casts(node)
   return node
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space,
-                                                 free_vars, free_vars_setup, requirement)
+local function is_identity_projection(expr, loop_index)
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
   end
@@ -2943,13 +2943,39 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   -- Strip the index for the purpose of checking if this is the
   -- identity projection functor.
   local stripped_index = strip_casts(expr.index)
-  if stripped_index:is(ast.typed.expr.ID) and
-    stripped_index.value == loop_index
+  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
+end
+
+local function wrap_partition_internal(node, parent)
+  return node {
+    value = ast.typed.expr.Internal {
+      value = values.value(
+        node.value,
+        expr.just(quote end, { impl = parent }),
+        node.value.expr_type),
+      expr_type = node.value.expr_type,
+      annotations = node.annotations,
+      span = node.span
+    }
+  }
+end
+
+local function make_partition_projection_functor(cx, expr, loop_index, color_space,
+                                                 free_vars, free_vars_setup, requirement)
+  cx = cx:new_local_scope()
+
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
+  assert(expr:is(ast.typed.expr.IndexAccess))
+
+  -- Never return 0 for cross products
+  if is_identity_projection(expr, loop_index) and
+     std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type))
   then
     return 0 -- Identity projection functor.
   end
 
-  -- But keep the unstripped index for all other purposes...
   local index = expr.index
   local index_type = std.as_read(index.expr_type)
 
@@ -2998,10 +3024,25 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [value.actions];
     end)
 
+    local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
+    local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
+    local depth = 0
+    if std.is_partition(base_type) then
+      expr = wrap_partition_internal(expr, parent)
+    else
+      -- No wrap_partition_internal in this case because we capture
+      -- the cross-product as a closure, rather than getting it
+      -- through the projection functor arguments.
+      assert(std.is_cross_product(base_type))
+      depth = #base_type.partition_symbols - 1
+    end
+
+    local index_access = codegen.expr(cx, expr):read(cx)
+
     local terra partition_functor([cx.runtime],
                                   mappable : c.legion_mappable_t,
                                   idx : uint,
-                                  parent : c.legion_logical_partition_t,
+                                  [parent],
                                   [point])
       var [requirement];
       var mappable_type = c.legion_mappable_get_type(mappable)
@@ -3024,13 +3065,11 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       end
       [symbol_setup];
       [free_vars_setup];
-      var index : index_type = [value.value];
-      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-        [cx.runtime], parent, index)
-      return subregion
+      [index_access.actions];
+      return [index_access.value].impl
     end
 
-    return std.register_projection_functor(false, false, 0, nil, partition_functor)
+    return std.register_projection_functor(false, false, depth, nil, partition_functor)
 
   -- create fill projection functor without mappable
   -- create projection functors with no preamble or free variables without mappable
@@ -3049,18 +3088,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
     return std.register_projection_functor(false, true, 0, nil, partition_functor)
   end
-end
-
-local function is_identity_projection(expr, loop_index)
-  if expr:is(ast.typed.expr.Projection) then
-    expr = expr.region
-  end
-  assert(expr:is(ast.typed.expr.IndexAccess))
-
-  -- Strip the index for the purpose of checking if this is the
-  -- identity projection functor.
-  local stripped_index = strip_casts(expr.index)
-  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
 end
 
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
@@ -3391,7 +3418,7 @@ local function index_launch_free_var_setup(free_vars)
 end
 
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
+    outer_cx, cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
@@ -3404,7 +3431,11 @@ local function expr_call_setup_partition_arg(
 
   free_vars_setup:insertall(loop_vars_setup)
 
-  local needs_non_identity_functor = not is_identity_projection(arg_value, loop_index)
+  -- Cross products always need the full-blown partition_functor
+  local needs_non_identity_functor = not (
+    is_identity_projection(arg_value, loop_index) and
+    std.is_partition(
+      std.as_read(util.get_base_indexed_node(arg_value).expr_type)))
   local proj_args_set = nil
   if needs_non_identity_functor and #free_vars > 0 then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
@@ -3456,7 +3487,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
+    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -9171,8 +9202,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = region_arg.value
-      local partition_type = std.as_read(region_arg.value.expr_type)
+      local partition_expr = util.get_base_indexed_node(region_arg.value)
+      local partition_type = std.as_read(partition_expr.expr_type):partition()
       partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
@@ -9341,7 +9372,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       local partition = args_partitions[i]
       assert(partition)
       expr_call_setup_partition_arg(
-        loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
+        cx, loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
         args_setup, node.free_vars[i], loop_vars)
     end
   end

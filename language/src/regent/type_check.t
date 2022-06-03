@@ -610,6 +610,8 @@ function type_check.expr_field_access(cx, node)
       })
   elseif std.is_partition(std.as_read(unpack_type)) and node.field_name == "colors" then
     field_type = std.as_read(unpack_type):colors()
+  elseif std.is_cross_product(std.as_read(unpack_type)) and node.field_name == "colors" then
+    field_type = std.as_read(unpack_type):partition():colors()
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
     local hint = ""
     if std.is_region(std.as_read(unpack_type)) and
