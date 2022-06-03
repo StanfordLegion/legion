@@ -223,8 +223,7 @@ namespace Legion {
                            DistributedID src_did, DistributedID dst_did,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
-                           bool src_indirect, bool dst_indirect,
-                           std::set<RtEvent> &applied) = 0;
+                           ReductionOpID redop, std::set<RtEvent> &applied) = 0;
       typedef std::pair<PhysicalInstance,DistributedID> UniqueInst;
       typedef LegionMap<UniqueInst,FieldMask> AcrossInsts;
       virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
@@ -367,8 +366,7 @@ namespace Legion {
                            DistributedID src_did, DistributedID dst_did,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
-                           bool src_indirect, bool dst_indirect,
-                           std::set<RtEvent> &applied);
+                           ReductionOpID redop, std::set<RtEvent> &applied);
       virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
@@ -647,14 +645,15 @@ namespace Legion {
                                     DistributedID dst_did,
                                     const FieldMask &src_mask,
                                     const FieldMask &dst_mask,
+                                    ReductionOpID redop,
                                     std::set<RtEvent> &applied) const
         {
           sanity_check();
           rec->record_copy_insts(lhs, tlid, index, dst_index, expr,
                                  src_inst, dst_inst, src_did, dst_did,
-                                 src_mask, dst_mask,
-                                 LEGION_READ_PRIV, LEGION_WRITE_PRIV,
-                                 false/*indirect*/, false/*indrect*/, applied);
+                                 src_mask, dst_mask, LEGION_READ_PRIV, 
+                                 redop > 0 ? LEGION_REDUCE_PRIV : 
+                                  LEGION_WRITE_PRIV, redop, applied);
         }
       typedef LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask> 
         AcrossInsts;
