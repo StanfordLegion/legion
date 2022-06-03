@@ -3872,7 +3872,7 @@ namespace Legion {
     {
       {
         AutoLock tpl_lock(template_lock);
-        for (std::set<ViewUser*>::iterator it = all_users.begin();
+        for (std::set<InstUser*>::iterator it = all_users.begin();
              it != all_users.end(); ++it)
           delete (*it);
         for (std::vector<TraceConditionSet*>::const_iterator it =
@@ -4258,8 +4258,8 @@ namespace Legion {
       prepare_parallel_replay(gen);
       push_complete_replays();
       // After elide fences we can clear these views
-      op_views.clear();
-      copy_views.clear();
+      op_insts.clear();
+      copy_insts.clear();
       // Check to see if the indirection fields for any across copies are
       // mutated during the execution of the trace. If they aren't then we
       // know that we don't need to recompute preimages on back-to-back replays
@@ -4268,19 +4268,19 @@ namespace Legion {
         for (std::vector<IssueAcross*>::const_iterator it =
               across_copies.begin(); it != across_copies.end(); it++)
         {
-          std::map<unsigned,ViewExprs>::iterator finder =
-            src_indirect_views.find((*it)->lhs);
-          if ((finder != src_indirect_views.end()) &&
+          std::map<unsigned,InstExprs>::iterator finder =
+            src_indirect_insts.find((*it)->lhs);
+          if ((finder != src_indirect_insts.end()) &&
               are_read_only_users(finder->second))
             (*it)->executor->record_trace_immutable_indirection(true/*src*/);
-          finder = dst_indirect_views.find((*it)->lhs);
-          if ((finder != dst_indirect_views.end()) &&
+          finder = dst_indirect_insts.find((*it)->lhs);
+          if ((finder != dst_indirect_insts.end()) &&
               are_read_only_users(finder->second))
             (*it)->executor->record_trace_immutable_indirection(false/*dst*/);
         }
         across_copies.clear();
-        src_indirect_views.clear();
-        dst_indirect_views.clear();
+        src_indirect_insts.clear();
+        dst_indirect_insts.clear();
       }
     }
 
@@ -4379,9 +4379,9 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              std::map<TraceLocalID, ViewExprs>::iterator finder =
-                op_views.find(replay->owner);
-              if (finder == op_views.end()) break;
+              std::map<TraceLocalID, InstExprs>::iterator finder =
+                op_insts.find(replay->owner);
+              if (finder == op_insts.end()) break;
               std::set<unsigned> users;
               find_all_last_users(finder->second, users, ready_events);
               rewrite_preconditions(replay->rhs, users, instructions, 
@@ -4391,10 +4391,10 @@ namespace Legion {
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              std::map<unsigned, ViewExprs>::iterator finder =
-                copy_views.find(copy->lhs);
+              std::map<unsigned, InstExprs>::iterator finder =
+                copy_insts.find(copy->lhs);
 #ifdef DEBUG_LEGION
-              assert(finder != copy_views.end());
+              assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
               find_all_last_users(finder->second, users, ready_events);
@@ -4406,10 +4406,10 @@ namespace Legion {
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              std::map<unsigned, ViewExprs>::iterator finder =
-                copy_views.find(fill->lhs);
+              std::map<unsigned, InstExprs>::iterator finder =
+                copy_insts.find(fill->lhs);
 #ifdef DEBUG_LEGION
-              assert(finder != copy_views.end());
+              assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
               find_all_last_users(finder->second, users, ready_events);
@@ -4421,10 +4421,10 @@ namespace Legion {
           case ISSUE_ACROSS:
             {
               IssueAcross *across = inst->as_issue_across();
-              std::map<unsigned, ViewExprs>::iterator finder =
-                copy_views.find(across->lhs);
+              std::map<unsigned, InstExprs>::iterator finder =
+                copy_insts.find(across->lhs);
 #ifdef DEBUG_LEGION
-              assert(finder != copy_views.end());
+              assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
               find_all_last_users(finder->second, users, ready_events);
@@ -4450,9 +4450,9 @@ namespace Legion {
               if (across->src_indirect_precondition != 0)
               {
                 users.clear();
-                finder = src_indirect_views.find(across->lhs);
+                finder = src_indirect_insts.find(across->lhs);
 #ifdef DEBUG_LEGION
-                assert(finder != src_indirect_views.end());
+                assert(finder != src_indirect_insts.end());
 #endif
                 find_all_last_users(finder->second, users, ready_events);
                 rewrite_preconditions(across->src_indirect_precondition, users,
@@ -4462,9 +4462,9 @@ namespace Legion {
               if (across->dst_indirect_precondition != 0)
               {
                 users.clear();
-                finder = dst_indirect_views.find(across->lhs);
+                finder = dst_indirect_insts.find(across->lhs);
 #ifdef DEBUG_LEGION
-                assert(finder != dst_indirect_views.end());
+                assert(finder != dst_indirect_insts.end());
 #endif
                 find_all_last_users(finder->second, users, ready_events);
                 rewrite_preconditions(across->dst_indirect_precondition, users,
@@ -6276,9 +6276,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_op_view(const TraceLocalID &tlid,
+    void PhysicalTemplate::record_op_inst(const TraceLocalID &tlid,
                                           unsigned idx,
-                                          InstanceView *view,
+                                          PhysicalInstance inst,
+                                          DistributedID inst_did,
                                           RegionNode *node,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
@@ -6286,21 +6287,23 @@ namespace Legion {
                                           std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
+      const UniqueInst key(inst, inst_did);
       AutoLock tpl_lock(template_lock);
       unsigned entry = find_memo_entry(tlid);
 
-      FieldMaskSet<IndexSpaceExpression> &views = op_views[tlid][view];
+      FieldMaskSet<IndexSpaceExpression> &insts = op_insts[tlid][key];
       IndexSpaceNode *expr = node->row_source;
-      views.insert(expr, user_mask);
+      insts.insert(expr, user_mask);
       if (update_validity)
-        add_view_user(view, usage, entry, expr, user_mask, applied);
+        add_inst_user(key, usage, entry, expr, user_mask, applied);
       trace_regions.insert(node, user_mask);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(ApEvent lhs,
+    void PhysicalTemplate::record_fill_inst(ApEvent lhs,
                                  IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 PhysicalInstance inst, DistributedID inst_did,
+                                 const FieldMask &fill_mask,
                                  std::set<RtEvent> &applied_events,
                                  const bool reduction_initialization)
     //--------------------------------------------------------------------------
@@ -6310,18 +6313,48 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0), 
-                   tracing_dsts, applied_events);
-      record_expression_views(copy_views[lhs_], expr, tracing_dsts);
+      record_inst(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
+                  inst, inst_did, fill_mask, applied_events);
+      record_expression_inst(copy_insts[lhs_], expr, inst, inst_did, fill_mask);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_copy_views(ApEvent lhs, 
+    void PhysicalTemplate::record_copy_insts(ApEvent lhs, 
+                           const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
+                           DistributedID src_did, DistributedID dst_did,
+                           const FieldMask &src_mask, const FieldMask &dst_mask,
+                           PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
+                           std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned lhs_ = find_event(lhs, tpl_lock);
+      record_inst(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
+                  src_inst, src_did, src_mask, applied_events);
+      record_expression_inst(src_indirect ? 
+          src_indirect_insts[lhs_] : copy_insts[lhs_], 
+          expr, src_inst, src_did, src_mask);
+      record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
+                   dst_inst, dst_did, dst_mask, applied_events);
+      record_expression_inst(dst_indirect ?
+          dst_indirect_insts[lhs_] : copy_insts[lhs_], 
+          expr, dst_inst, dst_did, dst_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_across_insts(ApEvent lhs, 
                                  const TraceLocalID &tlid,
                                  unsigned src_idx, unsigned dst_idx,
                                  IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 const AcrossInsts &src_insts,
+                                 const AcrossInsts &dst_insts,
                                  PrivilegeMode src_mode, PrivilegeMode dst_mode,
                                  bool src_indirect, bool dst_indirect,
                                  std::set<RtEvent> &applied_events)
@@ -6332,20 +6365,30 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_views(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
-                   tracing_srcs, applied_events);
-      record_expression_views(src_indirect ? 
-          src_indirect_views[lhs_] : copy_views[lhs_], expr, tracing_srcs);
-      record_views(lhs_, expr,RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
-                   tracing_dsts, applied_events);
-      record_expression_views(dst_indirect ?
-          dst_indirect_views[lhs_] : copy_views[lhs_], expr, tracing_dsts);
+      for (AcrossInsts::const_iterator it =
+            src_insts.begin(); it != src_insts.end(); it++)
+      {
+        record_inst(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
+            it->first.first, it->first.second, it->second, applied_events);
+        record_expression_inst(src_indirect ? 
+            src_indirect_insts[lhs_] : copy_insts[lhs_], 
+            expr, it->first.first, it->first.second, it->second);
+      }
+      for (AcrossInsts::const_iterator it =
+            dst_insts.begin(); it != dst_insts.end(); it++)
+      {
+        record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
+             it->first.first, it->first.second, it->second, applied_events);
+        record_expression_inst(dst_indirect ?
+            dst_indirect_insts[lhs_] : copy_insts[lhs_], 
+            expr, it->first.first, it->first.second, it->second);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_indirect_views(ApEvent indirect_done,
+    void PhysicalTemplate::record_indirect_insts(ApEvent indirect_done,
                             ApEvent all_done, IndexSpaceExpression *expr,
-                            const FieldMaskSet<InstanceView> &tracing_views,
+                            const AcrossInsts &insts,
                             std::set<RtEvent> &applied, PrivilegeMode privilege)
     //--------------------------------------------------------------------------
     {
@@ -6360,26 +6403,32 @@ namespace Legion {
       // that generated them because they can be collective, so we need to
       // record the summary event for when all the indirect copies are done
       // for their view user
-      record_views(all, expr, RegionUsage(privilege,
-            LEGION_EXCLUSIVE, 0), tracing_views, applied);
-      record_expression_views(copy_views[indirect], expr, tracing_views);
+      for (AcrossInsts::const_iterator it = 
+            insts.begin(); it != insts.end(); it++)
+      {
+        record_inst(all, expr, RegionUsage(privilege, LEGION_EXCLUSIVE, 0),
+                    it->first.first, it->first.second, it->second, applied);
+        record_expression_inst(copy_insts[indirect], expr,
+            it->first.first, it->first.second, it->second);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_views(unsigned entry,
-                                        IndexSpaceExpression *expr,
-                                        const RegionUsage &usage,
-                                        const FieldMaskSet<InstanceView> &views,
-                                        std::set<RtEvent> &applied)
+    void PhysicalTemplate::record_inst(unsigned entry,
+                                       IndexSpaceExpression *expr,
+                                       const RegionUsage &usage,
+                                       PhysicalInstance inst,
+                                       DistributedID inst_did,
+                                       const FieldMask &inst_mask,
+                                       std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<InstanceView>::const_iterator it = 
-            views.begin(); it != views.end(); ++it)
-        add_view_user(it->first, usage, entry, expr, it->second, applied);
+      const UniqueInst key(inst, inst_did);
+      add_inst_user(key, usage, entry, expr, inst_mask, applied);
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::ViewUser::ViewUser(const RegionUsage &r, unsigned u, 
+    PhysicalTemplate::InstUser::InstUser(const RegionUsage &r, unsigned u, 
                                          IndexSpaceExpression *e, ShardID s)
       : usage(r), user(u), expr(e), shard(s)
     //--------------------------------------------------------------------------
@@ -6388,7 +6437,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::ViewUser::~ViewUser(void)
+    PhysicalTemplate::InstUser::~InstUser(void)
     //--------------------------------------------------------------------------
     {
       if (expr->remove_base_expression_reference(TRACE_REF))
@@ -6396,7 +6445,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::add_view_user(InstanceView *view,
+    void PhysicalTemplate::add_inst_user(const UniqueInst &inst,
                                          const RegionUsage &usage,
                                          unsigned user_index,
                                          IndexSpaceExpression *user_expr,
@@ -6405,12 +6454,12 @@ namespace Legion {
                                          int owner_shard)
     //--------------------------------------------------------------------------
     {
-      ViewUser *user = new ViewUser(usage, user_index, user_expr, owner_shard);
+      InstUser *user = new InstUser(usage, user_index, user_expr, owner_shard);
       all_users.insert(user);
       RegionTreeForest *forest = trace->runtime->forest;
-      FieldMaskSet<ViewUser> &users = view_users[view];
-      FieldMaskSet<ViewUser> to_delete;
-      for (FieldMaskSet<ViewUser>::iterator it = users.begin();
+      FieldMaskSet<InstUser> &users = inst_users[inst];
+      FieldMaskSet<InstUser> to_delete;
+      for (FieldMaskSet<InstUser>::iterator it = users.begin();
            it != users.end(); ++it)
       {
         FieldMask overlap = user_mask & it->second;
@@ -6430,10 +6479,10 @@ namespace Legion {
         to_delete.insert(it->first, overlap);
       }
 
-      for (FieldMaskSet<ViewUser>::iterator it = to_delete.begin();
+      for (FieldMaskSet<InstUser>::iterator it = to_delete.begin();
            it != to_delete.end(); ++it)
       {
-        FieldMaskSet<ViewUser>::iterator finder = users.find(it->first);
+        FieldMaskSet<InstUser>::iterator finder = users.find(it->first);
 #ifdef DEBUG_LEGION
         assert(finder != users.end());
 #endif
@@ -6446,14 +6495,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void PhysicalTemplate::record_expression_views(ViewExprs &cviews,
+    /*static*/ void PhysicalTemplate::record_expression_inst(InstExprs &cviews,
                                         IndexSpaceExpression *expr,
-                                        const FieldMaskSet<InstanceView> &views)
+                                        PhysicalInstance inst,
+                                        DistributedID inst_did,
+                                        const FieldMask &inst_mask)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
-           it != views.end(); ++it)
-        cviews[it->first].insert(expr, it->second);
+      const UniqueInst key(inst, inst_did);
+      cviews[key].insert(expr, inst_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -6707,9 +6757,9 @@ namespace Legion {
     void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      for (ViewUsers::const_iterator it = view_users.begin();
-            it != view_users.end(); ++it)
-        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+      for (InstUsers::const_iterator it = inst_users.begin();
+            it != inst_users.end(); ++it)
+        for (FieldMaskSet<InstUser>::const_iterator uit = it->second.begin();
               uit != it->second.end(); ++uit)
           postconditions.insert(events[uit->first->user]);
       if (last_fence != NULL)
@@ -6871,12 +6921,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::find_all_last_users(ViewExprs &view_exprs,
+    void PhysicalTemplate::find_all_last_users(InstExprs &inst_exprs,
                                                std::set<unsigned> &users,
                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      for (ViewExprs::iterator it = view_exprs.begin(); it != view_exprs.end();
+      for (InstExprs::iterator it = inst_exprs.begin(); it != inst_exprs.end();
            ++it)
         for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
@@ -6884,7 +6934,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::find_last_users(InstanceView *view,
+    void PhysicalTemplate::find_last_users(const UniqueInst &inst,
                                            IndexSpaceExpression *expr,
                                            const FieldMask &mask,
                                            std::set<unsigned> &users,
@@ -6893,15 +6943,15 @@ namespace Legion {
     {
       if (expr->is_empty()) return;
 
-      ViewUsers::const_iterator finder = view_users.find(view);
-      if (finder == view_users.end()) return;
+      InstUsers::const_iterator finder = inst_users.find(inst);
+      if (finder == inst_users.end()) return;
 
       RegionTreeForest *forest = trace->runtime->forest;
-      for (FieldMaskSet<ViewUser>::const_iterator uit = 
+      for (FieldMaskSet<InstUser>::const_iterator uit = 
             finder->second.begin(); uit != finder->second.end(); ++uit)
         if (!!(uit->second & mask))
         {
-          ViewUser *user = uit->first;
+          InstUser *user = uit->first;
           IndexSpaceExpression *intersect =
             forest->intersect_index_spaces(expr, user->expr);
           if (!intersect->is_empty())
@@ -6923,18 +6973,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::are_read_only_users(ViewExprs &view_exprs)
+    bool PhysicalTemplate::are_read_only_users(InstExprs &inst_exprs)
     //--------------------------------------------------------------------------
     {
       RegionTreeForest *forest = trace->runtime->forest;
-      for (ViewExprs::const_iterator vit = 
-            view_exprs.begin(); vit != view_exprs.end(); vit++)
+      for (InstExprs::const_iterator vit = 
+            inst_exprs.begin(); vit != inst_exprs.end(); vit++)
       {
-        ViewUsers::const_iterator finder = view_users.find(vit->first);
+        InstUsers::const_iterator finder = inst_users.find(vit->first);
 #ifdef DEBUG_LEGION
-        assert(finder != view_users.end());
+        assert(finder != inst_users.end());
 #endif
-        for (FieldMaskSet<ViewUser>::const_iterator uit =
+        for (FieldMaskSet<InstUser>::const_iterator uit =
               finder->second.begin(); uit != finder->second.end(); uit++)
         {
           // If the user is read-only then we don't care
@@ -7569,42 +7619,25 @@ namespace Legion {
       std::set<RtEvent> applied;
       switch (kind)
       {
-        case UPDATE_VIEW_USER:
+        case UPDATE_INST_USER:
           {
             derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            InstanceView *view = static_cast<InstanceView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-
+            UniqueInst inst;
+            derez.deserialize(inst.first);
+            derez.deserialize(inst.second);
             PendingRemoteExpression pending;
             RtEvent expr_ready;
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                     source, pending, expr_ready);
-            if (view_ready.exists() || expr_ready.exists())
+            if (expr_ready.exists())
             {
-              if (user_expr != NULL)
-              {
-#ifdef DEBUG_LEGION
-                assert(!expr_ready.exists());
-#endif
-                DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              }
-              else
-              {
-                DeferTraceUpdateArgs args(this, kind, done, view,derez,pending);
-                const RtEvent pre = !view_ready.exists() ? expr_ready : 
-                  Runtime::merge_events(view_ready, expr_ready);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, pre);
-              }
+              DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
               return;
             }
-            else if (handle_update_view_user(view, user_expr, 
+            else if (handle_update_inst_user(inst, user_expr, 
                                              derez, applied, done))
               return;
             break;
@@ -7628,39 +7661,23 @@ namespace Legion {
         case FIND_LAST_USERS_REQUEST:
           {
             derez.deserialize(done);
-            DistributedID view_did;
-            derez.deserialize(view_did);
-            RtEvent view_ready;
-            InstanceView *view = static_cast<InstanceView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
+            UniqueInst inst;
+            derez.deserialize(inst.first);
+            derez.deserialize(inst.second);
             PendingRemoteExpression pending;
             RtEvent expr_ready;
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                                 source, pending, expr_ready); 
-            if (view_ready.exists() || expr_ready.exists())
+            if (expr_ready.exists())
             {
-              if (user_expr != NULL)
-              {
-#ifdef DEBUG_LEGION
-                assert(!expr_ready.exists());
-#endif
-                DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, view_ready);
-              }
-              else
-              {
-                DeferTraceUpdateArgs args(this, kind, done, view,derez,pending);
-                const RtEvent pre = !view_ready.exists() ? expr_ready : 
-                  Runtime::merge_events(view_ready, expr_ready);
-                runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_MESSAGE_PRIORITY, pre);
-              }
+              DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
               return;
             }
             else
-              handle_find_last_users(view, user_expr, derez, applied); 
+              handle_find_last_users(inst, user_expr, derez, applied); 
             break;
           }
         case FIND_LAST_USERS_RESPONSE:
@@ -7801,21 +7818,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(source_shard != repl_ctx->owner_shard->shard_id);
 #endif
-            ViewExprs view_exprs;
-            size_t num_views;
-            derez.deserialize(num_views);
-            std::vector<RtEvent> ready_events;
+            InstExprs inst_exprs;
+            size_t num_insts;
+            derez.deserialize(num_insts);
             RegionTreeForest *forest = trace->runtime->forest;
-            for (unsigned vidx = 0; vidx < num_views; vidx++)
+            for (unsigned vidx = 0; vidx < num_insts; vidx++)
             {
-              DistributedID view_did;
-              derez.deserialize(view_did);
-              RtEvent view_ready;
-              InstanceView *view = static_cast<InstanceView*>(
-                runtime->find_or_request_logical_view(view_did, view_ready));
-              if (view_ready.exists())
-                ready_events.push_back(view_ready);
-              FieldMaskSet<IndexSpaceExpression> &exprs = view_exprs[view];
+              UniqueInst inst;
+              derez.deserialize(inst.first);
+              derez.deserialize(inst.second);
+              FieldMaskSet<IndexSpaceExpression> &exprs = inst_exprs[inst];
               size_t num_exprs;
               derez.deserialize(num_exprs);
               for (unsigned idx = 0; idx < num_exprs; idx++)
@@ -7831,13 +7843,7 @@ namespace Legion {
             derez.deserialize(result);
             derez.deserialize(done);
             ShardManager *manager = repl_ctx->shard_manager;
-            if (!ready_events.empty())
-            {
-              const RtEvent wait_on = Runtime::merge_events(ready_events);
-              if (wait_on.exists() && !wait_on.has_triggered())
-                wait_on.wait();
-            }
-            if (!PhysicalTemplate::are_read_only_users(view_exprs))
+            if (!PhysicalTemplate::are_read_only_users(inst_exprs))
             {
               Serializer rez;
               rez.serialize(manager->repl_id);
@@ -8015,9 +8021,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     Deserializer &derez, LogicalView *v, RtUserEvent u)
+     Deserializer &derez, const UniqueInst &i, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), expr(NULL),
+        kind(k), done(d), inst(i), expr(NULL),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
         deferral_event(u)
     //--------------------------------------------------------------------------
@@ -8028,10 +8034,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, LogicalView *v,
+     ShardedPhysicalTemplate *t, UpdateKind k,RtUserEvent d,const UniqueInst &i,
      Deserializer &derez, IndexSpaceExpression *x, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t),
-        kind(k), done(d), view(v), expr(x),
+        kind(k), done(d), inst(i), expr(x),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
         deferral_event(u)
     //--------------------------------------------------------------------------
@@ -8043,10 +8049,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     LogicalView *v, Deserializer &derez, const PendingRemoteExpression &pend)
+     ShardedPhysicalTemplate *t, UpdateKind k,RtUserEvent d,const UniqueInst &i,
+     Deserializer &derez, const PendingRemoteExpression &pend)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), view(v), expr(NULL),
+        kind(k), done(d), inst(i), expr(NULL),
         pending(pend), buffer_size(derez.get_remaining_bytes()), 
         buffer(malloc(buffer_size))
     //--------------------------------------------------------------------------
@@ -8059,7 +8065,7 @@ namespace Legion {
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
         const DeferTraceUpdateArgs &rhs, RtUserEvent d, IndexSpaceExpression *e)
       : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
-        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(e), 
+        kind(rhs.kind), done(rhs.done), inst(rhs.inst), expr(e), 
         pending(rhs.pending), buffer_size(rhs.buffer_size), buffer(rhs.buffer),
         deferral_event(d)
     //--------------------------------------------------------------------------
@@ -8079,12 +8085,11 @@ namespace Legion {
       Deserializer derez(dargs->buffer, dargs->buffer_size);
       switch (dargs->kind)
       {
-        case UPDATE_VIEW_USER:
+        case UPDATE_INST_USER:
           {
             if (dargs->expr != NULL)
             {
-              if (dargs->target->handle_update_view_user(
-                    static_cast<InstanceView*>(dargs->view), 
+              if (dargs->target->handle_update_inst_user(dargs->inst,
                     dargs->expr, derez, applied, dargs->done, dargs))
                 return;
             }
@@ -8092,9 +8097,8 @@ namespace Legion {
             {
               IndexSpaceExpression *expr = 
                 runtime->forest->find_remote_expression(dargs->pending);
-              if (dargs->target->handle_update_view_user(
-                    static_cast<InstanceView*>(dargs->view), expr, derez,
-                    applied, dargs->done, dargs))
+              if (dargs->target->handle_update_inst_user(dargs->inst,
+                    expr, derez, applied, dargs->done, dargs))
                 return;
             }
             break;
@@ -8103,16 +8107,15 @@ namespace Legion {
           {
             if (dargs->expr != NULL)
             {
-              dargs->target->handle_find_last_users(
-                  static_cast<InstanceView*>(dargs->view), 
+              dargs->target->handle_find_last_users(dargs->inst,
                   dargs->expr, derez, applied);
             }
             else
             {
               IndexSpaceExpression *expr = 
                 runtime->forest->find_remote_expression(dargs->pending);
-              dargs->target->handle_find_last_users(
-                  static_cast<InstanceView*>(dargs->view), expr, derez,applied);
+              dargs->target->handle_find_last_users(dargs->inst,
+                                                    expr, derez,applied);
             }
             break;
           }
@@ -8135,7 +8138,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_view_user(InstanceView *view,
+    bool ShardedPhysicalTemplate::handle_update_inst_user(
+                                              const UniqueInst &inst,
                                               IndexSpaceExpression *user_expr, 
                                               Deserializer &derez, 
                                               std::set<RtEvent> &applied,
@@ -8159,7 +8163,7 @@ namespace Legion {
           pre = tpl_lock.try_next();
         if (dargs == NULL)
         {
-          DeferTraceUpdateArgs args(this, UPDATE_VIEW_USER, done, view,
+          DeferTraceUpdateArgs args(this, UPDATE_INST_USER, done, inst,
                                     derez, user_expr, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
@@ -8184,13 +8188,13 @@ namespace Legion {
       derez.deserialize(user_mask);
       int owner_shard;
       derez.deserialize(owner_shard);
-      PhysicalTemplate::add_view_user(view, usage, user_index, user_expr,
+      PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr,
                                       user_mask, applied, owner_shard);
       return false;
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_find_last_users(InstanceView *view,
+    void ShardedPhysicalTemplate::handle_find_last_users(const UniqueInst &inst,
                                                 IndexSpaceExpression *user_expr,
                                                 Deserializer &derez, 
                                                 std::set<RtEvent> &applied)
@@ -8205,7 +8209,7 @@ namespace Legion {
       // This is a local operation and all the data structures are
       // read-only for this part so there is no need for the lock yet
       std::set<std::pair<unsigned,ShardID> > sharded_users;
-      find_last_users_sharded(view, user_expr, user_mask, sharded_users);
+      find_last_users_sharded(inst, user_expr, user_mask, sharded_users);
       // Sort these into where they should go
       std::map<ShardID,std::vector<unsigned> > requests;
       for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
@@ -8346,10 +8350,10 @@ namespace Legion {
         // only for non-replayable traces so it should be minimal
         std::map<ShardID,std::set<unsigned> > remote_last_users;
         const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-        for (ViewUsers::const_iterator vit = view_users.begin();
-              vit != view_users.end(); vit++)
+        for (InstUsers::const_iterator vit = inst_users.begin();
+              vit != inst_users.end(); vit++)
         {
-          for (FieldMaskSet<ViewUser>::const_iterator it =
+          for (FieldMaskSet<InstUser>::const_iterator it =
                 vit->second.begin(); it != vit->second.end(); it++)
             if (it->first->shard != local_shard)
               remote_last_users[it->first->shard].insert(it->first->user);
@@ -8657,9 +8661,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (ViewUsers::const_iterator it = view_users.begin();
-           it != view_users.end(); ++it)
-        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+      for (InstUsers::const_iterator it = inst_users.begin();
+           it != inst_users.end(); ++it)
+        for (FieldMaskSet<InstUser>::const_iterator uit = it->second.begin();
              uit != it->second.end(); ++uit)
           // Check to see if this is a user from our shard
           if (uit->first->shard == local_shard)
@@ -8702,7 +8706,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::add_view_user(InstanceView *view,
+    void ShardedPhysicalTemplate::add_inst_user(const UniqueInst &inst,
                                                 const RegionUsage &usage,
                                                 unsigned user_index,
                                                 IndexSpaceExpression *user_expr,
@@ -8711,7 +8715,7 @@ namespace Legion {
                                                 int owner_shard)
     //--------------------------------------------------------------------------
     {
-      const ShardID target_shard = find_view_owner(view); 
+      const ShardID target_shard = find_inst_owner(inst); 
       // Check to see if we're on the right shard, if not send the message
       if (target_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -8721,9 +8725,10 @@ namespace Legion {
         rez.serialize(manager->repl_id);
         rez.serialize(target_shard);
         rez.serialize(template_index);
-        rez.serialize(UPDATE_VIEW_USER);
+        rez.serialize(UPDATE_INST_USER);
         rez.serialize(done);
-        rez.serialize(view->did);
+        rez.serialize(inst.first);
+        rez.serialize(inst.second);
         user_expr->pack_expression(rez, manager->get_shard_space(target_shard));
         rez.serialize(usage);
         rez.serialize(user_index);
@@ -8736,29 +8741,28 @@ namespace Legion {
         applied.insert(done);
       }
       else if (owner_shard < 0)
-        PhysicalTemplate::add_view_user(view, usage, user_index, user_expr,
+        PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr,
                       user_mask, applied, repl_ctx->owner_shard->shard_id);
       else
-        PhysicalTemplate::add_view_user(view, usage, user_index, user_expr, 
+        PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr, 
                       user_mask, applied, owner_shard);
     }
 
     //--------------------------------------------------------------------------
-    ShardID ShardedPhysicalTemplate::find_view_owner(InstanceView *view)
+    ShardID ShardedPhysicalTemplate::find_inst_owner(const UniqueInst &inst)
     //--------------------------------------------------------------------------
     {
-      // Figure out where the owner for this view is and then send it to 
+      // Figure out where the owner for this instance is and then send it to 
       // the appropriate shard trace. The algorithm we use for determining
-      // the right shard trace is to send a view to a shard trace on the node
-      // that owns the instance. If there is no shard on that node we 
+      // the right shard trace is to send a instance to a shard trace on the 
+      // node that owns the instance. If there is no shard on that node we 
       // round-robin views based on their owner node mod the number of nodes
       // where there are shards. Once on the correct node, then we pick the
-      // shard corresponding to their tree_id mod the number of shards on
+      // shard corresponding to their instance ID mod the number of shards on
       // that node. This algorithm guarantees that all the related instances
       // end up on the same shard for analysis to determine if the trace is
       // replayable or not.
-      PhysicalManager *manager = view->get_manager();
-      const AddressSpaceID inst_owner = manager->owner_space;
+      const AddressSpaceID inst_owner = inst.first.address_space();
       std::vector<ShardID> owner_shards;
       find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION
@@ -8767,10 +8771,7 @@ namespace Legion {
       // Figure out which shard we should be sending this view to based on
       // its tree ID
       if (owner_shards.size() > 1)
-      {
-        const RegionTreeID tid = manager->tree_id;
-        return owner_shards[tid % owner_shards.size()];
-      }
+        return owner_shards[inst.first.id % owner_shards.size()];
       else // If there's only one shard then there is only one choice
         return owner_shards.front();
     }
@@ -8993,7 +8994,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::find_last_users(InstanceView *view,
+    void ShardedPhysicalTemplate::find_last_users(const UniqueInst &inst,
                                                 IndexSpaceExpression *expr,
                                                 const FieldMask &mask,
                                                 std::set<unsigned> &users,
@@ -9004,7 +9005,7 @@ namespace Legion {
 
       // Check to see if we own this view, if we do then we can handle this
       // analysis locally, otherwise we'll need to message the owner
-      const ShardID owner_shard = find_view_owner(view);
+      const ShardID owner_shard = find_inst_owner(inst);
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
       if (owner_shard != local_shard)
       {
@@ -9017,7 +9018,8 @@ namespace Legion {
         rez.serialize(template_index);
         rez.serialize(FIND_LAST_USERS_REQUEST);
         rez.serialize(done);
-        rez.serialize(view->did);
+        rez.serialize(inst.first);
+        rez.serialize(inst.second);
         expr->pack_expression(rez, manager->get_shard_space(owner_shard));
         rez.serialize(mask);
         rez.serialize(repl_ctx->owner_shard->shard_id);
@@ -9028,7 +9030,7 @@ namespace Legion {
       else
       {
         std::set<std::pair<unsigned,ShardID> > sharded_users;
-        find_last_users_sharded(view, expr, mask, sharded_users);
+        find_last_users_sharded(inst, expr, mask, sharded_users);
         std::map<ShardID,std::vector<unsigned> > remote_requests;
         for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
               sharded_users.begin(); it != sharded_users.end(); it++)
@@ -9070,22 +9072,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::are_read_only_users(ViewExprs &view_exprs)
+    bool ShardedPhysicalTemplate::are_read_only_users(InstExprs &inst_exprs)
     //--------------------------------------------------------------------------
     {
-      std::map<ShardID,ViewExprs> shard_view_exprs;
-      for (ViewExprs::iterator vit = 
-            view_exprs.begin(); vit != view_exprs.end(); vit++)
+      std::map<ShardID,InstExprs> shard_inst_exprs;
+      for (InstExprs::iterator vit = 
+            inst_exprs.begin(); vit != inst_exprs.end(); vit++)
       {
-        const ShardID owner_shard = find_view_owner(vit->first); 
-        shard_view_exprs[owner_shard][vit->first].swap(vit->second);
+        const ShardID owner_shard = find_inst_owner(vit->first); 
+        shard_inst_exprs[owner_shard][vit->first].swap(vit->second);
       }
       std::atomic<bool> result(true);
       std::vector<RtEvent> done_events;
       ShardManager *manager = repl_ctx->shard_manager;
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (std::map<ShardID,ViewExprs>::iterator sit = 
-            shard_view_exprs.begin(); sit != shard_view_exprs.end(); sit++)
+      for (std::map<ShardID,InstExprs>::iterator sit = 
+            shard_inst_exprs.begin(); sit != shard_inst_exprs.end(); sit++)
       {
         if (sit->first != local_shard)
         {
@@ -9098,10 +9100,11 @@ namespace Legion {
           rez.serialize(READ_ONLY_USERS_REQUEST);
           rez.serialize(local_shard);
           rez.serialize<size_t>(sit->second.size());
-          for (ViewExprs::const_iterator vit = 
+          for (InstExprs::const_iterator vit = 
                 sit->second.begin(); vit != sit->second.end(); vit++)
           {
-            rez.serialize(vit->first->did);
+            rez.serialize(vit->first.first);
+            rez.serialize(vit->first.second);
             rez.serialize<size_t>(vit->second.size());
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   vit->second.begin(); it != vit->second.end(); it++)
@@ -9133,7 +9136,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::find_last_users_sharded(InstanceView *view,
+    void ShardedPhysicalTemplate::find_last_users_sharded(
+                                                  const UniqueInst &inst,
                                                   IndexSpaceExpression *expr,
                                                   const FieldMask &mask,
                           std::set<std::pair<unsigned,ShardID> > &sharded_users)
@@ -9141,18 +9145,18 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       // We should own this view if we are here
-      assert(find_view_owner(view) == repl_ctx->owner_shard->shard_id);
+      assert(find_inst_owner(inst) == repl_ctx->owner_shard->shard_id);
 #endif
-      ViewUsers::const_iterator finder = view_users.find(view);
-      if (finder == view_users.end()) return;
+      InstUsers::const_iterator finder = inst_users.find(inst);
+      if (finder == inst_users.end()) return;
 
       RegionTreeForest *forest = trace->runtime->forest;
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (FieldMaskSet<ViewUser>::const_iterator uit = 
+      for (FieldMaskSet<InstUser>::const_iterator uit = 
             finder->second.begin(); uit != finder->second.end(); ++uit)
         if (!!(uit->second & mask))
         {
-          ViewUser *user = uit->first;
+          InstUser *user = uit->first;
           IndexSpaceExpression *intersect =
             forest->intersect_index_spaces(expr, user->expr);
           if (!intersect->is_empty())

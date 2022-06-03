@@ -2262,17 +2262,23 @@ namespace Legion {
           std::set<RtEvent> user_applied;
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const FieldMask &inst_mask = targets[idx].get_valid_fields();
+            InstanceRef &ref = targets[idx];
+            const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
                 user_applied, analysis->collective_mapping, analysis->op,
                 trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
-            targets[idx].set_ready_event(ready);
+            ref.set_ready_event(ready);
             if (trace_info.recording)
-              trace_info.record_op_view(analysis->usage, inst_mask, 
-               analysis->target_views[idx], analysis->node, map_applied_events);
+            {
+              DomainPoint dummy;
+              PhysicalManager *manager = ref.get_physical_manager();
+              PhysicalInstance inst = manager->get_instance(dummy);
+              trace_info.record_op_inst(analysis->usage, inst_mask, inst,
+                        manager->did, analysis->node, map_applied_events);
+            }
           }
           if (!user_applied.empty())
           {
@@ -2287,17 +2293,23 @@ namespace Legion {
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const FieldMask &inst_mask = targets[idx].get_valid_fields();
+            InstanceRef &ref = targets[idx];
+            const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
                 map_applied_events, analysis->collective_mapping, analysis->op,
                 trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
-            targets[idx].set_ready_event(ready);
+            ref.set_ready_event(ready);
             if (trace_info.recording)
-              trace_info.record_op_view(analysis->usage, inst_mask, 
-               analysis->target_views[idx], analysis->node, map_applied_events);
+            {
+              DomainPoint dummy;
+              PhysicalManager *manager = ref.get_physical_manager();
+              PhysicalInstance inst = manager->get_instance(dummy);
+              trace_info.record_op_inst(analysis->usage, inst_mask, inst,
+                        manager->did, analysis->node, map_applied_events);
+            }
           }
         }
       }
@@ -2688,16 +2700,29 @@ namespace Legion {
           // Record this with the trace
           trace_info.record_issue_across(result, precondition, precondition,
                         ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
-          FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
+          LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
+            tracing_srcs, tracing_dsts;
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
-            tracing_srcs.insert(source_views[idx],
-                src_targets[idx].get_valid_fields());
+          {
+            const InstanceRef &ref = src_targets[idx];
+            PhysicalManager *manager = ref.get_physical_manager();
+            std::pair<PhysicalInstance,DistributedID> inst(
+                manager->get_instance(op->index_point), manager->did);
+            tracing_srcs[inst] = ref.get_valid_fields();
+          }
           for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-            tracing_dsts.insert(target_views[idx],
-                dst_targets[idx].get_valid_fields());
-          trace_info.record_copy_views(result, copy_expr,
-                                       tracing_srcs, tracing_dsts,
-                                       map_applied_events);
+          {
+            const InstanceRef &ref = src_targets[idx];
+            PhysicalManager *manager = ref.get_physical_manager();
+            std::pair<PhysicalInstance,DistributedID> inst(
+                manager->get_instance(op->index_point), manager->did);
+            tracing_dsts[inst] = ref.get_valid_fields();
+          }
+          trace_info.record_across_insts(result, src_index, dst_index,
+                                         LEGION_READ_PRIV, LEGION_WRITE_PRIV,
+                                         copy_expr, tracing_srcs, tracing_dsts,
+                                         false/*indirect*/, false/*indirect*/,
+                                         map_applied_events);
         }
         if (across->remove_reference())
           delete across;
@@ -2876,30 +2901,40 @@ namespace Legion {
         // Record this with the trace
         trace_info.record_issue_across(copy_post, local_precondition,
            copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT, across);
-        // If we're tracing record the views for this copy
-        FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
-        // Get the src_views
-        InnerContext *src_context = op->find_physical_context(src_index);
-        std::vector<InstanceView*> source_views;
-        src_context->convert_target_views(src_targets, source_views);
+        // If we're tracing record the insts for this copy
+        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
+          src_insts, idx_insts, dst_insts;
+        // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
-          src_views.insert(source_views[idx],
-              src_targets[idx].get_valid_fields());
-        // Get the idx views
-        InnerContext *idx_context = op->find_physical_context(idx_index); 
-        std::vector<InstanceView*> indirect_views;
-        idx_context->convert_target_views(idx_targets, indirect_views);
-        idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
-        // Get the dst views
-        for (unsigned idx = 0; idx < target_views.size(); idx++)
-          dst_views.insert(target_views[idx],
-              dst_targets[idx].get_valid_fields());
+        {
+          const InstanceRef &ref = src_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          src_insts[inst] = ref.get_valid_fields();
+        }
+        // Get the idx_insts
+        {
+          PhysicalManager *manager = idx_target.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          idx_insts[inst] = idx_target.get_valid_fields();
+        }
+        // Get the dst_insts
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const InstanceRef &ref = dst_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          dst_insts[inst] = ref.get_valid_fields();
+        }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post,
-            src_node, src_views, map_applied_events, LEGION_READ_PRIV);
-        trace_info.record_copy_views(copy_post, idx_index, dst_index,
-            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr, idx_views,
-            dst_views, true/*indirect*/, false/*indirect*/, map_applied_events);
+        trace_info.record_indirect_insts(copy_post, collective_post,
+            src_node, src_insts, map_applied_events, LEGION_READ_PRIV);
+        trace_info.record_across_insts(copy_post, idx_index, dst_index,
+            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr, idx_insts,
+            dst_insts, true/*indirect*/, false/*indirect*/, map_applied_events);
       }
       if (across->remove_reference())
         delete across;
@@ -3019,30 +3054,40 @@ namespace Legion {
         // Record this with the trace
         trace_info.record_issue_across(copy_post, local_precondition,
            copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
-        // If we're tracing record the views for this copy
-        FieldMaskSet<InstanceView> src_views, dst_views, idx_views;
-        // src_views
+        // If we're tracing record the insts for this copy
+        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
+          src_insts, idx_insts, dst_insts;
+        // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
-          src_views.insert(source_views[idx],
-              src_targets[idx].get_valid_fields());
-        // idx_views
-        std::vector<InstanceView*> indirect_views;
-        InnerContext *idx_context = op->find_physical_context(idx_index);
-        idx_context->convert_target_views(idx_targets, indirect_views);
-        idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
-        // dst_views
-        std::vector<InstanceView*> target_views;
-        InnerContext *dst_context = op->find_physical_context(dst_index);
-        dst_context->convert_target_views(dst_targets, target_views);
-        for (unsigned idx = 0; idx < target_views.size(); idx++)
-          dst_views.insert(target_views[idx],
-              dst_targets[idx].get_valid_fields());
-        trace_info.record_copy_views(copy_post, src_index, idx_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_views,
-            idx_views, false/*indirect*/, true/*indirect*/,map_applied_events); 
+        {
+          const InstanceRef &ref = src_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          src_insts[inst] = ref.get_valid_fields();
+        }
+        // Get the idx_insts
+        {
+          PhysicalManager *manager = idx_target.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          idx_insts[inst] = idx_target.get_valid_fields();
+        }
+        // Get the dst_insts
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const InstanceRef &ref = dst_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          dst_insts[inst] = ref.get_valid_fields();
+        }
+        trace_info.record_across_insts(copy_post, src_index, idx_index,
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_insts,
+            idx_insts, false/*indirect*/, true/*indirect*/,map_applied_events); 
         IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post,
-          dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
+        trace_info.record_indirect_insts(copy_post, collective_post,
+          dst_node, dst_insts, map_applied_events, LEGION_WRITE_PRIV);
       }
       if (across->remove_reference())
         delete across;
@@ -3184,44 +3229,50 @@ namespace Legion {
         // Record this with the trace
         trace_info.record_issue_across(copy_post, local_precondition,
             copy_precondition, src_indirect_ready, dst_indirect_ready, across);
-        // If we're tracing record the views for this copy
-        FieldMaskSet<InstanceView> src_views, src_idx_views;
-        FieldMaskSet<InstanceView> dst_idx_views, dst_views;
-        std::vector<InstanceView*> source_views;
-        InnerContext *src_context = op->find_physical_context(src_index);
-        src_context->convert_target_views(src_targets, source_views);
+        // If we're tracing record the insts for this copy
+        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
+          src_insts, src_idx_insts, dst_insts, dst_idx_insts;
+        // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
-          src_views.insert(source_views[idx],
-              src_targets[idx].get_valid_fields());
-        std::vector<InstanceView*> src_indirect_views, dst_indirect_views;
-        InnerContext *src_idx_context =
-          op->find_physical_context(src_idx_index);
-        src_idx_context->convert_target_views(src_idx_targets,
-                                              src_indirect_views);
-        src_idx_views.insert(src_indirect_views.back(),
-            src_idx_target.get_valid_fields());
-        InnerContext *dst_idx_context =
-          op->find_physical_context(dst_idx_index);
-        dst_idx_context->convert_target_views(dst_idx_targets,
-                                              dst_indirect_views);
-        dst_idx_views.insert(dst_indirect_views.back(),
-            dst_idx_target.get_valid_fields());
-        std::vector<InstanceView*> target_views;
-        InnerContext *dst_context = op->find_physical_context(dst_index);
-        dst_context->convert_target_views(dst_targets, target_views);
-        for (unsigned idx = 0; idx < target_views.size(); idx++)
-          dst_views.insert(target_views[idx],
-              dst_targets[idx].get_valid_fields());
-
+        {
+          const InstanceRef &ref = src_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          src_insts[inst] = ref.get_valid_fields();
+        }
+        // Get the src_idx_insts
+        {
+          PhysicalManager *manager = src_idx_target.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          src_idx_insts[inst] = src_idx_target.get_valid_fields();
+        }
+        // Get the dst_insts
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const InstanceRef &ref = dst_targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          dst_insts[inst] = ref.get_valid_fields();
+        }
+        // Get the dst_idx_insts
+        {
+          PhysicalManager *manager = dst_idx_target.get_physical_manager();
+          std::pair<PhysicalInstance,DistributedID> inst(
+              manager->get_instance(op->index_point), manager->did);
+          dst_idx_insts[inst] = dst_idx_target.get_valid_fields();
+        }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post,
-            src_node, src_views, map_applied_events, LEGION_READ_PRIV);
+        trace_info.record_indirect_insts(copy_post, collective_post,
+            src_node, src_insts, map_applied_events, LEGION_READ_PRIV);
         IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
-        trace_info.record_indirect_views(copy_post, collective_post,
-           dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
-        trace_info.record_copy_views(copy_post, src_idx_index, dst_idx_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_idx_views,
-            dst_idx_views,true/*indirect*/,true/*indirect*/,map_applied_events);
+        trace_info.record_indirect_insts(copy_post, collective_post,
+           dst_node, dst_insts, map_applied_events, LEGION_WRITE_PRIV);
+        trace_info.record_across_insts(copy_post, src_idx_index, dst_idx_index,
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_idx_insts,
+            dst_idx_insts,true/*indirect*/,true/*indirect*/,map_applied_events);
       }
       if (across->remove_reference())
         delete across;

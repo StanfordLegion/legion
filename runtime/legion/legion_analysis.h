@@ -225,17 +225,28 @@ namespace Legion {
                            ApEvent src_indirect_precondition,
                            ApEvent dst_indirect_precondition,
                            CopyAcrossExecutor *executor) = 0;
-      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+      virtual void record_copy_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_srcs,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
+                           DistributedID src_did, DistributedID dst_did,
+                           const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied) = 0;
-      virtual void record_indirect_views(ApEvent indirect_done,
+      typedef std::pair<PhysicalInstance,DistributedID> UniqueInst;
+      typedef LegionMap<UniqueInst,FieldMask> AcrossInsts;
+      virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           const AcrossInsts &src_insts,
+                           const AcrossInsts &dst_insts,
+                           PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
+                           std::set<RtEvent> &applied) = 0;
+      virtual void record_indirect_insts(ApEvent indirect_done,
                            ApEvent all_done, IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_views,
+                           const AcrossInsts &insts, 
                            std::set<RtEvent> &applied, PrivilegeMode priv) = 0;
       virtual void record_issue_fill(const TraceLocalID &tlid, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -247,14 +258,16 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
-      virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
+      virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
+                           PhysicalInstance inst, DistributedID inst_did,
+                           const FieldMask &fill_mask,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization) = 0;
     public:
-      virtual void record_op_view(const TraceLocalID &tlid,
+      virtual void record_op_inst(const TraceLocalID &tlid,
                           unsigned idx,
-                          InstanceView *view,
+                          PhysicalInstance inst,
+                          DistributedID did,
                           RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
@@ -292,11 +305,10 @@ namespace Legion {
         REMOTE_TRACE_TRIGGER_EVENT,
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
-        REMOTE_TRACE_COPY_VIEWS,
-        REMOTE_TRACE_INDIRECT_VIEWS,
+        REMOTE_TRACE_COPY_INSTS,
         REMOTE_TRACE_ISSUE_FILL,
-        REMOTE_TRACE_FILL_VIEWS,
-        REMOTE_TRACE_RECORD_OP_VIEW,
+        REMOTE_TRACE_FILL_INST,
+        REMOTE_TRACE_RECORD_OP_INST,
         REMOTE_TRACE_SET_OP_SYNC,
         REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
@@ -364,17 +376,26 @@ namespace Legion {
                            ApEvent src_indirect_precondition,
                            ApEvent dst_indirect_precondition,
                            CopyAcrossExecutor *executor);
-      virtual void record_copy_views(ApEvent lhs, const TraceLocalID &tlid,
+      virtual void record_copy_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_srcs,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
+                           DistributedID src_did, DistributedID dst_did,
+                           const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            bool src_indirect, bool dst_indirect,
                            std::set<RtEvent> &applied);
-      virtual void record_indirect_views(ApEvent indirect_done,ApEvent all_done,
+      virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
+                           unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_views,
+                           const AcrossInsts &src_insts,
+                           const AcrossInsts &dst_insts,
+                           PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                           bool src_indirect, bool dst_indirect,
+                           std::set<RtEvent> &applied);
+      virtual void record_indirect_insts(ApEvent indirect_done,ApEvent all_done,
+                           IndexSpaceExpression *expr,
+                           const AcrossInsts &insts,
                            std::set<RtEvent> &applied, PrivilegeMode priv);
       virtual void record_issue_fill(const TraceLocalID &tlid, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -386,14 +407,16 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-      virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
+      virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
+                           PhysicalInstance inst, DistributedID inst_did,
+                           const FieldMask &fill_mask,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization);
     public:
-      virtual void record_op_view(const TraceLocalID &tlid,
+      virtual void record_op_inst(const TraceLocalID &tlid,
                           unsigned idx,
-                          InstanceView *view,
+                          PhysicalInstance inst,
+                          DistributedID inst_did,
                           RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
@@ -632,59 +655,69 @@ namespace Legion {
                       copy_precondition, src_indirect_precondition,
                       dst_indirect_precondition, executor);
         }
-      inline void record_fill_views(ApEvent lhs,
-                                    IndexSpaceExpression *expr,
-                                    const FieldMaskSet<InstanceView> &dsts,
-                                    std::set<RtEvent> &applied,
-                                    const bool reduction_initialization) const
+      inline void record_fill_inst(ApEvent lhs,
+                                   IndexSpaceExpression *expr,
+                                   PhysicalInstance inst,
+                                   DistributedID inst_did,
+                                   const FieldMask &fill_mask,
+                                   std::set<RtEvent> &applied,
+                                   const bool reduction_initialization) const
         {
           sanity_check();
-          rec->record_fill_views(lhs, expr, dsts, applied,
-                                 reduction_initialization);
+          rec->record_fill_inst(lhs, expr, inst, inst_did, fill_mask,
+                                applied, reduction_initialization);
         }
-      inline void record_copy_views(ApEvent lhs, unsigned idx1, unsigned idx2,
-                                    PrivilegeMode mode1, PrivilegeMode mode2,
+      inline void record_copy_insts(ApEvent lhs,
                                     IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    bool src_indirect, bool dst_indirect,
+                                    PhysicalInstance src_inst,
+                                    PhysicalInstance dst_inst,
+                                    DistributedID src_did,
+                                    DistributedID dst_did,
+                                    const FieldMask &src_mask,
+                                    const FieldMask &dst_mask,
                                     std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_copy_views(lhs, tlid, idx1, idx2, expr,
-                                 tracing_srcs, tracing_dsts, mode1, mode2,
-                                 src_indirect, dst_indirect, applied);
-        }
-      inline void record_copy_views(ApEvent lhs,
-                                    IndexSpaceExpression *expr,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts,
-                                    std::set<RtEvent> &applied) const
-        {
-          sanity_check();
-          rec->record_copy_views(lhs, tlid, index, dst_index, expr,
-                                 tracing_srcs, tracing_dsts,
+          rec->record_copy_insts(lhs, tlid, index, dst_index, expr,
+                                 src_inst, dst_inst, src_did, dst_did,
+                                 src_mask, dst_mask,
                                  LEGION_READ_PRIV, LEGION_WRITE_PRIV,
                                  false/*indirect*/, false/*indrect*/, applied);
         }
-      inline void record_indirect_views(ApEvent indirect_done, ApEvent all_done,
+      typedef LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask> 
+        AcrossInsts;
+      inline void record_across_insts(ApEvent lhs, unsigned idx1, unsigned idx2,
+                                      PrivilegeMode mode1, PrivilegeMode mode2,
+                                      IndexSpaceExpression *expr,
+                                      AcrossInsts &src_insts,
+                                      AcrossInsts &dst_insts,
+                                      bool src_indirect, bool dst_indirect,
+                                      std::set<RtEvent> &applied) const
+        {
+          sanity_check();
+          rec->record_across_insts(lhs, tlid, idx1, idx2, expr,
+                                   src_insts, dst_insts, mode1, mode2,
+                                   src_indirect, dst_indirect, applied);
+        }
+      inline void record_indirect_insts(ApEvent indirect_done, ApEvent all_done,
                                         IndexSpaceExpression *expr,
-                                        const FieldMaskSet<InstanceView> &views,
+                                        AcrossInsts &insts,
                                         std::set<RtEvent> &applied,
                                         PrivilegeMode privilege) const
         {
           sanity_check();
-          rec->record_indirect_views(indirect_done, all_done, expr, views,
+          rec->record_indirect_insts(indirect_done, all_done, expr, insts,
                                      applied, privilege);
         }
-      inline void record_op_view(const RegionUsage &usage,
+      inline void record_op_inst(const RegionUsage &usage,
                                  const FieldMask &user_mask,
-                                 InstanceView *view, RegionNode *node,
+                                 PhysicalInstance inst, DistributedID inst_did,
+                                 RegionNode *node,
                                  std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_op_view(tlid, index, view, node, usage, user_mask,
-                              update_validity, applied);
+          rec->record_op_inst(tlid, index, inst, inst_did, node, usage, 
+                              user_mask, update_validity, applied);
         }
     public:
       void pack_trace_info(Serializer &rez, std::set<RtEvent> &applied) const;
