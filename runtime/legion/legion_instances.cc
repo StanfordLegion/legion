@@ -2451,11 +2451,8 @@ namespace Legion {
           index, recorded_events, trace_info.recording, runtime->address_space);
       }
       if (trace_info.recording)
-      {
-        const FieldMaskSet<InstanceView> dst_views(dst_view, fill_mask);
-        trace_info.record_fill_views(result, fill_expression, dst_views,
-                                     applied_events, (redop > 0));
-      }
+        trace_info.record_fill_inst(result, fill_expression, instance, did,
+                                    fill_mask, applied_events, (redop > 0));
       return result;
     }
 
@@ -2552,10 +2549,10 @@ namespace Legion {
       }
       if (trace_info.recording)
       {
-        const FieldMaskSet<InstanceView> src_views(src_view, *src_mask);
-        const FieldMaskSet<InstanceView> dst_views(dst_view, copy_mask);
-        trace_info.record_copy_views(result, copy_expression, src_views,
-                                     dst_views, applied_events);
+        DomainPoint dummy;
+        const PhysicalInstance src_inst = source_manager->get_instance(dummy); 
+        trace_info.record_copy_insts(result, copy_expression, src_inst,
+           instance,source_manager->did,did,*src_mask,copy_mask,applied_events);
       }
       if (across_helper != NULL)
         delete src_mask;
