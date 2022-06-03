@@ -115,6 +115,9 @@ namespace Realm {
     public:
       virtual ~Unstructured(void) {}
 
+      // Defines the next indirection to avoid a 3-way templating.
+      typename CopyIndirection<N2, T2>::Base* next_indirection;
+
       FieldID field_id;
       RegionInstance inst;
       bool is_ranges;
