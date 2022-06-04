@@ -563,7 +563,7 @@ namespace Realm {
 	  //  from the next count down and starting a new clump
 
 	  size_t best_waste = ~size_t(0);
-	  size_t merge_idx;
+	  size_t merge_idx = 0;
 	  Rect<N,T> merge_rect;
 
 	  // if state was illegal, no modifications to it are legal
