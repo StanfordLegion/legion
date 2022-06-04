@@ -1026,9 +1026,20 @@ namespace Realm {
 	  //  scheduler lock
 	  ThreadLocal::scheduler_lock++;
 
+	  // if we have any context managers, create the necessary contexts
+	  std::vector<void *> contexts(context_managers.size(), 0);
+	  if(!context_managers.empty())
+	    for(size_t i = 0; i < context_managers.size(); i++)
+	      contexts[i] = context_managers[i]->create_context(0 /*task*/);
+
 	  execute_internal_task(itask);
 
-	  ThreadLocal::scheduler_lock--;
+          // destroy contexts in reverse order
+	  if(!context_managers.empty())
+	    for(size_t i = context_managers.size(); i > 0; i--)
+	      context_managers[i-1]->destroy_context(0 /*task*/, contexts[i-1]);
+
+          ThreadLocal::scheduler_lock--;
 
 	  // we don't delete the internal task object - it can do that itself
 	  //  if it wants, or the requestor of the operation can do it once

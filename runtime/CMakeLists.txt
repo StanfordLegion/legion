@@ -118,14 +118,18 @@ if(Legion_USE_HDF5)
   )
 endif()
 
-if (REALM_USE_OPENMP)
+if (Legion_USE_OpenMP)
   list(APPEND REALM_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
     realm/openmp/openmp_internal.h
-    realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
-    realm/openmp/openmp_threadpool.inl
-    realm/openmp/openmp_api.cc
   )
+  if(NOT Legion_OpenMP_SYSTEM_RUNTIME)
+    list(APPEND REALM_SRC
+      realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
+      realm/openmp/openmp_threadpool.inl
+      realm/openmp/openmp_api.cc
+    )
+  endif()
 endif()
 
 if (Legion_USE_Python)
@@ -582,7 +586,7 @@ if(Legion_USE_Kokkos)
   # similarly, if Kokkos' OpenMP target is enabled but we're using Realm's
   #  OpenMP runtime implementation, remove anything mentioning openmp from
   #  the exported link options (don't mess with compile options though)
-  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP)
+  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP AND NOT Legion_OpenMP_SYSTEM_RUNTIME)
     edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS .*openmp.* "")
     edit_target_property(Kokkos::kokkoscontainers INTERFACE_LINK_OPTIONS .*openmp.* "")
   endif()
@@ -593,6 +597,14 @@ if(Legion_USE_HDF5)
   target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
+endif()
+
+if(Legion_USE_OpenMP)
+  # only include -fopenmp (or equivalent) if we're using the
+  #  system omp runtime libs
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    target_link_libraries(RealmRuntime PUBLIC OpenMP::OpenMP_CXX)
+  endif()
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
