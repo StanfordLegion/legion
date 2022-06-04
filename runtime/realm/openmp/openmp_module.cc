@@ -16,7 +16,10 @@
 #include "realm/openmp/openmp_module.h"
 
 #include "realm/openmp/openmp_internal.h"
+
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
 #include "realm/openmp/openmp_threadpool.h"
+#endif
 
 #include "realm/numa/numasysif.h"
 #include "realm/logging.h"
@@ -26,12 +29,18 @@
 #include "realm/runtime_impl.h"
 #include "realm/utils.h"
 
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+#include <omp.h>
+#endif
+
 namespace Realm {
 
   Logger log_omp("openmp");
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
   // defined in openmp_api.cc - refer to it to force linkage of that file
   extern void openmp_api_force_linkage(void);
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -48,11 +57,16 @@ namespace Realm {
 			                       Processor::OMP_PROC))
     , numa_node(_numa_node)
     , num_threads(_num_threads)
+    , ctxmgr(this)
   {
     // master runs in a user threads if possible
     {
       CoreReservationParameters params;
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+      params.set_num_cores(num_threads); // system omp runtime will use these
+#else
       params.set_num_cores(1);
+#endif
       params.set_numa_domain(numa_node);
       params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
       params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
@@ -65,24 +79,28 @@ namespace Realm {
 
 #ifdef REALM_USE_USER_THREADS
       if(!_force_kthreads) {
-	UserThreadTaskScheduler *sched = new OpenMPTaskScheduler<UserThreadTaskScheduler>(me, *core_rsrv, this);
+	UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
 	// no config settings we want to tweak yet
 	set_scheduler(sched);
       } else
 #endif
       {
-	KernelThreadTaskScheduler *sched = new OpenMPTaskScheduler<KernelThreadTaskScheduler>(me, *core_rsrv, this);
+	KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
 	sched->cfg_max_idle_workers = 3; // keep a few idle threads around
 	set_scheduler(sched);
       }
+      sched->add_task_context(&ctxmgr);
     }
 
-    pool = new ThreadPool(num_threads - 1,
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
+    pool = new ThreadPool(me,
+                          num_threads - 1,
 			  stringbuilder() << "OMP" << numa_node << " proc " << _me,
 			  numa_node, _stack_size, crs);
 
     // eagerly spin up worker threads
     pool->start_worker_threads();
+#endif
   }
 
   LocalOpenMPProcessor::~LocalOpenMPProcessor(void)
@@ -93,8 +111,10 @@ namespace Realm {
   void LocalOpenMPProcessor::shutdown(void)
   {
     log_omp.info() << "shutting down";
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
     pool->stop_worker_threads();
     delete pool;
+#endif
 
     LocalTaskProcessor::shutdown();
   }
@@ -102,37 +122,36 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class OpenMPTaskScheduler<T>
-  
-  template <typename T>
-  OpenMPTaskScheduler<T>::OpenMPTaskScheduler(Processor _proc,
-					      Realm::CoreReservation& _core_rsrv,
-					      LocalOpenMPProcessor *_omp_proc)
-    : T(_proc, _core_rsrv), omp_proc(_omp_proc)
+  // class LocalOpenMPProcessor::OpenMPContextManager
+
+  LocalOpenMPProcessor::OpenMPContextManager::OpenMPContextManager(LocalOpenMPProcessor *_proc)
+    : proc(_proc)
+  {}
+
+  void *LocalOpenMPProcessor::OpenMPContextManager::create_context(Task *task) const
   {
-    // nothing else
-  }
-  
-  template <typename T>
-  OpenMPTaskScheduler<T>::~OpenMPTaskScheduler(void)
-  {
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+    // this must be set on the right thread
+    omp_set_num_threads(proc->num_threads);
+
+    // make sure all of our workers know who we are
+    #pragma omp parallel
+    {
+      ThreadLocal::current_processor = proc->me;
+    }
+#else
+    proc->pool->associate_as_master();
+#endif
+
+    // we don't need to remember anything
+    return 0;
   }
 
-  template <typename T>
-  bool OpenMPTaskScheduler<T>::execute_task(Task *task)
+  void LocalOpenMPProcessor::OpenMPContextManager::destroy_context(Task *task, void *context) const
   {
-    omp_proc->pool->associate_as_master();
-    bool ok = T::execute_task(task);
-    return ok;
+    // nothing to clean up
   }
-  
-  template <typename T>
-  void OpenMPTaskScheduler<T>::execute_internal_task(InternalTask *task)
-  {
-    omp_proc->pool->associate_as_master();
-    T::execute_internal_task(task);
-  }
-  
+
 
   namespace OpenMP {
 
@@ -160,7 +179,9 @@ namespace Realm {
       //  disabled
       OpenMPModule *m = new OpenMPModule;
 
+#ifndef REALM_OPENMP_SYSTEM_RUNTIME
       openmp_api_force_linkage();
+#endif
 
       // first order of business - read command line parameters
       {
@@ -185,6 +206,13 @@ namespace Realm {
 	delete m;
 	return 0;
       }
+
+#ifdef REALM_OPENMP_SYSTEM_RUNTIME
+      if(m->cfg_num_openmp_cpus > 1) {
+	log_omp.fatal() << "system omp runtime limited to 1 proc - " << m->cfg_num_openmp_cpus << " requested";
+        abort();
+      }
+#endif
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found

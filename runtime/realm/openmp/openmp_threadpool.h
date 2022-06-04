@@ -17,6 +17,7 @@
 #ifndef REALM_OPENMP_THREADPOOL_H
 #define REALM_OPENMP_THREADPOOL_H
 
+#include "realm/processor.h"
 #include "realm/threads.h"
 #include "realm/logging.h"
 
@@ -66,7 +67,8 @@ namespace Realm {
 
   class ThreadPool {
   public:
-    ThreadPool(int _num_workers,
+    ThreadPool(Processor _proc,
+               int _num_workers,
 	       const std::string& _name_prefix,
 	       int _numa_node, size_t _stack_size,
 	       CoreReservationSet& crs);
@@ -138,6 +140,7 @@ namespace Realm {
     int get_num_workers() const { return num_workers; }
 
   protected:
+    Processor proc;
     int num_workers;
     bool workers_running;
     std::vector<CoreReservation *> core_rsrvs;

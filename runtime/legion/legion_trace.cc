@@ -4514,6 +4514,8 @@ namespace Legion {
       {
         unsigned merging_event_idx = merge_starts++;
         gen[merging_event_idx] = new_instructions.size();
+        if (precondition != fence_completion_id)
+          users.insert(precondition);
         new_instructions.push_back(
             new MergeEvent(*this, merging_event_idx, users,
                            generator_inst->owner));

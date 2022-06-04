@@ -224,11 +224,19 @@ set(COMPILE_TIME_MIN_LEVEL LEVEL_${Legion_OUTPUT_LEVEL})
 #------------------------------------------------------------------------------#
 option(Legion_USE_OpenMP "Use OpenMP" OFF)
 if(Legion_USE_OpenMP)
+  option(Legion_OpenMP_SYSTEM_RUNTIME "Use system's OpenMP runtime instead of internal Realm version" OFF)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    find_package(OpenMP REQUIRED)
+  endif()
+
   option(Legion_OpenMP_GOMP_SUPPORT "Enable GOMP support for OpenMP" ON)
   option(Legion_OpenMP_KMP_SUPPORT "Enable KMP support for OpenMP" ON)
 
   # define variable for realm_defines.h
   set(REALM_USE_OPENMP ON)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    set(REALM_OPENMP_SYSTEM_RUNTIME ON)
+  endif()
   if(Legion_OpenMP_GOMP_SUPPORT)
     set(REALM_OPENMP_GOMP_SUPPORT ON)
   endif()
