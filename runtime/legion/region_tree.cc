@@ -2273,9 +2273,9 @@ namespace Legion {
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
-              DomainPoint dummy;
               PhysicalManager *manager = ref.get_physical_manager();
-              PhysicalInstance inst = manager->get_instance(dummy);
+              PhysicalInstance inst =
+                manager->get_instance(analysis->collective_point);
               trace_info.record_op_inst(analysis->usage, inst_mask, inst,
                         manager->did, analysis->node, map_applied_events);
             }
@@ -2304,9 +2304,9 @@ namespace Legion {
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
-              DomainPoint dummy;
               PhysicalManager *manager = ref.get_physical_manager();
-              PhysicalInstance inst = manager->get_instance(dummy);
+              PhysicalInstance inst =
+                manager->get_instance(analysis->collective_point);
               trace_info.record_op_inst(analysis->usage, inst_mask, inst,
                         manager->did, analysis->node, map_applied_events);
             }
