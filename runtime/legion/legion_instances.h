@@ -1085,6 +1085,7 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
+                                const DistributedID src_inst_did,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1142,6 +1143,8 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expresison,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
+                                const FieldMask &dst_mask,
+                                const DistributedID dst_inst_did,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1185,6 +1188,7 @@ namespace Legion {
                                 ApEvent dst_precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &applied_events,
                                 const std::vector<CopySrcDstField> &dst_fields,
@@ -1354,6 +1358,7 @@ namespace Legion {
       struct AllReduceStage {
         Operation *op;
         IndexSpaceExpression *copy_expression;
+        FieldMask copy_mask;
         std::vector<CopySrcDstField> dst_fields;
         std::vector<Reservation> reservations;
         PhysicalTraceInfo *trace_info;
@@ -1363,7 +1368,7 @@ namespace Legion {
         std::set<RtEvent> applied_events;
         RtUserEvent applied_event;
       };
-      std::map<std::pair<uint64_t,int>,AllReduceStage> remaining_stages;
+      LegionMap<std::pair<uint64_t,int>,AllReduceStage> remaining_stages;
     protected:
       std::map<std::pair<DistributedID,DomainPoint>,
                 std::map<unsigned,Reservation> > view_reservations;
