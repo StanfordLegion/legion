@@ -53,14 +53,10 @@ if(Legion_VERSION STREQUAL "")
     endif()
   endif()
   unset(_git_result)
-  # these are the actual variables that are written into the headers
-  set(LEGION_VERSION "${Legion_VERSION}")
-  set(REALM_VERSION "${Legion_VERSION}")
-else()
-  # these are the actual variables that are written into the headers
-  set(LEGION_VERSION "${Legion_VERSION}")
-  set(REALM_VERSION "${Legion_VERSION}")
 endif()
+# these are the actual variables that are written into the headers
+set(LEGION_VERSION "${Legion_VERSION}")
+set(REALM_VERSION "${Legion_VERSION}")
 
 # Parse the major.minor.patch from (potentially non-semver) Legion_VERSION
 if(Legion_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)") # get the CMake version
@@ -78,8 +74,8 @@ if(Legion_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)") # get the CMake vers
   endif()
   set(Legion_VERSION "${Legion_VERSION_MAJOR}.${Legion_VERSION_MINOR}.${Legion_VERSION_PATCH}")
 else()
-  set(Legion_VERSION "22.05.00")
-  message(WARNING "Could not determine semver-compatible version - using '22.05.00'")
+  message(WARNING "Could not parse semver-compatible version from Legion version string '${Legion_VERSION}' - setting cmake package version to '0.0.0'")
+  set(Legion_VERSION "0.0.0")
 endif()
 
 project(Legion VERSION ${Legion_VERSION})
