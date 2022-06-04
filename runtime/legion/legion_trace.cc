@@ -6320,15 +6320,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_copy_insts(ApEvent lhs, 
-                           const TraceLocalID &tlid,
-                           unsigned src_idx, unsigned dst_idx,
-                           IndexSpaceExpression *expr,
-                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                           DistributedID src_did, DistributedID dst_did,
-                           const FieldMask &src_mask, const FieldMask &dst_mask,
-                           PrivilegeMode src_mode, PrivilegeMode dst_mode,
-                           bool src_indirect, bool dst_indirect,
-                           std::set<RtEvent> &applied_events)
+                         const TraceLocalID &tlid,
+                         unsigned src_idx, unsigned dst_idx,
+                         IndexSpaceExpression *expr,
+                         PhysicalInstance src_inst, PhysicalInstance dst_inst,
+                         DistributedID src_did, DistributedID dst_did,
+                         const FieldMask &src_mask, const FieldMask &dst_mask,
+                         PrivilegeMode src_mode, PrivilegeMode dst_mode,
+                         ReductionOpID redop, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -6338,14 +6337,10 @@ namespace Legion {
       const unsigned lhs_ = find_event(lhs, tpl_lock);
       record_inst(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
                   src_inst, src_did, src_mask, applied_events);
-      record_expression_inst(src_indirect ? 
-          src_indirect_insts[lhs_] : copy_insts[lhs_], 
-          expr, src_inst, src_did, src_mask);
-      record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
+      record_expression_inst(copy_insts[lhs_], expr, src_inst,src_did,src_mask);
+      record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, redop),
                    dst_inst, dst_did, dst_mask, applied_events);
-      record_expression_inst(dst_indirect ?
-          dst_indirect_insts[lhs_] : copy_insts[lhs_], 
-          expr, dst_inst, dst_did, dst_mask);
+      record_expression_inst(copy_insts[lhs_], expr, dst_inst,dst_did,dst_mask);
     }
 
     //--------------------------------------------------------------------------

@@ -695,16 +695,10 @@ namespace Legion {
                                               const FieldMask &dst_mask,
                                               PrivilegeMode src_mode,
                                               PrivilegeMode dst_mode,
-                                              bool src_indirect,
-                                              bool dst_indirect,
+                                              ReductionOpID redop,
                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Should never be recording indirect copies on remote nodes
-      assert(!src_indirect);
-      assert(!dst_indirect);
-#endif
       if (local_space != origin_space)
       {
         const RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -727,6 +721,7 @@ namespace Legion {
           rez.serialize(dst_did);
           rez.serialize(src_mask);
           rez.serialize(dst_mask);
+          rez.serialize(redop);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         applied.insert(done);
@@ -734,7 +729,7 @@ namespace Legion {
       else
         remote_tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr,
                 src_inst, dst_inst, src_did, dst_did, src_mask, dst_mask,
-                src_mode, dst_mode, src_indirect, dst_indirect, applied);
+                src_mode, dst_mode, redop, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1308,10 +1303,12 @@ namespace Legion {
             FieldMask src_mask, dst_mask;
             derez.deserialize(src_mask);
             derez.deserialize(dst_mask);
+            ReductionOpID redop;
+            derez.deserialize(redop);
             std::set<RtEvent> ready_events;
             tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr, src_inst,
                 dst_inst, src_did, dst_did, src_mask, dst_mask, src_mode,
-                dst_mode, false/*indirect*/, false/*indirect*/, ready_events);
+                dst_mode, redop, ready_events);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else

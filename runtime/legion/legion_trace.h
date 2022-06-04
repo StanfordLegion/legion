@@ -991,8 +991,7 @@ namespace Legion {
                            DistributedID src_did, DistributedID dst_did,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
-                           bool src_indirect, bool dst_indirect,
-                           std::set<RtEvent> &applied);
+                           ReductionOpID redop, std::set<RtEvent> &applied);
       virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,

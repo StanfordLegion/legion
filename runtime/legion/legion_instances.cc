@@ -2974,7 +2974,8 @@ namespace Legion {
             source_manager->get_instance(src_point); 
           trace_info.record_copy_insts(result, copy_expression, src_inst,
                                        instance, source_manager->did, did, 
-                                       *src_mask, copy_mask, applied_events);
+                                       *src_mask, copy_mask, reduction_op_id,
+                                       applied_events);
         }
       }
       else
@@ -5809,7 +5810,7 @@ namespace Legion {
       if (trace_info.recording)
         trace_info.record_copy_insts(copy_post, copy_expression,
             instances[instance_index], dst_fields[0].inst, did, dst_inst_did,
-            copy_mask, dst_mask, applied_events);
+            copy_mask, dst_mask, redop, applied_events);
       return copy_post;
     }
 
@@ -6059,7 +6060,7 @@ namespace Legion {
         if (trace_info.recording)
           trace_info.record_copy_insts(local_reduce, copy_expression,
               instances[idx], local_fields[0].inst, did, did,
-              copy_mask, copy_mask, applied_events);
+              copy_mask, copy_mask, redop, applied_events);
       }
       // Peform the reduction back to the destination
       // No need to swap the local fields back to being non-reduction
@@ -6101,7 +6102,7 @@ namespace Legion {
       if (trace_info.recording)
         trace_info.record_copy_insts(reduce_post, copy_expression,
             local_fields[0].inst, dst_fields[0].inst, did, dst_inst_did,
-            copy_mask, dst_mask, applied_events);
+            copy_mask, dst_mask, redop, applied_events);
     }
 
     //--------------------------------------------------------------------------
