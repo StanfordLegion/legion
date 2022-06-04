@@ -2552,7 +2552,8 @@ namespace Legion {
         DomainPoint dummy;
         const PhysicalInstance src_inst = source_manager->get_instance(dummy); 
         trace_info.record_copy_insts(result, copy_expression, src_inst,
-           instance,source_manager->did,did,*src_mask,copy_mask,applied_events);
+            instance, source_manager->did, did, *src_mask, copy_mask,
+            reduction_op_id, applied_events);
       }
       if (across_helper != NULL)
         delete src_mask;
