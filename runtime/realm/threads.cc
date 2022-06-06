@@ -1041,7 +1041,7 @@ namespace Realm {
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 
       // sanity-check the resulting value
-      if(minstack < PTHREAD_STACK_MIN) break;
+      if(minstack < (size_t)PTHREAD_STACK_MIN) break;
 
       static_tls_size = minstack - PTHREAD_STACK_MIN;
       log_thread.debug() << "static tls size = " << static_tls_size << " (from glibc __pthread_get_minstack)";
@@ -1565,11 +1565,7 @@ namespace Realm {
   /*static*/ void Thread::yield(void)
   {
 #ifdef REALM_USE_PTHREADS
-#ifdef REALM_ON_MACOS
     sched_yield();
-#else
-    pthread_yield();
-#endif
 #endif
 #ifdef REALM_ON_WINDOWS
     SwitchToThread();

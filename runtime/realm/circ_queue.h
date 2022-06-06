@@ -91,7 +91,15 @@ namespace Realm {
   };
 
   template <typename T, unsigned INTSIZE>
-  class CircularQueueIterator : public std::iterator<std::forward_iterator_tag, T> {
+  class CircularQueueIterator {
+  public:
+    // explicitly set iterator traits
+    typedef std::forward_iterator_tag iterator_category;
+    typedef T value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef T *pointer;
+    typedef T& reference;
+
   protected:
     friend class CircularQueue<T,INTSIZE>;
 

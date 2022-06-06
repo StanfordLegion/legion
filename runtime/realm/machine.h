@@ -249,7 +249,15 @@ namespace Realm {
     };
 
     template <typename QT, typename RT>
-    class REALM_PUBLIC_API MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
+    class REALM_PUBLIC_API MachineQueryIterator {
+    public:
+      // explicitly set iterator traits
+      typedef std::input_iterator_tag iterator_category;
+      typedef RT value_type;
+      typedef std::ptrdiff_t difference_type;
+      typedef RT *pointer;
+      typedef RT& reference;
+
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
       //  The CUDA compiler also seems to be a little dense here as well

@@ -16588,7 +16588,7 @@ namespace Legion {
       {
         delete (*it);
       }
-      available_dynamic_collective_ops.end();
+      available_dynamic_collective_ops.clear();
       for (std::deque<FuturePredOp*>::const_iterator it = 
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
