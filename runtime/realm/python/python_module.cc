@@ -702,7 +702,7 @@ namespace Realm {
 #ifdef REALM_USE_OPENMP
     if(_omp_workers > 0) {
       // create a pool (except for one thread, which is the main task thread)
-      omp_threadpool = new ThreadPool(_omp_workers - 1,
+      omp_threadpool = new ThreadPool(me, _omp_workers - 1,
 				      name, -1 /*numa_node*/, _stack_size, crs);
     } else
       omp_threadpool = 0;

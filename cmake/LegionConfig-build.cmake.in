@@ -1,2 +1,8 @@
 list(INSERT CMAKE_MODULE_PATH 0 @Legion_SOURCE_DIR@/cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/LegionConfigCommon.cmake)
+
+# Set our version variables
+set(Legion_VERSION_MAJOR @Legion_VERSION_MAJOR@)
+set(Legion_VERSION_MINOR @Legion_VERSION_MINOR@)
+set(Legion_VERSION_PATCH @Legion_VERSION_PATCH@)
+set(Legion_VERSION @Legion_VERSION@)

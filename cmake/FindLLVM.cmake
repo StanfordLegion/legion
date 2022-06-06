@@ -54,10 +54,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
     if(${LLVM_VERSION} VERSION_GREATER 3.5.99)
       list(REMOVE_ITEM LLVM_FIND_COMPONENTS jit)
     endif()
-    foreach(C IN LISTS LLVM_FIND_COMPONENTS)
-      list(FIND LLVM_AVAILABLE_COMPONENTS ${C} C_IDX)
+    foreach(_component IN LISTS LLVM_FIND_COMPONENTS)
+      list(FIND LLVM_AVAILABLE_COMPONENTS ${_component} C_IDX)
       if(C_IDX EQUAL -1)
-        message(FATAL_ERROR "${C} is not an available component for LLVM found at ${LLVM_CONFIG_EXECUTABLE}")
+        message(FATAL_ERROR "${_component} is not an available component for LLVM found at ${LLVM_CONFIG_EXECUTABLE}")
       endif()
     endforeach()
 
@@ -67,7 +67,7 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
       OUTPUT_VARIABLE _LLVM_LIBS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
-    # some versions of LLVM have a bug with libfiles where they produce 
+    # some versions of LLVM have a bug with libfiles where they produce
     #  /path/to/liblibfoo.so.so - do some string replaces to fix this
     string(REPLACE "liblib" "lib" _LLVM_LIBS ${_LLVM_LIBS})
     string(REPLACE ".so.so" ".so" _LLVM_LIBS ${_LLVM_LIBS})

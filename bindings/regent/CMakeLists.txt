@@ -59,6 +59,7 @@ elseif(Legion_USE_HIP)
 else()
   add_library(Regent SHARED ${REGENT_SRC})
 endif()
+add_library(Legion::Regent ALIAS Regent)
 target_link_libraries(Regent Legion::Legion)
 
 if(Legion_USE_CUDA)
