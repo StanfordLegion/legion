@@ -4752,6 +4752,8 @@ namespace Legion {
         if (it->second.second == Operation::TASK_OP_KIND)
           slice_tasks[slice_index].push_back(it->first);
       }
+      // Make sure that event creations and triggers are in the same slice
+      std::map<unsigned/*user event*/,unsigned/*slice*/> user_event_slices;
       // Keep track of these so that we don't end up leaking them
       std::vector<Instruction*> crossing_instructions;
       std::map<unsigned,std::pair<unsigned,unsigned> > crossing_counts;
@@ -4762,12 +4764,37 @@ namespace Legion {
         std::map<TraceLocalID, unsigned>::iterator finder =
           slice_indices_by_owner.find(owner);
         unsigned slice_index = -1U;
+        const InstructionKind kind = inst->get_kind();
         if (finder != slice_indices_by_owner.end())
           slice_index = finder->second;
+        else if (kind == TRIGGER_EVENT)
+        {
+          // Find the slice where the event creation was assigned
+          // and make sure that we end up on the same slice
+          TriggerEvent *trigger = inst->as_trigger_event(); 
+          std::map<unsigned,unsigned>::iterator finder = 
+            user_event_slices.find(trigger->lhs);
+#ifdef DEBUG_LEGION
+          assert(finder != user_event_slices.end());
+#endif
+          slice_index = finder->second;
+          user_event_slices.erase(finder);
+        }
         else
         {
           slice_index = next_slice_id;
           next_slice_id = (next_slice_id + 1) % replay_parallelism;
+          if (kind == CREATE_AP_USER_EVENT)
+          {
+            // Save which slice this is on so the later trigger will
+            // get recorded on the same slice
+            CreateApUserEvent *create = inst->as_create_ap_user_event();
+#ifdef DEBUG_LEGION
+            assert(user_event_slices.find(create->lhs) ==
+                    user_event_slices.end());
+#endif
+            user_event_slices[create->lhs] = slice_index;
+          }
         }
         slices[slice_index].push_back(inst);
         slice_indices_by_inst[idx] = slice_index;
@@ -4903,6 +4930,9 @@ namespace Legion {
           }
         }
       }
+#ifdef DEBUG_LEGION
+      assert(user_event_slices.empty());
+#endif
       // Update the crossing events and their counts
       if (!crossing_counts.empty())
       {
@@ -5966,12 +5996,9 @@ namespace Legion {
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = find_or_convert_event(lhs);
+      unsigned lhs_ = convert_event(lhs);
       user_events[lhs_] = lhs;
-#ifdef DEBUG_LEGION
-      assert(instructions[lhs_] == NULL);
-#endif
-      instructions[lhs_] = new CreateApUserEvent(*this, lhs_, tlid);
+      insert_instruction(new CreateApUserEvent(*this, lhs_, tlid));
     }
 
     //--------------------------------------------------------------------------
@@ -5989,7 +6016,7 @@ namespace Legion {
       // Do this first in case it gets pre-empted
       const unsigned rhs_ = 
         rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
-      unsigned lhs_ = find_or_convert_event(lhs);
+      unsigned lhs_ = find_event(lhs, tpl_lock);
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_, tlid));
     }
@@ -6042,7 +6069,7 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
            it++)
       {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const iterator finder = event_map.find(*it);
         if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
@@ -6076,7 +6103,7 @@ namespace Legion {
       for (std::vector<ApEvent>::const_iterator it =
             rhs.begin(); it != rhs.end(); it++)
       {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
@@ -6882,29 +6909,9 @@ namespace Legion {
       std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
 #ifdef DEBUG_LEGION
       assert(finder != event_map.end());
+      assert(finder->second != NO_INDEX);
 #endif
       return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    inline unsigned PhysicalTemplate::find_or_convert_event(const ApEvent &evnt)
-    //--------------------------------------------------------------------------
-    {
-      std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(evnt);
-      if (finder == event_map.end())
-      {
-        unsigned event_ = events.size();
-        events.push_back(evnt);
-#ifdef DEBUG_LEGION
-        assert(event_map.find(evnt) == event_map.end());
-#endif
-        event_map[evnt] = event_;
-        // Put a place holder in for the instruction until we make it
-        insert_instruction(NULL);
-        return event_;
-      }
-      else
-        return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -7061,7 +7068,7 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder == event_map.end())
         {
           // We're going to need to check this event later
@@ -7102,7 +7109,8 @@ namespace Legion {
         for (std::vector<ApEvent>::const_iterator it = 
               pending_events.begin(); it != pending_events.end(); it++)
         {
-          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+          std::map<ApEvent,unsigned>::const_iterator finder =
+            event_map.find(*it);
 #ifdef DEBUG_LEGION
           assert(finder != event_map.end());
 #endif
@@ -7153,7 +7161,7 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder == event_map.end())
         {
           // We're going to need to check this event later
@@ -7194,7 +7202,8 @@ namespace Legion {
         for (std::vector<ApEvent>::const_iterator it = 
               pending_events.begin(); it != pending_events.end(); it++)
         {
-          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+          std::map<ApEvent,unsigned>::const_iterator finder =
+            event_map.find(*it);
 #ifdef DEBUG_LEGION
           assert(finder != event_map.end());
 #endif
@@ -7257,8 +7266,7 @@ namespace Legion {
                                                  AutoLock &tpl_lock)
     //--------------------------------------------------------------------------
     {
-      std::map<ApEvent, unsigned>::const_iterator finder = 
-        event_map.find(event);
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
       // If we've already got it then we're done
       if (finder != event_map.end())
       {
@@ -7526,8 +7534,7 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
       // Check to see if we made this event
-      std::map<ApEvent,unsigned>::const_iterator finder = 
-        event_map.find(event);
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
       // If we didn't make this event then we don't do anything
       if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
@@ -9293,6 +9300,9 @@ namespace Legion {
                                  const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(user_events.find(lhs) != user_events.end());
+#endif
       ApUserEvent ev = Runtime::create_ap_user_event(NULL);
       events[lhs] = ev;
       user_events[lhs] = ev;
