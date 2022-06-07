@@ -6043,7 +6043,7 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
            it++)
       {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const iterator finder = event_map.find(*it);
         if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
@@ -6077,7 +6077,7 @@ namespace Legion {
       for (std::vector<ApEvent>::const_iterator it =
             rhs.begin(); it != rhs.end(); it++)
       {
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
@@ -6810,6 +6810,7 @@ namespace Legion {
       std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
 #ifdef DEBUG_LEGION
       assert(finder != event_map.end());
+      assert(finder->second != NO_INDEX);
 #endif
       return finder->second;
     }
@@ -6968,7 +6969,7 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder == event_map.end())
         {
           // We're going to need to check this event later
@@ -7009,7 +7010,8 @@ namespace Legion {
         for (std::vector<ApEvent>::const_iterator it = 
               pending_events.begin(); it != pending_events.end(); it++)
         {
-          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+          std::map<ApEvent,unsigned>::const_iterator finder =
+            event_map.find(*it);
 #ifdef DEBUG_LEGION
           assert(finder != event_map.end());
 #endif
@@ -7060,7 +7062,7 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder == event_map.end())
         {
           // We're going to need to check this event later
@@ -7101,7 +7103,8 @@ namespace Legion {
         for (std::vector<ApEvent>::const_iterator it = 
               pending_events.begin(); it != pending_events.end(); it++)
         {
-          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+          std::map<ApEvent,unsigned>::const_iterator finder =
+            event_map.find(*it);
 #ifdef DEBUG_LEGION
           assert(finder != event_map.end());
 #endif
@@ -7164,8 +7167,7 @@ namespace Legion {
                                                  AutoLock &tpl_lock)
     //--------------------------------------------------------------------------
     {
-      std::map<ApEvent, unsigned>::const_iterator finder = 
-        event_map.find(event);
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
       // If we've already got it then we're done
       if (finder != event_map.end())
       {
@@ -7357,8 +7359,7 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
       // Check to see if we made this event
-      std::map<ApEvent,unsigned>::const_iterator finder = 
-        event_map.find(event);
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
       // If we didn't make this event then we don't do anything
       if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
