@@ -860,7 +860,6 @@ namespace Legion {
     private:
       unsigned convert_event(const ApEvent &event);
       unsigned find_event(const ApEvent &event) const;
-      unsigned find_or_convert_event(const ApEvent &event);
       void insert_instruction(Instruction *inst);
     private:
       // Returns the set of last users for all <view,field mask,index expr>
