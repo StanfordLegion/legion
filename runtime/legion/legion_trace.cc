@@ -6155,9 +6155,12 @@ namespace Legion {
       assert(is_recording());
       assert(event_map.find(bar) == event_map.end());
       assert(managed_barriers.find(bar) == managed_barriers.end());
+      const unsigned lhs = convert_event(bar, false/*check*/);
+#else
+      const unsigned lhs = convert_event(bar);
 #endif
-      BarrierArrival *arrival = new BarrierArrival(*this, bar, 
-          convert_event(bar), total_arrivals, true/*managed*/);
+      BarrierArrival *arrival =
+        new BarrierArrival(*this, bar, lhs, total_arrivals, true/*managed*/);
       insert_instruction(arrival);
       // Save this as one of the barriers that we're managing
       managed_barriers[bar] = arrival;
@@ -8324,8 +8327,16 @@ namespace Legion {
                                                                   ApEvent event)
     //--------------------------------------------------------------------------
     {
+      if (!event.exists())
+        return 0;
       // TODO: Remove hack include at top of file when we fix this 
-      return Realm::ID(event.id).event_creator_node();
+      const Realm::ID id(event.id);
+      if (id.is_barrier())
+        return id.barrier_creator_node();
+#ifdef DEBUG_LEGION
+      assert(id.is_event());
+#endif
+      return id.event_creator_node();
     }
 
     //--------------------------------------------------------------------------
