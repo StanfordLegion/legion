@@ -5985,12 +5985,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_create_ap_user_event(
-                                      ApUserEvent lhs, const TraceLocalID &tlid)
+                                     ApUserEvent &lhs, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(lhs.exists());
-#endif
+      // Make the event here so it is on our local node
+      // Note this is important for control replications where the
+      // convert_event method will check this property
+      lhs = Runtime::create_ap_user_event(NULL);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());

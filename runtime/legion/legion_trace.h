@@ -944,7 +944,7 @@ namespace Legion {
       virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
                                          const TraceLocalID &tlid);
       virtual void request_term_event(ApUserEvent &term_event);
-      virtual void record_create_ap_user_event(ApUserEvent lhs, 
+      virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
                                         const TraceLocalID &tlid);
