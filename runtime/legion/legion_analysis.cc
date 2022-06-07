@@ -410,8 +410,9 @@ namespace Legion {
           tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
-        applied_events.insert(applied);
+        // Need this to be done before returning because we need to ensure
+        // that this event is recorded before anyone tries to trigger it
+        applied.wait();
       }
       else
         remote_tpl->record_create_ap_user_event(lhs, tlid);

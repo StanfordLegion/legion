@@ -1085,7 +1085,6 @@ namespace Legion {
       unsigned convert_event(const ApEvent &event);
 #endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
-      unsigned find_or_convert_event(const ApEvent &event);
       void insert_instruction(Instruction *inst);
     protected:
       // Returns the set of last users for all <view,field mask,index expr>

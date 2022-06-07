@@ -5970,12 +5970,9 @@ namespace Legion {
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = find_or_convert_event(lhs);
+      unsigned lhs_ = convert_event(lhs);
       user_events[lhs_] = lhs;
-#ifdef DEBUG_LEGION
-      assert(instructions[lhs_] == NULL);
-#endif
-      instructions[lhs_] = new CreateApUserEvent(*this, lhs_, tlid);
+      insert_instruction(new CreateApUserEvent(*this, lhs_, tlid));
     }
 
     //--------------------------------------------------------------------------
@@ -5993,7 +5990,7 @@ namespace Legion {
       // Do this first in case it gets pre-empted
       const unsigned rhs_ = 
         rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
-      unsigned lhs_ = find_or_convert_event(lhs);
+      unsigned lhs_ = find_event(lhs, tpl_lock);
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_, tlid));
     }
@@ -6815,27 +6812,6 @@ namespace Legion {
       assert(finder != event_map.end());
 #endif
       return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    inline unsigned PhysicalTemplate::find_or_convert_event(const ApEvent &evnt)
-    //--------------------------------------------------------------------------
-    {
-      std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(evnt);
-      if (finder == event_map.end())
-      {
-        unsigned event_ = events.size();
-        events.push_back(evnt);
-#ifdef DEBUG_LEGION
-        assert(event_map.find(evnt) == event_map.end());
-#endif
-        event_map[evnt] = event_;
-        // Put a place holder in for the instruction until we make it
-        insert_instruction(NULL);
-        return event_;
-      }
-      else
-        return finder->second;
     }
 
     //--------------------------------------------------------------------------
