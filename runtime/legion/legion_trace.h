@@ -1135,6 +1135,8 @@ namespace Legion {
     private:
       const unsigned replay_parallelism;
     protected:
+      static constexpr unsigned NO_INDEX = UINT_MAX;
+    protected:
       std::deque<std::map<TraceLocalID,Memoizable*> > operations;
       std::deque<std::pair<ApEvent,bool/*recurrent*/> > pending_replays;
       // Pair in memo_entries is <entry index, Operation::Kind>
@@ -1417,9 +1419,7 @@ namespace Legion {
       // Make this last since it registers the template with the
       // context which can trigger calls into the template so 
       // everything must valid at this point
-      const size_t template_index;
-    private:
-      static const unsigned NO_INDEX = UINT_MAX;
+      const size_t template_index; 
     protected:
       std::map<ApEvent,RtEvent> pending_event_requests;
       // Barriers that need to send remote refreshes
