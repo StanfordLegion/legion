@@ -181,7 +181,7 @@ namespace Legion {
       virtual void record_get_term_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
-      virtual void record_create_ap_user_event(ApUserEvent lhs, 
+      virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid) = 0;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
                                         const TraceLocalID &tlid) = 0;
@@ -324,7 +324,7 @@ namespace Legion {
       virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
                                          const TraceLocalID &tlid);
       virtual void request_term_event(ApUserEvent &term_event);
-      virtual void record_create_ap_user_event(ApUserEvent lhs, 
+      virtual void record_create_ap_user_event(ApUserEvent &hs, 
                                                const TraceLocalID &tlid);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
                                         const TraceLocalID &tlid);
@@ -457,7 +457,7 @@ namespace Legion {
           base_sanity_check();
           rec->request_term_event(term_event);
         }
-      inline void record_create_ap_user_event(ApUserEvent result) const
+      inline void record_create_ap_user_event(ApUserEvent &result) const
         {
           base_sanity_check();
           rec->record_create_ap_user_event(result, tlid);

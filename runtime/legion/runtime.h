@@ -5068,13 +5068,15 @@ namespace Legion {
                                                           const TraceInfo *info)
     //--------------------------------------------------------------------------
     {
+      ApUserEvent result;
+      if ((info == NULL) || !info->recording)
+      {
+        result = ApUserEvent(Realm::UserEvent::create_user_event());
 #ifdef LEGION_SPY
-      ApUserEvent result(Realm::UserEvent::create_user_event());
-      LegionSpy::log_ap_user_event(result);
-#else
-      ApUserEvent result(Realm::UserEvent::create_user_event());
+        LegionSpy::log_ap_user_event(result);
 #endif
-      if ((info != NULL) && info->recording)
+      }
+      else
         info->record_create_ap_user_event(result);
       return result;
     }
