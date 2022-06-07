@@ -6069,7 +6069,7 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
            it++)
       {
-        std::map<ApEvent,unsigned>::const iterator finder = event_map.find(*it);
+        std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(*it);
         if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
