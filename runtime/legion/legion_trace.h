@@ -1164,7 +1164,8 @@ namespace Legion {
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
       std::map<ApEvent,unsigned> event_map;
-      std::map<ApEvent,BarrierArrival*> managed_barriers;
+      std::map<ApEvent,BarrierAdvance*> managed_barriers;
+      std::map<ApEvent,std::vector<BarrierArrival*> > managed_arrivals;
     private:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
@@ -1440,7 +1441,6 @@ namespace Legion {
       std::map<ApEvent,RtEvent> pending_event_requests;
       // Barriers we don't managed and need to receive refreshes for
       std::map<ApEvent,BarrierAdvance*> local_advances;
-      std::map<ApEvent,BarrierArrival*> local_arrivals;
       // Collective barriers from application operations
       // These will be updated by the application before each replay
       // Key is <trace local id, unique barrier name for this op>
@@ -1870,9 +1870,8 @@ namespace Legion {
     class BarrierArrival : public Instruction {
     public:
       BarrierArrival(PhysicalTemplate &tpl,
-                     ApBarrier bar, unsigned lhs,
+                     ApBarrier bar, unsigned lhs, unsigned rhs,
                      size_t arrival_count, bool managed);
-      virtual ~BarrierArrival(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,Memoizable*> &operations,
@@ -1883,20 +1882,12 @@ namespace Legion {
         { return BARRIER_ARRIVAL; }
       virtual BarrierArrival* as_barrier_arrival(void)
         { return this; }
-      ApBarrier record_subscribed_shard(ShardID remote_shard); 
-      inline ApBarrier get_current_barrier(void) const { return barrier; }
-      void refresh_barrier(ApEvent key,
-          std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications);
-      void remote_refresh_barrier(ApBarrier newbar);
       void set_managed_barrier(ApBarrier newbar);
-      void record_arrival(unsigned rhs_, unsigned arrivals);
+      void set_collective_barrier(ApBarrier newbar);
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;
-      unsigned lhs;
-      // RHS events and their arrival counts
-      std::vector<std::pair<unsigned,unsigned> > rhs;
-      std::vector<ShardID> subscribed_shards;
+      unsigned lhs, rhs;
       const size_t total_arrivals;
       const bool managed;
     };
@@ -1909,7 +1900,9 @@ namespace Legion {
      */
     class BarrierAdvance : public Instruction {
     public:
-      BarrierAdvance(PhysicalTemplate &tpl, ApBarrier bar, unsigned lhs);
+      BarrierAdvance(PhysicalTemplate &tpl, ApBarrier bar,
+                     unsigned lhs, size_t arrival_count, bool owner);
+      virtual ~BarrierAdvance(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,Memoizable*> &operations,
@@ -1920,11 +1913,18 @@ namespace Legion {
         { return BARRIER_ADVANCE; }
       virtual BarrierAdvance* as_barrier_advance(void)
         { return this; }
-      inline void refresh_barrier(ApBarrier next) { barrier = next; }
+      inline ApBarrier get_current_barrier(void) const { return barrier; }
+      ApBarrier record_subscribed_shard(ShardID remote_shard); 
+      void refresh_barrier(ApEvent key,
+          std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications);
+      void remote_refresh_barrier(ApBarrier newbar);
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;
+      std::vector<ShardID> subscribed_shards;
       unsigned lhs;
+      const size_t total_arrivals;
+      const bool owner;
     };
 
   }; // namespace Internal

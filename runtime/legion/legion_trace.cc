@@ -3919,7 +3919,7 @@ namespace Legion {
     {
       std::set<ApEvent> all_events;
       std::set<ApEvent> local_barriers;
-      for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
             managed_barriers.begin(); it != managed_barriers.end(); it++)
         local_barriers.insert(it->second->get_current_barrier());
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
@@ -4575,9 +4575,7 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator 
-                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
-                used[gen[it->first]] = true;
+              used[gen[arrival->rhs]] = true;
               break;
             }
           case ISSUE_COPY:
@@ -4863,14 +4861,9 @@ namespace Legion {
               }
             case BARRIER_ARRIVAL:
               {
-                BarrierArrival *barrier = inst->as_barrier_arrival();
-#ifdef DEBUG_LEGION
-                assert(!barrier->rhs.empty());
-#endif
-                for (unsigned idx = 0; idx < barrier->rhs.size(); idx++)
-                  parallelize_replay_event(barrier->rhs[idx].first,
-                      slice_index, gen, slice_indices_by_inst,
-                      crossing_counts, crossing_instructions);
+                parallelize_replay_event(inst->as_barrier_arrival()->rhs,
+                    slice_index, gen, slice_indices_by_inst,
+                    crossing_counts, crossing_instructions);
                 break;
               }
             case ISSUE_COPY:
@@ -5045,12 +5038,8 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
-                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
-              {
-                incoming[arrival->lhs].push_back(it->first);
-                outgoing[it->first].push_back(arrival->lhs);
-              }
+              incoming[arrival->lhs].push_back(arrival->rhs);
+              outgoing[arrival->rhs].push_back(arrival->lhs);
               break;
             }
           case MERGE_EVENT :
@@ -5429,13 +5418,8 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              for (std::vector<std::pair<unsigned,unsigned> >::iterator it =
-                    arrival->rhs.begin(); it != arrival->rhs.end(); it++)
-              {
-                int subst = substs[it->first];
-                if (subst >= 0) it->first = (unsigned)subst;
-              }
-              lhs = arrival->lhs;
+              int subst = substs[arrival->rhs];
+              if (subst >= 0) arrival->rhs = (unsigned)subst;
               break;
             }
           case MERGE_EVENT:
@@ -5675,14 +5659,10 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
-                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
-              {
 #ifdef DEBUG_LEGION
-                assert(gen[it->first] != -1U);
+              assert(gen[arrival->rhs] != -1U);
 #endif
-                used[gen[it->first]] = true;
-              }
+              used[gen[arrival->rhs]] = true;
               break;
             }
           case GET_TERM_EVENT:
@@ -6160,11 +6140,11 @@ namespace Legion {
 #else
       const unsigned lhs = convert_event(bar);
 #endif
-      BarrierArrival *arrival =
-        new BarrierArrival(*this, bar, lhs, total_arrivals, true/*managed*/);
-      insert_instruction(arrival);
+      BarrierAdvance *advance =
+        new BarrierAdvance(*this, bar, lhs, total_arrivals, true/*owner*/);
+      insert_instruction(advance);
       // Save this as one of the barriers that we're managing
-      managed_barriers[bar] = arrival;
+      managed_barriers[bar] = advance;
       return 0; // No bothering with shards here
     }
 
@@ -6182,19 +6162,14 @@ namespace Legion {
       assert(bar.exists());
       assert(is_recording());
 #endif
-      unsigned rhs_ = fence_completion_id;
-      if (pre.exists())
-      {
-        std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(pre);
-        if (finder != event_map.end())
-          rhs_ = finder->second;
-      }
-      std::map<ApEvent,BarrierArrival*>::const_iterator finder =
-        managed_barriers.find(bar);
-#ifdef DEBUG_LEGION
-      assert(finder != managed_barriers.end());
-#endif
-      finder->second->record_arrival(rhs_, arrivals); 
+      const unsigned rhs = 
+        pre.exists() ? find_event(pre, tpl_lock) : fence_completion_id;
+      const unsigned lhs = events.size();
+      events.push_back(ApEvent());
+      BarrierArrival *arrival =
+          new BarrierArrival(*this, bar, lhs, rhs, arrivals, true/*managed*/);
+      insert_instruction(arrival);
+      managed_arrivals[bar].push_back(arrival);
     }
 
     //--------------------------------------------------------------------------
@@ -6687,7 +6662,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent replay_precondition;
-      if (total_replays++ == Realm::Barrier::MAX_PHASES)
+      if (++total_replays == Realm::Barrier::MAX_PHASES)
       {
         replay_precondition = refresh_managed_barriers();
         // Reset it back to one after updating our barriers
@@ -6769,14 +6744,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
-      for (std::map<ApEvent,BarrierArrival*>::const_iterator it =
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it =
             managed_barriers.begin(); it != managed_barriers.end(); it++)
-      {
         it->second->refresh_barrier(it->first, notifications);
+      if (!notifications.empty())
+      {
 #ifdef DEBUG_LEGION
-        // We should never have any notifications in this case
-        assert(notifications.empty());
+        assert(notifications.size() == 1);
 #endif
+        std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator local =
+          notifications.begin();
+#ifdef DEBUG_LEGION
+        assert(local->first == 0);
+        assert(local->second.size() == managed_arrivals.size());
+#endif
+        for (std::map<ApEvent,ApBarrier>::const_iterator it =
+              local->second.begin(); it != local->second.end(); it++)
+        {
+          std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+            managed_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(finder != managed_arrivals.end());
+#endif
+          for (unsigned idx = 0; idx < finder->second.size(); idx++)
+            finder->second[idx]->set_managed_barrier(it->second);
+        }
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -7334,8 +7326,7 @@ namespace Legion {
       // Technically using 'arrivals' here for total arrivals is wrong, but
       // it doesn't really matter since we aren't managing this barrier anyway
       BarrierArrival *arrival =
-        new BarrierArrival(*this, bar, bar_, arrivals, false/*managed*/);
-      arrival->record_arrival(pre_, arrivals);
+        new BarrierArrival(*this, bar, bar_, pre_, arrivals, false/*managed*/);
       insert_instruction(arrival);
 #ifdef DEBUG_LEGION
       assert(collective_barriers.find(key) == collective_barriers.end());
@@ -7366,37 +7357,19 @@ namespace Legion {
 #endif
       // Find the pre event first
       unsigned rhs = find_event(pre, tpl_lock);
-      // Check to see if we are the owner for this or not
-      if (owner_shard == local_shard)
-      {
-        // We should already have a barrier arrival instruction so we 
-        // should just be able to find it
-        std::map<ApEvent,BarrierArrival*>::const_iterator finder =
-          managed_barriers.find(bar);
-#ifdef DEBUG_LEGION
-        assert(finder != managed_barriers.end());
-#endif
-        finder->second->record_arrival(rhs, arrival_count);
-      }
-      else
+      events.push_back(ApEvent());
+      BarrierArrival *arrival = new BarrierArrival(*this, bar,
+          events.size() - 1, rhs, arrival_count, true/*managed*/);
+      insert_instruction(arrival);
+      if (owner_shard != local_shard)
       {
         // Check to see if we've already made a barrier arrival instruction
         // for this barrier or not
-        std::map<ApEvent,BarrierArrival*>::const_iterator finder =
-          local_arrivals.find(bar);
-        if (finder == local_arrivals.end())
+        std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+          managed_arrivals.find(bar);
+        if (finder == managed_arrivals.end())
         {
-          // We don't have a barrier arrival instruction yet so must make one
-          // Note we're not managing this barrier since it is owned by a
-          // different shard, technically using arrival count here is 
-          // not precise, but we're not managing this barrier so it
-          // doesn't matter
-          BarrierArrival *arrival = new BarrierArrival(*this, bar, 
-              convert_event(bar), arrival_count, false/*managed*/);
-          arrival->record_arrival(rhs, arrival_count);
-          insert_instruction(arrival);
-          // Save this as a local arrival for us to see refreshes for
-          local_arrivals[bar] = arrival;
+          // Need to request a subscription to this barrier on the owner shard
           // We need to tell the owner shard that we are going to 
           // subscribe to its updates for this barrier
           RtEvent subscribed = Runtime::create_rt_user_event();
@@ -7411,10 +7384,13 @@ namespace Legion {
           rez.serialize(subscribed);
           manager->send_trace_update(owner_shard, rez);
           applied.insert(subscribed); 
+          managed_arrivals[bar].push_back(arrival);
         }
         else
-          finder->second->record_arrival(rhs, arrival_count);
+          finder->second.push_back(arrival);
       }
+      else
+        managed_arrivals[bar].push_back(arrival);
     }
 
     //--------------------------------------------------------------------------
@@ -7543,27 +7519,35 @@ namespace Legion {
       if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
       // If we did make it then see if we have a remote barrier for it yet
-      std::map<ApEvent,BarrierArrival*>::const_iterator barrier_finder = 
+      std::map<ApEvent,BarrierAdvance*>::const_iterator barrier_finder = 
         managed_barriers.find(event);
       if (barrier_finder == managed_barriers.end())
       {
         // Make a new barrier and record it in the events
         ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
+        // The first generation of each barrier should be triggered when
+        // it is recorded in a barrier arrival instruction
+        Runtime::phase_barrier_arrive(barrier, 1/*count*/);
         // Record this in the instruction stream
 #ifdef DEBUG_LEGION
-        const unsigned index = convert_event(barrier, false/*check*/);
+        const unsigned lhs = convert_event(barrier, false/*check*/);
 #else
-        const unsigned index = convert_event(barrier);
+        const unsigned lhs = convert_event(barrier);
 #endif
-        // Then add a new instruction to arrive on the barrier with the
-        // event as a precondition
-        BarrierArrival *arrival_instruction = new BarrierArrival(*this, 
-            barrier, index, 1/*count*/, true/*managed*/);
-        arrival_instruction->record_arrival(finder->second, 1/*count*/);
-        insert_instruction(arrival_instruction);
-        // Save this in the remote barriers
-        managed_barriers[event] = arrival_instruction;
-        return arrival_instruction->record_subscribed_shard(remote_shard);
+        // First record the barrier advance for this new barrier
+        BarrierAdvance *advance = new BarrierAdvance(*this, barrier,
+                            lhs, 1/*arrival count*/, true/*owner*/);
+        insert_instruction(advance);
+        managed_barriers[event] = advance;
+        // Next make the arrival instruction for this barrier
+        events.push_back(ApEvent());
+        BarrierArrival *arrival = new BarrierArrival(*this, barrier,
+            events.size() - 1, finder->second, 1/*count*/, true/*managed*/);
+        insert_instruction(arrival);
+        managed_arrivals[event].push_back(arrival);
+        // Record our local shard too
+        advance->record_subscribed_shard(local_shard);
+        return advance->record_subscribed_shard(remote_shard);
       }
       else
         return barrier_finder->second->record_subscribed_shard(remote_shard);
@@ -7587,7 +7571,8 @@ namespace Legion {
 #else
         const unsigned index = convert_event(event);
 #endif
-        BarrierAdvance *advance = new BarrierAdvance(*this, barrier, index);
+        BarrierAdvance *advance =
+          new BarrierAdvance(*this, barrier, index,1/*count*/,false/*managed*/);
         insert_instruction(advance); 
         local_advances[event] = advance;
         // Don't remove it, just set it to NO_EVENT so we can tell the names
@@ -7894,19 +7879,23 @@ namespace Legion {
                   local_advances.find(key);
                 if (finder == local_advances.end())
                 {
-                  std::map<ApEvent,BarrierArrival*>::const_iterator finder2 =
-                    local_arrivals.find(key);
+                  std::map<ApEvent,
+                    std::vector<BarrierArrival*> >::const_iterator finder2 =
+                    managed_arrivals.find(key);
 #ifdef DEBUG_LEGION
-                  assert(finder2 != local_arrivals.end());
+                  assert(finder2 != managed_arrivals.end());
 #endif
-                  finder2->second->remote_refresh_barrier(bar);
+                  for (std::vector<BarrierArrival*>::const_iterator it =
+                        finder2->second.begin(); it !=
+                        finder2->second.end(); it++)
+                    (*it)->set_managed_barrier(bar);
                 }
                 else
-                  finder->second->refresh_barrier(bar);
+                  finder->second->remote_refresh_barrier(bar);
               }
               refreshed_barriers += num_barriers;
               const size_t expected = 
-                local_advances.size() + local_arrivals.size();
+                local_advances.size() + managed_arrivals.size();
 #ifdef DEBUG_LEGION
               assert(refreshed_barriers <= expected);
 #endif
@@ -8006,7 +7995,7 @@ namespace Legion {
             derez.deserialize(done);
 
             AutoLock tpl_lock(template_lock);
-            std::map<ApEvent,BarrierArrival*>::const_iterator finder =
+            std::map<ApEvent,BarrierAdvance*>::const_iterator finder =
               managed_barriers.find(bar);
 #ifdef DEBUG_LEGION
             assert(finder != managed_barriers.end());
@@ -8599,30 +8588,46 @@ namespace Legion {
     {
       std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
       // Need to update all our barriers since we're out of generations
-      for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
             managed_barriers.begin(); it != managed_barriers.end(); it++)
         it->second->refresh_barrier(it->first, notifications);
       // Send out the notifications to all the shards
       ShardManager *manager = repl_ctx->shard_manager;
+      size_t local_refreshed = 0;
       for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
             nit = notifications.begin(); nit != notifications.end(); nit++)
       {
-#ifdef DEBUG_LEGION
-        assert(nit->first != repl_ctx->owner_shard->shard_id);
-#endif
-        Serializer rez;
-        rez.serialize(manager->repl_id);
-        rez.serialize(nit->first);
-        rez.serialize(template_index);
-        rez.serialize(TEMPLATE_BARRIER_REFRESH);
-        rez.serialize<size_t>(nit->second.size());
-        for (std::map<ApEvent,ApBarrier>::const_iterator it = 
-              nit->second.begin(); it != nit->second.end(); it++)
+        if (nit->first != local_shard)
         {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(nit->first);
+          rez.serialize(template_index);
+          rez.serialize(TEMPLATE_BARRIER_REFRESH);
+          rez.serialize<size_t>(nit->second.size());
+          for (std::map<ApEvent,ApBarrier>::const_iterator it = 
+                nit->second.begin(); it != nit->second.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          manager->send_trace_update(nit->first, rez);
         }
-        manager->send_trace_update(nit->first, rez);
+        else
+        {
+          local_refreshed = nit->second.size();
+          for (std::map<ApEvent,ApBarrier>::const_iterator it =
+                nit->second.begin(); it != nit->second.end(); it++)
+          {
+            std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+              managed_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != managed_arrivals.end());
+#endif
+            for (unsigned idx = 0; idx < finder->second.size(); idx++)
+              finder->second[idx]->set_managed_barrier(it->second);
+          }
+        }
       }
       // Then wait for all our advances to be updated from other shards
       RtEvent replay_precondition;
@@ -8631,6 +8636,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!update_advances_ready.exists());
 #endif
+        if (local_refreshed > 0)
+          refreshed_barriers += local_refreshed;
         if (!pending_refresh_barriers.empty())
         {
           for (std::map<ApEvent,ApBarrier>::const_iterator it = 
@@ -8641,22 +8648,23 @@ namespace Legion {
               local_advances.find(it->first);
             if (finder == local_advances.end())
             {
-              std::map<ApEvent,BarrierArrival*>::const_iterator finder2 =
-                local_arrivals.find(it->first);
+              std::map<ApEvent,std::vector<BarrierArrival*> >::const_iterator 
+                finder2 = managed_arrivals.find(it->first);
 #ifdef DEBUG_LEGION
-              assert(finder2 != local_arrivals.end());
+              assert(finder2 != managed_arrivals.end());
 #endif
-              finder2->second->remote_refresh_barrier(it->second);
+              for (unsigned idx = 0; idx < finder2->second.size(); idx++)
+                finder2->second[idx]->set_managed_barrier(it->second);
             }
             else
-              finder->second->refresh_barrier(it->second);
+              finder->second->remote_refresh_barrier(it->second);
           }
           refreshed_barriers += pending_refresh_barriers.size();
 
           pending_refresh_barriers.clear();
         }
         const size_t expected = 
-          local_advances.size() + local_arrivals.size();
+          local_advances.size() + managed_arrivals.size();
 #ifdef DEBUG_LEGION
         assert(refreshed_barriers <= expected);
 #endif
@@ -8706,7 +8714,7 @@ namespace Legion {
       // Skip the any events that are from remote shards since we  
       std::set<ApEvent> all_events;
       std::set<ApEvent> local_barriers;
-      for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
             managed_barriers.begin(); it != managed_barriers.end(); it++)
         local_barriers.insert(it->second->get_current_barrier());
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
@@ -9864,24 +9872,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, ApBarrier bar,
-                                   unsigned _lhs, size_t arrivals, bool manage)
+                     unsigned _lhs, unsigned _rhs, size_t arrivals, bool manage)
       : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
-        lhs(_lhs), total_arrivals(arrivals), managed(manage)
+        lhs(_lhs), rhs(_rhs), total_arrivals(arrivals), managed(manage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    BarrierArrival::~BarrierArrival(void)
-    //--------------------------------------------------------------------------
-    {
-      // Destroy our barrier if we're managing it
       if (managed)
-        barrier.destroy_barrier();
-    }
+        Runtime::advance_barrier(barrier);
+    } 
 
     //--------------------------------------------------------------------------
     void BarrierArrival::execute(std::vector<ApEvent> &events,
@@ -9893,14 +9894,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
 #endif
-      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
-            rhs.begin(); it != rhs.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->first < events.size());
-#endif
-        Runtime::phase_barrier_arrive(barrier, it->second, events[it->first]);
-      }
+      Runtime::phase_barrier_arrive(barrier, total_arrivals, events[rhs]);
       events[lhs] = barrier;
       if (managed)
         Runtime::advance_barrier(barrier);
@@ -9913,55 +9907,16 @@ namespace Legion {
       std::stringstream ss; 
       ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
          << std::hex << barrier.id << std::dec << ", events["; 
-      bool first = true;
-      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
-            rhs.begin(); it != rhs.end(); it++)
-      {
-        if (first)
-          first = false;
-        else
-          ss << ", ";
-        ss << "(" << it->first << "," << it->second << ")";
-      }
-      ss << "], managed : " << (managed ? "yes" : "no") << ")";
+      ss << rhs << "], managed : " << (managed ? "yes" : "no") << ")";
       return ss.str();
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier BarrierArrival::record_subscribed_shard(ShardID remote_shard)
+    void BarrierArrival::set_collective_barrier(ApBarrier newbar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(managed);
-#endif
-      subscribed_shards.push_back(remote_shard);
-      return barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    void BarrierArrival::refresh_barrier(ApEvent key, 
-                  std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(managed);
-#endif
-      // Destroy the old barrier
-      barrier.destroy_barrier();
-      // Make the new barrier
-      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
-      for (std::vector<ShardID>::const_iterator it = 
-            subscribed_shards.begin(); it != subscribed_shards.end(); it++)
-        notifications[*it][key] = barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    void BarrierArrival::remote_refresh_barrier(ApBarrier newbar)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(managed);
-      assert(subscribed_shards.empty()); 
+      assert(!managed);
 #endif
       barrier = newbar;
     }
@@ -9976,36 +9931,29 @@ namespace Legion {
       barrier = newbar;
     }
 
-    //--------------------------------------------------------------------------
-    void BarrierArrival::record_arrival(unsigned rhs_, unsigned arrivals)
-    //--------------------------------------------------------------------------
-    {
-      // See if we already have an arrival
-      for (std::vector<std::pair<unsigned,unsigned> >::iterator it =
-            rhs.begin(); it != rhs.end(); it++)
-      {
-        if (it->first != rhs_)
-          continue;
-        it->second += arrivals;
-        return;
-      }
-      // If we get here we didn't find it so add it
-      rhs.push_back(std::make_pair(rhs_, arrivals));
-    }
-
     /////////////////////////////////////////////////////////////
     // BarrierAdvance
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    BarrierAdvance::BarrierAdvance(PhysicalTemplate &tpl,
-                                   ApBarrier bar, unsigned _lhs) 
-      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), lhs(_lhs)
+    BarrierAdvance::BarrierAdvance(PhysicalTemplate &tpl, ApBarrier bar, 
+                                  unsigned _lhs, size_t arrival_count, bool own) 
+      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
+        lhs(_lhs), total_arrivals(arrival_count), owner(own)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    BarrierAdvance::~BarrierAdvance(void)
+    //--------------------------------------------------------------------------
+    {
+      // Destroy our barrier if we're managing it
+      if (owner)
+        barrier.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -10018,8 +9966,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
 #endif
-      events[lhs] = barrier;
       Runtime::advance_barrier(barrier);
+      events[lhs] = barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -10030,6 +9978,45 @@ namespace Legion {
       ss << "events[" << lhs << "] = Runtime::barrier_advance("
          << std::hex << barrier.id << std::dec << ")";
       return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier BarrierAdvance::record_subscribed_shard(ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner);
+#endif
+      subscribed_shards.push_back(remote_shard);
+      return barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierAdvance::refresh_barrier(ApEvent key, 
+                  std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner);
+#endif
+      // Destroy the old barrier
+      barrier.destroy_barrier();
+      // Make the new barrier
+      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      for (std::vector<ShardID>::const_iterator it = 
+            subscribed_shards.begin(); it != subscribed_shards.end(); it++)
+        notifications[*it][key] = barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierAdvance::remote_refresh_barrier(ApBarrier newbar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!owner);
+      assert(subscribed_shards.empty()); 
+#endif
+      barrier = newbar;
     }
 
   }; // namespace Internal 
