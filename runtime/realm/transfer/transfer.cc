@@ -3552,6 +3552,8 @@ namespace Realm {
   template <int N2, typename T2>
   IndirectionInfo *CopyIndirection<N,T>::Unstructured<N2,T2>::create_info(const IndexSpace<N,T>& is) const
   {
+    // The next indirection is not allowed to be specified yet.
+    assert(next_indirection == nullptr);
     return new IndirectionInfoTyped<N,T,N2,T2>(is, *this);
   }
 
