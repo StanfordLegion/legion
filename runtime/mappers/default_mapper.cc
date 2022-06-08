@@ -2589,6 +2589,8 @@ namespace Legion {
       log_mapper.spew("Default select_sharding_functor for Task in %s",
                       get_mapper_name());
       output.chosen_functor = 0; // use the default functor
+      // don't do any slicing for tasks that are already sharded
+      output.slice_recurse = false;
     }
 
     //--------------------------------------------------------------------------
