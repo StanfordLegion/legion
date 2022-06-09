@@ -1541,7 +1541,7 @@ namespace Legion {
           runtime->weak_find_distributed_collectable(did));
       if (manager != NULL)
       {
-        if (acquired)
+        if (acquired || !manager->is_owner())
         {
           LocalReferenceMutator mutator;
           // Should be guaranteed to be able to acquire thi
@@ -7576,10 +7576,9 @@ namespace Legion {
         AutoLock i_lock(inst_lock);
         for (unsigned r = 0; r < total_ranks; r++)
         {
-          const std::pair<uint64_t,int> key(allreduce_tag, 
-                (stage != -2) ? expected_ranks[r] : stage);
-          std::map<std::pair<uint64_t,int>,AllReduceCopy>::iterator
-            finder = all_reduce_copies.find(key);
+          const CopyKey key(allreduce_tag, expected_ranks[r], stage);
+          std::map<CopyKey,AllReduceCopy>::iterator finder =
+            all_reduce_copies.find(key);
           if (finder != all_reduce_copies.end())
           {
             to_perform.emplace_back(std::move(finder->second));
@@ -7672,14 +7671,7 @@ namespace Legion {
         finder = remaining_stages.find(stage_key);
         if (finder == remaining_stages.end())
         {
-          // The local node hasn't issue this stage yet so save ourselves
-          // In general we only get one message from each src_rank except
-          // for in the single allreduce case where we could get multiple
-          // for stages -1 (start) and -2 (finish), in this case of the
-          // -2 stage we know we'll only get one message so we can use
-          // that as part of the key
-          std::pair<uint64_t,int> key(allreduce_tag, 
-                  (stage != -2) ? src_rank : stage);
+          const CopyKey key(allreduce_tag, src_rank, stage);
 #ifdef DEBUG_LEGION
           assert(all_reduce_copies.find(key) == all_reduce_copies.end());
 #endif
@@ -7740,8 +7732,13 @@ namespace Legion {
         AutoLock i_lock(inst_lock);
         // Save any applied events that we have
         if (!applied_events.empty())
+        {
           finder->second.applied_events.insert(
               applied_events.begin(), applied_events.end());
+#ifdef DEBUG_LEGION
+          applied_events.clear();
+#endif
+        }
 #ifdef DEBUG_LEGION
         assert(!finder->second.remaining_postconditions.empty());
 #endif

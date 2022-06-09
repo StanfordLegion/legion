@@ -1349,6 +1349,26 @@ namespace Legion {
       };
       std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     protected:
+      struct CopyKey {
+      public:
+        CopyKey(void) : tag(0), rank(0), stage(0) { }
+        CopyKey(uint64_t t, int r, int s) : tag(t), rank(r), stage(s) { }
+      public:
+        inline bool operator==(const CopyKey &rhs) const
+        { return (tag == rhs.tag) &&
+            (rank == rhs.rank) && (stage == rhs.stage); }
+        inline bool operator<(const CopyKey &rhs) const
+        {
+          if (tag < rhs.tag) return true;
+          if (tag > rhs.tag) return false;
+          if (rank < rhs.rank) return true;
+          if (rank > rhs.rank) return false;
+          return (stage < rhs.stage);
+        }
+      public:
+        uint64_t tag;
+        int rank, stage;
+      };
       struct AllReduceCopy {
         std::vector<CopySrcDstField> src_fields;
         ApEvent src_precondition;
@@ -1356,7 +1376,7 @@ namespace Legion {
         ApBarrier barrier_postcondition;
         ShardID barrier_shard;
       };
-      std::map<std::pair<uint64_t,int>,AllReduceCopy> all_reduce_copies;
+      std::map<CopyKey,AllReduceCopy> all_reduce_copies;
       struct AllReduceStage {
         Operation *op;
         IndexSpaceExpression *copy_expression;
