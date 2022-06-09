@@ -1101,9 +1101,15 @@ namespace Legion {
       // a task in a control-replicated root task
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
-      if ((task.tag & SAME_ADDRESS_SPACE) != 0 || same_address_space ||
-          (replication_enabled && (task.get_depth() == 1)))
+      if (((task.tag & SAME_ADDRESS_SPACE) != 0) || same_address_space)
 	all_procs.local_address_space();
+      else if (replication_enabled && (task.get_depth() == 1))
+      {
+        // Check to see if the parent task is control replicated
+        const Task *parent = task.get_parent_task();
+        if ((parent != NULL) && (parent->get_total_shards() > 1))
+          all_procs.local_address_space();
+      }
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 
       switch (input.domain.get_dim())
