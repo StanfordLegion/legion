@@ -10067,7 +10067,8 @@ class Indirections(object):
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
                  'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'src_indirections',
-                 'dst_indirections', 'redops', 'across', 'node_name']
+                 'dst_indirections', 'redops', 'across', 'node_name',
+                 'pending_fields', 'pending_indirections']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -10084,6 +10085,8 @@ class RealmCopy(RealmBase):
         self.redops = list()
         self.across = None
         self.node_name = 'realm_copy_'+str(realm_num)
+        self.pending_fields = list()
+        self.pending_indirections = list()
 
     def __str__(self):
         if self.indirections:
@@ -10150,7 +10153,12 @@ class RealmCopy(RealmBase):
         assert new_creator is not self.creator
         self.creator = new_creator
 
-    def add_field(self, src_fid, src, dst_fid, dst, redop):
+    def add_field(self, src_fid, src, dst_fid, dst, redop, first=True):
+        if first:
+            # Defer the first time since the field spaces might not be
+            # available on the instances yet
+            self.pending_fields.append((src_fid, src, dst_fid, dst, redop, False))
+            return
         # Always get the fields from the source and destination regions
         # which is especially important for handling cross-region copies
         src_field = src.field_space.get_field(src_fid)
@@ -10161,7 +10169,12 @@ class RealmCopy(RealmBase):
         self.dsts.append(dst)
         self.redops.append(redop)
 
-    def add_indirect_field(self, src_fid, src, src_index, dst_fid, dst, dst_index, redop):
+    def add_indirect_field(self, src_fid, src, src_index, dst_fid, dst, dst_index, redop, first=True):
+        if first:
+            # Defer the first time since the field spaces might not be
+            # available on the instances or the indirections yet
+            self.pending_indirections.append((src_fid, src, src_index, dst_fid, dst, dst_index, redop, False))
+            return
         assert self.indirections is not None
         if src_index >= 0:
             assert src is None
@@ -10188,6 +10201,14 @@ class RealmCopy(RealmBase):
             self.dsts.append(dst)
             self.dst_indirections.append(None)
         self.redops.append(redop)
+
+    def update_fields(self):
+        for pending in self.pending_fields:
+            self.add_field(*pending)
+        self.pending_fields = None
+        for pending in self.pending_indirections:
+            self.add_indirect_field(*pending)
+        self.pending_indirections = None
 
     def find_src_inst(self, src_field):
         assert len(self.src_fields) == len(self.srcs)
@@ -12372,6 +12393,9 @@ class State(object):
         # Update the futures
         for future in itervalues(self.futures):
             future.update_creator_and_users()     
+        # Update copy and fill fields
+        for copy in itervalues(self.copies):
+            copy.update_fields()
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
