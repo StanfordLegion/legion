@@ -7198,22 +7198,21 @@ namespace Legion {
         // Check to see if we have the valid data or not
         if ((collective_stages % 2) == local_offset)
         {
-          // We have the valid data, send it to up two 
+          // We have the valid data, send it to up to two 
           // non-participants as well as our partner
           // If we're odd then make us even and vice-versa
           int partner_index = local_index + ((local_offset == 0) ? 1 : -1);
           const AddressSpaceID partner = (*collective_mapping)[partner_index];
           std::vector<AddressSpaceID> targets(1, partner);
           // Check for the two non-participants
-          const int nonpart_index = local_index + 2*participating_ranks;
-          for (int offset = 0; offset < 2; offset++)
-          {
-            const int target_index = nonpart_index + offset;
-            if (target_index >= int(collective_mapping->size()))
-              break;
-            targets.push_back((*collective_mapping)[target_index]);
-          }
-          send_allreduce_stage(allreduce_tag, -1/*stage*/, local_rank,
+          const unsigned offset = 2*participating_ranks;
+          const unsigned one = offset + local_index;
+          if (one < collective_mapping->size())
+            targets.push_back((*collective_mapping)[one]);
+          const unsigned two = offset + partner_index;
+          if (two < collective_mapping->size())
+            targets.push_back((*collective_mapping)[two]);
+          send_allreduce_stage(allreduce_tag, -2/*stage*/, local_rank,
               instance_preconditions[0], predicate_guard, copy_expression,
               trace_info, local_fields[0], &targets.front(), targets.size(),
               local_final_events);
@@ -7225,7 +7224,7 @@ namespace Legion {
           std::vector<ApEvent> dst_events;
           // No reservations since this is a straight copy
           const std::vector<Reservation> no_reservations;
-          receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
+          receive_allreduce_stage(allreduce_tag, -2/*stage*/, op,
               instance_preconditions[0], predicate_guard, copy_expression,
               copy_mask, trace_info, applied_events, local_fields[0],
               no_reservations, &local_rank, 1/*total ranks*/, dst_events);
@@ -7274,7 +7273,7 @@ namespace Legion {
         // No reservations since this is a straight copy
         const std::vector<Reservation> no_reservations;
         std::vector<ApEvent> dst_events;
-        receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
+        receive_allreduce_stage(allreduce_tag, -2/*stage*/, op,
             instance_preconditions[0], predicate_guard, copy_expression,
             copy_mask, trace_info, applied_events, local_fields[0],
             no_reservations, &target_rank, 1/*total ranks*/, dst_events);
@@ -7568,13 +7567,17 @@ namespace Legion {
                             std::vector<ApEvent> &dst_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((stage != -2) || (total_ranks == 1));
+#endif
       std::vector<AllReduceCopy> to_perform;
       {
         unsigned remaining = 0;
         AutoLock i_lock(inst_lock);
         for (unsigned r = 0; r < total_ranks; r++)
         {
-          const std::pair<uint64_t,int> key(allreduce_tag, expected_ranks[r]);
+          const std::pair<uint64_t,int> key(allreduce_tag, 
+                (stage != -2) ? expected_ranks[r] : stage);
           std::map<std::pair<uint64_t,int>,AllReduceCopy>::iterator
             finder = all_reduce_copies.find(key);
           if (finder != all_reduce_copies.end())
@@ -7670,7 +7673,13 @@ namespace Legion {
         if (finder == remaining_stages.end())
         {
           // The local node hasn't issue this stage yet so save ourselves
-          std::pair<uint64_t,int> key(allreduce_tag, src_rank);
+          // In general we only get one message from each src_rank except
+          // for in the single allreduce case where we could get multiple
+          // for stages -1 (start) and -2 (finish), in this case of the
+          // -2 stage we know we'll only get one message so we can use
+          // that as part of the key
+          std::pair<uint64_t,int> key(allreduce_tag, 
+                  (stage != -2) ? src_rank : stage);
 #ifdef DEBUG_LEGION
           assert(all_reduce_copies.find(key) == all_reduce_copies.end());
 #endif
@@ -7909,7 +7918,7 @@ namespace Legion {
             src_fields[0].inst, local_fields[0].inst,
             src_inst_did, did, copy_mask, copy_mask,
             0/*redop*/, applied_events);
-      Runtime::trigger_event(&local_info, copy_done, copy_post);
+      Runtime::trigger_event(&trace_info, copy_done, copy_post);
       // Always record the writer to ensure later reads catch it
       dst_view->add_copy_user(false/*reading*/, 0/*redop*/, copy_post,
           local_info.get_collect_event(), copy_mask, copy_expression,
