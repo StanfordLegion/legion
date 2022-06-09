@@ -496,11 +496,10 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         assert os.path.exists(llvm_build_result)
 
     terra_dir = os.path.join(prefix_dir, 'terra.build')
-    terra_build_dir = os.path.join(terra_dir, 'build', 'bin')
     terra_build_result = os.path.join(terra_dir, 'release', 'bin', 'terra')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, terra_url, terra_branch)
-    if not os.path.exists(terra_build_dir):
+    if not os.path.exists(terra_build_result):
         try:
             build_terra(terra_dir, terra_branch, terra_lua, terra_use_cmake, cmake_exe, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
