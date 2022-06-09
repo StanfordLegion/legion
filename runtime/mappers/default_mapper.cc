@@ -1097,9 +1097,12 @@ namespace Legion {
 #if 1
       // The two-level decomposition doesn't work so for now do a
       // simple one-level decomposition across all the processors.
+      // Unless we're doing same address space mapping or this is
+      // a task in a control-replicated root task
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
-      if ((task.tag & SAME_ADDRESS_SPACE) != 0 || same_address_space)
+      if ((task.tag & SAME_ADDRESS_SPACE) != 0 || same_address_space ||
+          (replication_enabled && (task.get_depth() == 1)))
 	all_procs.local_address_space();
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 
