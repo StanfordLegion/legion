@@ -5997,7 +5997,22 @@ namespace Legion {
       // Do this first in case it gets pre-empted
       const unsigned rhs_ = 
         rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
+#ifdef DEBUG_LEGION
+      // Make sure we're always recording user events on the same shard
+      // where the create user event is recorded
+      unsigned lhs_ = UINT_MAX;
+      for (std::map<unsigned,ApUserEvent>::const_iterator it =
+            user_events.begin(); it != user_events.end(); it++)
+      {
+        if (it->second != lhs)
+          continue;
+        lhs_ = it->first;
+        break;
+      }
+      assert(lhs_ != UINT_MAX);
+#else
       unsigned lhs_ = find_event(lhs, tpl_lock);
+#endif
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_, tlid));
     }
@@ -6662,7 +6677,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent replay_precondition;
-      if (++total_replays == Realm::Barrier::MAX_PHASES)
+      if (total_replays++ == Realm::Barrier::MAX_PHASES)
       {
         replay_precondition = refresh_managed_barriers();
         // Reset it back to one after updating our barriers
@@ -7321,10 +7336,6 @@ namespace Legion {
 #else
       const unsigned bar_ = convert_event(bar);
 #endif
-      // Use a NO_BARRIER here since it is going to be filled in on each replay
-      // by an operation that will provide the name of the barrier to use
-      // Technically using 'arrivals' here for total arrivals is wrong, but
-      // it doesn't really matter since we aren't managing this barrier anyway
       BarrierArrival *arrival =
         new BarrierArrival(*this, bar, bar_, pre_, arrivals, false/*managed*/);
       insert_instruction(arrival);
@@ -7572,7 +7583,7 @@ namespace Legion {
         const unsigned index = convert_event(event);
 #endif
         BarrierAdvance *advance =
-          new BarrierAdvance(*this, barrier, index,1/*count*/,false/*managed*/);
+          new BarrierAdvance(*this, barrier, index, 1/*count*/, false/*owner*/);
         insert_instruction(advance); 
         local_advances[event] = advance;
         // Don't remove it, just set it to NO_EVENT so we can tell the names
@@ -9945,6 +9956,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
 #endif
+      if (owner)
+        Runtime::advance_barrier(barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -9966,8 +9979,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
 #endif
-      Runtime::advance_barrier(barrier);
       events[lhs] = barrier;
+      Runtime::advance_barrier(barrier);
     }
 
     //--------------------------------------------------------------------------
