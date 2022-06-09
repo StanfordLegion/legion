@@ -2090,6 +2090,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardID RemoteTaskOp::get_local_shard(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We're mapping a point task if we've made one of these
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RemoteTaskOp::get_total_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We're mapping a point task if we've made one of these
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteTaskOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -7582,6 +7598,13 @@ namespace Legion {
     {
       // Shards have already been sliced down to single points
       return Domain(index_point, index_point);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShardTask::get_total_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->total_shards;
     }
 
     //--------------------------------------------------------------------------

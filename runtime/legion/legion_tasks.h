@@ -364,6 +364,8 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual Domain get_slice_domain(void) const;
+      virtual ShardID get_local_shard(void) const;
+      virtual size_t get_total_shards(void) const;
       virtual void set_context_index(size_t index);
     public:
       virtual const char* get_logging_name(void) const;
@@ -653,6 +655,8 @@ namespace Legion {
       virtual void deactivate(void) = 0;
       virtual bool is_reducing_future(void) const { return (redop > 0); }
       virtual Domain get_slice_domain(void) const;
+      virtual ShardID get_local_shard(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -761,6 +765,8 @@ namespace Legion {
       void deactivate_individual_task(void);
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
       virtual Domain get_slice_domain(void) const { return Domain::NO_DOMAIN; }
+      virtual ShardID get_local_shard(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
@@ -878,6 +884,8 @@ namespace Legion {
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
       virtual Domain get_slice_domain(void) const 
         { return Domain(index_point,index_point); }
+      virtual ShardID get_local_shard(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
       virtual bool is_reducing_future(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
@@ -979,6 +987,8 @@ namespace Legion {
       virtual void activate(void); 
       virtual void deactivate(void);
       virtual Domain get_slice_domain(void) const;
+      virtual ShardID get_local_shard(void) const { return shard_id; }
+      virtual size_t get_total_shards(void) const;
       virtual SingleTask* get_origin_task(void) const 
         { assert(false); return NULL; }
       virtual bool is_shard_task(void) const { return true; }

@@ -727,6 +727,14 @@ namespace Legion {
         assert(false);
         return Domain::NO_DOMAIN;
       }
+      virtual ShardID get_local_shard(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual size_t get_total_shards(void) const {
+        assert(false);
+        return 1;
+      };
     };
 };
 

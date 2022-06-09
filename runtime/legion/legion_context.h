@@ -2669,6 +2669,8 @@ namespace Legion {
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
+      virtual ShardID get_local_shard(void) const;
+      virtual size_t get_total_shards(void) const;
       virtual bool has_trace(void) const;
     public:
       RemoteContext *const owner;

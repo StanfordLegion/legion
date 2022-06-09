@@ -105,6 +105,8 @@ namespace Legion {
         virtual const Legion::Task* get_parent_task(void) const;
         virtual const char* get_task_name(void) const;
         virtual Domain get_slice_domain(void) const;
+        virtual ShardID get_local_shard(void) const;
+        virtual size_t get_total_shards(void) const;
         virtual bool has_trace(void) const;
       public:
         inline UniqueID get_unique_task_id(void) const { return unique_id; }

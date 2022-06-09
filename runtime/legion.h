@@ -4031,6 +4031,10 @@ namespace Legion {
       // task is operating over. This method will only return a
       // valid domain if this is part of an index space task.
       virtual Domain get_slice_domain(void) const = 0;
+      // See comments below on the use of methods regarding
+      // the shards for a task for control replication
+      virtual ShardID get_local_shard(void) const = 0;
+      virtual size_t get_total_shards(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_TASK_MAPPABLE; }
