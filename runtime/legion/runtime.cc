@@ -6647,6 +6647,7 @@ namespace Legion {
         task = shard_manager->create_shard(shard, proxy);
       }
       top_context->increment_pending();
+      implicit_context = top_context;
       task->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
       task->complete_mapping();
       task->resolve_speculation();
@@ -6748,6 +6749,8 @@ namespace Legion {
           runtime->send_control_replicate_implicit_response(it->first, rez);
         }
       }
+      if (manager_ready.exists())
+        Runtime::trigger_event(manager_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -29651,8 +29654,6 @@ namespace Legion {
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
-      // Save the context in the implicit context
-      implicit_context = top_context;
       // Add a reference to the top level context
       top_context->add_reference();
       // Set the executing processor
@@ -29821,6 +29822,7 @@ namespace Legion {
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/);
+      implicit_context = NULL;
     }
 
     //--------------------------------------------------------------------------
