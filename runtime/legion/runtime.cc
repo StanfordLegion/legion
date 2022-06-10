@@ -16150,7 +16150,7 @@ namespace Legion {
                               "'shard_points' for control replicated task.",
                               sharding_id)
         const coord_t shard = result[0];
-        if ((shard < 0) || (manager->total_shards <= shard))
+        if ((shard < 0) || (manager->total_shards <= size_t(shard)))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                               "Illegal output shard %lld from sharding functor "
                               "%d. Shards for this index space launch must be "
