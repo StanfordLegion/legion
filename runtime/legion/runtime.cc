@@ -24367,18 +24367,12 @@ namespace Legion {
           }
         case LG_PART_INDEPENDENCE_TASK_ID:
           {
-            IndexSpaceNode::DynamicIndependenceArgs *dargs = 
-              (IndexSpaceNode::DynamicIndependenceArgs*)args;
-            IndexSpaceNode::handle_disjointness_test(
-                dargs->parent, dargs->left, dargs->right);
+            IndexSpaceNode::handle_disjointness_test(args);
             break;
           }
         case LG_SPACE_INDEPENDENCE_TASK_ID:
           {
-            IndexPartNode::DynamicIndependenceArgs *dargs = 
-              (IndexPartNode::DynamicIndependenceArgs*)args;
-            IndexPartNode::handle_disjointness_test(
-                dargs->parent, dargs->left, dargs->right);
+            IndexPartNode::handle_disjointness_test(args);
             break;
           }
         case LG_PENDING_CHILD_TASK_ID:

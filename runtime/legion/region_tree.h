@@ -1941,9 +1941,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_PART_INDEPENDENCE_TASK_ID;
       public:
         DynamicIndependenceArgs(IndexSpaceNode *par, 
-                                IndexPartNode *l, IndexPartNode *r)
-          : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-            parent(par), left(l), right(r) { }
+                                IndexPartNode *l, IndexPartNode *r);
       public:
         IndexSpaceNode *const parent;
         IndexPartNode *const left, *const right;
@@ -2069,9 +2067,7 @@ namespace Legion {
                                LegionColor c1, LegionColor c2);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
     public:
-      static void handle_disjointness_test(IndexSpaceNode *parent,
-                                           IndexPartNode *left,
-                                           IndexPartNode *right); 
+      static void handle_disjointness_test(const void *args);
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,
@@ -2829,9 +2825,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_SPACE_INDEPENDENCE_TASK_ID;
       public:
         DynamicIndependenceArgs(IndexPartNode *par, 
-                                IndexSpaceNode *l, IndexSpaceNode *r)
-          : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-            parent(par), left(l), right(r) { }
+                                IndexSpaceNode *l, IndexSpaceNode *r);
       public:
         IndexPartNode *const parent;
         IndexSpaceNode *const left, *const right;
@@ -2986,9 +2980,7 @@ namespace Legion {
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
     public:
-      static void handle_disjointness_test(IndexPartNode *parent,
-                                           IndexSpaceNode *left,
-                                           IndexSpaceNode *right);
+      static void handle_disjointness_test(const void *args);
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,

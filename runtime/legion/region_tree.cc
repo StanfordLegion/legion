@@ -8685,12 +8685,32 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_disjointness_test(
-              IndexSpaceNode *parent, IndexPartNode *left, IndexPartNode *right)
+    IndexSpaceNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
+                        IndexSpaceNode *par, IndexPartNode *l, IndexPartNode *r)
+      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+        parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
-      const bool disjoint = !left->intersects_with(right);
-      parent->record_disjointness(disjoint, left->color, right->color);
+      left->add_base_resource_ref(META_TASK_REF);
+      right->add_base_resource_ref(META_TASK_REF);
+      parent->add_base_resource_ref(META_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_disjointness_test(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DynamicIndependenceArgs *dargs =
+        (const DynamicIndependenceArgs*)args;
+      const bool disjoint = !dargs->left->intersects_with(dargs->right);
+      dargs->parent->record_disjointness(disjoint, dargs->left->color,
+                                         dargs->right->color);
+      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->left;
+      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->right;
+      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->parent;
     } 
 
     //--------------------------------------------------------------------------
@@ -10824,12 +10844,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/void IndexPartNode::handle_disjointness_test(
-             IndexPartNode *parent, IndexSpaceNode *left, IndexSpaceNode *right)
+    IndexPartNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
+                       IndexPartNode *par, IndexSpaceNode *l, IndexSpaceNode *r)
+      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+        parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
-      bool disjoint = !left->intersects_with(right);
-      parent->record_disjointness(disjoint, left->color, right->color);
+      left->add_base_resource_ref(META_TASK_REF);
+      right->add_base_resource_ref(META_TASK_REF);
+      parent->add_base_resource_ref(META_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void IndexPartNode::handle_disjointness_test(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DynamicIndependenceArgs *dargs =
+        (const DynamicIndependenceArgs*)args;
+      bool disjoint = !dargs->left->intersects_with(dargs->right);
+      dargs->parent->record_disjointness(disjoint, dargs->left->color,
+                                         dargs->right->color);
+      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->left;
+      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->right;
+      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->parent;
     }
 
     //--------------------------------------------------------------------------
