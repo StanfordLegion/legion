@@ -7130,6 +7130,8 @@ namespace Legion {
           for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
             unstructured->spaces[idx] =
               indirect_records[nonempty_indexes[idx]].domain;
+          // No next indirections yet...
+          unstructured->next_indirection = NULL;
           indirect_index = indirections.size();
           indirections.push_back(unstructured);
 #ifdef LEGION_SPY
