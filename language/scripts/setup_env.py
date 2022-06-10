@@ -94,7 +94,7 @@ def git_clone(repo_dir, url, branch=None, commit_id=None):
     if branch is not None:
         assert commit_id is None
         subprocess.check_call(['git', 'clone', '-b', branch, url, repo_dir])
-    elif commid_id is not None:
+    elif commit_id is not None:
         subprocess.check_call(['git', 'clone', url, repo_dir])
         subprocess.check_call(['git', '-C', repo_dir, 'checkout', commit_id])
     else:
