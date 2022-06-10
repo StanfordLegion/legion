@@ -16186,7 +16186,7 @@ namespace Legion {
           functor->shard(point, sharding_space, manager->total_shards);
         if (manager->total_shards <= shard)
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
-                              "Illegal output shard %lld from sharding "
+                              "Illegal output shard %d from sharding "
                               "functor %d. Shards for this index space "
                               "launch must be between 0 and %zd (exclusive).",
                               shard, sharding_id, manager->total_shards)
