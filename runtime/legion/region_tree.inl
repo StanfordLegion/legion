@@ -5964,7 +5964,6 @@ namespace Legion {
         context->find_launch_space_domain(shard_space, sharding_domain);
       else
         sharding_domain = local_space;
-      ShardManager *manager = func->manager;
       std::vector<Realm::Point<DIM,T> > index_points; 
       if (!func->functor->is_invertible())
       {
