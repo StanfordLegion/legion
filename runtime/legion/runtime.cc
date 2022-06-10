@@ -16123,7 +16123,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
               RegionTreeForest *f, ShardManager *m, ShardingID id)
-      : functor(func), forest(f), manager(m), sharding_id(id)
+      : functor(func), forest(f), manager(m), sharding_id(id),
+        use_points(func->use_points())
     //--------------------------------------------------------------------------
     {
     }
@@ -16139,41 +16140,57 @@ namespace Legion {
                                          const Domain &sharding_space)
     //--------------------------------------------------------------------------
     {
-      const DomainPoint result = functor->shard(point, sharding_space,
-                          manager->shard_points, manager->shard_domain);
-      if (manager->isomorphic_points)
+      if (use_points)
       {
-        if (result.get_dim() != 1)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
-                              "Illegal output from sharding functor %d. "
-                              "Shards must be contained in the set of "
-                              "'shard_points' for control replicated task.",
-                              sharding_id)
-        const coord_t shard = result[0];
-        if ((shard < 0) || (manager->total_shards <= size_t(shard)))
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
-                              "Illegal output shard %lld from sharding functor "
-                              "%d. Shards for this index space launch must be "
-                              "between 0 and %zd (exclusive).", shard,
-                              sharding_id, manager->total_shards)
-        return result[0];
+        const DomainPoint result = functor->shard_points(point, sharding_space,
+                                  manager->shard_points, manager->shard_domain);
+        if (manager->isomorphic_points)
+        {
+          if (result.get_dim() != 1)
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                                "Illegal output from sharding functor %d. "
+                                "Shards must be contained in the set of "
+                                "'shard_points' for control replicated task.",
+                                sharding_id)
+          const coord_t shard = result[0];
+          if ((shard < 0) || (manager->total_shards <= size_t(shard)))
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                                "Illegal output shard %lld from sharding "
+                                "functor %d. Shards for this index space "
+                                "launch must be between 0 and %zd (exclusive).",
+                                shard, sharding_id, manager->total_shards)
+          return result[0];
+        }
+        else
+        {
+          std::vector<DomainPoint>::const_iterator finder = 
+            std::lower_bound(manager->sorted_points.begin(),
+                             manager->sorted_points.end(), result);
+          if (finder == manager->sorted_points.end())
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                                "Illegal output from sharding functor %d. "
+                                "Shards must be contained in the set of "
+                                "'shard_points' for control replicated task.",
+                                sharding_id)
+          const unsigned offset =
+            std::distance(manager->sorted_points.begin(), finder);
+#ifdef DEBUG_LEGION
+          assert(offset < manager->shard_lookup.size());
+#endif
+          return manager->shard_lookup[offset];
+        }
       }
       else
       {
-        std::vector<DomainPoint>::const_iterator finder = 
-          std::lower_bound(manager->sorted_points.begin(),
-                           manager->sorted_points.end(), result);
-        if (finder == manager->sorted_points.end())
+        const ShardID shard =
+          functor->shard(point, sharding_space, manager->total_shards);
+        if (manager->total_shards <= shard)
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
-                              "Illegal output from sharding functor %d. "
-                              "Shards must be contained in the set of "
-                              "'shard_points' for control replicated task.",
-                              sharding_id)
-        unsigned offset = std::distance(manager->sorted_points.begin(), finder);
-#ifdef DEBUG_LEGION
-        assert(offset < manager->shard_lookup.size());
-#endif
-        return manager->shard_lookup[offset];
+                              "Illegal output shard %lld from sharding "
+                              "functor %d. Shards for this index space "
+                              "launch must be between 0 and %zd (exclusive).",
+                              shard, sharding_id, manager->total_shards)
+        return shard;
       }
     }
 

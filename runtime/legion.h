@@ -4569,36 +4569,34 @@ namespace Legion {
       ShardingFunctor(void);
       virtual ~ShardingFunctor(void);
     public:
-      // This is the method the runtime will call so you only
-      // need to override this one
-      virtual DomainPoint shard(const DomainPoint &index_point,
-                                const Domain &index_domain,
-                                const std::vector<DomainPoint> &shard_points,
-                                const Domain &shard_domain);
-      // This is an older method that will be invoked if you haven't
-      // overridden the method above, so you can also just implement
-      // this if you prefer the simpler interface
+      // Indicate whether this functor wants to use the ShardID or 
+      // DomainPoint versions of these methods
+      virtual bool use_points(void) const { return false; }
+    public:
+      // The ShardID version of this method
       virtual ShardID shard(const DomainPoint &index_point,
                             const Domain &index_domain,
                             const size_t total_shards);
+      // The DomainPoint version of this method
+      virtual DomainPoint shard_points(const DomainPoint &index_point,
+                            const Domain &index_domain,
+                            const std::vector<DomainPoint> &shard_points,
+                            const Domain &shard_domain);
     public:
       virtual bool is_invertible(void) const { return false; }
-      // This is the method that the runtime will call so you
-      // only need to override this one
-      virtual void invert(const DomainPoint &shard_point,
-                          const std::vector<DomainPoint> &shard_points,
-                          const Domain &shard_domain,
-                          const Domain &index_domain,
-                          const Domain &sharding_domain,
-                          std::vector<DomainPoint> &index_points);
-      // This is an older method that will be invoked if you haven't
-      // overridden the method above, so you can also just implement
-      // this if you prefer the simpler interface
+      // The ShardID version of this method
       virtual void invert(ShardID shard,
                           const Domain &sharding_domain,
                           const Domain &index_domain,
                           const size_t total_shards,
                           std::vector<DomainPoint> &points);
+      // The DomainPoint version of this method
+      virtual void invert_points(const DomainPoint &shard_point,
+                          const std::vector<DomainPoint> &shard_points,
+                          const Domain &shard_domain,
+                          const Domain &index_domain,
+                          const Domain &sharding_domain,
+                          std::vector<DomainPoint> &index_points);
     };
 
     /**

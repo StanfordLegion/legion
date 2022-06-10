@@ -5983,8 +5983,12 @@ namespace Legion {
       else
       {
         std::vector<DomainPoint> domain_points;
-        func->functor->invert(shard_points[shard], shard_points, shard_domain,
-                          Domain(local_space), sharding_domain, domain_points);
+        if (func->use_points)
+          func->functor->invert_points(shard_points[shard], shard_points,
+             shard_domain, Domain(local_space), sharding_domain, domain_points);
+        else
+          func->functor->invert(shard, sharding_domain, Domain(local_space),
+                                shard_points.size(), domain_points);
         index_points.resize(domain_points.size());
         for (unsigned idx = 0; idx < domain_points.size(); idx++)
           index_points[idx] = Point<DIM,coord_t>(domain_points[idx]);

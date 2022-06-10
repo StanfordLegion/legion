@@ -2423,6 +2423,7 @@ namespace Legion {
       RegionTreeForest *const forest;
       ShardManager *const manager;
       const ShardingID sharding_id;
+      const bool use_points;
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;

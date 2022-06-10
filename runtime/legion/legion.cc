@@ -3926,49 +3926,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint ShardingFunctor::shard(const DomainPoint &index_point,
-                                   const Domain &index_domain,
-                                   const std::vector<DomainPoint> &shard_points,
-                                   const Domain &shard_domain)
-    //--------------------------------------------------------------------------
-    {
-      // invoke the old method in case users haven't overridden it
-      ShardID sid = shard(index_point, index_domain, shard_points.size());
-      return shard_points[sid];
-    }
-
-    //--------------------------------------------------------------------------
     ShardID ShardingFunctor::shard(const DomainPoint &index_point,
                                    const Domain &index_domain,
                                    const size_t total_shards)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
-          "Invocation of deprecated 'ShardingFunctor::shard' method "
+          "Invocation of 'ShardingFunctor::shard' method "
           "without a user-provided override");
       return 0;
     }
 
     //--------------------------------------------------------------------------
-    void ShardingFunctor::invert(const DomainPoint &shard_point,
-                                 const std::vector<DomainPoint> &shard_points,
-                                 const Domain &shard_domain,
-                                 const Domain &index_domain,
-                                 const Domain &sharding_domain,
-                                 std::vector<DomainPoint> &index_points)
+    DomainPoint ShardingFunctor::shard_points(const DomainPoint &index_point,
+                                   const Domain &index_domain,
+                                   const std::vector<DomainPoint> &shard_points,
+                                   const Domain &shard_domain)
     //--------------------------------------------------------------------------
     {
-      // Find the point in the shard points and call it
-      const size_t total_shards = shard_points.size();
-      for (unsigned idx = 0; idx < total_shards; idx++)
-      {
-        if (shard_points[idx] != shard_point)
-          continue;
-        invert(idx, sharding_domain, index_domain, total_shards, index_points);
-        return;
-      }
-      // Should never end up here
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::shard_points' method "
+          "without a user-provided override");
+      return DomainPoint();
     }
 
     //--------------------------------------------------------------------------
@@ -3980,7 +3959,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
-          "Invocation of deprecated 'ShardingFunctor::invert' method "
+          "Invocation of 'ShardingFunctor::invert' method "
+          "without a user-provided override");
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingFunctor::invert_points(const DomainPoint &shard_point,
+                                 const std::vector<DomainPoint> &shard_points,
+                                 const Domain &shard_domain,
+                                 const Domain &index_domain,
+                                 const Domain &sharding_domain,
+                                 std::vector<DomainPoint> &index_points)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of 'ShardingFunctor::invert_points' method "
           "without a user-provided override");
     }
     
