@@ -30281,6 +30281,26 @@ namespace Legion {
                       LG_STARTUP_TASK_ID);
         log_run.print("Legion endpoint task has Realm ID %d",
                       LG_ENDPOINT_TASK_ID);
+#ifdef LEGION_SEPARATE_META_TASKS
+        RUNTIME_CALL_DESCRIPTIONS(descs);
+        for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
+        {
+          if (idx == LG_MESSAGE_ID)
+          {
+            LG_MESSAGE_DESCRIPTIONS(msg_descs);
+            for (unsigned msg = 0; msg < LAST_SEND_KIND; msg++)
+              log_run.print("Legion message %s meta-task has Realm ID %d",
+                  msg_descs[msg], LG_TASK_ID+idx+msg);
+          }
+          else
+          {
+            log_run.print("Legion runtime %s meta-task has Realm ID %d",
+                descs[idx], LG_TASK_ID+idx);
+            log_run.print("Legion application %s meta-task has Realm ID %d",
+                descs[idx], LG_APP_PROC_TASK_ID+idx);
+          }
+        }
+#endif
       }
       return Runtime::merge_events(registered_events);
     }
@@ -31378,18 +31398,12 @@ namespace Legion {
           }
         case LG_PART_INDEPENDENCE_TASK_ID:
           {
-            IndexSpaceNode::DynamicIndependenceArgs *dargs = 
-              (IndexSpaceNode::DynamicIndependenceArgs*)args;
-            IndexSpaceNode::handle_disjointness_test(
-                dargs->parent, dargs->left, dargs->right);
+            IndexSpaceNode::handle_disjointness_test(args);
             break;
           }
         case LG_SPACE_INDEPENDENCE_TASK_ID:
           {
-            IndexPartNode::DynamicIndependenceArgs *dargs = 
-              (IndexPartNode::DynamicIndependenceArgs*)args;
-            IndexPartNode::handle_disjointness_test(
-                dargs->parent, dargs->left, dargs->right);
+            IndexPartNode::handle_disjointness_test(args);
             break;
           }
         case LG_POST_DECREMENT_TASK_ID:
