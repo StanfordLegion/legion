@@ -2094,7 +2094,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID RemoteTaskOp::get_local_shard(void) const
+    ShardID RemoteTaskOp::get_shard_id(void) const
     //--------------------------------------------------------------------------
     {
       // We're mapping a point task if we've made one of these
@@ -2107,6 +2107,20 @@ namespace Legion {
     {
       // We're mapping a point task if we've made one of these
       return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint RemoteTaskOp::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DomainPoint(0);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain RemoteTaskOp::get_shard_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Domain(DomainPoint(0),DomainPoint(0));
     }
 
     //--------------------------------------------------------------------------
@@ -3827,10 +3841,83 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_replication(get_unique_id(), repl_context,
                                      !output.control_replication_map.empty());
+        std::vector<DomainPoint> sorted_points;
+        sorted_points.reserve(output.task_mappings.size());
+        std::vector<ShardID> shard_lookup;
+        shard_lookup.reserve(output.task_mappings.size());
+        bool isomorphic_points = true;
+        if (!output.shard_points.empty())
+        {
+          if (output.shard_points.size() != output.task_mappings.size())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s did not provide exactly one shard point for "
+                "each of the task_mappings in 'map_replicate_task' mapper "
+                "call for task %s (UID %lld). The number of shard_points "
+                "must exactly match the number of 'task_mappings'.",
+                mapper->get_mapper_name(), get_task_name(), get_unique_id())
+          std::map<DomainPoint,ShardID> shard_mapping;
+          const int dim = output.shard_points.front().get_dim();
+          if (dim != 1)
+            isomorphic_points = false;
+          for (unsigned idx = 0; idx < output.shard_points.size(); idx++)
+          {
+            if (isomorphic_points && (output.shard_points[idx][0] != idx))
+              isomorphic_points = false;
+            if (output.shard_points[idx].get_dim() != dim)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s specified shard points with different "
+                  "dimensionalities of %d and %d for 'map_replicate_task' "
+                  "call for task %s (UID %lld). All shard points must have "
+                  "the same dimenstionality.", mapper->get_mapper_name(),
+                  dim, output.shard_points[idx].get_dim(),
+                  get_task_name(), get_unique_id())
+            std::pair<std::map<DomainPoint,ShardID>::iterator,bool> result =
+              shard_mapping.insert(std::pair<DomainPoint,ShardID>(
+                    output.shard_points[idx],idx));
+            if (!result.second)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s specified duplicate shard point names for shards "
+                  "%d and %d in 'map_replicate_task' mapper call for task %s "
+                  "(UID %lld). Each shard point must be given a unique name.",
+                  mapper->get_mapper_name(), result.first->second, idx,
+                  get_task_name(), get_unique_id())
+          }
+          for (std::map<DomainPoint,ShardID>::const_iterator it =
+                shard_mapping.begin(); it != shard_mapping.end(); it++)
+          {
+            sorted_points.push_back(it->first);
+            shard_lookup.push_back(it->second);
+          }
+          const int domain_dim = output.shard_domain.get_dim();
+          if ((domain_dim > 0) && (domain_dim != dim))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s specified a 'shard_domain' output with "
+                "dimensionality %d different than the %d dimension points "
+                "in 'shard_points' in 'map_replicate_task' call for task "
+                "%s (UID %lld). The dimensionality of 'shard_domain' must "
+                "match the dimensionality of the 'shard_points'.",
+                mapper->get_mapper_name(), domain_dim, dim,
+                get_task_name(), get_unique_id())
+        }
+        else
+        {
+          // Mapper didn't specify it so we can fill it in
+          output.shard_domain = Domain(DomainPoint(0),
+              DomainPoint(output.task_mappings.size()-1));
+          output.shard_points.reserve(output.task_mappings.size());
+          for (unsigned idx = 0; idx < output.task_mappings.size(); idx++)
+          {
+            output.shard_points.push_back(DomainPoint(idx));
+            sorted_points.push_back(DomainPoint(idx));
+            shard_lookup.push_back(idx);
+          }
+        }
         if (!output.control_replication_map.empty())
         {
           shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-              is_top_level_task(), total_shards, runtime->address_space, this);
+              is_top_level_task(), isomorphic_points, output.shard_domain,
+              std::move(output.shard_points), std::move(sorted_points),
+              std::move(shard_lookup), runtime->address_space, this);
           shard_manager->add_reference();
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3882,7 +3969,9 @@ namespace Legion {
         else
         {
           shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
-              is_top_level_task(), total_shards, runtime->address_space, this);
+              is_top_level_task(), isomorphic_points, output.shard_domain,
+              std::move(output.shard_points), std::move(sorted_points),
+              std::move(shard_lookup), runtime->address_space, this);
           shard_manager->add_reference();
           if (!runtime->unsafe_mapper)
           {
@@ -7831,6 +7920,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return shard_manager->total_shards;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint ShardTask::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->shard_points[shard_id];
+    }
+
+    //--------------------------------------------------------------------------
+    Domain ShardTask::get_shard_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->shard_domain;
     }
 
     //--------------------------------------------------------------------------

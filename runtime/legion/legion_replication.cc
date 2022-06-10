@@ -1869,21 +1869,7 @@ namespace Legion {
                       mapper->get_mapper_name(), get_task_name(), 
                       get_unique_id(), parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id())
-#endif
-      // If we have a future map then set the sharding function
-      if ((redop == 0) && !elide_future_return && (must_epoch == NULL))
-      {
-#ifdef DEBUG_LEGION
-        assert(future_map.impl != NULL);
-        ReplFutureMapImpl *impl = 
-          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
-        assert(impl != NULL);
-#else
-        ReplFutureMapImpl *impl = 
-          static_cast<ReplFutureMapImpl*>(future_map.impl);
-#endif
-        impl->set_sharding_function(sharding_function);
-      }
+#endif 
       // Now we can do the normal prepipeline stage
       IndexTask::trigger_prepipeline_stage();
     }
@@ -1919,6 +1905,20 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      // If we have a future map then set the sharding function
+      if ((redop == 0) && !elide_future_return && (must_epoch == NULL))
+      {
+#ifdef DEBUG_LEGION
+        assert(future_map.impl != NULL);
+        ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+        assert(impl != NULL);
+#else
+        ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(future_map.impl);
+#endif
+        impl->set_sharding_function(sharding_function);
+      }
       // Compute the local index space of points for this shard
       if (sharding_space.exists())
         internal_space = 
@@ -10271,11 +10271,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, ReplicationID id, bool control, 
-                               bool top, size_t total, AddressSpaceID owner, 
+                               bool top, bool iso, const Domain &dom,
+                               std::vector<DomainPoint> &&shards,
+                               std::vector<DomainPoint> &&sorted,
+                               std::vector<ShardID> &&lookup,
+                               AddressSpaceID owner, 
                                SingleTask *original/*= NULL*/, RtBarrier bar)
-      : runtime(rt), repl_id(id), owner_space(owner), total_shards(total),
-        original_task(original),control_replicated(control),
-        top_level_task(top), address_spaces(NULL), collective_mapping(NULL), 
+      : runtime(rt), repl_id(id), owner_space(owner), shard_points(shards),
+        sorted_points(sorted), shard_lookup(lookup), shard_domain(dom),
+        total_shards(shard_points.size()), original_task(original),
+        control_replicated(control), top_level_task(top),
+        isomorphic_points(iso), address_spaces(NULL), collective_mapping(NULL),
         local_mapping_complete(0), remote_mapping_complete(0),
         local_execution_complete(0), remote_execution_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
@@ -10287,6 +10293,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(total_shards > 0);
+      assert(shard_points.size() == sorted_points.size());
+      assert(shard_points.size() == shard_lookup.size());
 #endif
       // Add an extra reference if we're not the owner manager
       if (owner_space != runtime->address_space)
@@ -10366,16 +10374,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager::ShardManager(const ShardManager &rhs)
-      : runtime(NULL), repl_id(0), owner_space(0), total_shards(0),
-        original_task(NULL), control_replicated(false), top_level_task(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-    
-    //--------------------------------------------------------------------------
     ShardManager::~ShardManager(void)
     //--------------------------------------------------------------------------
     { 
@@ -10446,15 +10444,6 @@ namespace Legion {
       assert(local_future_result == NULL);
       assert(created_equivalence_sets.empty());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ShardManager& ShardManager::operator=(const ShardManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -10616,7 +10605,22 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(repl_id);
+        rez.serialize(shard_domain);
         rez.serialize(total_shards);
+        rez.serialize(isomorphic_points);
+        if (isomorphic_points)
+        {
+          for (unsigned idx = 0; idx < total_shards; idx++)
+            rez.serialize(shard_points[idx]);
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < total_shards; idx++)
+          {
+            rez.serialize(sorted_points[idx]);
+            rez.serialize(shard_lookup[idx]);
+          }
+        }
         rez.serialize(control_replicated);
         rez.serialize(top_level_task);
         rez.serialize(shard_task_barrier);
@@ -11935,8 +11939,33 @@ namespace Legion {
       DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
+      Domain shard_domain;
+      derez.deserialize(shard_domain);
       size_t total_shards;
       derez.deserialize(total_shards);
+      std::vector<DomainPoint> shard_points(total_shards);
+      std::vector<DomainPoint> sorted_points(total_shards);
+      std::vector<ShardID> shard_lookup(total_shards);
+      bool isomorphic_points;
+      derez.deserialize(isomorphic_points);
+      if (isomorphic_points)
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          derez.deserialize(shard_points[idx]);
+          sorted_points[idx] = shard_points[idx];
+          shard_lookup[idx] = idx;
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          derez.deserialize(sorted_points[idx]);
+          derez.deserialize(shard_lookup[idx]);
+          shard_points[shard_lookup[idx]] = sorted_points[idx];
+        }
+      }
       bool control_repl;
       derez.deserialize(control_repl);
       bool top_level_task;
@@ -11945,7 +11974,9 @@ namespace Legion {
       derez.deserialize(shard_task_barrier);
       ShardManager *manager = 
         new ShardManager(runtime, repl_id, control_repl, top_level_task,
-                total_shards, source, NULL/*original*/, shard_task_barrier);
+                isomorphic_points, shard_domain, std::move(shard_points),
+                std::move(sorted_points), std::move(shard_lookup), 
+                source, NULL/*original*/, shard_task_barrier);
       manager->unpack_shards_and_launch(derez);
     }
 
@@ -12121,7 +12152,7 @@ namespace Legion {
       if (finder != sharding_functions.end())
         return finder->second;
       ShardingFunction *result = 
-        new ShardingFunction(functor, runtime->forest, sid, total_shards);
+        new ShardingFunction(functor, runtime->forest, this, sid);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;

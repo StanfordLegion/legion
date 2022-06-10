@@ -575,7 +575,6 @@ namespace Legion {
                                   MapTaskOutput&     output) = 0;
       //------------------------------------------------------------------------
 
-
       /**
        * ----------------------------------------------------------------------
        *  Map Replicate Task 
@@ -596,10 +595,22 @@ namespace Legion {
        * logical version of the task rather than having them all execute
        * independently. The vector should be exactly the same size as the 
        * vector of task_mappings if it is not empty
+       *
+       * The mapper can optionally give names to the shards by filling in the
+       * 'shard_points' vector with a set of unique points, all which must be
+       * of the same dimension. The 'shard_points' vector must either be empty
+       * or be of the same size as the 'task_mappings'. The mapper can also 
+       * provide an optional 'shard_domain' value to describe the set of points.
+       * If this is provided the runtime does not introspect it other than to
+       * check that its dimensionality matches that of the points. This value
+       * is then passed as the 'shard_domain' argument to all invocation of a 
+       * sharding functor for operations launched by these shards.
        */
       struct MapReplicateTaskOutput {
         std::vector<MapTaskOutput>                      task_mappings;
         std::vector<Processor>                          control_replication_map;
+        std::vector<DomainPoint>                        shard_points;
+        Domain                                          shard_domain;
       };
       //------------------------------------------------------------------------
       virtual void map_replicate_task(const MapperContext      ctx,

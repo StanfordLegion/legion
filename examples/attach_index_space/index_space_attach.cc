@@ -114,8 +114,8 @@ void top_level_task(const Task *task,
   IndexAttachLauncher xy_launcher(LEGION_EXTERNAL_INSTANCE, input_lr, false/*restricted*/);
   IndexAttachLauncher z_launcher(LEGION_EXTERNAL_INSTANCE, output_lr, false/*restricted*/); 
   int offset = 0;
-  const ShardID local_shard = runtime->local_shard(ctx);
-  const size_t total_shards = runtime->total_shards(ctx);
+  const ShardID local_shard = task->get_shard_id();
+  const size_t total_shards = task->get_total_shards();
   for (int i = 0; i < num_subregions; ++i) {
     const DomainPoint point = Point<1>(i);
     IndexSpace child_space = runtime->get_index_subspace(ctx, ip, point);

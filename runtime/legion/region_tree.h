@@ -2429,11 +2429,14 @@ namespace Legion {
       virtual void log_launch_space(UniqueID op_id) = 0;
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
                                             ShardID shard,
-                                            IndexSpace shard_space) = 0;
+                                            IndexSpace shard_space,
+                                            const Domain &shard_domain,
+                              const std::vector<DomainPoint> &shard_points) = 0;
       virtual void compute_range_shards(ShardingFunction *func,
                                         IndexSpace shard_space,
+                              const std::vector<DomainPoint> &shard_points,
+                                        const Domain &shard_domain,
                                         std::set<ShardID> &range_shards) = 0;
-      virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2759,11 +2762,14 @@ namespace Legion {
       virtual void log_launch_space(UniqueID op_id);
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
                                             ShardID shard, 
-                                            IndexSpace shard_space);
+                                            IndexSpace shard_space,
+                                            const Domain &shard_domain,
+                                  const std::vector<DomainPoint> &shard_points);
       virtual void compute_range_shards(ShardingFunction *func,
                                         IndexSpace shard_space,
+                                  const std::vector<DomainPoint> &shard_points,
+                                        const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
-      virtual void destroy_shard_domain(const Domain &domain);
     public:
       bool contains_point(const Realm::Point<DIM,T> &point);
     protected:

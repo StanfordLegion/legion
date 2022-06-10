@@ -6152,7 +6152,8 @@ legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  return runtime->local_shard(ctx);
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_shard_id();
 }
 
 legion_shard_id_t
@@ -6162,7 +6163,8 @@ legion_runtime_local_shard_without_context(void)
   if (ctx == NULL)
     return 0; // no shard if we're not inside a task
   Runtime *runtime = Runtime::get_runtime();
-  return runtime->local_shard(ctx);
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_total_shards();
 }
 
 size_t
@@ -6171,7 +6173,8 @@ legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  return runtime->total_shards(ctx);
+  const Task *task = runtime->get_local_task(ctx);
+  return task->get_total_shards();
 }
 
 legion_shard_id_t
