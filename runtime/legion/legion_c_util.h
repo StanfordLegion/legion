@@ -727,7 +727,7 @@ namespace Legion {
         assert(false);
         return Domain::NO_DOMAIN;
       }
-      virtual ShardID get_local_shard(void) const {
+      virtual ShardID get_shard_id(void) const {
         assert(false);
         return 0;
       }
@@ -735,6 +735,14 @@ namespace Legion {
         assert(false);
         return 1;
       };
+      virtual DomainPoint get_shard_point(void) const {
+        assert(false);
+        return DomainPoint();
+      };
+      virtual Domain get_shard_domain(void) const {
+        assert(false);
+        return Domain();
+      }
     };
 };
 

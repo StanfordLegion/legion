@@ -103,8 +103,6 @@ namespace Legion {
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
           bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
-      virtual ShardID get_shard_id(void) const;
-      virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size);
     public:
@@ -1436,8 +1434,6 @@ namespace Legion {
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
     public:
-      virtual ShardingFunction* find_sharding_function(ShardingID sid);
-    public:
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
       virtual void release_grant(Grant grant);
@@ -1996,8 +1992,6 @@ namespace Legion {
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual Future from_value(const void *value, size_t value_size,
           bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
-      virtual ShardID get_shard_id(void) const;
-      virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size); 
     public:
@@ -2369,8 +2363,6 @@ namespace Legion {
                                        AddressSpaceID target,
                                        bool replicate = false);
     public:
-      virtual ShardingFunction* find_sharding_function(ShardingID sid);
-    public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
@@ -2669,8 +2661,10 @@ namespace Legion {
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
-      virtual ShardID get_local_shard(void) const;
+      virtual ShardID get_shard_id(void) const;
       virtual size_t get_total_shards(void) const;
+      virtual DomainPoint get_shard_point(void) const;
+      virtual Domain get_shard_domain(void) const;
       virtual bool has_trace(void) const;
     public:
       RemoteContext *const owner;
@@ -2746,8 +2740,6 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
       virtual void free_region_tree_context(void);
     public:
-      virtual ShardingFunction* find_sharding_function(ShardingID sid);
-    public:
       const Task* get_parent_task(void);
     public:
       void unpack_local_field_update(Deserializer &derez);
@@ -2777,7 +2769,11 @@ namespace Legion {
       std::map<unsigned,RtEvent> pending_physical_contexts;
     protected:
       // For remote replicate contexts
+      friend class RemoteTask;
+      ShardID shard_id;
       size_t total_shards;
+      DomainPoint shard_point;
+      Domain shard_domain;
       ReplicationID repl_id;
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     };

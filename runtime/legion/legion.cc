@@ -3924,6 +3924,65 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    DomainPoint ShardingFunctor::shard(const DomainPoint &index_point,
+                                   const Domain &index_domain,
+                                   const std::vector<DomainPoint> &shard_points,
+                                   const Domain &shard_domain)
+    //--------------------------------------------------------------------------
+    {
+      // invoke the old method in case users haven't overridden it
+      ShardID sid = shard(index_point, index_domain, shard_points.size());
+      return shard_points[sid];
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardingFunctor::shard(const DomainPoint &index_point,
+                                   const Domain &index_domain,
+                                   const size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of deprecated 'ShardingFunctor::shard' method "
+          "without a user-provided override");
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingFunctor::invert(const DomainPoint &shard_point,
+                                 const std::vector<DomainPoint> &shard_points,
+                                 const Domain &shard_domain,
+                                 const Domain &index_domain,
+                                 const Domain &sharding_domain,
+                                 std::vector<DomainPoint> &index_points)
+    //--------------------------------------------------------------------------
+    {
+      // Find the point in the shard points and call it
+      const size_t total_shards = shard_points.size();
+      for (unsigned idx = 0; idx < total_shards; idx++)
+      {
+        if (shard_points[idx] != shard_point)
+          continue;
+        invert(idx, sharding_domain, index_domain, total_shards, index_points);
+        return;
+      }
+      // Should never end up here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingFunctor::invert(ShardID shard,
+                                 const Domain &sharding_domain,
+                                 const Domain &index_domain,
+                                 const size_t total_shards,
+                                 std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_SHARDING,
+          "Invocation of deprecated 'ShardingFunctor::invert' method "
+          "without a user-provided override");
+    }
     
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
@@ -6881,20 +6940,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID Runtime::local_shard(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return ctx->get_shard_id();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t Runtime::total_shards(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return ctx->get_num_shards();
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
@@ -7468,11 +7513,11 @@ namespace Legion {
                                          const char *task_name,
                                          bool control_replicable,
                                          unsigned shard_per_address_space,
-                                         int shard_id)
+                                         int shard_id, DomainPoint point)
     //--------------------------------------------------------------------------
     {
       return runtime->begin_implicit_task(top_task_id, top_mapper_id, proc_kind,
-              task_name, control_replicable, shard_per_address_space, shard_id);
+       task_name, control_replicable, shard_per_address_space, shard_id, point);
     }
 
     //--------------------------------------------------------------------------
@@ -7846,7 +7891,8 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what "
             "they are doing asking for the shard ID in task %s (UID %lld)",
             ctx->get_task_name(), ctx->get_unique_id())
-      return ctx->get_shard_id();
+      const Task *task = get_local_task(ctx);
+      return task->get_shard_id();
     }
 
     //--------------------------------------------------------------------------
@@ -7857,7 +7903,8 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what they"
             " are doing asking for the number of shards in task %s (UID %lld)",
             ctx->get_task_name(), ctx->get_unique_id())
-      return ctx->get_num_shards();
+      const Task *task = get_local_task(ctx);
+      return task->get_total_shards();
     }
 
     //--------------------------------------------------------------------------

@@ -6531,40 +6531,24 @@ namespace Legion {
       : Collectable(), runtime(rt), task_id(tid), mapper_id(mid), kind(k), 
         shards_per_address_space(shards_per_space), 
         expected_local_arrivals(shards_per_space), expected_remote_arrivals(0),
-        local_shard_id(0), top_context(NULL)
+        local_shard_id(0), top_context(NULL), shard_manager(NULL),
+        local_task_name(NULL)
     //--------------------------------------------------------------------------
     {
-      shard_manager.store(NULL);
+      remaining_create_arrivals = shards_per_address_space;
       // If we're the owner node, we also expect one arrival from
       // every remote node as well
       if (runtime->address_space == 0)
+      {
         expected_remote_arrivals = (runtime->total_address_spaces - 1);
-    }
-
-    //--------------------------------------------------------------------------
-    ImplicitShardManager::ImplicitShardManager(const ImplicitShardManager &rhs)
-      : Collectable(), runtime(rhs.runtime), task_id(rhs.task_id), 
-        mapper_id(rhs.mapper_id), kind(rhs.kind), 
-        shards_per_address_space(rhs.shards_per_address_space)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
+        remaining_create_arrivals += (runtime->total_address_spaces - 1);
+      }
     }
 
     //--------------------------------------------------------------------------
     ImplicitShardManager::~ImplicitShardManager(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ImplicitShardManager& ImplicitShardManager::operator=(
-                                                const ImplicitShardManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -6592,75 +6576,138 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardTask* ImplicitShardManager::create_shard(int shard_id, Processor proxy,
-                                                  const char *task_name)
+    ShardTask* ImplicitShardManager::create_shard(int shard_id,
+               const DomainPoint &point, Processor proxy, const char *task_name)
     //--------------------------------------------------------------------------
     {
-      ShardTask *result = NULL;
-      if (runtime->address_space == 0)
+      ShardTask *task = NULL;
       {
-        AutoLock m_lock(manager_lock);
-        if (shard_manager.load() == NULL)
-          create_shard_manager(proxy, task_name);
-#ifdef DEBUG_LEGION
-        assert(local_shard_id < shards_per_address_space);
-#endif
-        const ShardID shard = (shard_id < 0) ? local_shard_id++ : shard_id;
-        result = shard_manager.load()->create_shard(shard, proxy);
-      }
-      else
-      {
-        RtEvent wait_on;
-        if (shard_manager.load() == NULL)
-        {
-          AutoLock m_lock(manager_lock); 
-          if (shard_manager.load() == NULL)
-          {
-            if (!manager_ready.exists())
-              request_shard_manager();
-            wait_on = manager_ready;
-          }
-        }
-        if (wait_on.exists())
-          wait_on.wait();
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         assert(local_shard_id < shards_per_address_space);
 #endif
         const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
-          shards_per_address_space + local_shard_id++) : shard_id; 
-        result = shard_manager.load()->create_shard(shard, proxy);
-      }
+            shards_per_address_space + local_shard_id++) : shard_id;
+        const size_t total_shards = 
+          shards_per_address_space * runtime->total_address_spaces;
+        if (total_shards <= shard)
+          REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
+              "All shard IDs must be contained within [0,%zd) for implicit "
+              "control replicated task %s", total_shards, task_name)
+        const DomainPoint shard_point = 
+          (point.get_dim() > 0) ? point : DomainPoint(shard);
+        std::pair<std::map<DomainPoint,ShardID>::iterator,bool> result =
+         shard_points.insert(std::pair<DomainPoint,ShardID>(shard_point,shard));
+        if (!result.second)
+          REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
+              "Discovered multiple ranks with the same implicit shard point "
+              "for implicit control replicated task %s", task_name)
+        if (remaining_create_arrivals == 0)
+          REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
+              "Too many arrivals for implicit control replicated task %s. "
+              "Only %d are permitted.", task_name, shards_per_address_space)
+        RtEvent wait_on;
+        if (--remaining_create_arrivals == 0)
+        {
+          if (runtime->address_space > 0)
+          {
+            if (!manager_ready.exists())
+              manager_ready = Runtime::create_rt_user_event();
+            request_shard_manager();
+            wait_on = manager_ready;
+          }
+          else
+          {
+            local_proxy = proxy;
+            local_task_name = task_name;
+            create_shard_manager();
+          }
+        }
+        else
+        {
+          if (runtime->address_space == 0)
+          {
+            local_proxy = proxy;
+            local_task_name = task_name;
+          }
+          if (!manager_ready.exists())
+            manager_ready = Runtime::create_rt_user_event();
+          wait_on = manager_ready;
+        }
+        if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          m_lock.release();
+          wait_on.wait();
+          m_lock.reacquire();
+        }
 #ifdef DEBUG_LEGION
-      assert(top_context != NULL);
+        assert(shard_manager != NULL);
+        assert(top_context != NULL);
 #endif
+        task = shard_manager->create_shard(shard, proxy);
+      }
       top_context->increment_pending();
-      result->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
-      result->complete_mapping();
-      result->resolve_speculation();
-      return result;
+      task->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
+      task->complete_mapping();
+      task->resolve_speculation();
+      return task;
     }
 
     //--------------------------------------------------------------------------
-    void ImplicitShardManager::create_shard_manager(Processor proxy,
-                                                    const char *task_name)
+    void ImplicitShardManager::create_shard_manager(void)
     //--------------------------------------------------------------------------
     {
+      const size_t total_shards = 
+        runtime->total_address_spaces * shards_per_address_space;
 #ifdef DEBUG_LEGION
+      assert(runtime->address_space == 0);
       assert(top_context == NULL);
-      assert(shard_manager.load() == NULL);
+      assert(shard_manager == NULL);
+      assert(shard_points.size() == total_shards);
 #endif
-      IndividualTask *implicit_top = 
-       runtime->create_implicit_top_level(task_id, mapper_id, proxy, task_name);
+      IndividualTask *implicit_top = runtime->create_implicit_top_level(
+                        task_id, mapper_id, local_proxy, local_task_name);
       top_context = implicit_top->get_context();
       // Now we need to make the shard manager
       const ReplicationID repl_context = runtime->get_unique_replication_id();
-      const size_t total_shards = 
-        runtime->total_address_spaces * shards_per_address_space;
-      // We also need a shard 
+      // Fill in the shard points
+      std::vector<DomainPoint> points(total_shards);
+      std::vector<DomainPoint> sorted_points;
+      sorted_points.reserve(total_shards);
+      std::vector<ShardID> shard_lookup;
+      shard_lookup.reserve(total_shards);
+      bool isomorphic_points = true;
+      // Should not be any duplicate shard domains
+      if (shard_points.size() != total_shards)
+        REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
+              "Discovered multiple ranks with the same implicit shard point "
+              "for implicit control replicated task %s", local_task_name)
+      for (std::map<DomainPoint,ShardID>::const_iterator it =
+            shard_points.begin(); it != shard_points.end(); it++)
+      {
+        if (isomorphic_points && ((it->first.get_dim() != 1) ||
+            (it->first[0] != it->second)))
+          isomorphic_points = false;
+        sorted_points.push_back(it->first);
+        shard_lookup.push_back(it->second);
+#ifdef DEBUG_LEGION
+        assert(it->second < points.size());
+#endif
+        // Should not be any duplicate shard IDs
+        if (points[it->second].get_dim() > 0)
+          REPORT_LEGION_ERROR(ERROR_IMPLICIT_REPLICATED_SHARDING,
+              "Discovered multiple ranks with the same implicit shard ID "
+              "for implicit control replicated task %s", local_task_name)
+        points[it->second] = it->first;
+      }
+      Domain shard_domain;
+      if (isomorphic_points)
+        shard_domain = Domain(DomainPoint(0),DomainPoint(total_shards-1));
       ShardManager *manager = new ShardManager(runtime, repl_context,true/*cr*/,
-         true/*top level*/, total_shards, runtime->address_space, implicit_top);
-      shard_manager.store(manager);
+         true/*top level*/, isomorphic_points, shard_domain, std::move(points),
+         std::move(sorted_points), std::move(shard_lookup),
+         runtime->address_space, implicit_top);
+      shard_manager = manager;
       implicit_top->set_shard_manager(manager);
       // This is a dummy shard_mapping for now since we won't actually need
       // a real one, this just needs to make sure all the checks pass
@@ -6680,7 +6727,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);
-      // Distribute the shard manager to all the remove nodes
+      // Distribute the shard manager to all the remote nodes
       std::vector<ShardTask*> empty_shards;
       for (AddressSpaceID space = 1; 
             space < runtime->total_address_spaces; space++)
@@ -6708,10 +6755,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_manager.load() == NULL);
-      assert(!manager_ready.exists());
+      assert(manager_ready.exists());
+      assert(shard_points.size() == shards_per_address_space);
 #endif
-      manager_ready = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -6720,30 +6766,42 @@ namespace Legion {
         rez.serialize(kind);
         rez.serialize(shards_per_address_space);
         rez.serialize(this);
+        for (std::map<DomainPoint,ShardID>::const_iterator it =
+              shard_points.begin(); it != shard_points.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       runtime->send_control_replicate_implicit_request(0/*owner*/, rez);
     }
 
     //--------------------------------------------------------------------------
-    void ImplicitShardManager::process_implicit_request(void *remote,
-                                                        AddressSpaceID space)
+    void ImplicitShardManager::process_implicit_request(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(runtime->address_space == 0);
+#endif
       AutoLock m_lock(manager_lock);
-      ShardManager *manager = shard_manager.load();
-      if (manager != NULL)
+      void *remote;
+      derez.deserialize(remote);
+      remote_spaces.push_back(std::pair<AddressSpaceID,void*>(source, remote));
+      for (unsigned idx = 0; idx < shards_per_address_space; idx++)
       {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote);
-          rez.serialize(top_context->get_context_uid());
-          rez.serialize(manager->repl_id);
-        }
-        runtime->send_control_replicate_implicit_response(space, rez);
+        DomainPoint point;
+        derez.deserialize(point);
+#ifdef DEBUG_LEGION
+        assert(shard_points.find(point) == shard_points.end());
+#endif
+        derez.deserialize(shard_points[point]);
       }
-      else
-        remote_spaces.push_back(std::pair<AddressSpaceID,void*>(space, remote));
+#ifdef DEBUG_LEGION
+      assert(remaining_create_arrivals > 0);
+#endif
+      if (--remaining_create_arrivals == 0)
+        create_shard_manager();
     }
     
     //--------------------------------------------------------------------------
@@ -6754,11 +6812,11 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(top_context == NULL);
-      assert(shard_manager.load() == NULL);
+      assert(shard_manager == NULL);
       assert(manager_ready.exists());
 #endif
       top_context = c;
-      shard_manager.store(m);
+      shard_manager = m;
       RtUserEvent to_trigger = manager_ready;
       manager_ready = RtUserEvent::NO_RT_USER_EVENT;
       return to_trigger;
@@ -6777,12 +6835,10 @@ namespace Legion {
       Processor::Kind kind;
       derez.deserialize(kind);
       unsigned shards_per_address_space;
-      derez.deserialize(shards_per_address_space);
-      void *remote;
-      derez.deserialize(remote);
+      derez.deserialize(shards_per_address_space); 
       ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
           task_id, mapper_id, kind, shards_per_address_space, false/*local*/);
-      manager->process_implicit_request(remote, remote_space);
+      manager->process_implicit_request(derez, remote_space);
       if (manager->remove_reference())
         delete manager;
     }
@@ -16066,19 +16122,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
-              RegionTreeForest *f, ShardingID id, size_t total)
-      : functor(func), forest(f), sharding_id(id), total_shards(total)
+              RegionTreeForest *f, ShardManager *m, ShardingID id)
+      : functor(func), forest(f), manager(m), sharding_id(id)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ShardingFunction::ShardingFunction(const ShardingFunction &rhs)
-      : functor(NULL), forest(NULL), sharding_id(0), total_shards(0)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -16088,27 +16135,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction& ShardingFunction::operator=(const ShardingFunction &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     ShardID ShardingFunction::find_owner(const DomainPoint &point,
                                          const Domain &sharding_space)
     //--------------------------------------------------------------------------
     {
-      ShardID result = functor->shard(point, sharding_space, total_shards);
-      if (total_shards <= result)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
-                            "Illegal output shard %d from sharding functor %d. "
-                            "Shards for this index space launch must be "
-                            "between 0 and %zd (exclusive).", result,
-                            sharding_id, total_shards)
-      return result;
+      const DomainPoint result = functor->shard(point, sharding_space,
+                          manager->shard_points, manager->shard_domain);
+      if (manager->isomorphic_points)
+      {
+        if (result.get_dim() != 1)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                              "Illegal output from sharding functor %d. "
+                              "Shards must be contained in the set of "
+                              "'shard_points' for control replicated task.",
+                              sharding_id)
+        const coord_t shard = result[0];
+        if ((shard < 0) || (manager->total_shards <= shard))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                              "Illegal output shard %lld from sharding functor "
+                              "%d. Shards for this index space launch must be "
+                              "between 0 and %zd (exclusive).", shard,
+                              sharding_id, manager->total_shards)
+        return result[0];
+      }
+      else
+      {
+        std::vector<DomainPoint>::const_iterator finder = 
+          std::lower_bound(manager->sorted_points.begin(),
+                           manager->sorted_points.end(), result);
+        if (finder == manager->sorted_points.end())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
+                              "Illegal output from sharding functor %d. "
+                              "Shards must be contained in the set of "
+                              "'shard_points' for control replicated task.",
+                              sharding_id)
+        unsigned offset = std::distance(manager->sorted_points.begin(), finder);
+#ifdef DEBUG_LEGION
+        assert(offset < manager->shard_lookup.size());
+#endif
+        return manager->shard_lookup[offset];
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16127,7 +16193,8 @@ namespace Legion {
       }
       // Otherwise we need to make it
       IndexSpace result = 
-        full_space->create_shard_space(this, shard, shard_space);
+        full_space->create_shard_space(this, shard, shard_space,
+                  manager->shard_domain, manager->shard_points);
       AutoLock s_lock(sharding_lock);
       shard_index_spaces[key] = result;
       return result;
@@ -29625,7 +29692,7 @@ namespace Legion {
                                          const char *task_name,
                                          bool control_replicable,
                                          unsigned shards_per_address_space,
-                                         int shard_id)
+                                         int shard_id, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       if (!runtime_started)
@@ -29673,7 +29740,7 @@ namespace Legion {
           find_implicit_shard_manager(top_task_id, top_mapper_id, proc_kind, 
                                       shards_per_address_space, true/*local*/);
         local_task = 
-          implicit_shard_manager->create_shard(shard_id, proxy, task_name);
+          implicit_shard_manager->create_shard(shard_id,point,proxy,task_name);
         if (implicit_shard_manager->remove_reference())
           delete implicit_shard_manager;
       }
