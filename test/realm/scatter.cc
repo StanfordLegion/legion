@@ -419,6 +419,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
     indirect.subfield_offset = 0;
     indirect.oor_possible = oor_possible;
     indirect.aliasing_possible = true; // doesn't matter for gather perf, so be sound
+    indirect.next_indirection = nullptr;
 
     std::vector<CopySrcDstField> srcs, dsts;
     srcs.resize(1);
@@ -507,6 +508,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
     indirect.subfield_offset = 0;
     indirect.oor_possible = oor_possible;
     indirect.aliasing_possible = aliasing_possible;
+    indirect.next_indirection = nullptr;
 
     std::vector<CopySrcDstField> srcs, dsts;
     srcs.resize(1);
@@ -614,6 +616,7 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
       src_ind.subfield_offset = 0;
       src_ind.oor_possible = src_oor_possible;
       src_ind.aliasing_possible = src_aliasing_possible;
+      src_ind.next_indirection = nullptr;
 
       typename CopyIndirection<N,T>::template Unstructured<DST::_N,typename DST::_T> dst_ind;
       dst_ind.field_id = dstptr_id;
@@ -622,6 +625,7 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
       dst_ind.subfield_offset = 0;
       dst_ind.oor_possible = dst_oor_possible;
       dst_ind.aliasing_possible = dst_aliasing_possible;
+      dst_ind.next_indirection = nullptr;
 
       std::vector<CopySrcDstField> srcs, dsts;
       srcs.resize(1);

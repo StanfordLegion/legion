@@ -99,6 +99,9 @@ namespace Realm {
     public:
       virtual ~Affine(void) {}
 
+      // Defines the next indirection to avoid a 3-way templating.
+      typename CopyIndirection<N2, T2>::Base* next_indirection;
+
       Matrix<N,N2,T2> transform;
       Point<N2,T2> offset_lo, offset_hi;
       Point<N2,T2> divisor;
@@ -114,6 +117,8 @@ namespace Realm {
     class Unstructured : public CopyIndirection<N,T>::Base {
     public:
       virtual ~Unstructured(void) {}
+
+      typename CopyIndirection<N2, T2>::Base* next_indirection;
 
       FieldID field_id;
       RegionInstance inst;
