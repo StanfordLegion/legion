@@ -4031,10 +4031,23 @@ namespace Legion {
       // task is operating over. This method will only return a
       // valid domain if this is part of an index space task.
       virtual Domain get_slice_domain(void) const = 0;
-      // See comments below on the use of methods regarding
-      // the shards for a task for control replication
-      virtual ShardID get_local_shard(void) const = 0;
+      //------------------------------------------------------------------------
+      // Control Replication methods
+      // In general SPMD-style programming in Legion is wrong. If you find
+      // yourself writing SPMD-style code for large fractions of your program
+      // then you're probably doing something wrong. There are a few exceptions:
+      // 1. index attach/detach operations are collective and may need
+      //    to do per-shard work
+      // 2. I/O in general often needs to do per-shard work
+      // 3. interaction with collective frameworks like MPI and NCCL
+      // 4. others?
+      // For these reasons we allow users to get access to sharding information
+      // Please, please, please be careful with how you use it
+      //------------------------------------------------------------------------
+      virtual ShardID get_shard_id(void) const = 0;
       virtual size_t get_total_shards(void) const = 0;
+      virtual DomainPoint get_shard_point(void) const = 0;
+      virtual Domain get_shard_domain(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_TASK_MAPPABLE; }
@@ -4556,16 +4569,34 @@ namespace Legion {
       ShardingFunctor(void);
       virtual ~ShardingFunctor(void);
     public:
-      virtual ShardID shard(const DomainPoint &point,
-                            const Domain &full_space,
-                            const size_t total_shards) = 0;
+      // Indicate whether this functor wants to use the ShardID or 
+      // DomainPoint versions of these methods
+      virtual bool use_points(void) const { return false; }
+    public:
+      // The ShardID version of this method
+      virtual ShardID shard(const DomainPoint &index_point,
+                            const Domain &index_domain,
+                            const size_t total_shards);
+      // The DomainPoint version of this method
+      virtual DomainPoint shard_points(const DomainPoint &index_point,
+                            const Domain &index_domain,
+                            const std::vector<DomainPoint> &shard_points,
+                            const Domain &shard_domain);
     public:
       virtual bool is_invertible(void) const { return false; }
+      // The ShardID version of this method
       virtual void invert(ShardID shard,
-                          const Domain &shard_domain,
-                          const Domain &full_domain,
+                          const Domain &sharding_domain,
+                          const Domain &index_domain,
                           const size_t total_shards,
-                          std::vector<DomainPoint> &points) { }
+                          std::vector<DomainPoint> &points);
+      // The DomainPoint version of this method
+      virtual void invert_points(const DomainPoint &shard_point,
+                          const std::vector<DomainPoint> &shard_points,
+                          const Domain &shard_domain,
+                          const Domain &index_domain,
+                          const Domain &sharding_domain,
+                          std::vector<DomainPoint> &index_points);
     };
 
     /**
@@ -8012,38 +8043,6 @@ namespace Legion {
       void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
-      // Control Replication
-      // In general SPMD-style programming in Legion is wrong. If you find
-      // yourself writing SPMD-style code for large fractions of your program
-      // then you're probably doing something wrong. There are a few exceptions:
-      // 1. index attach/detach operations are collective and may need
-      //    to do per-shard work
-      // 2. I/O in general often needs to do per-shard work
-      // 3. interaction with collective frameworks like MPI and NCCL
-      // 4. others?
-      // For these reasons we allow users to get access to their shard ID and
-      // the total number of shards and to make a future map collectively
-      // Please, please, please be careful with how you use them
-      //------------------------------------------------------------------------
-      /**
-       * Return the ShardID for the execution of this task in a
-       * control-replicated context. If the task is not control
-       * replicated then the ShardID will always be zero.
-       * @param ctx enclosing task context
-       * @return the ShardID for this execution of the task
-       */
-      ShardID local_shard(Context ctx);
-
-      /**
-       * Return the total number of shards for the execution of this task in
-       * a control-replicated context. If the task is not control-replicated
-       * then the total number of shards will always be one.
-       * @param enclosing task context
-       * @return the total number of shards in the execution of the task
-       */
-      size_t total_shards(Context ctx); 
-    public:
-      //------------------------------------------------------------------------
       // MPI Interoperability 
       //------------------------------------------------------------------------
       /**
@@ -9014,7 +9013,8 @@ namespace Legion {
                                   const char *task_name = NULL,
                                   bool control_replicable = false,
                                   unsigned shard_per_address_space = 1,
-                                  int shard_id = -1);
+                                  int shard_id = -1,
+                                  DomainPoint shard_point = DomainPoint());
 
       /**
        * Unbind an implicit context from the external thread it is 

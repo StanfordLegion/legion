@@ -1176,19 +1176,19 @@ namespace Legion {
     public:
       ImplicitShardManager(Runtime *rt, TaskID tid, MapperID mid, 
            Processor::Kind k, unsigned shards_per_address_space);
-      ImplicitShardManager(const ImplicitShardManager &rhs);
+      ImplicitShardManager(const ImplicitShardManager &rhs) = delete;
       ~ImplicitShardManager(void);
     public:
-      ImplicitShardManager& operator=(const ImplicitShardManager &rhs);
+      ImplicitShardManager& operator=(const ImplicitShardManager &rhs) = delete;
     public:
       bool record_arrival(bool local);
-      ShardTask* create_shard(int shard_id, Processor proxy, 
-                              const char *task_name);
+      ShardTask* create_shard(int shard_id, const DomainPoint &shard_point,
+                              Processor proxy, const char *task_name);
     protected:
-      void create_shard_manager(Processor proxy, const char *task_name);
+      void create_shard_manager(void);
       void request_shard_manager(void);
     public:
-      void process_implicit_request(void *remote, AddressSpaceID space);
+      void process_implicit_request(Deserializer &derez, AddressSpaceID source);
       RtUserEvent process_implicit_response(ShardManager *manager,
                                             InnerContext *context);
     public:
@@ -1203,12 +1203,16 @@ namespace Legion {
       const unsigned shards_per_address_space;
     protected:
       mutable LocalLock manager_lock;
+      unsigned remaining_create_arrivals;
       unsigned expected_local_arrivals;
       unsigned expected_remote_arrivals;
       unsigned local_shard_id;
       InnerContext *top_context;
-      std::atomic<ShardManager*> shard_manager;
+      ShardManager *shard_manager;
       RtUserEvent manager_ready;
+      Processor local_proxy;
+      const char *local_task_name;
+      std::map<DomainPoint,ShardID> shard_points;
       std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
     };
 
@@ -2404,20 +2408,22 @@ namespace Legion {
       };
     public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
-                       ShardingID sharding_id, size_t total_shards);
-      ShardingFunction(const ShardingFunction &rhs);
+                       ShardManager *manager, ShardingID sharding_id);
+      ShardingFunction(const ShardingFunction &rhs) = delete;
       virtual ~ShardingFunction(void);
     public:
-      ShardingFunction& operator=(const ShardingFunction &rhs);
+      ShardingFunction& operator=(const ShardingFunction &rhs) = delete;
     public:
-      ShardID find_owner(const DomainPoint &point,const Domain &sharding_space);
+      ShardID find_owner(const DomainPoint &point,
+                         const Domain &sharding_space);
       IndexSpace find_shard_space(ShardID shard, IndexSpaceNode *full_space,
                                   IndexSpace sharding_space);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
+      ShardManager *const manager;
       const ShardingID sharding_id;
-      const size_t total_shards;
+      const bool use_points;
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;
@@ -4513,7 +4519,7 @@ namespace Legion {
                                   const char *task_name,
                                   bool control_replicable,
                                   unsigned shard_per_address_space,
-                                  int shard_id);
+                                  int shard_id, const DomainPoint &point);
       void unbind_implicit_task_from_external_thread(Context ctx);
       void bind_implicit_task_to_external_thread(Context ctx);
       void finish_implicit_task(Context ctx);

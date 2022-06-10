@@ -2434,8 +2434,9 @@ namespace Legion {
       virtual void log_launch_space(UniqueID op_id) = 0;
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
                                             ShardID shard,
-                                            IndexSpace shard_space) = 0;
-      virtual void destroy_shard_domain(const Domain &domain) = 0;
+                                            IndexSpace shard_space,
+                                            const Domain &shard_domain,
+                              const std::vector<DomainPoint> &shard_points) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -2760,9 +2761,10 @@ namespace Legion {
                                     MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);
       virtual IndexSpace create_shard_space(ShardingFunction *func, 
-                                            ShardID shard, 
-                                            IndexSpace shard_space);
-      virtual void destroy_shard_domain(const Domain &domain);
+                                            ShardID shard,
+                                            IndexSpace shard_space,
+                                            const Domain &shard_domain,
+                                  const std::vector<DomainPoint> &shard_points);
     public:
       bool contains_point(const Realm::Point<DIM,T> &point);
     protected:

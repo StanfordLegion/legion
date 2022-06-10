@@ -5953,17 +5953,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpace IndexSpaceNodeT<DIM,T>::create_shard_space(
-                  ShardingFunction *func, ShardID shard, IndexSpace shard_space)
+       ShardingFunction *func, ShardID shard, IndexSpace shard_space,
+       const Domain &shard_domain, const std::vector<DomainPoint> &shard_points)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
-      Domain shard_domain;
+      Domain sharding_domain;
       if (shard_space != handle)
-        context->find_launch_space_domain(shard_space, shard_domain);
+        context->find_launch_space_domain(shard_space, sharding_domain);
       else
-        shard_domain = local_space;
-      std::vector<Realm::Point<DIM,T> > shard_points; 
+        sharding_domain = local_space;
+      std::vector<Realm::Point<DIM,T> > index_points; 
       if (!func->functor->is_invertible())
       {
         for (Realm::IndexSpaceIterator<DIM,T> rect_itr(local_space); 
@@ -5973,40 +5974,35 @@ namespace Legion {
                 itr.valid; itr.step())
           {
             const ShardID point_shard = 
-              func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), shard_domain);
+             func->find_owner(DomainPoint(Point<DIM,T>(itr.p)),sharding_domain);
             if (point_shard == shard)
-              shard_points.push_back(itr.p);
+              index_points.push_back(itr.p);
           }
         }
       }
       else
       {
         std::vector<DomainPoint> domain_points;
-        func->functor->invert(shard, Domain(local_space), shard_domain,
-                              func->total_shards, domain_points);  
-        shard_points.resize(domain_points.size());
+        if (func->use_points)
+          func->functor->invert_points(shard_points[shard], shard_points,
+             shard_domain, Domain(local_space), sharding_domain, domain_points);
+        else
+          func->functor->invert(shard, sharding_domain, Domain(local_space),
+                                shard_points.size(), domain_points);
+        index_points.resize(domain_points.size());
         for (unsigned idx = 0; idx < domain_points.size(); idx++)
-          shard_points[idx] = Point<DIM,coord_t>(domain_points[idx]);
+          index_points[idx] = Point<DIM,coord_t>(domain_points[idx]);
       }
-      if (shard_points.empty())
+      if (index_points.empty())
         return IndexSpace::NO_SPACE;
       // Another useful case is if all the points are in the shard then
       // we can return ourselves as the result
-      if (shard_points.size() == get_volume())
+      if (index_points.size() == get_volume())
         return handle;
-      Realm::IndexSpace<DIM,T> realm_is(shard_points);
+      Realm::IndexSpace<DIM,T> realm_is(index_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
       return context->runtime->find_or_create_index_slice_space(domain, 
                                                 handle.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::destroy_shard_domain(const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      DomainT<DIM,T> to_destroy = domain;
-      to_destroy.destroy();
     }
 
     /////////////////////////////////////////////////////////////

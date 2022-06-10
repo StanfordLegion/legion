@@ -2481,13 +2481,17 @@ namespace Legion {
       };
     public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
-                   bool control, bool top, size_t total_shards,
+                   bool control, bool top, bool isomorphic_points,
+                   const Domain &shard_domain,
+                   std::vector<DomainPoint> &&shard_points,
+                   std::vector<DomainPoint> &&sorted_points,
+                   std::vector<ShardID> &&shard_lookup,
                    AddressSpaceID owner_space, SingleTask *original = NULL,
                    RtBarrier shard_task_barrier = RtBarrier::NO_RT_BARRIER);
-      ShardManager(const ShardManager &rhs);
+      ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
     public:
-      ShardManager& operator=(const ShardManager &rhs);
+      ShardManager& operator=(const ShardManager &rhs) = delete;
     public:
       inline RtBarrier get_shard_task_barrier(void) const
         { return shard_task_barrier; }
@@ -2648,10 +2652,15 @@ namespace Legion {
       Runtime *const runtime;
       const ReplicationID repl_id;
       const AddressSpaceID owner_space;
+      const std::vector<DomainPoint> shard_points;
+      const std::vector<DomainPoint> sorted_points;
+      const std::vector<ShardID> shard_lookup;
+      const Domain shard_domain;
       const size_t total_shards;
       SingleTask *const original_task;
       const bool control_replicated;
       const bool top_level_task;
+      const bool isomorphic_points;
     protected:
       mutable LocalLock                manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput

@@ -202,20 +202,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID TaskContext::get_shard_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t TaskContext::get_num_shards(void) const
-    //--------------------------------------------------------------------------
-    {
-      return 1;
-    }
-
-    //--------------------------------------------------------------------------
     Future TaskContext::consensus_match(const void *input, void *output,
                                         size_t num_elements,size_t element_size)
     //--------------------------------------------------------------------------
@@ -9606,15 +9592,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction* InnerContext::find_sharding_function(ShardingID sid)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by inherited classes
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     DynamicCollective InnerContext::advance_dynamic_collective(
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
@@ -11363,20 +11340,6 @@ namespace Legion {
           break;
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ShardID ReplicateContext::get_shard_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_shard->shard_id;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplicateContext::get_num_shards(void) const
-    //--------------------------------------------------------------------------
-    {
-      return total_shards;
     }
 
     //--------------------------------------------------------------------------
@@ -16954,7 +16917,7 @@ namespace Legion {
             ImplicitShardingFunctor(this, COLLECTIVE_LOC_101, repl_impl);
           functor->compute_sharding(data);
           function =
-            new ShardingFunction(functor, runtime->forest, sid, total_shards);
+            new ShardingFunction(functor, runtime->forest, shard_manager, sid);
         }
         else
           function = shard_manager->find_sharding_function(sid);
@@ -17057,7 +17020,7 @@ namespace Legion {
             ImplicitShardingFunctor(this, COLLECTIVE_LOC_102, repl_impl);
           functor->compute_sharding(futures);
           function =
-            new ShardingFunction(functor, runtime->forest, sid, total_shards);
+            new ShardingFunction(functor, runtime->forest, shard_manager, sid);
         }
         else
           function = shard_manager->find_sharding_function(sid);
@@ -18659,15 +18622,11 @@ namespace Legion {
       // Do the normal inner pack with replicate true
       InnerContext::pack_remote_context(rez, target, true/*replicate*/);
       // Then pack our additional information
+      rez.serialize(owner_shard->shard_id);
       rez.serialize<size_t>(total_shards);
+      rez.serialize(shard_manager->shard_points[owner_shard->shard_id]);
+      rez.serialize(shard_manager->shard_domain);
       rez.serialize(shard_manager->repl_id);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardingFunction* ReplicateContext::find_sharding_function(ShardingID sid)
-    //--------------------------------------------------------------------------
-    {
-      return shard_manager->find_sharding_function(sid);
     }
 
     //--------------------------------------------------------------------------
@@ -20528,17 +20487,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID RemoteTask::get_local_shard(void) const
+    ShardID RemoteTask::get_shard_id(void) const
     //--------------------------------------------------------------------------
     {
-      return owner->get_shard_id();
+      return owner->shard_id;
     }
 
     //--------------------------------------------------------------------------
     size_t RemoteTask::get_total_shards(void) const
     //--------------------------------------------------------------------------
     {
-      return owner->get_num_shards();
+      return owner->total_shards;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint RemoteTask::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->shard_point;
+    }
+
+    //--------------------------------------------------------------------------
+    Domain RemoteTask::get_shard_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->shard_domain;
     }
 
     //--------------------------------------------------------------------------
@@ -20899,36 +20872,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction* RemoteContext::find_sharding_function(ShardingID sid)
-    //--------------------------------------------------------------------------
-    {
-      if (shard_manager != NULL)
-        return shard_manager->find_sharding_function(sid);
-      // Check to see if it is in the cache
-      {
-        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
-        std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
-          sharding_functions.find(sid);
-        if (finder != sharding_functions.end())
-          return finder->second;
-      }
-      // Get the functor from the runtime
-      ShardingFunctor *functor = runtime->find_sharding_functor(sid);
-      // Retake the lock
-      AutoLock rem_lock(remote_lock);
-      // See if we lost the race
-      std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
-        sharding_functions.find(sid);
-      if (finder != sharding_functions.end())
-        return finder->second;
-      ShardingFunction *result = 
-        new ShardingFunction(functor, runtime->forest, sid, total_shards);
-      // Save the result for the future
-      sharding_functions[sid] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -20965,7 +20908,10 @@ namespace Legion {
       derez.deserialize(replicate);
       if (replicate)
       {
+        derez.deserialize(shard_id);
         derez.deserialize(total_shards);
+        derez.deserialize(shard_point);
+        derez.deserialize(shard_domain);
         derez.deserialize(repl_id);
         // See if we have a local shard manager
         shard_manager = runtime->find_shard_manager(repl_id, true/*can fail*/);
