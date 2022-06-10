@@ -90,9 +90,13 @@ def extract(dest_dir, archive_path, format):
 def apply_patch(dest_dir, diff_path, strip_levels=1):
     subprocess.check_call(['patch', '-p%d' % strip_levels, '-i', diff_path], cwd=dest_dir)
 
-def git_clone(repo_dir, url, branch=None):
+def git_clone(repo_dir, url, branch=None, commit_id=None):
     if branch is not None:
+        assert commit_id is None
         subprocess.check_call(['git', 'clone', '-b', branch, url, repo_dir])
+    elif commit_id is not None:
+        subprocess.check_call(['git', 'clone', url, repo_dir])
+        subprocess.check_call(['git', '-C', repo_dir, 'checkout', commit_id])
     else:
         subprocess.check_call(['git', 'clone', url, repo_dir])
 
@@ -372,7 +376,7 @@ def check_dirty_build(name, build_result, component_dir):
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
            legion_use_cmake=False, extra_flags=[], llvm_version=None,
            terra_url=None, terra_branch=None, terra_lua=None, terra_use_cmake=None,
-           gasnet_version=None,
+           gasnet_version=None, gasnet_config_version=None,
            thread_count=None, insecure=False):
     if not cache:
         if 'CC' not in os.environ:
@@ -428,7 +432,10 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     if gasnet_enabled():
         gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
         if not os.path.exists(gasnet_dir):
-            git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
+            git_clone(
+                gasnet_dir,
+                'https://github.com/StanfordLegion/gasnet.git',
+                commit_id=gasnet_config_version)
         if not cache:
             conduit = discover_conduit()
             conduit_short = short_conduit(conduit)
@@ -496,11 +503,10 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         assert os.path.exists(llvm_build_result)
 
     terra_dir = os.path.join(prefix_dir, 'terra.build')
-    terra_build_dir = os.path.join(terra_dir, 'build', 'bin')
     terra_build_result = os.path.join(terra_dir, 'release', 'bin', 'terra')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, terra_url, terra_branch)
-    if not os.path.exists(terra_build_dir):
+    if not os.path.exists(terra_build_result):
         try:
             build_terra(terra_dir, terra_branch, terra_lua, terra_use_cmake, cmake_exe, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
@@ -580,6 +586,10 @@ if __name__ == '__main__':
         '--gasnet-version', dest='gasnet_version', required=False,
         default=os.environ.get('GASNET_VERSION', 'GASNet-2022.3.0'),
         help='Select GASNet version.')
+    parser.add_argument(
+        '--gasnet-config-version', dest='gasnet_config_version', required=False,
+        default='ea8576d9f3ac00b9af50715078f83cf6a3d2abce',
+        help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
         help='Number threads used to compile.')
