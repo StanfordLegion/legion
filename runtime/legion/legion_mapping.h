@@ -603,7 +603,7 @@ namespace Legion {
        * provide an optional 'shard_domain' value to describe the set of points.
        * If this is provided the runtime does not introspect it other than to
        * check that its dimensionality matches that of the points. This value
-       * is then passed as the 'shard_domain' argument to all invocation of a 
+       * is then passed as the 'shard_domain' argument to all invocations of a
        * sharding functor for operations launched by these shards.
        */
       struct MapReplicateTaskOutput {

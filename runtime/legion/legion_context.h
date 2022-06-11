@@ -1903,7 +1903,7 @@ namespace Legion {
       inline int get_shard_collective_participating_shards(void) const
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
-        { return shard_collective_last_radix; }
+        { return shard_collective_last_radix; } 
       virtual ReplicationID get_replication_id(void) const;
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
@@ -2466,8 +2466,8 @@ namespace Legion {
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
-      IndexSpace find_sharding_launch_space(bool can_create);
-      IndexSpace find_collective_map_launch_space(void);
+      IndexSpace find_sharding_launch_space(void);
+      const DomainPoint& get_shard_point(void) const; 
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);

@@ -2712,7 +2712,7 @@ namespace Legion {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
-            result = create_index_space(domain, \
+            result = create_index_space_internal(&domain, \
               NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             break; \
           }
@@ -17199,10 +17199,8 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
-      map_op->initialize_replication(this,
-          find_sharding_launch_space(true/*can create*/),
-          shard_manager->find_sharding_function(0/*cyclic*/),
-          shard_manager->is_first_local_shard(owner_shard));
+      map_op->initialize_replication(this, find_sharding_launch_space(),
+                      shard_manager->is_first_local_shard(owner_shard));
       if (current_trace != NULL)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
                       "Attempted an inline mapping of region "
@@ -17280,10 +17278,8 @@ namespace Legion {
       }
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
-      map_op->initialize_replication(this,
-          find_sharding_launch_space(true/*can create*/),
-          shard_manager->find_sharding_function(0/*cyclic*/),
-          shard_manager->is_first_local_shard(owner_shard));
+      map_op->initialize_replication(this, find_sharding_launch_space(),
+                      shard_manager->is_first_local_shard(owner_shard));
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
@@ -17993,8 +17989,6 @@ namespace Legion {
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
       op->initialize_replication(this,
-          find_sharding_launch_space(!unordered),
-          shard_manager->find_sharding_function(0/*cyclic*/),
           shard_manager->is_first_local_shard(owner_shard));
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
@@ -20592,7 +20586,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::find_sharding_launch_space(bool can_create)
+    IndexSpace ReplicateContext::find_sharding_launch_space(void)
     //--------------------------------------------------------------------------
     {
       // In general this method is only called during intialization by the
@@ -20602,25 +20596,20 @@ namespace Legion {
       // the corresponding attach operation
       if (sharding_launch_space.exists())
         return sharding_launch_space;
-#ifdef DEBUG_LEGION
-      assert(can_create);
-#endif
-      const Domain shard_domain(DomainPoint(0), 
-          DomainPoint(shard_manager->total_shards-1));
-      sharding_launch_space = find_index_launch_space(shard_domain);
+      // If we don't have a shard domain from the manager then there's
+      // nothing we can do about this either
+      if (shard_manager->shard_domain.get_dim() == 0)
+        return sharding_launch_space;
+      sharding_launch_space =
+        find_index_launch_space(shard_manager->shard_domain);
       return sharding_launch_space;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::find_collective_map_launch_space(void)
+    const DomainPoint& ReplicateContext::get_shard_point(void) const
     //--------------------------------------------------------------------------
     {
-      if (collective_map_launch_space.exists())
-        return collective_map_launch_space;
-      const Domain collective_domain(DomainPoint(0),
-          shard_manager->get_collective_mapping().size()-1);
-      collective_map_launch_space = find_index_launch_space(collective_domain);
-      return collective_map_launch_space;
+      return shard_manager->shard_points[owner_shard->shard_id];
     }
 
     //--------------------------------------------------------------------------

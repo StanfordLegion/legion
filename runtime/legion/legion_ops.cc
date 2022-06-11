@@ -3413,12 +3413,12 @@ namespace Legion {
           assert(!it->second.regions.empty());
 #endif
           // We can only use the collective space as the point space if
-          // we know that it containes all the points
+          // we know that it contains all the points
           IndexSpace point_space = IndexSpace::NO_SPACE;
           if (it->second.total_points == total_points)
           {
             if (!total_point_space.exists())
-              total_point_space = get_collective_space()->handle;
+              total_point_space = get_collective_space();
             point_space = total_point_space;
           }
           bool multi_instance = true;

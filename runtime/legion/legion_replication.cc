@@ -7201,15 +7201,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplMapOp::initialize_replication(ReplicateContext *ctx, 
-              IndexSpace shard_sp, ShardingFunction *fn, bool first_local_shard)
+                                    IndexSpace shard_sp, bool first_local_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!shard_space.exists());
-      assert(shard_fn == NULL);
 #endif
       shard_space = shard_sp;
-      shard_fn = fn;
       is_first_local_shard = first_local_shard;
       if (!remap_region && !runtime->unsafe_mapper)
       {
@@ -7249,8 +7247,7 @@ namespace Legion {
           assert(manager->is_collective_manager());
           CollectiveManager *collective = manager->as_collective_manager();
           assert(collective->contains_point(get_shard_point()));
-          assert(collective->point_space->get_volume() ==
-                  ctx->shard_manager->total_shards);
+          assert(collective->total_points == ctx->shard_manager->total_shards);
         }
       }
 #endif
@@ -7265,12 +7262,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      // Now promote the region requirement up to projection requirement
-      requirement.handle_type = LEGION_REGION_PROJECTION;
-      requirement.projection = 0; // identity
-      IndexSpaceNode *shard_space_node = runtime->forest->get_node(shard_space);
-      ProjectionInfo projection_info(runtime, requirement,
-                                     shard_space_node, shard_fn);
+      ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -7432,27 +7424,20 @@ namespace Legion {
     DomainPoint ReplMapOp::get_collective_instance_point(void) const
     //--------------------------------------------------------------------------
     {
-      return DomainPoint(get_parent_shard());
-    }
-
-    //--------------------------------------------------------------------------
-    ShardID ReplMapOp::get_parent_shard(void) const
-    //--------------------------------------------------------------------------
-    {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      return repl_ctx->owner_shard->shard_id;
+      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* ReplMapOp::get_collective_space(void) const
+    IndexSpace ReplMapOp::get_collective_space(void) const
     //--------------------------------------------------------------------------
     {
-      return runtime->forest->get_node(shard_space);
+      return shard_space;
     }
 
     //--------------------------------------------------------------------------
@@ -7465,7 +7450,6 @@ namespace Legion {
       mapping_check = 0;
       sources_check = 0;
       shard_space = IndexSpace::NO_SPACE;
-      shard_fn = NULL;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
@@ -7552,10 +7536,8 @@ namespace Legion {
       assert(did_broadcast == NULL);
       assert(single_broadcast == NULL);
 #endif
-      shard_space = ctx->find_sharding_launch_space(true/*can create*/);
       resource_barrier = resource_bar;
       ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
-      shard_fn = ctx->shard_manager->find_sharding_function(0/*cyclic*/);
       collective_instance = collective_inst;
       deduplicate_across_shards = dedup_across_shards;
       is_first_local_shard = first_local_shard;
@@ -7587,10 +7569,8 @@ namespace Legion {
                 ctx->owner_shard->shard_id, runtime->address_space)
           }
         }
-        if (deduplicate_across_shards)
-          point_space = ctx->find_collective_map_launch_space();
-        else
-          point_space = shard_space;
+        if (!deduplicate_across_shards)
+          shard_space = ctx->find_sharding_launch_space();
         const ShardID owner_shard = ctx->get_next_attach_did_origin();
         did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_77);
@@ -7647,9 +7627,7 @@ namespace Legion {
     {
       activate_attach_op();
       shard_space = IndexSpace::NO_SPACE;
-      point_space = IndexSpace::NO_SPACE;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-      shard_fn = NULL;
       exchange_index = 0;
       collective_instance = false;
       deduplicate_across_shards = false;
@@ -7676,32 +7654,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAttachOp::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    { 
-      // First compute the parent index
-      compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
-#ifdef DEBUG_LEGION
-      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      // Now promote the region requirement up to projection requirement
-      requirement.handle_type = LEGION_REGION_PROJECTION;
-      requirement.projection = 0; // identity
-      // No need to create the external instance here
-      if (runtime->legion_spy_enabled)
-        log_requirement();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplAttachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
       if (runtime->check_privileges)
         check_privilege();
-      IndexSpaceNode *shard_space_node = runtime->forest->get_node(shard_space);
-      ProjectionInfo projection_info(runtime, requirement,
-                                     shard_space_node, shard_fn);
+      ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -7797,10 +7755,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      DomainPoint result;
-      result.dim = 1;
-      result[0] = repl_ctx->owner_shard->shard_id;
-      return result;
+      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
@@ -7997,7 +7952,9 @@ namespace Legion {
           assert(layout != NULL);
           assert(shard_space.exists());
 #endif
-          IndexSpaceNode *point_node = runtime->forest->get_node(point_space);
+          IndexSpaceNode *point_node = NULL;
+          if (shard_space.exists())
+            point_node = runtime->forest->get_node(shard_space);
           manager = new CollectiveManager(runtime->forest, manager_did,
               runtime->determine_owner(manager_did), point_node,
               shard_manager->total_shards,
@@ -8200,17 +8157,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
-                                              IndexSpace shard_sp,
-                                              ShardingFunction *fn,
                                               bool first_local_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!shard_space.exists());
-      assert(shard_fn == NULL);
-#endif
-      shard_space = shard_sp;
-      shard_fn = fn;
       is_first_local_shard = first_local_shard;
     }
 
@@ -8219,8 +8168,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_detach_op();
-      shard_space = IndexSpace::NO_SPACE;
-      shard_fn = NULL;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
@@ -8237,25 +8184,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      DetachOp::trigger_prepipeline_stage();
-#ifdef DEBUG_LEGION
-      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      // Now promote the region requirement up to projection requirement
-      requirement.handle_type = LEGION_REGION_PROJECTION;
-      requirement.projection = 0; // identity
-    }
-
-    //--------------------------------------------------------------------------
     void ReplDetachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *shard_space_node = runtime->forest->get_node(shard_space);
-      ProjectionInfo projection_info(runtime, requirement,
-                                     shard_space_node, shard_fn);
+      ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -8316,10 +8248,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      DomainPoint result;
-      result.dim = 1;
-      result[0] = repl_ctx->owner_shard->shard_id;
-      return result;
+      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
@@ -8846,10 +8775,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      DomainPoint result;
-      result.dim = 1;
-      result[0] = repl_ctx->owner_shard->shard_id;
-      return result;
+      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
@@ -9040,10 +8966,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      DomainPoint result;
-      result.dim = 1;
-      result[0] = repl_ctx->owner_shard->shard_id;
-      return result;
+      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------

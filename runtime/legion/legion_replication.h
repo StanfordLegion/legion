@@ -2262,7 +2262,6 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   IndexSpace shard_space,
-                                  ShardingFunction *shard_fn,
                                   bool first_local_shard);
     public:
       virtual void activate(void);
@@ -2275,15 +2274,13 @@ namespace Legion {
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual bool supports_collective_instances(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
-      virtual ShardID get_parent_shard(void) const;
       // From collective instance creator
-      virtual IndexSpaceNode* get_collective_space(void) const;
+      virtual IndexSpace get_collective_space(void) const;
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       CollectiveID mapping_check, sources_check;
       IndexSpace shard_space;
-      ShardingFunction *shard_fn;
       RtBarrier collective_map_barrier; 
       bool is_first_local_shard;
     };
@@ -2309,7 +2306,6 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -2328,9 +2324,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     protected:
       IndexSpace shard_space;
-      IndexSpace point_space;
       RtBarrier collective_map_barrier;
-      ShardingFunction *shard_fn;
       size_t exchange_index;
       bool collective_instance;
       bool deduplicate_across_shards;
@@ -2393,13 +2387,10 @@ namespace Legion {
       ReplDetachOp& operator=(const ReplDetachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  IndexSpace shard_space,
-                                  ShardingFunction *shard_fn,
                                   bool first_local_shard);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void select_sources(const unsigned index,
@@ -2418,8 +2409,6 @@ namespace Legion {
       void record_unordered_kind(
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     protected:
-      IndexSpace shard_space;
-      ShardingFunction *shard_fn;
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
     };
