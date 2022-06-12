@@ -1182,6 +1182,7 @@ extern "C" {
     }
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaSetDeviceFlags(unsigned flags)
   {
     get_gpu_or_die("cudaSetDeviceFlags");
@@ -1191,6 +1192,7 @@ extern "C" {
     return cudaErrorSetOnActiveProcess;
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaGetDeviceFlags(unsigned *flags)
   {
     get_gpu_or_die("cudaGetDeviceFlags");
@@ -1206,6 +1208,7 @@ extern "C" {
     return (cudaError_t)cuCtxGetFlags(flags);
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaMalloc3DArray(cudaArray_t *array,
                                 const cudaChannelFormatDesc *desc,
                                 cudaExtent extent, unsigned flags)
@@ -1298,6 +1301,7 @@ extern "C" {
       return (cudaError_t)ret;
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaFreeArray(cudaArray_t array)
   {
     get_gpu_or_die("cudaFreeArray");
@@ -1305,6 +1309,7 @@ extern "C" {
     return (cudaError_t)cuArrayDestroy((CUarray)array);
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaCreateSurfaceObject(cudaSurfaceObject_t *object,
                                       const cudaResourceDesc *desc)
   {
@@ -1328,6 +1333,7 @@ extern "C" {
       return (cudaError_t)ret;
   }
 
+  REALM_PUBLIC_API
   cudaError_t cudaDestroySurfaceObject(cudaSurfaceObject_t object)
   {
     get_gpu_or_die("cudaDestroySurfaceObject");
