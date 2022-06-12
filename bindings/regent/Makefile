@@ -22,6 +22,7 @@ DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_HIP         ?= 0		# Include HIP support (requires HIP)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
@@ -37,6 +38,7 @@ endif
 # List all the application source files here
 GEN_SRC		?= regent.cc regent_partitions.cc bishop_mapper.cc bishop_c.cc murmur_hash3.cc # .cc files
 GEN_GPU_SRC	?= regent_cuda.cu		# .cu files
+GEN_HIP_SRC	?= regent_cuda.cu		# .cu files
 
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_SRC += regent_cudart_hijack.cc
@@ -53,6 +55,7 @@ LD_FLAGS ?=
 
 CC_FLAGS += -fPIC
 NVCC_FLAGS += -Xcompiler -fPIC
+HIPCC_FLAGS += -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else

@@ -2167,6 +2167,17 @@ class PointSet(object):
     def __nonzero__(self):
         return len(self.points) > 0
 
+    def __eq__(self, other):
+        if len(self.points) != len(other.points):
+            return False
+        for point in self.points:
+            if point not in other.points:
+                return False
+        return True
+
+    def __neq__(self, other):
+        return not self == other
+
     # Set intersection
     def __and__(self, other):
         result = self.copy()
@@ -4229,6 +4240,8 @@ class LogicalState(object):
                       "a close operation that we normally would have expected. This "+
                       "is likely a runtime bug. Re-run with logical checks "+
                       "to confirm.") % (op, str(op.uid)))
+            if self.node.state.bad_graph_on_error:
+                self.node.state.dump_bad_graph(op.context, req.logical_node.tree_id, self.field)
             if self.node.state.assert_on_error:
                 assert False
         return close
@@ -4399,10 +4412,8 @@ class LogicalState(object):
             if replay_op is not None and prev_op is replay_op:
                 # If it is a previous registration of ourself, skip it
                 # This will only happen during replays
-                if prev_req.index == req.index:
-                    dominates = False
-                    continue
-                assert False
+                dominates = False
+                continue
             # Close operations from the same creator can never depend on eachother
             if op.is_close() and prev_op.is_close() and op.creator is prev_op.creator:
                 continue
@@ -4519,35 +4530,54 @@ class DataflowTraverser(object):
         if isinstance(node, RealmCopy):
             self.post_visit_copy(node, eq_key)
 
-    def traverse_node(self, node, eq_key, first = True):
-        if node.version_numbers and eq_key in node.version_numbers and \
-                node.version_numbers[eq_key] != self.state.version_number:
-            # We can't traverse this node if it's from a previous version number
-            # because that is not the same value of the equivalence class
-            # Skip this check on the first node though for things like copy across
-            return False
-        if not self.visit_node(node, eq_key):
-            return False
-        eq_privileges = node.get_equivalence_privileges()
-        privilege = eq_privileges[eq_key]
-        # We can't traverse past any operation that writes this field 
-        # unless this is the first operation which we're trying to
-        # traverse backwards from
-        if privilege == READ_ONLY or first:
-            # Check to see if the version number is the same, if this
-            # is an operation from a previous version then we can't traverse it
-            if node.eq_incoming and eq_key in node.eq_incoming:
-                incoming = node.eq_incoming[eq_key]
-                if incoming:
-                    for next_node in incoming:
-                        # Short-circuit if we're done for better or worse
-                        if self.traverse_node(next_node, eq_key, first=False):
-                            # Still need to do the post visit call
-                            self.post_visit_node(node, eq_key)
-                            return True
-        self.post_visit_node(node, eq_key)
-        # See if we are done
-        return self.failed_analysis or self.verified(eq_key)
+    def run(self, first, eq_key):
+        # Do this with DFS since we care about paths
+        nodes = list()
+        nodes.append((first,True))
+        while nodes:
+            node,first_pass = nodes[-1]
+            if first_pass:
+                if node.version_numbers and eq_key in node.version_numbers and \
+                        node.version_numbers[eq_key] != self.state.version_number:
+                    # We can't traverse this node if it's from a previous version number
+                    # because that is not the same value of the equivalence class
+                    # Skip this check on the first node though for things like copy across
+                    nodes.pop()
+                    continue
+                if not self.visit_node(node, eq_key):
+                    nodes.pop()
+                    continue
+                eq_privileges = node.get_equivalence_privileges()
+                privilege = eq_privileges[eq_key]
+                # We can't traverse past any operation that writes this field 
+                # unless this is the first operation which we're trying to
+                # traverse backwards from
+                if privilege == READ_ONLY or node is first:
+                    # Check to see if the version number is the same, if this
+                    # is an operation from a previous version then we can't traverse it
+                    if node.eq_incoming and eq_key in node.eq_incoming:
+                        incoming = node.eq_incoming[eq_key]
+                        if incoming:
+                            # Record that we haven't run the post-visit method yet
+                            nodes[-1] = (node,False)
+                            # Add these nodes to the stack
+                            for next_node in incoming:
+                                nodes.append((next_node,True))
+                            # Can't run the post visit method yet
+                            continue
+            self.post_visit_node(node, eq_key)
+            nodes.pop()
+            # See if we are done
+            if self.failed_analysis or self.verified(eq_key):
+                break
+        # Unwind the stack in case we finished early
+        while nodes:
+            node,first_pass = nodes.pop()
+            # Skip any nodes that we finished early for
+            if first_pass:
+                continue
+            # Run the post visit method for any ndoes on the stack
+            self.post_visit_node(node, eq_key)
 
     def visit_copy(self, copy, eq_key):
         # We should never traverse through indirection copies here
@@ -4792,7 +4822,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = copy.get_equivalence_privileges()
                         if src_key in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(copy, dst_key)
+                            self.run(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
                         if copy.is_across():
@@ -4806,11 +4836,11 @@ class DataflowTraverser(object):
                                     continue
                                 eq_privileges = node.get_equivalence_privileges()
                                 if src_key in eq_privileges:
-                                    self.traverse_node(node, src_key)
+                                    self.run(node, src_key)
                         else:
                             eq_privileges = copy.get_equivalence_privileges()
                             if src_key in eq_privileges:
-                                self.traverse_node(copy, src_key)
+                                self.run(copy, src_key)
             # Only need to traverse fills directly for across cases as the 
             # non-accross ones will be traverse by the normal copy traversasl
             if op.realm_fills:
@@ -4822,7 +4852,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key not in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(fill, dst_key)
+                            self.run(fill, dst_key)
                 else:
                     for fill in op.realm_fills:
                         # Skip across fills
@@ -4830,7 +4860,7 @@ class DataflowTraverser(object):
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key in eq_privileges:
-                            self.traverse_node(fill, src_key)
+                            self.run(fill, src_key)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
@@ -4841,12 +4871,12 @@ class DataflowTraverser(object):
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
                     if src_key in eq_privileges:
-                        self.traverse_node(copy, src_key)
+                        self.run(copy, src_key)
             if op.realm_fills:
                 for fill in op.realm_fills:
                     eq_privileges = fill.get_equivalence_privileges()
                     if src_key in eq_privileges:
-                        self.traverse_node(fill, src_key)
+                        self.run(fill, src_key)
         elif restricted:
             assert not self.across
             # If this is restricted, do the traversal from the copies
@@ -4860,10 +4890,10 @@ class DataflowTraverser(object):
                     if self.target in copy.dsts and \
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dst_fields:
-                        self.traverse_node(copy, src_key)
+                        self.run(copy, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.traverse_node(op, src_key)
+            self.run(op, src_key)
         return self.verified(ver_key, True)
 
 class EquivalenceSet(object):
@@ -5305,6 +5335,12 @@ class EquivalenceSet(object):
             for copy in copies:
                 bad = check_preconditions(preconditions, copy)
                 if bad is not None:
+                    # Handle a special case here of collective scatter copies
+                    # They look racy to Legion Spy but they are what the user
+                    # controls so it's up to the user to specify them
+                    if isinstance(bad,RealmCopy) and \
+                            copy.creator.index_owner is bad.creator.index_owner:
+                        continue
                     print("ERROR: Missing indirect precondition for "+str(copy)+
                           " on field "+str(field)+" for "+str(op)+" on "+str(bad))
                     if op.state.eq_graph_on_error:
@@ -5487,10 +5523,10 @@ class Operation(object):
                  'collective_copies', 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
-                 'futures', 'index_owner', 'points', 'launch_shape', 'creator', 
-                 'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
-                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
-                 'cluster_name', 'generation', 'transitive_warning_issued', 
+                 'futures', 'index_owner', 'points', 'index_point', 'launch_shape',
+                 'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
+                 'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
+                 'node_name', 'cluster_name', 'generation', 'transitive_warning_issued',
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', "replayed", "restricted"]
                   # If you add a field here, you must update the merge method
@@ -5538,6 +5574,8 @@ class Operation(object):
         # Only valid for index operations 
         self.points = None
         self.launch_shape = None
+        # Only valid for point operations
+        self.index_point = None
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
@@ -5711,9 +5749,11 @@ class Operation(object):
         self.partition_node = node
         self.partition_kind = kind
 
-    def set_index_owner(self, owner):
+    def set_index_owner(self, owner, point):
         assert not self.index_owner
         self.index_owner = owner
+        assert not self.index_point
+        self.index_point = point
 
     def add_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
@@ -5721,8 +5761,8 @@ class Operation(object):
         if self.points is None:
             self.points = dict()
         point.op.set_name(self.name)
-        point.op.set_index_owner(self)
         index_point = point.point
+        point.op.set_index_owner(self, index_point)
         if index_point in self.points:
             self.points[index_point] = self.state.alias_index_points(point,
                                                   self.points[index_point])
@@ -5733,7 +5773,7 @@ class Operation(object):
 
     def add_point_op(self, op, point):
         op.kind = self.kind
-        op.set_index_owner(self)
+        op.set_index_owner(self, point)
         # Initialize if necessary
         if self.points is None:
             self.points = dict()
@@ -5998,7 +6038,7 @@ class Operation(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
-            traverser.visit_event(self.start_event)
+            traverser.run(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
@@ -6008,7 +6048,7 @@ class Operation(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
-            traverser.visit_event(self.finish_event)
+            traverser.run(self.finish_event)
             # Keep everything symmetric
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
@@ -6075,15 +6115,14 @@ class Operation(object):
                 if not copy.indirections.has_group_instance(src_index,
                             src_inst, src_req.logical_node.index_space):
                     continue
-                if copy.index_expr.get_index_space() is not \
-                        src_idx_req.logical_node.index_space:
-                    continue
                 if not copy.indirections.has_indirect_instance(src_index,
                                             src_idx_inst, src_idx_field):
                     continue
+                src_copy_space = src_idx_req.logical_node.index_space
             else:
                 if src_inst is not copy.srcs[index]:
                     continue
+                src_copy_space = src_req.logical_node.index_space
             if dst_field is not copy.dst_fields[index]:
                 continue
             if dst_idx_req is not None:
@@ -6093,14 +6132,23 @@ class Operation(object):
                 if not copy.indirections.has_group_instance(dst_index,
                             dst_inst, dst_req.logical_node.index_space):
                     continue
-                if copy.index_expr.get_index_space() is not \
-                        dst_idx_req.logical_node.index_space:
-                    continue
                 if not copy.indirections.has_indirect_instance(dst_index,
                                             dst_idx_inst, dst_idx_field):
                     continue
+                dst_copy_space = dst_idx_req.logical_node.index_space
             else:
                 if dst_inst is not copy.dsts[index]:
+                    continue
+                dst_copy_space = dst_req.logical_node.index_space
+            # Check that the copy domain is equal to the intersection
+            # of the source and destination copy expressions
+            if src_copy_space is dst_copy_space:
+                if copy.index_expr.get_index_space() is not src_copy_space and \
+                    copy.index_expr.get_point_set() != src_copy_space.get_point_set():
+                    continue
+            else:
+                point_set = src_copy_space.get_point_set() & dst_copy_space.get_point_set()
+                if point_set != copy.index_expr.get_point_set():
                     continue
             if redop != copy.redops[index]:
                 continue
@@ -6176,15 +6224,14 @@ class Operation(object):
                     if not copy.indirections.has_group_instance(src_index,
                                 src_inst, src_req.logical_node.index_space):
                         continue
-                    if copy.index_expr.get_index_space() is not \
-                            src_idx_req.logical_node.index_space:
-                        continue
                     if not copy.indirections.has_indirect_instance(src_index,
                                                 src_idx_inst, src_idx_field):
                         continue
+                    src_copy_space = src_idx_req.logical_node.index_space
                 else:
                     if src_inst is not copy.srcs[index]:
                         continue
+                    src_copy_space = src_req.logical_node.index_space
                 if dst_field is not copy.dst_fields[index]:
                     continue
                 if dst_idx_req is not None:
@@ -6194,14 +6241,23 @@ class Operation(object):
                     if not copy.indirections.has_group_instance(dst_index,
                                 dst_inst, dst_req.logical_node.index_space):
                         continue
-                    if copy.index_expr.get_index_space() is not \
-                            dst_idx_req.logical_node.index_space:
-                        continue
                     if not copy.indirections.has_indirect_instance(dst_index,
                                                 dst_idx_inst, dst_idx_field):
                         continue
+                    dst_copy_space = dst_idx_req.logical_node.index_space
                 else:
                     if dst_inst is not copy.dsts[index]:
+                        continue
+                    dst_copy_space = dst_req.logical_node.index_space
+                # Check that the copy domain is equal to the intersection
+                # of the source and destination copy expressions
+                if src_copy_space is dst_copy_space:
+                    if copy.index_expr.get_index_space() is not src_copy_space and \
+                        copy.index_expr.get_point_set() != src_copy_space.get_point_set():
+                        continue
+                else:
+                    point_set = src_copy_space.get_point_set() & dst_copy_space.get_point_set()
+                    if point_set != copy.index_expr.get_point_set():
                         continue
                 if redop != copy.redops[index]:
                     continue
@@ -6298,23 +6354,20 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req1, req2)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Check for invertible projection functions which can 
                         # the runtime knows how to handle their dependences
                         if req1.index == req2.index and \
                                 self.reqs[req1.index].projection_function is not None and \
                                 self.reqs[req1.index].projection_function.invertible:
-                            # This should only happen for tasks right now
-                            assert op1.task is not None
-                            assert op2.task is not None
                             # Check to make sure we find a dependence going one way or
                             # the other between the two operations
                             if op1.intra_space_dependences is not None and \
-                                    op2.task.point in op1.intra_space_dependences:
+                                    op2.index_point in op1.intra_space_dependences:
                                 order_points = True
                                 continue
                             if op2.intra_space_dependences is not None and \
-                                    op1.task.point in op2.intra_space_dependences:
+                                    op1.index_point in op2.intra_space_dependences:
                                 order_points = True
                                 continue
                             print(("Missing intra space dependence between requirements "+
@@ -6334,30 +6387,52 @@ class Operation(object):
             # them in an ordered dictionary so that whenever we iterate
             # over them we do them in an order consistent with their deps
             # This should only happen for index task kinds currently
-            assert self.kind == INDEX_TASK_KIND 
-            satisfied_deps = set()
-            remaining_tasks = dict()
-            for point,task in iteritems(self.points):
-                if task.op.intra_space_dependences is None:
-                    new_points[point] = task
-                    satisfied_deps.add(point)
-                else:
-                    remaining_tasks[point] = task
-            while remaining_tasks:
-                next_remaining = dict()
-                for point,task in iteritems(remaining_tasks):
-                    satisfied = True
-                    for dep in task.op.intra_space_dependences:
-                        if dep not in satisfied_deps:
-                            satisfied = False
-                            break
-                    if satisfied:
+            if self.kind == INDEX_TASK_KIND:
+                satisfied_deps = set()
+                remaining_tasks = dict()
+                for point,task in iteritems(self.points):
+                    if task.op.intra_space_dependences is None:
                         new_points[point] = task
                         satisfied_deps.add(point)
                     else:
-                        next_remaining[point] = task
-                remaining_tasks = next_remaining
-            
+                        remaining_tasks[point] = task
+                while remaining_tasks:
+                    next_remaining = dict()
+                    for point,task in iteritems(remaining_tasks):
+                        satisfied = True
+                        for dep in task.op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = task
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_tasks = next_remaining
+            else:
+                satisfied_deps = set()
+                remaining_ops = dict()
+                for point,op in iteritems(self.points):
+                    if op.intra_space_dependences is None:
+                        new_points[point] = op
+                        satisfied_deps.add(point)
+                    else:
+                        remaining_ops[point] = op
+                while remaining_ops:
+                    next_remaining = dict()
+                    for point,op in iteritems(remaining_ops):
+                        satisfied = True
+                        for dep in op.intra_space_dependences:
+                            if dep not in satisfied_deps:
+                                satisfied = False
+                                break
+                        if satisfied:
+                            new_points[point] = op 
+                            satisfied_deps.add(point)
+                        else:
+                            next_remaining[point] = task
+                    remaining_ops = next_remaining
         else:
             # Let's put things in order by their UID
             if self.kind == INDEX_TASK_KIND:
@@ -6413,7 +6488,7 @@ class Operation(object):
                 if aliased:
                     assert ancestor
                     dep_type = compute_dependence_type(req, other_req)
-                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                    if dep_type != NO_DEPENDENCE:
                         # Only report this at least one is not a projection requirement
                         if req.projection_function is None or \
                             other_req.projection_function is None:
@@ -6911,6 +6986,16 @@ class Operation(object):
                       perform_checks, False, None, dst_versions):
                 return False
             if gather:
+                # Check to see if the copy space is empty
+                if idx_req.logical_node.index_space is not dst_req.logical_node.index_space:
+                    idx_points = idx_req.logical_node.index_space.get_point_set()
+                    dst_points = dst_req.logical_node.index_space.get_point_set()
+                    copy_points = idx_points & dst_points
+                    
+                else:
+                    copy_points = idx_points
+                if len(copy_points) == 0:
+                    continue
                 local_copies = set()
                 if perform_checks:
                     copy = self.find_verification_indirection_copy(src_field,
@@ -6939,10 +7024,17 @@ class Operation(object):
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, local_copies, dst_points,
+                        copy_redop, perform_checks, local_copies, copy_points,
                         dst_depth, dst_field, dst_req, dst_inst, dst_versions):
                     return False
             else:
+                # Check to see if the copy space is empty
+                if idx_req.logical_node.index_space is not src_req.logical_node.index_space:
+                    copy_points = idx_points & src_points
+                else:
+                    copy_points = idx_points
+                if len(copy_points) == 0:
+                    continue
                 local_copies = set()
                 if perform_checks:
                     copy = self.find_verification_indirection_copy(src_field,
@@ -6967,7 +7059,7 @@ class Operation(object):
                 else:
                     global_copies = local_copies 
                 if not src_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, local_copies, src_points,
+                        copy_redop, perform_checks, local_copies, copy_points,
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
@@ -6981,7 +7073,7 @@ class Operation(object):
                 dst_req.priv = REDUCE
                 dst_req.redop = copy_redop
         if not idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 idx_depth, idx_field, idx_req, idx_inst, idx_versions):
             return False
         return True
@@ -7015,6 +7107,13 @@ class Operation(object):
         dst_idx_field = dst_idx_req.fields[0] 
         dst_idx_inst = dst_idx_mappings[dst_idx_field.fid]
         assert not dst_idx_inst.is_virtual()
+        # Check to see if the copy space is empty
+        if src_idx_req.logical_node.index_space is not dst_idx_req.logical_node.index_space:
+            copy_points = src_idx_points & dst_idx_points
+        else:
+            copy_points = src_idx_points
+        if len(copy_points == 0):
+            return True
         # We just need to verify these region requirements one time
         src_idx_versions = dict()
         if not src_idx_req.logical_node.perform_physical_verification(
@@ -7099,11 +7198,11 @@ class Operation(object):
                 dst_req.priv = REDUCE
                 dst_req.redop = copy_redop
         if not src_idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, src_idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 src_idx_depth, src_idx_field, src_idx_req, src_idx_inst, src_idx_versions):
             return False
         if not dst_idx_req.logical_node.perform_indirect_copy_verification(self,
-                copy_redop, perform_checks, idx_copies, dst_idx_points,
+                copy_redop, perform_checks, idx_copies, copy_points,
                 dst_idx_depth, dst_idx_field, dst_idx_req, dst_idx_inst, dst_idx_versions):
             return False
         return True
@@ -9136,7 +9235,7 @@ class RealmBase(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
-            traverser.visit_event(self.start_event)
+            traverser.run(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
@@ -9146,7 +9245,7 @@ class RealmBase(object):
                 op_fn=traverse_node, copy_fn=traverse_node, 
                 fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
-            traverser.visit_event(self.finish_event)
+            traverser.run(self.finish_event)
             # Keep everything symmetric
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
@@ -9477,14 +9576,14 @@ class RealmCopy(RealmBase):
                             else:
                                 line.append('^')
                         if has_dst_indirect:
-                            idx_inst = self.indirections.get_group_instance(dst_index, row)
-                            if idx_inst is not None:
-                                line.append(str(idx_inst))
-                            else:
-                                line.append('^')
                             if row == 0:
                                 line.append(str(
                                     self.indirections.get_indirect_instance(dst_index)))
+                            else:
+                                line.append('^')
+                            idx_inst = self.indirections.get_group_instance(dst_index, row)
+                            if idx_inst is not None:
+                                line.append(str(idx_inst))
                             else:
                                 line.append('^')
                         else:
@@ -9546,19 +9645,58 @@ class RealmCopy(RealmBase):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
             point_set = self.index_expr.get_point_set()
-            for point in point_set.iterator():
-                for field in self.src_fields:
-                    key = (point,field,self.src_tree_id)
-                    assert key not in self.eq_privileges
-                    self.eq_privileges[key] = READ_ONLY
-            # If this is a copy across record that we 
-            # are writing to the destination fields
             if self.is_across():
+                # Copy-across case
+                for fidx in range(len(self.src_fields)):
+                    field = self.src_fields[fidx]
+                    # Check for any indirections
+                    if self.src_indirections is None or self.src_indirections[fidx] is None:
+                        for point in point_set.iterator():
+                            key = (point,field,self.src_tree_id)
+                            assert key not in self.eq_privileges
+                            self.eq_privileges[key] = READ_ONLY
+                    else:
+                        # Do the source instances first
+                        index = self.src_indirections[fidx]
+                        for off in range(self.indirections.get_group_size(index)):
+                            inst,space = self.indirections.groups[index][off]
+                            for point in space.get_point_set().iterator():
+                                key = (point,field,inst.tree_id)
+                                self.eq_privileges[key] = READ_ONLY
+                        # Then do the indirection field
+                        inst = self.indirections.get_indirect_instance(index)
+                        field = self.indirections.get_indirect_field(index)
+                        for point in point_set.iterator():
+                            key = (point,field,inst.tree_id)
+                            self.eq_privileges[key] = READ_ONLY
+                    field = self.dst_fields[fidx]
+                    redop = self.redops[fidx]
+                    if self.dst_indirections is None or self.dst_indirections[fidx] is None:
+                        for point in point_set.iterator():
+                            key = (point,field,self.dst_tree_id)
+                            assert key not in self.eq_privileges
+                            self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
+                    else:
+                        # Do the destination instances first
+                        index = self.dst_indirections[fidx]
+                        for off in range(self.indirections.get_group_size(index)):
+                            inst,space = self.indirections.groups[index][off]
+                            for point in space.get_point_set().iterator():
+                                key = (point,field,inst.tree_id)
+                                self.eq_privileges[key] = WRITE_ONLY if redop == 0 else READ_WRITE
+                        # Then do the indirection field
+                        inst = self.indirections.get_indirect_instance(index)
+                        field = self.indirections.get_indirect_field(index)
+                        for point in point_set.iterator():
+                            key = (point,field,inst.tree_id)
+                            self.eq_privileges[key] = READ_ONLY
+            else:
+                # Normal copy case
                 for point in point_set.iterator():
-                    for field in self.dst_fields:
-                        key = (point,field,self.dst_tree_id)
+                    for field in self.src_fields:
+                        key = (point,field,self.src_tree_id)
                         assert key not in self.eq_privileges
-                        self.eq_privileges[key] = WRITE_ONLY
+                        self.eq_privileges[key] = READ_ONLY
         return self.eq_privileges 
 
 class RealmFill(RealmBase):
@@ -9692,10 +9830,9 @@ class RealmFill(RealmBase):
         return self.eq_privileges
 
 class RealmDeppart(RealmBase):
-    __slots__ = ['index_space', 'node_name']
+    __slots__ = ['node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
-        self.index_space = None
         self.finish_event = finish
         if finish.exists():
             finish.add_incoming_deppart(self)
@@ -9721,14 +9858,15 @@ class RealmDeppart(RealmBase):
         assert new_creator is not self.creator
         self.creator = new_creator
 
-    def set_index_space(self, index_space):
-        self.index_space = index_space
+    def set_index_expr(self, index_expr):
+        self.index_expr = index_expr
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Deppart ("+str(self.realm_num)+") of "+self.index_space.html_safe_name
+            label = "Realm Deppart ("+str(self.realm_num)+") of "+\
+                    self.index_expr.point_space_graphviz_string()
         else:
-            label = "Realm Deppart of "+self.index_space.html_safe_name
+            label = "Realm Deppart ("+str(self.realm_num)+")"
         if self.creator is not None:
             label += " generated by "+self.creator.html_safe_name
         lines = [[{ "label" : label, "colspan" : 3 }]]
@@ -9756,136 +9894,92 @@ class EventGraphTraverser(object):
         self.forwards = forwards
         self.use_gen = use_gen
         self.generation = generation
-        self.event_fn = event_fn
-        self.op_fn = op_fn
-        self.copy_fn = copy_fn
-        self.fill_fn = fill_fn
-        self.deppart_fn = deppart_fn
-        self.post_event_fn = post_event_fn
-        self.post_op_fn = post_op_fn
-        self.post_copy_fn = post_copy_fn
-        self.post_fill_fn = post_fill_fn
-        self.post_deppart_fn = post_deppart_fn
+        self.functions = list()
+        self.functions.append(event_fn)
+        self.functions.append(op_fn)
+        self.functions.append(copy_fn)
+        self.functions.append(fill_fn)
+        self.functions.append(deppart_fn)
+        self.post_functions = list()
+        self.post_functions.append(post_event_fn)
+        self.post_functions.append(post_op_fn)
+        self.post_functions.append(post_copy_fn)
+        self.post_functions.append(post_fill_fn)
+        self.post_functions.append(post_deppart_fn)
 
-    def visit_event(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.event_fn is not None:
-            do_next = self.event_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.outgoing is not None:
-                for event in node.outgoing:
-                    self.visit_event(event)
-            if node.outgoing_ops is not None:
-                for op in node.outgoing_ops:
-                    self.visit_op(op)
-            if node.outgoing_fills is not None:
-                for fill in node.outgoing_fills:
-                    self.visit_fill(fill)
-            if node.outgoing_copies is not None:
-                for copy in node.outgoing_copies:
-                    self.visit_copy(copy)
-        else:
-            if node.incoming is not None:
-                for event in node.incoming:
-                    self.visit_event(event)
-            if node.incoming_ops is not None:
-                for op in node.incoming_ops:
-                    self.visit_op(op)
-            if node.incoming_fills is not None:
-                for fill in node.incoming_fills:
-                    self.visit_fill(fill)
-            if node.incoming_copies is not None:
-                for copy in node.incoming_copies:
-                    self.visit_copy(copy)
-        if self.post_event_fn is not None:
-            self.post_event_fn(node, self)
+    def run(self, event):
+        nodes = list()
+        nodes.append((event,0,True))
+        while nodes:
+            node,kind,first_pass = nodes[-1]
+            if first_pass:
+                if self.use_gen:
+                    if node.generation == self.generation:
+                        nodes.pop()
+                        continue
+                    else:
+                        node.generation = self.generation
+                do_next = True
+                if self.functions[kind] is not None:
+                    do_next = self.functions[kind](node, self)
+                if not do_next:
+                    nodes.pop()
+                    continue
+                if kind == 0:
+                    # Event 
+                    # We'll just assume all events have some kind of children
+                    # which will be true in most cases
+                    nodes[-1] = (node,0,False)
+                    if self.forwards:
+                        if node.outgoing is not None:
+                            for event in node.outgoing:
+                                nodes.append((event,0,True))
+                        if node.outgoing_ops is not None:
+                            for op in node.outgoing_ops:
+                                nodes.append((op,1,True))
+                        if node.outgoing_copies is not None:
+                            for copy in node.outgoing_copies:
+                                nodes.append((copy,2,True))
+                        if node.outgoing_fills is not None:
+                            for fill in node.outgoing_fills:
+                                nodes.append((fill,3,True))
+                        if node.outgoing_depparts is not None:
+                            for deppart in node.outgoing_depparts:
+                                nodes.append((deppart,4,True))
+                    else:
+                        if node.incoming is not None:
+                            for event in node.incoming:
+                                nodes.append((event,0,True))
+                        if node.incoming_ops is not None:
+                            for op in node.incoming_ops:
+                                nodes.append((op,1,True))
+                        if node.incoming_copies is not None:
+                            for copy in node.incoming_copies:
+                                nodes.append((copy,2,True))
+                        if node.incoming_fills is not None:
+                            for fill in node.incoming_fills:
+                                nodes.append((fill,3,True))
+                        if node.incoming_depparts is not None:
+                            for deppart in node.incoming_depparts:
+                                nodes.append((deppart,4,True))
+                    # We assumed we have children so keep going 
+                    continue
+                else:
+                    # Something with just a start and finish event
+                    if self.forwards:
+                        if node.finish_event.exists():
+                            nodes[-1] = (node,kind,False)
+                            nodes.append((node.finish_event,0,True))
+                            continue
+                    else:
+                        if node.start_event.exists():
+                            nodes[-1] = (node,kind,False)
+                            nodes.append((node.start_event,0,True))
+                            continue
+            if self.post_functions[kind] is not None:
+                self.post_functions[kind](node, self)
+            nodes.pop()
 
-    def visit_op(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.op_fn is not None:
-            do_next = self.op_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_op_fn is not None:
-            self.post_op_fn(node, self)
-
-    def visit_fill(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.fill_fn is not None:
-            do_next = self.fill_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_fill_fn is not None:
-            self.post_fill_fn(node, self)
-
-    def visit_copy(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.copy_fn is not None:
-            do_next = self.copy_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_copy_fn is not None:
-            self.post_copy_fn(node, self)
-
-    def visit_deppart(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                node.generation = self.generation
-        do_next = True
-        if self.deppart_fn is not None:
-            do_next = self.deppart_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.finish_event.exists():
-                self.visit_event(node.finish_event)
-        else:
-            if node.start_event.exists():
-                self.visit_event(node.start_event)
-        if self.post_deppart_fn is not None:
-            self.post_deppart_fn(node, self)
 
 class PhysicalTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -9896,28 +9990,36 @@ class PhysicalTraverser(object):
         self.node_fn = node_fn
         self.post_node_fn = post_node_fn
 
-    def visit_node(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                assert node.generation < self.generation
-                node.generation = self.generation
-        do_next = True
-        if self.node_fn is not None:
-            do_next = self.node_fn(node, self)
-        if not do_next:
-            return
-        if self.forwards:
-            if node.physical_outgoing is not None:
-                for next_node in node.physical_outgoing:
-                    self.visit_node(next_node)
-        else:
-            if node.physical_incoming is not None:
-                for next_node in node.physical_incoming:
-                    self.visit_node(next_node)
-        if self.post_node_fn is not None:
-            self.post_node_fn(node, self)
+    def run(self, node):
+        # Do this with DFS for reachability
+        nodes = list()
+        nodes.append((node,True))
+        while nodes:
+            node,first_pass = nodes[-1]
+            if first_pass:
+                if self.use_gen:
+                    if node.generation == self.generation:
+                        nodes.pop()
+                        continue
+                    else:
+                        assert node.generation < self.generation
+                        node.generation = self.generation
+                do_next = True
+                if self.node_fn is not None:
+                    do_next = self.node_fn(node, self)
+                if not do_next:
+                    nodes.pop()
+                    continue
+                children = node.physical_outgoing if self.forwards else node.physical_incoming
+                if children is not None:
+                    nodes[-1] = (node,False)
+                    for next_node in children:
+                        nodes.append((next_node,True))
+                    # We have children to traverse so we're not done with this node yet
+                    continue
+            if self.post_node_fn is not None:
+                self.post_node_fn(node, self)
+            nodes.pop()
 
 class GraphPrinter(object):
     # Static member so we only issue this warning once
@@ -10542,8 +10644,8 @@ def parse_legion_spy_line(line, state):
         deppart.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         deppart.set_creator(op)
-        index_space = state.get_index_space(int(m.group('ispace')))
-        deppart.set_index_space(index_space) 
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        deppart.set_index_expr(index_expr) 
         return True
     m = barrier_arrive_pat.match(line)
     if m is not None:
@@ -11580,16 +11682,16 @@ class State(object):
         # Traverse all the sources 
         for op in self.unique_ops:
             if not op.physical_incoming:
-                topological_sorter.visit_node(op)
+                topological_sorter.run(op)
         for copy in itervalues(self.copies):
             if not copy.physical_incoming:
-                topological_sorter.visit_node(copy)
+                topological_sorter.run(copy)
         for fill in itervalues(self.fills):
             if not fill.physical_incoming:
-                topological_sorter.visit_node(fill)
+                topological_sorter.run(fill)
         for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
-                topological_sorter.visit_node(deppart)
+                topological_sorter.run(deppart)
         # Now that we have everything sorted based on topology
         # Do the simplification in postorder so we simplify
         # the smallest subgraphs first and only do the largest
@@ -11781,16 +11883,16 @@ class State(object):
             # Traverse all the sources 
             for op in self.unique_ops:
                 if not op.physical_incoming:
-                    topological_sorter.visit_node(op)
+                    topological_sorter.run(op)
             for copy in itervalues(self.copies):
                 if not copy.physical_incoming:
-                    topological_sorter.visit_node(copy)
+                    topological_sorter.run(copy)
             for fill in itervalues(self.fills):
                 if not fill.physical_incoming:
-                    topological_sorter.visit_node(fill)
+                    topological_sorter.run(fill)
             for deppart in itervalues(self.depparts):
                 if not deppart.physical_incoming:
-                    topological_sorter.visit_node(deppart)
+                    topological_sorter.run(deppart)
             postorder = topological_sorter.postorder
         # Transitively reduce the equivalence set graphs 
         # We do this in one pass to avoid try and maximize efficiency

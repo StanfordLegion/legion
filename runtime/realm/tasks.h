@@ -247,7 +247,10 @@ namespace Realm {
       // gets highest priority task available from any task queue
       Task *get_best_ready_task(int& task_priority);
 
-      Mutex lock;
+      // TODO: switch this to DelegatingMutex - goal is that callers of
+      //  things like thread_ready() should not have to block on
+      //  contention
+      FIFOMutex lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
       std::set<Thread *> blocked_workers;
@@ -407,8 +410,8 @@ namespace Realm {
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
       std::set<Thread *> terminating_workers;
-      std::map<Thread *, Mutex::CondVar *> sleeping_threads;
-      Mutex::CondVar shutdown_condvar;
+      std::map<Thread *, FIFOMutex::CondVar *> sleeping_threads;
+      FIFOMutex::CondVar shutdown_condvar;
     };
 
 #ifdef REALM_USE_USER_THREADS
@@ -457,7 +460,7 @@ namespace Realm {
       std::set<Thread *> all_workers;
 
       int host_startups_remaining;
-      Mutex::CondVar host_startup_condvar;
+      FIFOMutex::CondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

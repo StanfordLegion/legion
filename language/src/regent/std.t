@@ -17,7 +17,7 @@
 local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local base = require("regent/std_base")
-local cudahelper = require("regent/cudahelper")
+local gpuhelper = require("regent/gpu/helper")
 local data = require("common/data")
 local ffi = require("ffi")
 local header_helper = require("regent/header_helper")
@@ -46,7 +46,8 @@ std.replicable_whitelist = base.replicable_whitelist
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE
-std.check_cuda_available = cudahelper.check_cuda_available
+std.check_gpu_available = gpuhelper.check_gpu_available
+std.check_cuda_available = gpuhelper.check_gpu_available
 
 -- #####################################
 -- ## Utilities
@@ -1315,7 +1316,7 @@ function std.check_read(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1336,7 +1337,7 @@ function std.check_write(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1361,7 +1362,7 @@ function std.check_reduce(cx, op, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, error_message = t:bounds()
+    local region_types, error_message = t:bounds(node)
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
@@ -1989,6 +1990,13 @@ function std.generate_conditional_metamethods_for_bounded_type(ty)
   return methods
 end
 
+-- This function is equivalent to writing ty:bounds(node), but makes
+-- it more clear that we're *CHECKING* the bounds, i.e., this will
+-- fail with an error if it doesn't work.
+function std.check_bounds(node, ty)
+  return ty:bounds(node)
+end
+
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
 --
@@ -2058,7 +2066,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     return self.points_to_type ~= false
   end
 
-  function st:bounds()
+  function st:bounds(node)
     local bounds = data.newtuple()
     local is_ispace = false
     local is_region = false
@@ -2070,9 +2078,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if not (terralib.types.istype(bound) and
               (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
-        return nil, tostring(self.index_type) ..
-                    " expected an ispace or region as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound)
+        local message = tostring(self.index_type) ..
+          " expected an ispace or region as argument " ..
+          tostring(i+1) .. ", got " .. tostring(bound)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       if std.is_region(bound) then
         if not std.type_eq(bound:ispace().index_type, self.index_type) or
@@ -2085,9 +2095,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
           if not std.type_eq(self.index_type, std.ptr) then
             index_message = tostring(self.index_type) .. ", "
           end
-          return nil, tostring(self.index_type) .. " expected region(" ..
-                      index_message .. tostring(self.points_to_type) .. ") as argument " ..
-                      tostring(i+1) .. ", got " .. tostring(bound)
+          local message = tostring(self.index_type) .. " expected region(" ..
+            index_message .. tostring(self.points_to_type) .. ") as argument " ..
+            tostring(i+1) .. ", got " .. tostring(bound)
+          if node then report.error(node, message) end
+          assert(false, message)
         end
       end
       if std.is_ispace(bound) then is_ispace = true end
@@ -2095,8 +2107,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       bounds:insert(bound)
     end
     if is_ispace and is_region then
-      --report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
-      return nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions"
+      local message = tostring(self.index_type) .. " bounds may not mix ispaces and regions"
+      if node then report.error(node, message) end
+      assert(false, message)
     end
     return bounds
   end
@@ -2867,7 +2880,7 @@ function std.cross_product(...)
            "Cross product type requires argument " .. tostring(i) .. " to be a symbol")
     if terralib.types.istype(partition_symbol:gettype()) then
       assert(std.is_partition(partition_symbol:gettype()),
-             "Cross prodcut type requires argument " .. tostring(i) .. " to be a partition")
+             "Cross product type requires argument " .. tostring(i) .. " to be a partition")
     end
   end
 
@@ -3032,23 +3045,22 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   st.impl_type = legion_vptr_t
   st.vec_type = vec
 
-  function st:bounds()
+  function st:bounds(node)
     local bounds = terralib.newlist()
     for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        --report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
-        --            ", got " .. tostring(region.type))
-        return nil, "vptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region.type)
+        local message = "vptr expected a region as argument " .. tostring(i+1) ..
+          ", got " .. tostring(region.type)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       if not std.type_eq(region.fspace_type, points_to_type) then
-        --report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
-        --            ") as argument " .. tostring(i+1) ..
-        --            ", got " .. tostring(region))
-        return nil, "vptr expected region(" .. tostring(points_to_type) ..
-                    ") as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region)
+        local message = "vptr expected region(" .. tostring(points_to_type) ..
+          ") as argument " .. tostring(i+1) ..
+          ", got " .. tostring(region)
+        if node then report.error(node, message) end
+        assert(false, message)
       end
       bounds:insert(region)
     end
@@ -3134,8 +3146,8 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   st.bounds_symbols = pointer_type.bounds_symbols
   st.field_path = data.newtuple(...)
 
-  function st:bounds()
-    return self.pointer_type:bounds()
+  function st:bounds(node)
+    return self.pointer_type:bounds(node)
   end
 
   if std.config["debug"] then
@@ -4285,16 +4297,16 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
   local cuda_setup = quote end
-  if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
+  if gpuhelper.check_gpu_available() then
+    gpuhelper.link_driver_library()
     local all_kernels = terralib.newlist()
     variants:map(function(variant)
       if variant:is_cuda() then
         all_kernels:insertall(variant:get_cuda_kernels())
       end
     end)
-    all_kernels:insertall(cudahelper.get_internal_kernels())
-    cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
+    all_kernels:insertall(gpuhelper.get_internal_kernels())
+    cuda_setup = gpuhelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local extra_setup = quote end
@@ -4738,31 +4750,34 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   end
   if link_flags then flags:insertall(link_flags) end
   if os.getenv('CRAYPE_VERSION') then
-    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local ugni_link_opts = os.getenv('CRAY_UGNI_POST_LINK_OPTS')
+    if ugni_link_opts then
+      for flag in ugni_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-lugni")
     end
-    flags:insert("-lugni")
-    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local udreg_link_opts = os.getenv('CRAY_UDREG_POST_LINK_OPTS')
+    if udreg_link_opts then
+      for flag in udreg_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-ludreg")
     end
-    flags:insert("-ludreg")
-    for flag in os.getenv('CRAY_XPMEM_POST_LINK_OPTS'):gmatch("%S+") do
-      flags:insert(flag)
+    local xpmem_link_opts = os.getenv('CRAY_XPMEM_POST_LINK_OPTS')
+    if xpmem_link_opts then
+      for flag in xpmem_link_opts:gmatch("%S+") do
+        flags:insert(flag)
+      end
+      flags:insert("-lxpmem")
     end
-    flags:insert("-lxpmem")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated CUDA code correctly
-  if std.config["cuda"] and cudahelper.check_cuda_available() and base.c.REGENT_USE_HIJACK == 0 then
-    flags:insertall({
-      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
-      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
-      "-lpthread", "-lrt"
-    })
+  if gpuhelper.check_gpu_available() then
+    flags:insertall(gpuhelper.driver_library_link_flags())
   end
 
   profile('compile', nil, function()

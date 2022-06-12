@@ -406,4 +406,11 @@ function ast_util.render(expr)
   end
 end
 
+function ast_util.get_base_indexed_node(node, previous_index)
+  if node:is(ast.typed.expr.IndexAccess) then
+    return ast_util.get_base_indexed_node(node.value, node.index)
+  end
+  return node, previous_index
+end
+
 return ast_util

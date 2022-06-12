@@ -5912,13 +5912,13 @@ namespace Legion {
 #undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS
 #undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS
 
-#define DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(DIM)                     \
+#define DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(DIM, FIELD_CHECK)        \
       ReductionAccessor(const UntypedDeferredValue &value,                    \
                         bool silence_warnings = false,                        \
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         assert(!check_field_size || (actual_field_size == value.field_size)); \
         const Realm::RegionInstance instance = value.instance;                \
@@ -5952,7 +5952,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         assert(!check_field_size || (actual_field_size == value.field_size)); \
         const Realm::RegionInstance instance = value.instance;                \
@@ -5977,7 +5977,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
@@ -5999,7 +5999,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
@@ -6022,7 +6022,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
@@ -6045,7 +6045,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
@@ -6063,13 +6063,13 @@ namespace Legion {
               source_bounds, offset);                                         \
       }
 
-#define DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(DIM)         \
+#define DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(DIM,FIELD_CHECK) \
       ReductionAccessor(const UntypedDeferredValue &value,                    \
                         bool silence_warnings = false,                        \
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         assert(!check_field_size || (actual_field_size == value.field_size)); \
         const Realm::RegionInstance instance = value.instance;                \
@@ -6109,7 +6109,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         assert(!check_field_size || (actual_field_size == value.field_size)); \
         const Realm::RegionInstance instance = value.instance;                \
@@ -6140,7 +6140,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
@@ -6163,7 +6163,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
@@ -6187,7 +6187,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
@@ -6211,7 +6211,7 @@ namespace Legion {
                         const char *warning_string = NULL,                    \
                         size_t offset = 0,                                    \
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
-                        bool check_field_size = false)                        \
+                        bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
         const Realm::RegionInstance instance = buffer.instance;               \
         const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
@@ -6245,7 +6245,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -6267,7 +6272,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -6290,7 +6300,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -6314,7 +6329,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -6329,7 +6349,11 @@ namespace Legion {
             transform.transform, transform.offset, fid, source_bounds, offset);
       }
     public:
-      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(N)
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<N,T>& p, 
@@ -6415,7 +6439,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<N,T> is;
@@ -6439,7 +6468,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<N,T> is;
@@ -6464,7 +6498,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<M,T> is;
@@ -6490,7 +6529,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<M,T> is;
@@ -6507,7 +6551,11 @@ namespace Legion {
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
-      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(N)
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(N, false)
+#endif
     public:
       __CUDA_HD__ 
       inline void reduce(const Point<N,T>& p, 
@@ -6621,7 +6669,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -6643,7 +6696,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -6666,7 +6724,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -6690,7 +6753,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -6705,7 +6773,11 @@ namespace Legion {
             transform.transform, transform.offset, fid, source_bounds, offset);
       }
     public:
-      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(1)
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 
@@ -6780,7 +6852,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<1,T> is;
@@ -6804,7 +6881,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<1,T> is;
@@ -6829,7 +6911,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<M,T> is;
@@ -6855,7 +6942,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       )
         : field(fid)
       {
         DomainT<M,T> is;
@@ -6872,7 +6964,11 @@ namespace Legion {
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
-      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(1)
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 

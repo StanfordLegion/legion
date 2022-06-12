@@ -128,12 +128,12 @@ memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 
 ifeq ($(strip $(HIP_TARGET)),ROCM)
-%.o : %.cpp $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+%.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(HIPCC) -o $@ -c $< $(INC_FLAGS) $(HIPCC_FLAGS)
 endif
 ifeq ($(strip $(HIP_TARGET)),CUDA)
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
-        $(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
 endif
 endif
 

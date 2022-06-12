@@ -1197,15 +1197,20 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
       public:
         DeferredCopyAcross(CopyOp *op, const PhysicalTraceInfo &info,
-                           unsigned idx, ApEvent pre, ApUserEvent d,
-                           PredEvent g, RtUserEvent a, 
+                           unsigned idx, ApEvent init, ApUserEvent local_pre,
+                           ApUserEvent local_post, ApEvent collective_pre, 
+                           ApEvent collective_post, PredEvent g, RtUserEvent a,
                            InstanceSet *src, InstanceSet *dst,
-                           InstanceSet *gather, InstanceSet *scatter)
+                           InstanceSet *gather, InstanceSet *scatter,
+                           const bool preimages)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
-            PhysicalTraceInfo(info), copy(op),
-            index(idx), precondition(pre), done(d), guard(g), applied(a),
+            PhysicalTraceInfo(info), copy(op), index(idx),
+            init_precondition(init), local_precondition(local_pre),
+            local_postcondition(local_post), 
+            collective_precondition(collective_pre), 
+            collective_postcondition(collective_post), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
-            scatter_targets(scatter) 
+            scatter_targets(scatter), compute_preimages(preimages)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -1217,14 +1222,18 @@ namespace Legion {
       public:
         CopyOp *const copy;
         const unsigned index;
-        const ApEvent precondition;
-        const ApUserEvent done;
+        const ApEvent init_precondition;
+        const ApUserEvent local_precondition;
+        const ApUserEvent local_postcondition;
+        const ApEvent collective_precondition;
+        const ApEvent collective_postcondition;
         const PredEvent guard;
         const RtUserEvent applied;
         InstanceSet *const src_targets;
         InstanceSet *const dst_targets;
         InstanceSet *const gather_targets;
         InstanceSet *const scatter_targets;
+        const bool compute_preimages;
       };
     public:
       CopyOp(Runtime *rt);
@@ -1254,12 +1263,13 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space, 
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources);
+          std::vector<IndirectRecord> &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -1282,21 +1292,25 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
     protected:
-      void check_copy_privileges(const bool permit_projection);
+      void check_copy_privileges(const bool permit_projection) const;
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
-                                const bool permit_projection);
-      void check_compatibility_properties(void) const;
+                                const bool permit_projection) const;
+      void perform_type_checking(void) const;
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
-                               const ApEvent local_init_precondition,
-                               const ApUserEvent local_completion,
+                               const ApEvent init_precondition,
+                               const ApUserEvent local_precondition,
+                               const ApUserEvent local_postcondition,
+                               const ApEvent collective_precondition,
+                               const ApEvent collective_postcondition,
                                const PredEvent predication_guard,
                                const InstanceSet &src_targets,
                                const InstanceSet &dst_targets,
                                const InstanceSet *gather_targets,
                                const InstanceSet *scatter_targets,
                                const PhysicalTraceInfo &trace_info,
-                               std::set<RtEvent> &applied_conditions);
+                               std::set<RtEvent> &applied_conditions,
+                               const bool compute_preimages);
       void finalize_copy_profiling(void);
     public:
       static void handle_deferred_across(const void *args);
@@ -1331,6 +1345,7 @@ namespace Legion {
       std::vector<unsigned>                 dst_parent_indexes;
       LegionVector<VersionInfo>             src_versions;
       LegionVector<VersionInfo>             dst_versions;
+      std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
       std::vector<RegionTreePath>           gather_privilege_paths;
       std::vector<RegionTreePath>           scatter_privilege_paths;
@@ -1340,6 +1355,8 @@ namespace Legion {
       std::vector<bool>                     scatter_is_range;
       LegionVector<VersionInfo>             gather_versions;
       LegionVector<VersionInfo>             scatter_versions;
+      std::vector<std::vector<IndirectRecord> > src_indirect_records;
+      std::vector<std::vector<IndirectRecord> > dst_indirect_records;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
@@ -1393,12 +1410,17 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources); 
+          std::vector<IndirectRecord> &records, const bool sources); 
+    public:
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 RtEvent point_mapped);
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -1416,16 +1438,17 @@ namespace Legion {
       IndexSpaceNode*                                    launch_space;
     protected:
       std::vector<PointCopyOp*>                          points;
-      std::vector<LegionVector<IndirectRecord> >         src_records;
-      std::vector<LegionVector<IndirectRecord> >         dst_records;
-      std::vector<std::vector<ApEvent> >                 exchange_pre_events;
-      std::vector<std::vector<ApEvent> >                 exchange_post_events;
-      std::vector<ApUserEvent>                           pre_merged;
-      std::vector<ApUserEvent>                           post_merged;
-      std::vector<size_t>                                src_exchanges;
-      std::vector<size_t>                                dst_exchanges;
-      std::vector<RtUserEvent>                           src_exchanged;
-      std::vector<RtUserEvent>                           dst_exchanged;
+      struct IndirectionExchange {
+        std::set<ApEvent> local_preconditions;
+        std::set<ApEvent> local_postconditions;
+        std::vector<std::vector<IndirectRecord>*> src_records;
+        std::vector<std::vector<IndirectRecord>*> dst_records;
+        ApUserEvent collective_pre;
+        ApUserEvent collective_post;
+        RtUserEvent src_ready;
+        RtUserEvent dst_ready;
+      };
+      std::vector<IndirectionExchange>                   collective_exchanges;
       unsigned                                           points_committed;
       bool                                       collective_src_indirect_points;
       bool                                       collective_dst_indirect_points;
@@ -1434,6 +1457,8 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements; 
+      std::map<DomainPoint,RtEvent> intra_space_dependences;
+      std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     };
 
     /**
@@ -1461,12 +1486,13 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
-      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+      virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
+          const InstanceSet &instances, const RegionRequirement &req,
           const DomainPoint &key,
-          LegionVector<IndirectRecord> &records, const bool sources);
+          std::vector<IndirectRecord> &records, const bool sources);
     public:
       // For collective instances
       virtual CollectiveManager* find_or_create_collective_instance(
@@ -1484,12 +1510,16 @@ namespace Legion {
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
-      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
     protected:
-      IndexCopyOp*              owner;
+      IndexCopyOp*                          owner;
+      std::set<RtEvent>                     intra_space_mapping_dependences;
     };
 
     /**
@@ -3198,6 +3228,9 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       DependentPartitionOp *owner;
     };
@@ -3387,7 +3420,10 @@ namespace Legion {
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
-      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps);
+      virtual const Mappable* as_mappable(void) const { return this; }
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;

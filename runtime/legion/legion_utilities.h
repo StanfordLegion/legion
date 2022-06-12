@@ -1948,9 +1948,15 @@ namespace Legion {
     public:
       // forward declaration
       class const_iterator;
-      class iterator : public std::iterator<std::input_iterator_tag,
-                              std::pair<T*const,FieldMask> > {
+      class iterator {
       public:
+        // explicitly set iterator traits
+        typedef std::input_iterator_tag iterator_category;
+        typedef std::pair<T*const,FieldMask> value_type;
+        typedef std::ptrdiff_t difference_type;
+        typedef std::pair<T*const,FieldMask> *pointer;
+        typedef std::pair<T*const,FieldMask>& reference;
+
         iterator(FieldMaskSet *_set, 
             std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
@@ -2059,9 +2065,15 @@ namespace Legion {
         bool single;
       };
     public:
-      class const_iterator : public std::iterator<std::input_iterator_tag,
-                              std::pair<T*const,FieldMask> > {
+      class const_iterator {
       public:
+        // explicitly set iterator traits
+        typedef std::input_iterator_tag iterator_category;
+        typedef std::pair<T*const,FieldMask> value_type;
+        typedef std::ptrdiff_t difference_type;
+        typedef std::pair<T*const,FieldMask> *pointer;
+        typedef std::pair<T*const,FieldMask>& reference;
+
         const_iterator(const FieldMaskSet *_set, 
             const std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }

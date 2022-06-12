@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+// Useful for IDEs
+#include "legion_domain.h"
+
 namespace Legion {
 
   //----------------------------------------------------------------------------
@@ -2070,9 +2073,15 @@ namespace Legion {
   template<typename FT>
   class Span<FT,LEGION_READ_ONLY> {
   public:
-    class iterator : 
-      public std::iterator<std::random_access_iterator_tag,FT> {
+    class iterator {
     public:
+      // explicitly set iterator traits
+      typedef std::random_access_iterator_tag iterator_category;
+      typedef FT value_type;
+      typedef std::ptrdiff_t difference_type;
+      typedef FT *pointer;
+      typedef FT& reference;
+
       iterator(void) : ptr(NULL), stride(0) { } 
     private:
       iterator(const uint8_t *p, size_t s) : ptr(p), stride(s) { }
@@ -2131,9 +2140,15 @@ namespace Legion {
       const uint8_t *ptr;
       size_t stride;
     };
-    class reverse_iterator : 
-      public std::iterator<std::random_access_iterator_tag,FT> {
+    class reverse_iterator {
     public:
+      // explicitly set iterator traits
+      typedef std::random_access_iterator_tag iterator_category;
+      typedef FT value_type;
+      typedef std::ptrdiff_t difference_type;
+      typedef FT *pointer;
+      typedef FT& reference;
+
       reverse_iterator(void) : ptr(NULL), stride(0) { } 
     private:
       reverse_iterator(const uint8_t *p, size_t s) : ptr(p), stride(s) { }

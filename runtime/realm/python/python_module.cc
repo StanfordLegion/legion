@@ -391,12 +391,12 @@ namespace Realm {
 
     // take lock and go into normal task scheduler loop
     {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
       KernelThreadTaskScheduler::scheduler_loop();
     }
 #if 0
     // now go into main scheduler loop, holding scheduler lock for whole thing
-    AutoLock<> al(lock);
+    AutoLock<FIFOMutex> al(lock);
     while(true) {
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
@@ -557,7 +557,7 @@ namespace Realm {
     // if this gets called before we're done initializing the interpreter,
     //  we need a simple blocking wait
     if(!interpreter_ready) {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
 
       log_py.debug() << "waiting during initialization";
       bool really_blocked = try_update_thread_state(thread,
@@ -615,7 +615,7 @@ namespace Realm {
   {
     // handle the wakening of the initialization thread specially
     if(!interpreter_ready) {
-      AutoLock<> al(lock);
+      AutoLock<FIFOMutex> al(lock);
       resumable_workers.put(thread, 0);
     } else {
       KernelThreadTaskScheduler::thread_ready(thread);
@@ -702,7 +702,7 @@ namespace Realm {
 #ifdef REALM_USE_OPENMP
     if(_omp_workers > 0) {
       // create a pool (except for one thread, which is the main task thread)
-      omp_threadpool = new ThreadPool(_omp_workers - 1,
+      omp_threadpool = new ThreadPool(me, _omp_workers - 1,
 				      name, -1 /*numa_node*/, _stack_size, crs);
     } else
       omp_threadpool = 0;

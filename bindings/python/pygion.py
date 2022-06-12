@@ -1498,7 +1498,7 @@ class Partition(object):
             assert isinstance(parent, Region)
             assert isinstance(ipartition, Ipartition)
             handle = c.legion_logical_partition_create(
-                _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
+                _my.ctx.runtime, parent.raw_value(), ipartition.raw_value())
 
         # Important: Copy handle. Do NOT assume ownership.
         assert handle is not None
@@ -2518,7 +2518,7 @@ if is_script:
     def _cleanup():
         del _my.ctx
 
-    legion_top.cleanup_items.append(_cleanup)
+    legion_top.add_cleanup_item(_cleanup)
 
     # FIXME: Really this should be the number of control replicated shards at this level
     c.legion_runtime_enable_scheduler_lock()

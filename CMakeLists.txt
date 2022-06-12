@@ -15,7 +15,70 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.7)
-project(Legion)
+
+#------------------------------------------------------------------------------#
+# Version information
+#------------------------------------------------------------------------------#
+
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the cmake Legion_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+
+set(Legion_VERSION "" CACHE STRING "string to use for Legion/Realm version")
+if(Legion_VERSION STREQUAL "")
+  find_package(Git)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      RESULT_VARIABLE _git_result
+      OUTPUT_VARIABLE Legion_VERSION
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  else()
+    set(_git_result -1)
+  endif()
+  if(_git_result EQUAL 0)
+    message(STATUS "Version string from git: ${Legion_VERSION}")
+  else()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
+      file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VERSION _file_contents)
+      string(STRIP "${_file_contents}" Legion_VERSION)
+      unset(_file_contents)
+      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
+    else()
+      set(Legion_VERSION "unknown")
+      message(WARNING "Could not determine version string - using 'unknown'")
+    endif()
+  endif()
+  unset(_git_result)
+endif()
+# these are the actual variables that are written into the headers
+set(LEGION_VERSION "${Legion_VERSION}")
+set(REALM_VERSION "${Legion_VERSION}")
+
+# Parse the major.minor.patch from (potentially non-semver) Legion_VERSION
+if(Legion_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)") # get the CMake version
+  set(Legion_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(Legion_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(Legion_VERSION_PATCH "${CMAKE_MATCH_3}")
+  if(NOT Legion_VERSION_MAJOR VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_MAJOR "${Legion_VERSION_MAJOR}")
+  endif()
+  if(NOT Legion_VERSION_MINOR VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_MINOR "${Legion_VERSION_MINOR}")
+  endif()
+  if(NOT Legion_VERSION_PATCH VERSION_EQUAL 0)
+    string(REGEX REPLACE "^0+" "" Legion_VERSION_PATCH "${Legion_VERSION_PATCH}")
+  endif()
+  set(Legion_VERSION "${Legion_VERSION_MAJOR}.${Legion_VERSION_MINOR}.${Legion_VERSION_PATCH}")
+else()
+  message(WARNING "Could not parse semver-compatible version from Legion version string '${Legion_VERSION}' - setting cmake package version to '0.0.0'")
+  set(Legion_VERSION "0.0.0")
+endif()
+
+project(Legion VERSION ${Legion_VERSION})
 
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
@@ -39,48 +102,6 @@ endif()
 set(SOVERSION 1)
 
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
-
-#------------------------------------------------------------------------------#
-# Version information
-#------------------------------------------------------------------------------#
-
-# the Legion/Realm version string is set by the first of these that works:
-# 1) a defined value for the cmake Legion_VERSION variable
-# 2) the output of `git describe`, if successful
-# 3) the contents of 'VERSION' (at the root of the source tree), if available
-# 4) "unknown", if all else fails
-
-set(Legion_VERSION "" CACHE STRING "string to use for Legion/Realm version")
-if(Legion_VERSION STREQUAL "")
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
-      WORKING_DIRECTORY ${Legion_SOURCE_DIR}
-      RESULT_VARIABLE _git_result
-      OUTPUT_VARIABLE Legion_VERSION
-      ERROR_QUIET
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-  else()
-    set(_git_result -1)
-  endif()
-  if(_git_result EQUAL 0)
-    message(STATUS "Version string from git: ${Legion_VERSION}")
-  else()
-    if(EXISTS ${Legion_SOURCE_DIR}/VERSION)
-      file(READ ${Legion_SOURCE_DIR}/VERSION _file_contents)
-      string(STRIP "${_file_contents}" Legion_VERSION)
-      unset(_file_contents)
-      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
-    else()
-      set(Legion_VERSION "unknown")
-      message(WARNING "Could not determine version string - using 'unknown'")
-    endif()
-  endif()
-  unset(_git_result)
-endif()
-# these are the actual variables that are written into the headers
-set(LEGION_VERSION "${Legion_VERSION}")
-set(REALM_VERSION "${Legion_VERSION}")
 
 #------------------------------------------------------------------------------#
 # Build type and shared vs static library
@@ -224,11 +245,19 @@ set(COMPILE_TIME_MIN_LEVEL LEVEL_${Legion_OUTPUT_LEVEL})
 #------------------------------------------------------------------------------#
 option(Legion_USE_OpenMP "Use OpenMP" OFF)
 if(Legion_USE_OpenMP)
+  option(Legion_OpenMP_SYSTEM_RUNTIME "Use system's OpenMP runtime instead of internal Realm version" OFF)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    find_package(OpenMP REQUIRED)
+  endif()
+
   option(Legion_OpenMP_GOMP_SUPPORT "Enable GOMP support for OpenMP" ON)
   option(Legion_OpenMP_KMP_SUPPORT "Enable KMP support for OpenMP" ON)
 
   # define variable for realm_defines.h
   set(REALM_USE_OPENMP ON)
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    set(REALM_OPENMP_SYSTEM_RUNTIME ON)
+  endif()
   if(Legion_OpenMP_GOMP_SUPPORT)
     set(REALM_OPENMP_GOMP_SUPPORT ON)
   endif()
@@ -380,7 +409,7 @@ if(Legion_USE_HIP)
     if(BUILD_SHARED_LIBS)
       set(HIPCC_FLAGS "${HIPCC_FLAGS} -fPIC")
     endif()
-    
+
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
@@ -699,6 +728,8 @@ endforeach()
 #------------------------------------------------------------------------------#
 # Build-tree package generation
 #------------------------------------------------------------------------------#
+include(CMakePackageConfigHelpers)
+
 export(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE ${Legion_BINARY_DIR}/LegionTargets.cmake
@@ -723,6 +754,11 @@ configure_file(
   ${Legion_BINARY_DIR}/LegionConfig.cmake
   @ONLY
 )
+
+write_basic_package_version_file(
+  ${Legion_BINARY_DIR}/LegionConfig-version.cmake
+  VERSION ${Legion_VERSION}
+  COMPATIBILITY ExactVersion)
 
 install(FILES cmake/LegionConfig-install.cmake
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
@@ -839,6 +875,13 @@ if(Legion_REDOP_HALF)
   set(LEGION_REDOP_HALF ON)
 endif()
 mark_as_advanced(Legion_REDOP_HALF)
+
+if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
+  set(HIP_THRUST_ROOT_DIR "" CACHE STRING "Location of HIP THRUST library")
+  if(NOT HIP_THRUST_ROOT_DIR)
+    message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
+  endif()
+endif()
 
 #------------------------------------------------------------------------------#
 # Configure definition headers

@@ -21,6 +21,8 @@ import "regent"
 
 assert(regentlib.config["separate"], "test requires separate compilation")
 
+local format = require("std/format")
+
 struct fs {
   x : int
   y : int
@@ -33,7 +35,7 @@ where reads writes(r.{x, y}), reads(r.z) end
 
 task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
 where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
-  regentlib.c.printf("Task with two region requirements\n")
+  format.println("Task with two region requirements")
   my_regent_task(r, 3, 4, false)
 end
 

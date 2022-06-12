@@ -30,9 +30,6 @@ public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
                 std::vector<Processor>* procs_list);
-  virtual void select_task_options(const MapperContext    ctx,
-                                   const Task&            task,
-                                         TaskOptions&     output);
   virtual void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task,
                                     std::vector<Processor::Kind> &ranking);
@@ -70,20 +67,6 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
   : DefaultMapper(rt, machine, local, mapper_name)
   , procs_list(*_procs_list)
 {
-}
-
-void StencilMapper::select_task_options(const MapperContext    ctx,
-                                        const Task&            task,
-                                              TaskOptions&     output)
-{
-  output.initial_proc = default_policy_select_initial_processor(ctx, task);
-  output.inline_task = false;
-  output.stealable = stealing_enabled;
-#ifdef MAP_LOCALLY
-  output.map_locally = true;
-#else
-  output.map_locally = false;
-#endif
 }
 
 void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,

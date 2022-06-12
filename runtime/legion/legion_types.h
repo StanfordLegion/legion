@@ -398,6 +398,7 @@ namespace Legion {
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
+      LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -510,6 +511,7 @@ namespace Legion {
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
+        "Defer Copy-Across Execution for Preimages",              \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Yield",                                                  \
@@ -818,9 +820,6 @@ namespace Legion {
       SEND_GC_RESPONSE,
       SEND_GC_ACQUIRE,
       SEND_GC_ACQUIRED,
-      SEND_GC_RELEASE,
-      SEND_GC_VERIFICATION,
-      SEND_GC_VERIFIED,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
       SEND_ACQUIRE_REQUEST,
@@ -1004,9 +1003,6 @@ namespace Legion {
         "Send GC Response",                                           \
         "Send GC Acquire Request",                                    \
         "Send GC Acquire Response",                                   \
-        "Send GC Release",                                            \
-        "Send GC Verification Request",                               \
-        "Send GC Verification Response",                              \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \
         "Send Acquire Request",                                       \
@@ -1515,7 +1511,7 @@ namespace Legion {
     class AssignFenceCompletion;
     class IssueCopy;
     class IssueFill;
-    class IssueIndirect;
+    class IssueAcross;
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class SetEffects;
@@ -1525,7 +1521,8 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
-    class CopyIndirection;
+    class CopyAcrossExecutor;
+    class CopyAcrossUnstructured;
     class IndexSpaceExpression;
     class IndexSpaceExprRef;
     class IndexSpaceOperation;

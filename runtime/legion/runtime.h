@@ -801,6 +801,15 @@ namespace Legion {
     };
 
     /**
+     * \class GCHole
+     * A helper class for tracking ranges of instance allocations
+     * for aiding in intelligent garbage collection
+     */
+    class GCHole {
+
+    };
+
+    /**
      * \class MemoryManager
      * The goal of the memory manager is to keep track of all of
      * the physical instances that the runtime knows about in various
@@ -959,9 +968,7 @@ namespace Legion {
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
-      void check_instance_deletions(const std::vector<PhysicalManager*> &to_del,
-                                    const std::vector<RtEvent> &ready_events,
-                                    std::vector<RtEvent> &delete_effects);
+      void check_instance_deletions(const std::vector<PhysicalManager*> &del);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -973,6 +980,7 @@ namespace Legion {
                                           unsigned *unsat_index,
                                           CollectiveManager *collective = NULL,
                                           DomainPoint *collective_point = NULL);
+      void remove_collectable(GCPriority priority, PhysicalManager *manager);
     public:
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
@@ -1006,13 +1014,21 @@ namespace Legion {
       // Lock for controlling access to the data
       // structures in this memory manager
       mutable LocalLock manager_lock;
-      // Precondition event for performing collections
-      std::atomic<RtEvent> gc_precondition;
+      // Lock for ordering garbage collection
+      // This lock should always be taken before the manager lock
+      mutable LocalLock collection_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
+      // For collectable instances they have non-NULL GCHole that 
+      // represents a range of memory that can be collected
+      // This data structure is protected by the manager_lock
       typedef LegionMap<PhysicalManager*,GCPriority,
                         MEMORY_INSTANCES_ALLOC> TreeInstances;
       std::map<RegionTreeID,TreeInstances> current_instances;
+      // Keep track of all groupings of instances based on their 
+      // garbage collection priorities and placement in memory
+      std::map<GCPriority,std::set<PhysicalManager*>,
+               std::greater<GCPriority> > collectable_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
@@ -1532,6 +1548,9 @@ namespace Legion {
     public:
       virtual const DomainPoint& get_domain_point(void) const = 0;
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
+      virtual void record_intra_space_dependences(unsigned idx,
+                               const std::vector<DomainPoint> &region_deps) = 0;
+      virtual const Mappable* as_mappable(void) const = 0;
     }; 
 
     /**
@@ -1555,7 +1574,8 @@ namespace Legion {
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
-                          const std::vector<ProjectionPoint*> &points);
+                          const std::vector<ProjectionPoint*> &points,
+                          IndexSpaceNode *launch_space);
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
@@ -1575,6 +1595,10 @@ namespace Legion {
       void check_inversion(const Task *task, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);
       void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
+      void check_inversion(const Mappable *mappable, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Mappable *mappable, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
     public:
       const int depth; 
@@ -2381,9 +2405,6 @@ namespace Legion {
       void send_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_acquire(AddressSpaceID target, Serializer &rez);
       void send_gc_acquired(AddressSpaceID target, Serializer &rez);
-      void send_gc_release(AddressSpaceID target, Serializer &rez);
-      void send_gc_verification(AddressSpaceID target, Serializer &rez);
-      void send_gc_verified(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
@@ -2637,9 +2658,6 @@ namespace Legion {
       void handle_gc_response(Deserializer &derez);
       void handle_gc_acquire(Deserializer &derez, AddressSpaceID source);
       void handle_gc_acquired(Deserializer &derez);
-      void handle_gc_release(Deserializer &derez, AddressSpaceID source);
-      void handle_gc_verification(Deserializer &derez, AddressSpaceID source);
-      void handle_gc_verified(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
@@ -4450,12 +4468,6 @@ namespace Legion {
         case SEND_GC_ACQUIRE:
           break;
         case SEND_GC_ACQUIRED:
-          break;
-        case SEND_GC_RELEASE:
-          break;
-        case SEND_GC_VERIFICATION:
-          break;
-        case SEND_GC_VERIFIED:
           break;
         case SEND_GC_DEBUG_REQUEST:
           break;

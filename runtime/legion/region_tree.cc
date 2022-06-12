@@ -33,25 +33,57 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+    //--------------------------------------------------------------------------
+    IndirectRecord::IndirectRecord(RegionTreeForest *forest,
+                                   const RegionRequirement &req,
+                                   const InstanceSet &insts,
+                                   const DomainPoint &key)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
+      domain = is->get_domain(domain_ready, true/*tight*/);
 #ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
-               const DomainPoint &key, IndexSpace s, const Domain &d)
-      : fields(m),inst(p->get_instance(key)),
-        instance_event(p->get_unique_event()),
-        index_space(s), domain(d)
-    //--------------------------------------------------------------------------
-    {
-    }
-#else
-    //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
-               const DomainPoint &key, IndexSpace s, const Domain &d)
-      : fields(m), inst(p->get_instance(key)), domain(d)
-    //--------------------------------------------------------------------------
-    {
-    }
+      index_space = req.region.get_index_space();
 #endif
+      FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
+      std::vector<unsigned> field_indexes(req.instance_fields.size());
+      fs->get_field_indexes(req.instance_fields, field_indexes);
+      instances.resize(field_indexes.size());
+#ifdef LEGION_SPY
+      instance_events.resize(field_indexes.size());
+#endif
+      // For each of the fields in the region requirement
+      // (importantly in the order they will be copied)
+      // find the corresponding instance and store them 
+      // in the indirect record
+      for (unsigned fidx = 0; fidx < field_indexes.size(); fidx++)
+      {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        bool found = false;
+#endif
+#endif
+        for (unsigned idx = 0; idx < insts.size(); idx++)
+        {
+          const InstanceRef &ref = insts[idx];
+          const FieldMask &mask = ref.get_valid_fields();
+          if (!mask.is_set(field_indexes[fidx]))
+            continue;
+          PhysicalManager *manager = ref.get_physical_manager();
+          instances[fidx] = manager->get_instance(key);
+#ifdef LEGION_SPY
+          instance_events[fidx] = manager->get_unique_event();
+#endif
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+    }
 
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
@@ -736,31 +768,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::check_partition_by_field_size(IndexPartition pid,
-                FieldSpace fs, FieldID fid, bool is_range, bool use_color_space)
+    size_t RegionTreeForest::get_coordinate_size(IndexSpace handle, bool range)
     //--------------------------------------------------------------------------
     {
-      const size_t field_size = get_node(fs)->get_field_size(fid);
-      IndexPartNode *partition = get_node(pid);
-      if (use_color_space)
-      {
-#ifdef DEBUG_LEGION
-        assert(!is_range);
-#endif
-        return partition->color_space->check_field_size(field_size, 
-                                                        false/*range*/);
-      }
-      else
-        return partition->parent->check_field_size(field_size, is_range);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::check_association_field_size(IndexSpace is,
-                                                     FieldSpace fs, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      const size_t field_size = get_node(fs)->get_field_size(fid);
-      return get_node(is)->check_field_size(field_size, false/*is range*/);
+      return get_node(handle)->get_coordinate_size(range);
     }
 
     //--------------------------------------------------------------------------
@@ -1173,6 +1184,18 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
           "FieldSpace %x has no field %d", handle.id, fid)
       return node->get_field_size(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID RegionTreeForest::get_field_serdez(FieldSpace handle,
+                                                      FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      if (!node->has_field(fid))
+        REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
+          "FieldSpace %x has no field %d", handle.id, fid)
+      return node->get_field_serdez(fid);
     }
 
     //--------------------------------------------------------------------------
@@ -2185,6 +2208,7 @@ namespace Legion {
                                         CopyOp *op, 
                                         unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, PredEvent guard, 
+                                 const std::map<Reservation,bool> &reservations,
                                         const PhysicalTraceInfo &trace_info,
                                         std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -2194,20 +2218,15 @@ namespace Legion {
       assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
-#endif
-      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
-      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
-      // Get the field indexes for all the fields
+#endif 
       RegionNode *src_node = get_node(src_req.region);
       RegionNode *dst_node = get_node(dst_req.region);
-      IndexSpaceExpression *dst_expr = dst_node->row_source;
+      WrapperReferenceMutator mutator(map_applied_events);
+      IndexSpaceExpression *copy_expr = intersect_index_spaces(
+          src_node->row_source, dst_node->row_source, &mutator);
       // Quick out if there is nothing to copy to
-      if (dst_expr->is_empty())
+      if (copy_expr->is_empty())
         return ApEvent::NO_AP_EVENT;
-      src_node->column_source->get_field_indexes(src_req.instance_fields, 
-                                                 src_indexes);   
-      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes); 
       // Perform the copies/reductions across
       InnerContext *context = op->find_physical_context(dst_index, dst_req);
       std::vector<InstanceView*> target_views;
@@ -2215,145 +2234,78 @@ namespace Legion {
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
-        // iterate over the source equivalence sets
+        // iterate over the source equivalence sets as we can just
+        // build a standard CopyAcrossUnstructured object
+        CopyAcrossUnstructured *across = 
+         copy_expr->create_across_unstructured(reservations,false/*preimages*/);
+        across->add_reference();
+#ifdef LEGION_SPY
+        across->src_tree_id = src_req.region.get_tree_id();
+        across->dst_tree_id = dst_req.region.get_tree_id();
+#endif
+        // Fill in the source fields 
         InnerContext *src_context = 
           op->find_physical_context(src_index, src_req);
         std::vector<InstanceView*> source_views;
         src_context->convert_target_views(src_targets, source_views);
-        std::set<ApEvent> copy_preconditions;
-        std::vector<CopySrcDstField> src_fields, dst_fields;  
-        // Iterate over all the indexes for the fields
-        for (unsigned fidx = 0; fidx < dst_req.instance_fields.size(); fidx++)
-        {
-#ifdef DEBUG_LEGION
-          bool found = false;
-#endif
-          // Find the source instance
-          for (unsigned idx = 0; idx < src_targets.size(); idx++)
-          {
-            const InstanceRef &ref = src_targets[idx];
-            const FieldMask &src_mask = ref.get_valid_fields();
-            if (!src_mask.is_set(src_indexes[fidx]))
-              continue;
-            // We found it
-            FieldMask copy_mask;
-            copy_mask.set_bit(src_indexes[fidx]);
-            source_views[idx]->copy_from(copy_mask, src_fields);
-            copy_preconditions.insert(ref.get_ready_event());
-#ifdef DEBUG_LEGION
-            found = true;
-#endif
-            break;
-          }
-#ifdef DEBUG_LEGION
-          assert(found);
-          found = false;
-#endif
-          // Find the destination instance
-          for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-          {
-            const InstanceRef &ref = dst_targets[idx];
-            const FieldMask &dst_mask = ref.get_valid_fields();
-            if (!dst_mask.is_set(dst_indexes[fidx]))
-              continue;
-            // We found it
-            FieldMask copy_mask;
-            copy_mask.set_bit(dst_indexes[fidx]);
-            target_views[idx]->copy_to(copy_mask, dst_fields);
-            copy_preconditions.insert(ref.get_ready_event());
-#ifdef DEBUG_LEGION
-            found = true;
-#endif
-            break;
-          }
-#ifdef DEBUG_LEGION
-          assert(found);
-#endif
-        }
+        across->initialize_source_fields(this, src_req,
+                              src_targets, source_views, trace_info);
+        // Fill in the destination fields 
+        const bool exclusive_redop = 
+          IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
+        across->initialize_destination_fields(this, dst_req, dst_targets, 
+                              target_views, trace_info, exclusive_redop);
+        // Get the preconditions for this copy
+        std::vector<ApEvent> copy_preconditions;
         if (precondition.exists())
-          copy_preconditions.insert(precondition);
-        // Now we can issue the copy operation
-        ApEvent full_precondition;
+          copy_preconditions.push_back(precondition);
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+        {
+          const ApEvent ready = src_targets[idx].get_ready_event();
+          if (ready.exists())
+            copy_preconditions.push_back(ready);
+        }
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const ApEvent ready = dst_targets[idx].get_ready_event();
+          if (ready.exists())
+            copy_preconditions.push_back(ready);
+        }
         if (!copy_preconditions.empty())
-          full_precondition = 
-            Runtime::merge_events(&trace_info, copy_preconditions);
-        // Early out here since we've done the full copy
-        // If we're doing a reduction we actually want the intersection
-        // of the two index spaces for source and destination, In the
-        // normal write case we know we have to be writing everything
-        IndexSpaceExpression *src_expr = src_node->row_source;
-        if ((dst_req.redop > 0) && (dst_expr->expr_id != src_expr->expr_id))
+          precondition = Runtime::merge_events(&trace_info, copy_preconditions);
+        ApEvent result = across->execute(op, guard, precondition,
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, trace_info);
+        if (trace_info.recording)
         {
-          IndexSpaceExpression *intersect = 
-            intersect_index_spaces(src_expr, dst_expr);
-          if (intersect->is_empty())
-            return ApEvent::NO_AP_EVENT;
-          if (trace_info.recording)
-          {
-            FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
-            for (unsigned idx = 0; idx < src_targets.size(); idx++)
-              tracing_srcs.insert(source_views[idx],
-                  src_targets[idx].get_valid_fields());
-            for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-              tracing_dsts.insert(target_views[idx],
-                  dst_targets[idx].get_valid_fields());
-            const ApEvent result = intersect->issue_copy(trace_info, 
-                                         dst_fields, src_fields,
-#ifdef LEGION_SPY
-                                         src_req.region.get_tree_id(),
-                                         dst_req.region.get_tree_id(),
-#endif
-                                         full_precondition, guard,
-                                         dst_req.redop, false/*fold*/); 
-            trace_info.record_copy_views(result, intersect,
-                                         tracing_srcs, tracing_dsts,
-                                         map_applied_events);
-            return result;
-          }
-          else
-            return intersect->issue_copy(trace_info,
-                                         dst_fields, src_fields,
-#ifdef LEGION_SPY
-                                         src_req.region.get_tree_id(),
-                                         dst_req.region.get_tree_id(),
-#endif
-                                         full_precondition, guard,
-                                         dst_req.redop, false/*fold*/); 
+          // Record this with the trace
+          trace_info.record_issue_across(result, precondition, precondition,
+                        ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
+          FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
+          for (unsigned idx = 0; idx < src_targets.size(); idx++)
+            tracing_srcs.insert(source_views[idx],
+                src_targets[idx].get_valid_fields());
+          for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+            tracing_dsts.insert(target_views[idx],
+                dst_targets[idx].get_valid_fields());
+          trace_info.record_copy_views(result, copy_expr,
+                                       tracing_srcs, tracing_dsts,
+                                       map_applied_events);
         }
-        else
-        {
-          if (trace_info.recording)
-          {
-            FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
-            for (unsigned idx = 0; idx < src_targets.size(); idx++)
-              tracing_srcs.insert(source_views[idx],
-                  src_targets[idx].get_valid_fields());
-            for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-              tracing_dsts.insert(target_views[idx],
-                  dst_targets[idx].get_valid_fields());
-            const ApEvent result = dst_expr->issue_copy(trace_info, 
-                                        dst_fields, src_fields,
-#ifdef LEGION_SPY
-                                        src_req.region.get_tree_id(),
-                                        dst_req.region.get_tree_id(),
-#endif
-                                        full_precondition, guard,
-                                        dst_req.redop, false/*fold*/);
-            trace_info.record_copy_views(result, dst_expr, 
-                                         tracing_srcs, tracing_dsts,
-                                         map_applied_events);
-            return result;
-          }
-          else
-            return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
-#ifdef LEGION_SPY
-                                        src_req.region.get_tree_id(),
-                                        dst_req.region.get_tree_id(),
-#endif
-                                        full_precondition, guard,
-                                        dst_req.redop, false/*fold*/);
-        }
+        if (across->remove_reference())
+          delete across;
+        return result;
       }
+#ifdef DEBUG_LEGION
+      // Should never need to do any reservations here
+      assert(reservations.empty());
+#endif
+      // Get the field indexes for all the fields
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size()); 
+      src_node->column_source->get_field_indexes(src_req.instance_fields, 
+                                                 src_indexes);   
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
       FieldMask src_mask, dst_mask; 
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
       {
@@ -2382,7 +2334,7 @@ namespace Legion {
       {
         // Check that the index spaces intersect
         IndexSpaceExpression *overlap = 
-          intersect_index_spaces(it->first->set_expr, dst_expr);
+          intersect_index_spaces(it->first->set_expr, copy_expr);
         if (overlap->is_empty())
           continue;
         // No alt-set tracking here because some equivalence sets
@@ -2394,7 +2346,7 @@ namespace Legion {
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       // Start with the source mask here in case we need to filter which
       // is all done on the source fields
-      analysis->local_exprs.insert(dst_expr, src_mask);
+      analysis->local_exprs.insert(copy_expr, src_mask);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
@@ -2414,7 +2366,7 @@ namespace Legion {
     ApEvent RegionTreeForest::gather_across(const RegionRequirement &src_req,
                                             const RegionRequirement &idx_req,
                                             const RegionRequirement &dst_req,
-                             const LegionVector<IndirectRecord> &src_records,
+                                      std::vector<IndirectRecord> &src_records,
                                             const InstanceSet &src_targets,
                                             const InstanceSet &idx_targets,
                                             const InstanceSet &dst_targets,
@@ -2426,10 +2378,12 @@ namespace Legion {
                                             const PredEvent pred_guard,
                                             const ApEvent collective_pre,
                                             const ApEvent collective_post,
-                                            const ApUserEvent copy_pre,
+                                            const ApUserEvent local_pre,
+                                 const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                           const bool possible_src_out_of_range)
+                                           const bool possible_src_out_of_range,
+                                           const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2439,147 +2393,114 @@ namespace Legion {
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(idx_req.privilege_fields.size() == 1);
 #endif  
-      const InstanceRef &idx_target = idx_targets[0];
-      const FieldID idx_field = *(idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
-      RegionNode *src_node = get_node(src_req.region);
-      RegionNode *idx_node = get_node(idx_req.region);
-      RegionNode *dst_node = get_node(dst_req.region);
-      IndexSpaceExpression *copy_expr = 
-        // If they are the same then we know the answer
-        (idx_node->row_source == dst_node->row_source) ? dst_node->row_source :
-        // If we're writing we already checked for dominance so just do the dst
-        (dst_req.redop == 0) ? dst_node->row_source :
-        // Otherwise take the intersection of the two index spaces
-        intersect_index_spaces(idx_node->row_source, dst_node->row_source);
+      IndexSpaceNode *idx_node = get_node(idx_req.region.get_index_space());
+      IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
+      IndexSpaceExpression *copy_expr = (idx_node == dst_node) ? dst_node :
+        intersect_index_spaces(idx_node, dst_node);
+      // Trigger the source precondition event when all our sources are ready
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+      {
+        const ApEvent ready = src_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
+      }
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition = 
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Easy out if we're not moving anything
-      if ((copy_expr != dst_node->row_source) && copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
-      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
-      src_node->column_source->get_field_indexes(src_req.instance_fields,
-                                                 src_indexes);
-      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
-      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes);
-      // Build the indirection first which will also give us the
-      // indirection indexes for each of the source fields
-      std::vector<CopyIndirection*> indirections;
-      std::vector<unsigned> indirection_indexes;
+      if (copy_expr->is_empty())
+        return local_pre;
+      CopyAcrossUnstructured *across = 
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      across->add_reference();
+      // Initialize the source indirection fields
+      const InstanceRef &idx_target = idx_targets[0];
+      across->initialize_source_indirections(this, src_records,
+          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
+          possible_src_out_of_range);
 #ifdef LEGION_SPY
-      const unsigned indirect_id = runtime->get_unique_indirections_id();
+      across->src_indirect_instance_event = 
+        idx_target.get_physical_manager()->get_unique_event();
 #endif
-      copy_expr->construct_indirections(src_indexes, idx_field, 
-               src_req.region.get_index_space().get_type_tag(), 
-               gather_is_range, 
-               idx_target.get_manager()->get_instance(op->index_point),
-               src_records, indirections, indirection_indexes,
-#ifdef LEGION_SPY
-               indirect_id, idx_target.get_manager()->get_unique_event(),
-#endif
-               possible_src_out_of_range, false/*possible aliasing*/);
-#ifdef DEBUG_LEGION
-      assert(indirection_indexes.size() == src_req.instance_fields.size());
-#endif
-      std::vector<CopySrcDstField> src_fields(src_req.instance_fields.size());
-      std::vector<CopySrcDstField> dst_fields;
-      std::set<ApEvent> copy_preconditions;
-      // Construct the source and destination field info 
+      
+      // Initialize the destination fields
       InnerContext *context = op->find_physical_context(dst_index, dst_req);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
-      FieldSpaceNode *src_field_node = src_node->column_source;
-      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
+      const bool exclusive_redop =
+          IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
+      across->initialize_destination_fields(this, dst_req, dst_targets,
+          target_views, trace_info, exclusive_redop);
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
+      else
+        copy_preconditions.swap(local_preconditions);
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
-        // The source entry is easy
-        const FieldID src_fid = src_req.instance_fields[fidx];
-        const size_t field_size = src_field_node->get_field_size(src_fid);
-        src_fields[fidx].set_indirect(indirection_indexes[fidx], 
-                                      src_fid, field_size);
-        // We need to find the destination instance
-#ifdef DEBUG_LEGION
-        bool found = false;
-#endif
-        // Find the destination instance
-        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-        {
-          const InstanceRef &ref = dst_targets[idx];
-          const FieldMask &dst_mask = ref.get_valid_fields();
-          if (!dst_mask.is_set(dst_indexes[fidx]))
-            continue;
-          // We found it
-          FieldMask copy_mask;
-          copy_mask.set_bit(dst_indexes[fidx]);
-          target_views[idx]->copy_to(copy_mask, dst_fields);
-          copy_preconditions.insert(ref.get_ready_event());
-#ifdef DEBUG_LEGION
-          found = true;
-#endif
-          break;
-        }
-#ifdef DEBUG_LEGION
-        assert(found);
-#endif
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          copy_preconditions.push_back(ready);
       }
-      // Handle any reduction operations
-      if (dst_req.redop > 0)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
-      }
-      // Also add our local source copy preconditions
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent src_event = src_targets[idx].get_ready_event();
-        if (src_event.exists())
-          copy_preconditions.insert(src_event);
-      }
-      const ApEvent indirect_event = idx_target.get_ready_event();
-      if (indirect_event.exists())
-        copy_preconditions.insert(indirect_event);
+      ApEvent src_indirect_ready = idx_target.get_ready_event();
+      if (src_indirect_ready.exists())
+        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
-        copy_preconditions.insert(init_precondition);
-      ApEvent local_pre;
+      {
+        if (src_indirect_ready.exists())
+          src_indirect_ready = Runtime::merge_events(&trace_info, 
+                          src_indirect_ready, init_precondition);
+        else
+          src_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
       if (!copy_preconditions.empty())
-        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
-#ifdef DEBUG_LEGION
-      assert(copy_pre.exists());
-#endif
-      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
-      const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
-#ifdef LEGION_SPY
-                                  indirect_id,
-#endif
-                                  collective_pre, pred_guard, local_pre);
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
+      // Launch the copy
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          src_indirect_ready, ApEvent::NO_AP_EVENT, trace_info);
       if (trace_info.recording)
       {
+        // Record this with the trace
+        trace_info.record_issue_across(copy_post, local_precondition,
+           copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
+        // Get the src_views
+        InnerContext *src_context =
+          op->find_physical_context(src_index, src_req);
         std::vector<InstanceView*> source_views;
-        InnerContext *idx_context =
-          op->find_physical_context(idx_index, idx_req); 
-        idx_context->convert_target_views(src_targets, source_views);
+        src_context->convert_target_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
           src_views.insert(source_views[idx],
               src_targets[idx].get_valid_fields());
+        // Get the idx views
+        InnerContext *idx_context =
+          op->find_physical_context(idx_index, idx_req); 
         std::vector<InstanceView*> indirect_views;
-        InnerContext *dst_context =
-          op->find_physical_context(dst_index, dst_req);
-        dst_context->convert_target_views(idx_targets, indirect_views);
+        idx_context->convert_target_views(idx_targets, indirect_views);
         idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
+        // Get the dst views
         for (unsigned idx = 0; idx < target_views.size(); idx++)
           dst_views.insert(target_views[idx],
               dst_targets[idx].get_valid_fields());
+        IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
         trace_info.record_indirect_views(copy_post, collective_post, src_index,
-            src_node->row_source,src_views,map_applied_events,LEGION_READ_PRIV);
+            src_node, src_views, map_applied_events, LEGION_READ_PRIV);
         trace_info.record_copy_views(copy_post, idx_index, dst_index,
-            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr,
-            idx_views, dst_views, map_applied_events); 
+            LEGION_READ_PRIV, LEGION_WRITE_PRIV, copy_expr, idx_views,
+            dst_views, true/*indirect*/, false/*indirect*/, map_applied_events);
       }
-      // Clean up our indirections
-      for (std::vector<CopyIndirection*>::const_iterator it =
-            indirections.begin(); it != indirections.end(); it++)
-        delete (*it);
+      if (across->remove_reference())
+        delete across;
       return copy_post;
     }
 
@@ -2590,7 +2511,7 @@ namespace Legion {
                                              const InstanceSet &src_targets,
                                              const InstanceSet &idx_targets,
                                              const InstanceSet &dst_targets,
-                            const LegionVector<IndirectRecord> &dst_records,
+                                      std::vector<IndirectRecord> &dst_records,
                                              CopyOp *op, unsigned src_index,
                                              unsigned idx_index,
                                              unsigned dst_index,
@@ -2599,11 +2520,13 @@ namespace Legion {
                                              const PredEvent pred_guard,
                                              const ApEvent collective_pre,
                                              const ApEvent collective_post,
-                                             const ApUserEvent copy_pre,
+                                             const ApUserEvent local_pre,
+                                 const std::map<Reservation,bool> &reservations,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
-                                             const bool possible_dst_aliasing)
+                                             const bool possible_dst_aliasing,
+                                             const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2614,126 +2537,99 @@ namespace Legion {
       assert(idx_req.privilege_fields.size() == 1);
       assert(idx_targets.size() == 1);
 #endif  
-      const InstanceRef idx_target = idx_targets[0];
-      const FieldID idx_field = *(idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
-      RegionNode *src_node = get_node(src_req.region);
-      RegionNode *idx_node = get_node(idx_req.region);
-      RegionNode *dst_node = get_node(dst_req.region);
-      IndexSpaceExpression *copy_expr =
-        (idx_node->row_source == src_node->row_source) ? idx_node->row_source :
-        intersect_index_spaces(src_node->row_source, idx_node->row_source);
+      IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
+      IndexSpaceNode *idx_node = get_node(idx_req.region.get_index_space());
+      IndexSpaceExpression *copy_expr = (idx_node == src_node) ? idx_node :
+        intersect_index_spaces(src_node, idx_node);
+      // Trigger the source precondition event when all our sources are ready
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      {
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
+      }
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition =
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
       // Easy out if we're not going to move anything
-      if ((copy_expr != idx_node->row_source) && copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
-      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
-      src_node->column_source->get_field_indexes(src_req.instance_fields,
-                                                 src_indexes);
-      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
-      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes);
-      // Build the indirection first which will also give us the
-      // indirection indexes for each of the source fields
-      std::vector<CopyIndirection*> indirections;
-      std::vector<unsigned> indirection_indexes;
-#ifdef LEGION_SPY
-      const unsigned indirect_id = runtime->get_unique_indirections_id();
-#endif
-      copy_expr->construct_indirections(dst_indexes, idx_field, 
-               dst_req.region.get_index_space().get_type_tag(), 
-               scatter_is_range, 
-               idx_target.get_manager()->get_instance(op->index_point),
-               dst_records, indirections, indirection_indexes,
-#ifdef LEGION_SPY
-               indirect_id, idx_target.get_manager()->get_unique_event(),
-#endif
-               possible_dst_out_of_range, possible_dst_aliasing);
-#ifdef DEBUG_LEGION
-      assert(indirection_indexes.size() == dst_req.instance_fields.size());
-#endif
-      std::vector<CopySrcDstField> src_fields;
-      std::vector<CopySrcDstField> dst_fields(dst_req.instance_fields.size());
-      std::set<ApEvent> copy_preconditions;
-      // Construct the source and destination field info 
+      if (copy_expr->is_empty())
+        return local_pre;
+      CopyAcrossUnstructured *across = 
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      across->add_reference();
+      // Initialize the sources
       InnerContext *context = op->find_physical_context(src_index, src_req);
       std::vector<InstanceView*> source_views;
       context->convert_target_views(src_targets, source_views);
-      FieldSpaceNode *dst_field_node = dst_node->column_source;
-      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
-      {
-        // We need to find the source instance
-#ifdef DEBUG_LEGION
-        bool found = false;
-#endif
-        // Find the source instance
-        for (unsigned idx = 0; idx < src_targets.size(); idx++)
-        {
-          const InstanceRef &ref = src_targets[idx];
-          const FieldMask &src_mask = ref.get_valid_fields();
-          if (!src_mask.is_set(src_indexes[fidx]))
-            continue;
-          // We found it
-          FieldMask copy_mask;
-          copy_mask.set_bit(src_indexes[fidx]);
-          source_views[idx]->copy_from(copy_mask, src_fields);
-          copy_preconditions.insert(ref.get_ready_event());
-#ifdef DEBUG_LEGION
-          found = true;
-#endif
-          break;
-        }
-#ifdef DEBUG_LEGION
-        assert(found);
-#endif
-        // The destination entry is easy
-        const FieldID dst_fid = dst_req.instance_fields[fidx];
-        const size_t field_size = dst_field_node->get_field_size(dst_fid);
-        dst_fields[fidx].set_indirect(indirection_indexes[fidx], 
-                                      dst_fid, field_size);
-      }
-      // Handle any reduction operations
-      if (dst_req.redop > 0)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
-      }
-      // Also add any other copy preconditions
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent dst_event = dst_targets[idx].get_ready_event();
-        if (dst_event.exists())
-          copy_preconditions.insert(dst_event);
-      }
-      const ApEvent indirect_event = idx_target.get_ready_event();
-      if (indirect_event.exists())
-        copy_preconditions.insert(indirect_event);
-      if (init_precondition.exists())
-        copy_preconditions.insert(init_precondition);
-      ApEvent local_pre;
-      if (!copy_preconditions.empty())
-        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
-#ifdef DEBUG_LEGION
-      assert(copy_pre.exists());
-#endif
-      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
-      const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+      across->initialize_source_fields(this, src_req, src_targets,
+                                       source_views, trace_info);
+      // Initialize the destination indirections
+      const InstanceRef idx_target = idx_targets[0];
+      // Only exclusive if we're the only point sctatting to our instance
+      // and we're not racing with any other operations
+      const bool exclusive_redop = (dst_records.size() == 1) && 
+        (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
+      across->initialize_destination_indirections(this, dst_records,
+          dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
+          possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
 #ifdef LEGION_SPY
-                                  indirect_id,
-#endif
-                                  collective_pre, pred_guard, local_pre);
+      across->dst_indirect_instance_event = 
+        idx_target.get_physical_manager()->get_unique_event();
+#endif 
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
+      else
+        copy_preconditions.swap(local_preconditions);
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+      {
+        const ApEvent ready = src_targets[idx].get_ready_event();
+        if (ready.exists())
+          copy_preconditions.push_back(ready);
+      }
+      ApEvent dst_indirect_ready = idx_target.get_ready_event();
+      if (dst_indirect_ready.exists())
+        copy_preconditions.push_back(dst_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (dst_indirect_ready.exists())
+          dst_indirect_ready = Runtime::merge_events(&trace_info, 
+                          dst_indirect_ready, init_precondition);
+        else
+          dst_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
+      if (!copy_preconditions.empty())
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
+      // Launch the copy
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          ApEvent::NO_AP_EVENT, dst_indirect_ready, trace_info);
       if (trace_info.recording)
       {
+        // Record this with the trace
+        trace_info.record_issue_across(copy_post, local_precondition,
+           copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, dst_views, idx_views;
+        // src_views
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
           src_views.insert(source_views[idx],
               src_targets[idx].get_valid_fields());
+        // idx_views
         std::vector<InstanceView*> indirect_views;
         InnerContext *idx_context =
           op->find_physical_context(idx_index, idx_req);
         idx_context->convert_target_views(idx_targets, indirect_views);
         idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
+        // dst_views
         std::vector<InstanceView*> target_views;
         InnerContext *dst_context =
           op->find_physical_context(dst_index, dst_req);
@@ -2741,16 +2637,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
           dst_views.insert(target_views[idx],
               dst_targets[idx].get_valid_fields());
-        trace_info.record_copy_views(copy_post, src_index, dst_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, idx_views,
-            dst_views, map_applied_events); 
+        trace_info.record_copy_views(copy_post, src_index, idx_index,
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_views,
+            idx_views, false/*indirect*/, true/*indirect*/,map_applied_events); 
+        IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
         trace_info.record_indirect_views(copy_post, collective_post, dst_index,
-          dst_node->row_source,dst_views,map_applied_events,LEGION_WRITE_PRIV);
+          dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
       }
-      // Clean up our indirections
-      for (std::vector<CopyIndirection*>::const_iterator it =
-            indirections.begin(); it != indirections.end(); it++)
-        delete (*it);
+      if (across->remove_reference())
+        delete across;
       return copy_post;
     }
 
@@ -2761,9 +2656,9 @@ namespace Legion {
                               const RegionRequirement &dst_idx_req,
                               const InstanceSet &src_targets,
                               const InstanceSet &dst_targets,
-                              const LegionVector<IndirectRecord> &src_records,
+                              std::vector<IndirectRecord> &src_records,
                               const InstanceSet &src_idx_targets,
-                              const LegionVector<IndirectRecord> &dst_records,
+                              std::vector<IndirectRecord> &dst_records,
                               const InstanceSet &dst_idx_targets, CopyOp *op,
                               unsigned src_index, unsigned dst_index,
                               unsigned src_idx_index, unsigned dst_idx_index,
@@ -2772,12 +2667,14 @@ namespace Legion {
                               const PredEvent pred_guard,
                               const ApEvent collective_pre,
                               const ApEvent collective_post,
-                              const ApUserEvent copy_pre,
+                              const ApUserEvent local_pre,
+                              const std::map<Reservation,bool> &reservations,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
-                              const bool possible_dst_aliasing)
+                              const bool possible_dst_aliasing,
+                              const bool compute_preimages)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2791,121 +2688,102 @@ namespace Legion {
       assert(src_idx_targets.size() == 1);
       assert(dst_idx_targets.size() == 1);
 #endif  
-      const InstanceRef &src_idx_target = src_idx_targets[0];
-      const InstanceRef &dst_idx_target = dst_idx_targets[0];
-      const FieldID src_idx_field = *(src_idx_req.privilege_fields.begin());
-      const FieldID dst_idx_field = *(dst_idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
-      RegionNode *src_node = get_node(src_req.region);
-      RegionNode *src_idx_node = get_node(src_idx_req.region);
-      RegionNode *dst_node = get_node(dst_req.region);
-      RegionNode *dst_idx_node = get_node(dst_idx_req.region);
-      IndexSpaceExpression *copy_expr =
-        (src_idx_node->row_source == dst_idx_node->row_source) ?
-         src_idx_node->row_source : intersect_index_spaces(
-             src_idx_node->row_source, dst_idx_node->row_source);
-      // Quick out if there is nothing we're going to copy
-      if ((copy_expr != src_idx_node->row_source) && copy_expr->is_empty())
-        return ApEvent::NO_AP_EVENT;
-      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
-      src_node->column_source->get_field_indexes(src_req.instance_fields,
-                                                 src_indexes);
-      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
-      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes);
-      // Build the indirection first which will also give us the
-      // indirection indexes for each of the source fields
-      std::vector<CopyIndirection*> indirections;
-      std::vector<unsigned> src_indirection_indexes;
-#ifdef LEGION_SPY
-      const unsigned indirect_id = runtime->get_unique_indirections_id();
-#endif
-      copy_expr->construct_indirections(src_indexes, src_idx_field,
-               src_req.region.get_index_space().get_type_tag(),
-               both_are_range, 
-               src_idx_target.get_manager()->get_instance(op->index_point),
-               src_records, indirections, src_indirection_indexes,
-#ifdef LEGION_SPY
-               indirect_id, src_idx_target.get_manager()->get_unique_event(),
-#endif
-               possible_src_out_of_range, false/*possible aliasing*/);
-#ifdef DEBUG_LEGION
-      assert(src_indirection_indexes.size() == src_req.instance_fields.size());
-#endif
-      std::vector<unsigned> dst_indirection_indexes;
-      copy_expr->construct_indirections(dst_indexes, dst_idx_field,
-               dst_req.region.get_index_space().get_type_tag(),
-               both_are_range, 
-               dst_idx_target.get_manager()->get_instance(op->index_point),
-               dst_records, indirections, dst_indirection_indexes,
-#ifdef LEGION_SPY
-               indirect_id, dst_idx_target.get_manager()->get_unique_event(),
-#endif
-               possible_dst_out_of_range, possible_dst_aliasing);
-#ifdef DEBUG_LEGION
-      assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
-#endif
-      std::vector<CopySrcDstField> src_fields(src_req.instance_fields.size());
-      std::vector<CopySrcDstField> dst_fields(dst_req.instance_fields.size());
-      std::set<ApEvent> copy_preconditions;
-      // Construct the source and destination field info 
-      FieldSpaceNode *src_field_node = src_node->column_source;
-      FieldSpaceNode *dst_field_node = dst_node->column_source;
-      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
-      {
-        // Do the source field first
-        const FieldID src_fid = src_req.instance_fields[fidx];
-        const size_t src_field_size = src_field_node->get_field_size(src_fid);
-        src_fields[fidx].set_indirect(src_indirection_indexes[fidx],
-                                      src_fid, src_field_size);
-        // Then the destination field
-        const FieldID dst_fid = dst_req.instance_fields[fidx];
-        const size_t dst_field_size = dst_field_node->get_field_size(dst_fid);
-        dst_fields[fidx].set_indirect(dst_indirection_indexes[fidx], 
-                                      dst_fid, dst_field_size);
-      }
-      // Handle any reduction operations
-      if (dst_req.redop > 0)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
-      }
-      // Also add any other copy preconditions
+      IndexSpaceNode *src_idx_node = 
+        get_node(src_idx_req.region.get_index_space());
+      IndexSpaceNode *dst_idx_node = 
+        get_node(dst_idx_req.region.get_index_space());
+      IndexSpaceExpression *copy_expr = (src_idx_node == dst_idx_node) ?
+         src_idx_node : intersect_index_spaces(src_idx_node, dst_idx_node);
+      // Trigger the precondition event when all our srcs and dsts are ready
+      std::vector<ApEvent> local_preconditions;
+      if (init_precondition.exists())
+        local_preconditions.push_back(init_precondition);
       for (unsigned idx = 0; idx < src_targets.size(); idx++)
       {
-        const ApEvent src_event = src_targets[idx].get_ready_event();
-        if (src_event.exists())
-          copy_preconditions.insert(src_event);
+        const ApEvent ready = src_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
       }
       for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
-        const ApEvent dst_event = dst_targets[idx].get_ready_event();
-        if (dst_event.exists())
-          copy_preconditions.insert(dst_event);
+        const ApEvent ready = dst_targets[idx].get_ready_event();
+        if (ready.exists())
+          local_preconditions.push_back(ready);
       }
-      const ApEvent src_indirect_event = src_idx_target.get_ready_event();
-      if (src_indirect_event.exists())
-        copy_preconditions.insert(src_indirect_event);
-      const ApEvent dst_indirect_event = dst_idx_target.get_ready_event();
-      if (dst_indirect_event.exists())
-        copy_preconditions.insert(dst_indirect_event);
-      if (init_precondition.exists())
-        copy_preconditions.insert(init_precondition);
-      ApEvent local_pre;
-      if (!copy_preconditions.empty())
-        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
-#ifdef DEBUG_LEIGON
-      assert(copy_pre.exists());
-#endif
-      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
-      const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+      ApEvent local_precondition;
+      if (!local_preconditions.empty())
+        local_precondition = 
+          Runtime::merge_events(&trace_info, local_preconditions);
+      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      // Quick out if there is nothing we're going to copy
+      if (copy_expr->is_empty())
+        return local_pre;
+      CopyAcrossUnstructured *across = 
+        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      across->add_reference();
+      // Initialize the source indirection fields
+      const InstanceRef &src_idx_target = src_idx_targets[0];
+      across->initialize_source_indirections(this, src_records,
+          src_req, src_idx_req, src_idx_target, op->index_point, 
+          both_are_range, possible_src_out_of_range);
 #ifdef LEGION_SPY
-                                  indirect_id,
-#endif
-                                  collective_pre, pred_guard, local_pre);
+      across->src_indirect_instance_event = 
+        src_idx_target.get_physical_manager()->get_unique_event();
+#endif 
+      // Initialize the destination indirections
+      const InstanceRef &dst_idx_target = dst_idx_targets[0];
+      // Only exclusive if we're the only point sctatting to our instance
+      // and we're not racing with any other operations
+      const bool exclusive_redop = (dst_records.size() == 1) && 
+        (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
+      across->initialize_destination_indirections(this, dst_records,
+          dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
+          possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
+#ifdef LEGION_SPY
+      across->dst_indirect_instance_event = 
+        dst_idx_target.get_physical_manager()->get_unique_event();
+#endif 
+      // Compute the copy preconditions
+      std::vector<ApEvent> copy_preconditions;
+      if (collective_pre.exists())
+        copy_preconditions.push_back(collective_pre);
+      else
+        copy_preconditions.swap(local_preconditions);
+      ApEvent src_indirect_ready = src_idx_target.get_ready_event();
+      if (src_indirect_ready.exists())
+        copy_preconditions.push_back(src_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (src_indirect_ready.exists())
+          src_indirect_ready = Runtime::merge_events(&trace_info, 
+                          src_indirect_ready, init_precondition);
+        else
+          src_indirect_ready = init_precondition;
+      }
+      ApEvent dst_indirect_ready = dst_idx_target.get_ready_event();
+      if (dst_indirect_ready.exists())
+        copy_preconditions.push_back(dst_indirect_ready);
+      if (init_precondition.exists())
+      {
+        if (dst_indirect_ready.exists())
+          dst_indirect_ready = Runtime::merge_events(&trace_info, 
+                          dst_indirect_ready, init_precondition);
+        else
+          dst_indirect_ready = init_precondition;
+      }
+      ApEvent copy_precondition;
+      if (!copy_preconditions.empty())
+        copy_precondition =
+          Runtime::merge_events(&trace_info, copy_preconditions);
+      // Launch the copy
+      ApEvent copy_post = across->execute(op, pred_guard, copy_precondition,
+          src_indirect_ready, dst_indirect_ready, trace_info);
       if (trace_info.recording)
       {
+        // Record this with the trace
+        trace_info.record_issue_across(copy_post, local_precondition,
+            copy_precondition, src_indirect_ready, dst_indirect_ready, across);
         // If we're tracing record the views for this copy
         FieldMaskSet<InstanceView> src_views, src_idx_views;
         FieldMaskSet<InstanceView> dst_idx_views, dst_views;
@@ -2937,18 +2815,18 @@ namespace Legion {
           dst_views.insert(target_views[idx],
               dst_targets[idx].get_valid_fields());
 
+        IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
         trace_info.record_indirect_views(copy_post, collective_post, src_index,
-            src_node->row_source,src_views,map_applied_events,LEGION_READ_PRIV);
+            src_node, src_views, map_applied_events, LEGION_READ_PRIV);
+        IndexSpaceNode *dst_node = get_node(dst_req.region.get_index_space());
         trace_info.record_indirect_views(copy_post, collective_post, dst_index,
-           dst_node->row_source,dst_views,map_applied_events,LEGION_WRITE_PRIV);
+           dst_node, dst_views, map_applied_events, LEGION_WRITE_PRIV);
         trace_info.record_copy_views(copy_post, src_idx_index, dst_idx_index,
-            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr,
-            src_idx_views, dst_idx_views, map_applied_events); 
+            LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_idx_views,
+            dst_idx_views,true/*indirect*/,true/*indirect*/,map_applied_events);
       }
-      // Clean up our indirections
-      for (std::vector<CopyIndirection*>::const_iterator it =
-            indirections.begin(); it != indirections.end(); it++)
-        delete (*it);
+      if (across->remove_reference())
+        delete across;
       return copy_post;
     }
 
@@ -5092,10 +4970,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
+    bool RegionTreeForest::check_types(TypeTag t1, TypeTag t2, bool &diff_dims)
     //--------------------------------------------------------------------------
     {
-      return (left.get_type_tag() == right.get_type_tag());
+      if (t1 == t2)
+        return true;
+      const int d1 = NT_TemplateHelper::get_dim(t1); 
+      const int d2 = NT_TemplateHelper::get_dim(t2);
+      diff_dims = (d1 != d2);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -5104,7 +4987,7 @@ namespace Legion {
     {
       // Check to see if dst is dominated by source
 #ifdef DEBUG_LEGION
-      assert(are_compatible(src, dst));
+      assert(src.get_type_tag() == dst.get_type_tag());
 #endif
       IndexSpaceNode *src_node = get_node(src);
       IndexSpaceNode *dst_node = get_node(dst);
@@ -6680,6 +6563,194 @@ namespace Legion {
       assert(creator.operation != NULL);
 #endif
       return creator.operation;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Copy Across Executor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
+        CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
+        ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
+        bool recurrent, unsigned s)
+      : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
+        executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
+        copy_precondition(copy_pre), src_indirect_precondition(src_pre),
+        dst_indirect_precondition(dst_pre), 
+        done_event(Runtime::create_ap_user_event(trace_info)),
+        stage(s+1), recurrent_replay(recurrent)
+    //--------------------------------------------------------------------------
+    {
+      executor->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CopyAcrossExecutor::handle_deferred_copy_across(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCopyAcrossArgs *dargs = (const DeferCopyAcrossArgs*)args;
+      Runtime::trigger_event(dargs->trace_info, dargs->done_event,
+          dargs->executor->execute(dargs->op, dargs->guard, 
+            dargs->copy_precondition, dargs->src_indirect_precondition, 
+            dargs->dst_indirect_precondition, *dargs->trace_info,
+            dargs->recurrent_replay, dargs->stage));
+      if (dargs->executor->remove_reference())
+        delete dargs->executor;
+      delete dargs->trace_info;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Copy Across Unstructured
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossUnstructured::initialize_source_fields(
+              RegionTreeForest *forest, const RegionRequirement &req,
+              const InstanceSet &insts, const std::vector<InstanceView*> &views,
+              const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_fields.empty());
+#endif
+      FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
+      std::vector<unsigned> indexes(req.instance_fields.size());
+      fs->get_field_indexes(req.instance_fields, indexes);
+      src_fields.reserve(indexes.size());
+      for (std::vector<unsigned>::const_iterator it =
+            indexes.begin(); it != indexes.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        for (unsigned idx = 0; idx < insts.size(); idx++)
+        {
+          const InstanceRef &ref = insts[idx];
+          const FieldMask &mask = ref.get_valid_fields();
+          if (!mask.is_set(*it))
+            continue;
+          FieldMask copy_mask;
+          copy_mask.set_bit(*it);
+          views[idx]->copy_from(copy_mask, src_fields);
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossUnstructured::initialize_destination_fields(
+              RegionTreeForest *forest, const RegionRequirement &req,
+              const InstanceSet &insts, const std::vector<InstanceView*> &views,
+              const PhysicalTraceInfo &trace_info, const bool exclusive_redop)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dst_fields.empty());
+#endif
+      FieldSpaceNode *fs = forest->get_node(req.region.get_field_space());
+      std::vector<unsigned> indexes(req.instance_fields.size());
+      fs->get_field_indexes(req.instance_fields, indexes);
+      dst_fields.reserve(indexes.size());
+      for (std::vector<unsigned>::const_iterator it =
+            indexes.begin(); it != indexes.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        for (unsigned idx = 0; idx < insts.size(); idx++)
+        {
+          const InstanceRef &ref = insts[idx];
+          const FieldMask &mask = ref.get_valid_fields();
+          if (!mask.is_set(*it))
+            continue;
+          FieldMask copy_mask;
+          copy_mask.set_bit(*it);
+          views[idx]->copy_to(copy_mask, dst_fields);
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      if (req.redop != 0)
+      {
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(req.redop, false/*fold*/, exclusive_redop);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossUnstructured::initialize_source_indirections(
+            RegionTreeForest *forest, std::vector<IndirectRecord> &records,
+            const RegionRequirement &src_req, const RegionRequirement &idx_req,
+            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const bool are_range, const bool possible_out_of_range)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_fields.empty());
+      assert(idx_req.privilege_fields.size() == 1);
+#endif
+      src_indirections.swap(records);
+      src_indirect_field = *(idx_req.privilege_fields.begin());
+      src_indirect_instance =
+        indirect_instance.get_physical_manager()->get_instance(point);
+      src_indirect_type = src_req.region.get_index_space().get_type_tag();
+      both_are_range = are_range;
+      possible_src_out_of_range = possible_out_of_range;
+      src_fields.resize(src_req.instance_fields.size());
+      FieldSpaceNode *fs = forest->get_node(src_req.region.get_field_space());
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+      {
+        const FieldID fid = src_req.instance_fields[idx];
+        src_fields[idx].set_indirect(0/*dummy indirection for now*/,
+                                     fid, fs->get_field_size(fid));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossUnstructured::initialize_destination_indirections(
+            RegionTreeForest *forest, std::vector<IndirectRecord> &records,
+            const RegionRequirement &dst_req, const RegionRequirement &idx_req,
+            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const bool are_range, const bool possible_out_of_range,
+            const bool possible_aliasing, const bool exclusive_redop)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(dst_fields.empty());
+      assert(idx_req.privilege_fields.size() == 1);
+#endif
+      dst_indirections.swap(records);
+      dst_indirect_field = *(idx_req.privilege_fields.begin());
+      dst_indirect_instance =
+        indirect_instance.get_physical_manager()->get_instance(point);
+      dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
+      both_are_range = are_range;
+      possible_dst_out_of_range = possible_out_of_range;
+      possible_dst_aliasing = possible_aliasing;
+      dst_fields.resize(dst_req.instance_fields.size());
+      FieldSpaceNode *fs = forest->get_node(dst_req.region.get_field_space());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+      {
+        const FieldID fid = dst_req.instance_fields[idx];
+        dst_fields[idx].set_indirect(0/*dummy indirection for now*/,
+                                     fid, fs->get_field_size(fid));
+        if (dst_req.redop != 0)
+          dst_fields[idx].set_redop(dst_req.redop, 
+                    false/*fold*/, exclusive_redop);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -8614,21 +8685,45 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_disjointness_test(
-              IndexSpaceNode *parent, IndexPartNode *left, IndexPartNode *right)
+    IndexSpaceNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
+                        IndexSpaceNode *par, IndexPartNode *l, IndexPartNode *r)
+      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+        parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
-      const bool disjoint = !left->intersects_with(right);
-      parent->record_disjointness(disjoint, left->color, right->color);
+      left->add_base_resource_ref(META_TASK_REF);
+      right->add_base_resource_ref(META_TASK_REF);
+      parent->add_base_resource_ref(META_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_disjointness_test(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DynamicIndependenceArgs *dargs =
+        (const DynamicIndependenceArgs*)args;
+      const bool disjoint = !dargs->left->intersects_with(dargs->right);
+      dargs->parent->record_disjointness(disjoint, dargs->left->color,
+                                         dargs->right->color);
+      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->left;
+      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->right;
+      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->parent;
     } 
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::send_node(AddressSpaceID target, RtEvent done,
                                    RtEvent &send_precondition,
+                                   std::set<IndexTreeNode*> &visited,
                                    std::vector<SendNodeRecord> &nodes_to_send,
                                    const bool above /* = false */)
     //--------------------------------------------------------------------------
     {
+      // Do a quick check to see if we already visited this node
+      if (!visited.insert(this).second)
+        return true;
       // If we're not the owner continue up the tree to see if anyone is
       // and check whether they are still valid
       if (!is_owner())
@@ -8642,8 +8737,8 @@ namespace Legion {
               return false;
             send_references++;
           }
-          const bool result = parent->send_node(target, done, send_precondition,
-                                                nodes_to_send, true/*above*/);
+          const bool result = parent->send_node(target, done,
+              send_precondition, visited, nodes_to_send, true/*above*/);
           // Remove the reference
           bool remove_reference = false;
           {
@@ -8677,11 +8772,6 @@ namespace Legion {
         {
           if (tree_valid)
           {
-            // Do a quick check that it's not in our set already
-            for (std::vector<SendNodeRecord>::const_iterator it =
-                  nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-              if (it->node == this)
-                return true;
             // Still need to record the effects so this is not collected early
             std::map<AddressSpaceID,RtEvent>::iterator finder =
               send_effects.find(target);
@@ -8733,8 +8823,8 @@ namespace Legion {
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
       if (still_valid && (parent != NULL) &&
-          !parent->send_node(target, done, send_precondition, 
-                             nodes_to_send, true/*above*/))
+          !parent->send_node(target, done, send_precondition,
+            visited, nodes_to_send, true/*above*/))
       {
         if (above)
         {
@@ -8948,8 +9038,10 @@ namespace Legion {
       if (target != NULL)
       {
         RtEvent send_precondition;
+        std::set<IndexTreeNode*> visited;
         std::vector<SendNodeRecord> nodes_to_send;
-        target->send_node(source, to_trigger, send_precondition, nodes_to_send);
+        target->send_node(source, to_trigger,
+                          send_precondition, visited, nodes_to_send);
         // Now send back the results
         Serializer rez;
         {
@@ -10752,17 +10844,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/void IndexPartNode::handle_disjointness_test(
-             IndexPartNode *parent, IndexSpaceNode *left, IndexSpaceNode *right)
+    IndexPartNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
+                       IndexPartNode *par, IndexSpaceNode *l, IndexSpaceNode *r)
+      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
+        parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
-      bool disjoint = !left->intersects_with(right);
-      parent->record_disjointness(disjoint, left->color, right->color);
+      left->add_base_resource_ref(META_TASK_REF);
+      right->add_base_resource_ref(META_TASK_REF);
+      parent->add_base_resource_ref(META_TASK_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void IndexPartNode::handle_disjointness_test(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DynamicIndependenceArgs *dargs =
+        (const DynamicIndependenceArgs*)args;
+      bool disjoint = !dargs->left->intersects_with(dargs->right);
+      dargs->parent->record_disjointness(disjoint, dargs->left->color,
+                                         dargs->right->color);
+      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->left;
+      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->right;
+      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->parent;
     }
 
     //--------------------------------------------------------------------------
     bool IndexPartNode::send_node(AddressSpaceID target, RtEvent done,
                                   RtEvent &send_precondition,
+                                  std::set<IndexTreeNode*> &visited,
                                   std::vector<SendNodeRecord> &nodes_to_send,
                                   const bool above /* = false */)
     //--------------------------------------------------------------------------
@@ -10770,6 +10883,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
 #endif
+      // Do a quick check to see if we already visited this
+      if (!visited.insert(this).second)
+        return true;
       if (!is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -10777,27 +10893,11 @@ namespace Legion {
 #endif
         // See if anything above or the color space needs to be sent
         if (!parent->send_node(target, done, send_precondition,
-                               nodes_to_send, true/*above*/))
+                               visited, nodes_to_send, true/*above*/))
           return false;
-        // Do a quick check to see if the color space is from our same
-        // tree and if it is whether it is above us in the tree. If it
-        // is then we can skip sending it since we already would have
-        // done the analysis for it.
-        if (color_space->handle.get_tree_id() == handle.get_tree_id())
-        {
-          IndexSpaceNode *upabove = parent;
-          while (true)
-          {
-            if (color_space == upabove)
-              return true;
-            if (upabove->parent == NULL)
-              break;
-            upabove = upabove->parent->parent;
-          }
-        }
         RtEvent temp_precondition;
         color_space->send_node(target, done, temp_precondition,
-                               nodes_to_send, false/*above*/);
+                               visited, nodes_to_send, false/*above*/);
         if (temp_precondition.exists())
         {
           if (send_precondition.exists())
@@ -10819,11 +10919,6 @@ namespace Legion {
           return false;
         if (has_remote_instance(target))
         {
-          // Do a quick check that it's not in our set already
-          for (std::vector<SendNodeRecord>::const_iterator it =
-                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-            if (it->node == this)
-              return true;
           // Still need to record the effects so this is not collected early
           std::map<AddressSpaceID,RtEvent>::iterator finder =
             send_effects.find(target);
@@ -10845,8 +10940,8 @@ namespace Legion {
         send_count++;
         update_remote_instances(target);
       }
-      if (!parent->send_node(target, done, send_precondition, 
-                             nodes_to_send, true/*above*/))
+      if (!parent->send_node(target, done, send_precondition,
+                             visited, nodes_to_send, true/*above*/))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10859,25 +10954,9 @@ namespace Legion {
         }
         return false;
       }
-      // Do a quick check to see if the color space is from our same
-      // tree and if it is whether it is above us in the tree. If it
-      // is then we can skip sending it since we already would have
-      // done the analysis for it.
-      if (color_space->handle.get_tree_id() == handle.get_tree_id())
-      {
-        IndexSpaceNode *upabove = parent;
-        while (true)
-        {
-          if (color_space == upabove)
-            return true;
-          if (upabove->parent == NULL)
-            break;
-          upabove = upabove->parent->parent;
-        }
-      }
       RtEvent temp_precondition;
       color_space->send_node(target, done, temp_precondition,
-                             nodes_to_send, false/*above*/);
+                             visited, nodes_to_send, false/*above*/);
       if (temp_precondition.exists())
       {
         if (send_precondition.exists())
@@ -11038,10 +11117,11 @@ namespace Legion {
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       RtEvent send_precondition;
+      std::set<IndexTreeNode*> visited;
       std::vector<SendNodeRecord> nodes_to_send;
       if ((target != NULL) &&
-          target->send_node(source, to_trigger, 
-                            send_precondition, nodes_to_send))
+          target->send_node(source, to_trigger, send_precondition,
+                            visited, nodes_to_send))
       {
         // Now send back the results
         Serializer rez;
@@ -12934,6 +13014,59 @@ namespace Legion {
       if (!wait_for.has_triggered())
         wait_for.wait();
       return get_field_size(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID FieldSpaceNode::get_field_serdez(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_for;
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        while (allocation_state == FIELD_ALLOC_PENDING)
+        {
+#ifdef DEBUG_LEGION
+          assert(is_owner());
+#endif
+          const RtEvent wait_on = pending_field_allocation;
+          n_lock.release();
+          if (!wait_on.has_triggered())
+            wait_on.wait();
+          n_lock.reacquire();
+        }
+        if (allocation_state != FIELD_ALLOC_INVALID)
+        {
+          std::map<FieldID,FieldInfo>::const_iterator finder = 
+            field_infos.find(fid);
+#ifdef DEBUG_LEGION
+          assert(finder != field_infos.end());
+#endif
+          // See if this field has been allocated or not yet
+          if (!finder->second.size_ready.exists())
+            return finder->second.serdez_id;
+          wait_for = Runtime::protect_event(finder->second.size_ready);
+        }
+      }
+      if (!wait_for.exists())
+      {
+        std::map<FieldID,FieldInfo> local_infos;
+        const RtEvent ready = 
+          request_field_infos_copy(&local_infos, local_space);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        std::map<FieldID,FieldInfo>::const_iterator finder = 
+          local_infos.find(fid);
+#ifdef DEBUG_LEGION
+        assert(finder != local_infos.end());
+#endif
+        // See if this field has been allocated or not yet
+        if (!finder->second.size_ready.exists())
+          return finder->second.serdez_id;
+        wait_for = Runtime::protect_event(finder->second.size_ready);
+      }
+      if (!wait_for.has_triggered())
+        wait_for.wait();
+      return get_field_serdez(fid);
     }
 
     //--------------------------------------------------------------------------
@@ -15884,15 +16017,6 @@ namespace Legion {
           flush_logical_reductions(closer, state, reduction_flush_fields,
                        record_close_operations, no_next_child,new_states);
       }
-      // Figure out now if we can do disjoint closes at this level of
-      // the region tree. This applies to when we close directly to a
-      // disjoint partition in the region tree (only happens with
-      // projection functions). The rule for projection analysis is that 
-      // dirty data can only live at the leaves of the open tree. Therefore
-      // we must either being going into a disjoint shallow mode or any
-      // mode which is read only that permits us to go to disjoint shallow
-      const bool disjoint_close = !is_region() && are_all_children_disjoint() &&
-        (IS_READ_ONLY(closer.user.usage) || (proj_info.projection->depth == 0));
       // Now we can look at all the children
       for (LegionList<FieldState>::iterator it = 
             state.field_states.begin(); it != 
@@ -16018,26 +16142,7 @@ namespace Legion {
 #endif
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
-                  // If we are doing a disjoint close, update the open
-                  // states with the appropriate new state
-                  if (disjoint_close)
-                  {
-                    // Record the fields are already open
-                    open_below |= overlap;
-                    // Make a new state with the default projection
-                    // function to indicate that we are open in 
-                    // disjoint shallow mode with read-write
-                    RegionUsage close_usage(LEGION_READ_WRITE, 
-                                            LEGION_EXCLUSIVE, 0);
-                    IndexSpaceNode *color_space = 
-                      as_partition_node()->row_source->color_space;
-                    FieldState new_state(close_usage, overlap,
-                        context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/);
-                    new_states.emplace_back(std::move(new_state));
-                  }
-                  else
-                    closer.record_close_operation(overlap);
+                  closer.record_close_operation(overlap);
                 }
                 it->filter(current_mask);
                 if (!it->valid_fields())
@@ -16098,7 +16203,6 @@ namespace Legion {
                   const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
-                  //assert(!disjoint_close);
 #endif
                   closer.record_close_operation(overlap);
                   // Advance the projection epochs
@@ -16128,26 +16232,7 @@ namespace Legion {
 #endif
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
-                  // If we're doing a disjoint close update the open
-                  // states accordingly 
-                  if (disjoint_close)
-                  {
-                    // Record the fields are already open
-                    open_below |= overlap;
-                    // Make a new state with the default projection
-                    // function to indicate that we are open in 
-                    // disjoint shallow mode with read-write
-                    RegionUsage close_usage(LEGION_READ_WRITE, 
-                                            LEGION_EXCLUSIVE, 0);
-                    IndexSpaceNode *color_space = 
-                      as_partition_node()->row_source->color_space;
-                    FieldState new_state(close_usage, overlap,
-                        context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/);
-                    new_states.emplace_back(std::move(new_state));
-                  }
-                  else
-                    closer.record_close_operation(overlap);
+                  closer.record_close_operation(overlap);
                 }
                 it->filter(current_mask);
                 if (!it->valid_fields())

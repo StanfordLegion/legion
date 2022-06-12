@@ -85,7 +85,8 @@ namespace Legion {
       TRACE_REF = 26,
       AGGREGATOR_REF = 27,
       FIELD_STATE_REF = 28,
-      LAST_SOURCE_REF = 29,
+      COPY_ACROSS_REF = 29,
+      LAST_SOURCE_REF = 30,
     };
 
     enum ReferenceKind {
@@ -125,6 +126,7 @@ namespace Legion {
       "Physical Trace Reference",                   \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
+      "Copy Across Executor Reference",             \
     }
 
     extern Realm::Logger log_garbage;

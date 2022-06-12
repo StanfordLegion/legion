@@ -39,7 +39,7 @@ list(APPEND REALM_SRC
   realm/deppart/inst_helper.h
   realm/deppart/partitions.h               realm/deppart/partitions.cc
   realm/deppart/preimage.h
-  realm/deppart/rectlist.h                 
+  realm/deppart/rectlist.h
   realm/deppart/rectlist.inl
   realm/deppart/setops.h                   realm/deppart/setops.cc
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
@@ -118,14 +118,18 @@ if(Legion_USE_HDF5)
   )
 endif()
 
-if (REALM_USE_OPENMP)
+if (Legion_USE_OpenMP)
   list(APPEND REALM_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
     realm/openmp/openmp_internal.h
-    realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
-    realm/openmp/openmp_threadpool.inl
-    realm/openmp/openmp_api.cc
   )
+  if(NOT Legion_OpenMP_SYSTEM_RUNTIME)
+    list(APPEND REALM_SRC
+      realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
+      realm/openmp/openmp_threadpool.inl
+      realm/openmp/openmp_api.cc
+    )
+  endif()
 endif()
 
 if (Legion_USE_Python)
@@ -230,6 +234,7 @@ endforeach()
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+add_library(Legion::RealmRuntime ALIAS RealmRuntime)
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 
 # turn on warnings about partially-overloaded methods, if supported
@@ -432,7 +437,7 @@ if(Legion_USE_CUDA)
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
-    
+
     # filter anything referring to *cudart* out of the CUDA_LIBRARIES
     #  making sure our changes are visible to the scope above
     # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
@@ -464,8 +469,8 @@ if(Legion_USE_HIP)
     target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
-  
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_NVCC__")
+
+    target_compile_definitions(RealmRuntime PRIVATE __HIP_PLATFORM_NVIDIA__)
   endif()
 
   if (Legion_HIP_TARGET STREQUAL "ROCM")
@@ -474,12 +479,12 @@ if(Legion_USE_HIP)
     endif()
 
     set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
-    target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include ${HIP_ROOT_DIR}/../include)
+    target_include_directories(RealmRuntime PRIVATE ${HIP_INCLUDE_DIRS})
     target_link_libraries(RealmRuntime PRIVATE ${HIP_LIBRARIES})
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__")
+    target_compile_definitions(RealmRuntime PRIVATE __HIP_PLATFORM_AMD__)
   endif()
 endif()
 
@@ -572,7 +577,7 @@ if(Legion_USE_Kokkos)
   # and add kokkos libraries to our exported library requirements
   set_property(TARGET RealmRuntime APPEND
     PROPERTY INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
-  
+
   # if Kokkos' CUDA target is enabled, and we're performing runtime hijack,
   #  rewrite Kokkos' cudart dependency to be on Realm instead
   if(Kokkos_ENABLE_CUDA AND Legion_HIJACK_CUDART)
@@ -582,7 +587,7 @@ if(Legion_USE_Kokkos)
   # similarly, if Kokkos' OpenMP target is enabled but we're using Realm's
   #  OpenMP runtime implementation, remove anything mentioning openmp from
   #  the exported link options (don't mess with compile options though)
-  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP)
+  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP AND NOT Legion_OpenMP_SYSTEM_RUNTIME)
     edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS .*openmp.* "")
     edit_target_property(Kokkos::kokkoscontainers INTERFACE_LINK_OPTIONS .*openmp.* "")
   endif()
@@ -593,6 +598,14 @@ if(Legion_USE_HDF5)
   target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
+endif()
+
+if(Legion_USE_OpenMP)
+  # only include -fopenmp (or equivalent) if we're using the
+  #  system omp runtime libs
+  if(Legion_OpenMP_SYSTEM_RUNTIME)
+    target_link_libraries(RealmRuntime PUBLIC OpenMP::OpenMP_CXX)
+  endif()
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
@@ -639,16 +652,16 @@ list(APPEND LEGION_SRC
   legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/interval_tree.h                 
-  legion/legion_allocation.h             
+  legion/interval_tree.h
+  legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
-  legion/legion_config.h                 
+  legion/legion_config.h
   legion/legion_constraint.h              legion/legion_constraint.cc
   legion/legion_context.h                 legion/legion_context.cc
-  legion/legion_c_util.h                 
+  legion/legion_c_util.h
   legion/legion.cc
-  legion/legion.inl                      
+  legion/legion.inl
   legion/legion_domain.h
   legion/legion_domain.inl
   legion/legion_instances.h               legion/legion_instances.cc
@@ -659,15 +672,19 @@ list(APPEND LEGION_SRC
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
-  legion/legion_types.h                 
-  legion/legion_utilities.h             
+  legion/legion_types.h
+  legion/legion_utilities.h
   legion/legion_views.h                   legion/legion_views.cc
   legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
-  legion/rectangle_set.h                
+  legion/rectangle_set.h
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
+
+if(Legion_USE_HIP)
+  list(APPEND LEGION_SRC hip_cuda_compat/hip_cuda.h)
+endif()
 
 if(Legion_REDOP_HALF)
   list(APPEND LEGION_SRC mathtypes/half.h)
@@ -684,20 +701,9 @@ if(Legion_USE_CUDA)
 endif()
 
 if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
-  if (Legion_HIP_TARGET STREQUAL "CUDA")
-    list(APPEND LEGION_HIP_SRC
-      legion/legion_redop.cu
-    )
-  endif()
-  if (Legion_HIP_TARGET STREQUAL "ROCM")
-    list(APPEND HIP_CUDA_SRC
-      legion/legion_redop.cu
-    )
-    hipify_cuda_file(HIP_HIPIFY_SRC ${HIP_CUDA_SRC})
-    list(APPEND LEGION_HIP_SRC
-      ${HIP_HIPIFY_SRC}
-    )
-  endif()
+  list(APPEND LEGION_HIP_SRC
+    legion/legion_redop.cu
+  )
 endif()
 
 # generate per-dimension object files for deppart stuff
@@ -707,22 +713,22 @@ foreach(INST_N1 RANGE 1 ${LEGION_MAX_DIM})
   set(SRCFILE legion/region_tree)
   configure_file(${PROJECT_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}.cc)
   list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}.cc)
-  
+
   foreach(INST_N2 RANGE 1 ${LEGION_MAX_DIM})
     configure_file(${PROJECT_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
     list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
   endforeach()
   unset(SRCFILE)
 endforeach()
-              
+
 # Legion Fortran
 if(Legion_USE_Fortran)
   list(APPEND LEGION_FORTRAN_SRC
     legion/legion_f_types.f90
     legion/legion_f_c_interface.f90
-    legion/legion_f.f90              
+    legion/legion_f.f90
   )
-endif()               
+endif()
 
 # HACK: completely separating the Legion and Realm cmake stuff will take
 #  a while, so just exclude LegionRuntime from the "all" target for the
@@ -732,6 +738,7 @@ if(Legion_BUILD_REALM_ONLY)
 endif()
 
 add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 # do we have any cuda source files in Legion itself?
 if(LEGION_CUDA_SRC)
   if("${Legion_CUDA_ARCH}" STREQUAL "")
@@ -796,6 +803,7 @@ if(LEGION_HIP_SRC)
     # complex reduction ops bring in a public dependency on cuda headers
     if(Legion_REDOP_COMPLEX)
       target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_NVIDIA__)
     endif()
   endif()
 
@@ -822,7 +830,11 @@ if(LEGION_HIP_SRC)
       if(NOT DEFINED THRUST_PATH)
           set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
       endif()
-      target_include_directories(LegionRuntime PUBLIC ${THRUST_PATH})
+      target_include_directories(LegionRuntime PUBLIC ${HIP_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_AMD__)
+    else()
+      target_include_directories(LegionRuntime PRIVATE ${HIP_INCLUDE_DIRS})
+      target_compile_definitions(LegionRuntime PRIVATE __HIP_PLATFORM_AMD__)
     endif()
   endif()
 endif()

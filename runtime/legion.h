@@ -2706,7 +2706,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2718,7 +2723,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Specify a specific Affine transform to use for interpreting points
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2729,7 +2739,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Specify both a transform and a bounds to use
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2741,7 +2756,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
     public:
       // Create a ReductionAccessor for an UntypedDeferredValue
       // (only with AffineAccessors)
@@ -2750,7 +2770,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Create a ReductionAccessor for an UntypedDeferredValue
       // Specify a specific bounds rectangle to use for the accessor
       // (only with AffineAccessors)
@@ -2760,7 +2785,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
     public:
       // Create a ReductionAccessor for an UntypedDeferredBuffer
       // (only with AffineAccessors)
@@ -2769,7 +2799,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Create a ReductionAccessor for an UntypedDeferredBuffer
       // Specify a specific bounds rectangle to use for the accessor
       // (only with AffineAccessors)
@@ -2779,7 +2814,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Create a ReductionAccessor for an UntypedDeferredBuffer
       // Specify a specific Affine transform to use for interpreting points
       // (only with AffineAccessors)
@@ -2790,7 +2830,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
       // Create a ReductionAccessor for an UntypedDeferredBuffer
       // Specify both a transform and a bounds to use
       // (only with AffineAccessors)
@@ -2802,7 +2847,12 @@ namespace Legion {
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
                         size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false) { }
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;

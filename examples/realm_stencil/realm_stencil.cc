@@ -446,26 +446,38 @@ void shard_task(const void *args, size_t arglen,
       RegionInstance::create_instance(private_inst, a.sysmem,
                                       a.exterior_bounds, field_sizes,
                                       0 /*SOA*/, ProfilingRequestSet()));
-    if (a.xp_inst_out.exists())
+    if (a.xp_inst_out.exists()) {
+      Event e = a.xp_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(xp_inst_out_local, a.regmem,
                                         a.xp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.xm_inst_out.exists())
+    }
+    if (a.xm_inst_out.exists()) {
+      Event e = a.xm_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(xm_inst_out_local, a.regmem,
                                         a.xm_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.yp_inst_out.exists())
+    }
+    if (a.yp_inst_out.exists()) {
+      Event e = a.yp_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(yp_inst_out_local, a.regmem,
                                         a.yp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
-    if (a.ym_inst_out.exists())
+    }
+    if (a.ym_inst_out.exists()) {
+      Event e = a.ym_inst_out.fetch_metadata(p);
+      e.wait();
       events.push_back(
         RegionInstance::create_instance(ym_inst_out_local, a.regmem,
                                         a.ym_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
+    }
     Event::merge_events(events).wait();
   }
 
@@ -720,6 +732,8 @@ void top_level_task(const void *args, size_t arglen,
     field_sizes[FID_INPUT] = sizeof(DTYPE);
     field_sizes[FID_OUTPUT] = sizeof(DTYPE);
 
+    
+
     std::vector<Event> events;
     for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
       Point2 i(it.p);
@@ -881,6 +895,21 @@ void top_level_task(const void *args, size_t arglen,
       assert(args.xm_inst_in.exists() == args.xm_inst_out.exists());
       assert(args.yp_inst_in.exists() == args.yp_inst_out.exists());
       assert(args.ym_inst_in.exists() == args.ym_inst_out.exists());
+
+      {
+        std::vector<Event> events;
+
+        if (args.xp_inst_in.exists()) events.push_back(args.xp_inst_in.fetch_metadata(p));
+        if (args.xm_inst_in.exists()) events.push_back(args.xm_inst_in.fetch_metadata(p));
+        if (args.yp_inst_in.exists()) events.push_back(args.yp_inst_in.fetch_metadata(p));
+        if (args.ym_inst_in.exists()) events.push_back(args.ym_inst_in.fetch_metadata(p));
+
+        if (args.xp_inst_out.exists()) events.push_back(args.xp_inst_out.fetch_metadata(p));
+        if (args.xm_inst_out.exists()) events.push_back(args.xm_inst_out.fetch_metadata(p));
+        if (args.yp_inst_out.exists()) events.push_back(args.yp_inst_out.fetch_metadata(p));
+        if (args.ym_inst_out.exists()) events.push_back(args.ym_inst_out.fetch_metadata(p));
+        Event::merge_events(events).wait();
+      }
 
       if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2, coord_t>().bounds));
       if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2, coord_t>().bounds));

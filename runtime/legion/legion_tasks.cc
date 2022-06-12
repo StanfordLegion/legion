@@ -3331,11 +3331,14 @@ namespace Legion {
         target_processors = procs;
 
       virtual_mapped.resize(regions.size(), false);
+      bool needs_reservations = false;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         InstanceSet &instances = physical_instances[idx];
         if (IS_NO_ACCESS(regions[idx]))
           continue;
+        if (IS_ATOMIC(regions[idx]))
+          needs_reservations = true;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
         if (runtime->legion_spy_enabled)
@@ -3343,6 +3346,9 @@ namespace Legion {
                                                 idx, regions[idx],
                                                 instances);
       }
+      if (needs_reservations)
+        // We group all reservations together anyway
+        tpl->get_task_reservations(this, atomic_locks);
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
       assert(!task_effects_complete.exists());
@@ -3859,11 +3865,9 @@ namespace Legion {
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         if (!atomic_locks.empty())
         {
-#ifdef DEBUG_LEGION
-          assert(single_task_termination.exists());
-#endif
-          trace_info.record_reservations(this, ready_event, atomic_locks,
-                                         ready_event, single_task_termination);
+          const TraceLocalID tlid = get_trace_local_id();
+          trace_info.record_reservations(tlid, atomic_locks,
+                                         map_applied_conditions);
         }
         trace_info.record_complete_replay(this, ready_event);
       }
@@ -6885,7 +6889,14 @@ namespace Legion {
             const RtEvent pre = slice_owner->find_intra_space_dependence(prev);
             intra_space_mapping_dependences.insert(pre);
             if (runtime->legion_spy_enabled)
-              LegionSpy::log_intra_space_dependence(unique_op_id, prev);
+            {
+              // We know we only need a dependence on the previous point but
+              // Legion Spy is stupid, so log everything we have a
+              // precondition on even if it is transitively implied
+              for (unsigned idx2 = 0; idx2 < idx; idx2++)
+                LegionSpy::log_intra_space_dependence(unique_op_id,
+                                                      dependences[idx2]);
+            }
           }
           // If we're not the last dependence, then send our mapping event
           // so that others can record a dependence on us
@@ -7015,7 +7026,7 @@ namespace Legion {
       interfering_requirements.clear();
       point_requirements.clear();
       assert(pending_intra_space_dependences.empty());
-#endif
+#endif 
       runtime->free_index_task(this);
     }
 
@@ -8661,33 +8672,19 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         const RegionRequirement &req = regions[idx];
-        if (!IS_WRITE(req) || (req.must_premap() && !IS_EXCLUSIVE(req)))
+        if (!IS_WRITE(req))
           continue;
-        local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
-      }
-      // If the projection functions are invertible then we don't have to 
-      // worry about interference because the runtime knows how to hook
-      // up those kinds of dependences
-      for (std::set<std::pair<unsigned,unsigned> >::iterator it = 
-            local_interfering.begin(); it != local_interfering.end(); /*none*/)
-      {
-        if (it->first == it->second)
+        // If the projection functions are invertible then we don't have to 
+        // worry about interference because the runtime knows how to hook
+        // up those kinds of dependences
+        if (req.handle_type != LEGION_SINGULAR_PROJECTION)
         {
-          const RegionRequirement &req = regions[it->first];
-          if (req.handle_type != LEGION_SINGULAR_PROJECTION)
-          {
-            ProjectionFunction *func = 
-              runtime->find_projection_function(req.projection);   
-            if (func->is_invertible)
-            {
-              std::set<std::pair<unsigned,unsigned> >::iterator to_del = it++;
-              local_interfering.erase(to_del); 
-              continue;
-            }
-          }
+          ProjectionFunction *func = 
+            runtime->find_projection_function(req.projection);   
+          if (func->is_invertible)
+            continue;
         }
-        // If we make it here then keep going
-        it++;
+        local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
       }
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())

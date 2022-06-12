@@ -3,6 +3,16 @@ attempt is made to keep this list accurate for the master branch.
 
 Version ??.??.? (????? ??, ????)
   * Regent
+     - Support for HIP on AMD GPUs has been added. All tasks marked with
+        `__demand(__cuda)` are automatically eligible. Note that the name of
+        the annotation may change in the future to something more general, but
+        for now no change is being made. Some CUDA flags have migrated to more
+        general names. See below.
+     - The flag `-fcuda 1` is deprecated. Use `-fgpu cuda` instead.
+     - The flag `-fcuda-offline` is deprecated. Use `-fgpu-offline` instead.
+     - The flag `-fcuda-arch` is deprecated. Use `-fgpu-arch` instead.
+     - Enable HIP support with `-fgpu hip` and use the `-fgpu-offline` and
+        `-fgpu-arch` flags as necessary/appropriate.
      - Support for new flag `-ffast-math 1` which enables fast-math
         optimizations on CPU and GPU. By default, CPU code has this
         disabled, and GPU code uses only the `contract` flag in LLVM

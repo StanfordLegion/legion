@@ -24,5 +24,4 @@ task f()
   var x : int1d(is)
   return @x
 end
-
-f()
+f:compile()

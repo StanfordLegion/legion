@@ -28,7 +28,7 @@ task main()
                      __raw(q).index_partition,
                      __raw(r).index_partition)
 
-  var colors : uint32[3]
+  var colors : c.legion_color_t[3]
   var raw_cp = c.legion_terra_index_cross_product_create_multi(
                  __runtime(), __context(), &partitions[0], &colors[0], 3)
 

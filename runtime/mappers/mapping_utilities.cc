@@ -1085,6 +1085,8 @@ namespace Legion {
           case Memory::LEVEL3_CACHE: return "LEVEL3_CACHE";
           case Memory::LEVEL2_CACHE: return "LEVEL2_CACHE";
           case Memory::LEVEL1_CACHE: return "LEVEL1_CACHE";
+          case Memory::GPU_MANAGED_MEM: return "GPU_MANAGED_MEM";
+          case Memory::GPU_DYNAMIC_MEM: return "GPU_DYNAMIC_MEM";
           default: assert(false); return "";
         }
       }
@@ -1315,9 +1317,36 @@ namespace Legion {
         if (include_index_point && task.is_index_space) {
           ss << "(index_point=" << task.index_point << ")";
         }
+        ss << "<" << task.get_unique_id() << ">";
         return ss.str();
       }
 
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const InlineMapping& inline_op)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "InlineMapping" << "<" << inline_op.get_unique_id() << ">";
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Copy& copy,
+                            bool include_index_point)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "Copy";
+        if (include_index_point && copy.is_index_space) {
+          ss << "(index_point=" << copy.index_point << ")";
+        }
+        ss << "<" << copy.get_unique_id() << ">";
+        return ss.str();
+      }
     }; // namespace Utilities
   }; // namespace Mapping
 }; // namespace Legion

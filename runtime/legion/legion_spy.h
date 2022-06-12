@@ -1406,28 +1406,39 @@ namespace Legion {
         log_spy.print("Task Premapping %llu %d", unique_id, index);
       }
 
+      static inline char to_ascii(unsigned value)
+      {
+        return value < 10 ? '0' + value : 'A' + (value - 10);
+      }
+
       static inline void log_tunable_value(UniqueID unique_id, unsigned index,
                                     const void *value, size_t num_bytes)
       {
-        // Build a hex string for the value 
-        // For now the result must be a multiple of 4 bytes
-        assert((num_bytes % 4) == 0);
+        // Build a hex string for the value
         size_t buffer_size = ((8 * num_bytes) / 4) + 1;
         char *buffer = (char*)malloc(buffer_size);
-        unsigned *src = (unsigned*)value;
         unsigned byte_index = 0;
-        for (unsigned word_idx = 0; word_idx < (num_bytes/4); word_idx++)
+
         {
-          unsigned word = src[word_idx];
-          // Every 4 bits get's a hex character 
-          for (unsigned i = 0; i < (8*sizeof(word)/4); i++, byte_index++)
+          const unsigned *src = (const unsigned*)value;
+          for (unsigned word_idx = 0; word_idx < (num_bytes/4); word_idx++)
           {
-            // Get the next four bits
-            unsigned offset = (word >> (i*4)) & 0xF; 
-            if (offset < 10)
-              buffer[byte_index] = '0' + offset;
-            else
-              buffer[byte_index] = 'A' + (offset-10);
+            unsigned word = src[word_idx];
+            // Every 4 bits get's a hex character
+            for (unsigned i = 0; i < (8*sizeof(word)/4); i++, byte_index++)
+              // Get the next four bits
+              buffer[byte_index] = to_ascii((word >> (i*4)) & 0xF);
+          }
+        }
+        // Convert remaining bytes
+        {
+          const char *src = (const char*)value;
+          for (unsigned char_index = (num_bytes/4)*4; char_index < num_bytes;
+               char_index++)
+          {
+            unsigned word = src[char_index];
+            for (unsigned i = 0; i < 2; i++, byte_index++)
+              buffer[byte_index] = to_ascii((word >> (i*4)) & 0xF);
           }
         }
         buffer[byte_index] = '\0';
@@ -1590,7 +1601,7 @@ namespace Legion {
       }
 
       static inline void log_deppart_events(UniqueID op_unique_id,
-                                            IndexSpace handle,
+                                            IndexSpaceExprID expr_id,
                                             LgEvent pre, LgEvent post)
       {
         // Realm has an optimization where if it can do the deppart op
@@ -1598,8 +1609,8 @@ namespace Legion {
         // which of course breaks Legion Spy's way of logging deppart
         // operations uniquely as their completion event
         assert(pre != post);
-        log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
-                      op_unique_id, handle.get_id(), pre.id, post.id);
+        log_spy.print("Deppart Events %llu %lld " IDFMT " " IDFMT,
+                      op_unique_id, expr_id, pre.id, post.id);
       }
 
       // We use this call as a special guard call to know when 

@@ -16,6 +16,7 @@
 #include"realm_defines.h"
 
 #ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
 #include "realm/hip/hiphijack_api.h"
 #endif
 
@@ -165,26 +166,26 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
+  calc_new_currents_kernel<<<num_blocks,threads_per_block
 #ifdef LEGION_USE_HIP
-  calc_new_currents_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_wire,
-#else
-  calc_new_currents_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+                             , 0, hipGetTaskStream()
 #endif
-                                                             piece.num_wires,
-                                                             piece.dt,
-                                                             piece.steps,
-                                                             fa_in_ptr,
-                                                             fa_out_ptr,
-                                                             fa_in_loc,
-                                                             fa_out_loc,
-                                                             fa_inductance,
-                                                             fa_resistance,
-                                                             fa_wire_cap,
-                                                             fa_pvt_voltage,
-                                                             fa_shr_voltage,
-                                                             fa_ghost_voltage,
-                                                             fa_currents,
-                                                             fa_voltages);
+                          >>>(piece.first_wire,
+                              piece.num_wires,
+                              piece.dt,
+                              piece.steps,
+                              fa_in_ptr,
+                              fa_out_ptr,
+                              fa_in_loc,
+                              fa_out_loc,
+                              fa_inductance,
+                              fa_resistance,
+                              fa_wire_cap,
+                              fa_pvt_voltage,
+                              fa_shr_voltage,
+                              fa_ghost_voltage,
+                              fa_currents,
+                              fa_voltages);
 #endif
 }
 
@@ -266,22 +267,22 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
+  distribute_charge_kernel<<<num_blocks,threads_per_block
 #ifdef LEGION_USE_HIP
-  distribute_charge_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_wire,
-#else
-  distribute_charge_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+                             , 0, hipGetTaskStream()
 #endif
-                                                             piece.num_wires,
-                                                             piece.dt,
-                                                             fa_in_ptr,
-                                                             fa_out_ptr,
-                                                             fa_in_loc,
-                                                             fa_out_loc,
-                                                             fa_in_current,
-                                                             fa_out_current,
-                                                             fa_pvt_charge,
-                                                             fa_shr_charge,
-                                                             fa_ghost_charge);
+                          >>>(piece.first_wire,
+                              piece.num_wires,
+                              piece.dt,
+                              fa_in_ptr,
+                              fa_out_ptr,
+                              fa_in_loc,
+                              fa_out_loc,
+                              fa_in_current,
+                              fa_out_current,
+                              fa_pvt_charge,
+                              fa_shr_charge,
+                              fa_ghost_charge);
 #endif
 }
 
@@ -352,21 +353,21 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_nodes + (threads_per_block-1)) / threads_per_block;
 
+  update_voltages_kernel<<<num_blocks,threads_per_block
 #ifdef LEGION_USE_HIP
-  update_voltages_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_node,
-#else
-  update_voltages_kernel<<<num_blocks,threads_per_block>>>(piece.first_node,
+                           , 0, hipGetTaskStream()
 #endif
-                                                           piece.num_nodes,
-                                                           fa_pvt_voltage,
-                                                           fa_shr_voltage,
-                                                           fa_pvt_charge,
-                                                           fa_shr_charge,
-                                                           fa_pvt_cap,
-                                                           fa_shr_cap,
-                                                           fa_pvt_leakage,
-                                                           fa_shr_leakage,
-                                                           fa_ptr_loc);
+                        >>>(piece.first_node,
+                            piece.num_nodes,
+                            fa_pvt_voltage,
+                            fa_shr_voltage,
+                            fa_pvt_charge,
+                            fa_shr_charge,
+                            fa_pvt_cap,
+                            fa_shr_cap,
+                            fa_pvt_leakage,
+                            fa_shr_leakage,
+                            fa_ptr_loc);
 #endif
 }
 

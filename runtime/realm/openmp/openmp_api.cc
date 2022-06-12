@@ -45,6 +45,16 @@ extern "C" {
   }
 
   REALM_PUBLIC_API
+  int omp_get_num_places(void)
+  {
+    // Some newer versions of the OpenMP runtime enable control over OpenMP
+    // threads ploacement onto different sockets or cores. This sort of thing
+    // is controlled by Realm in our implementation, so just return the number
+    // of threads allocated to this worker pool.
+    return omp_get_num_threads();
+  }
+
+  REALM_PUBLIC_API
   int omp_get_max_threads(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
@@ -1254,6 +1264,7 @@ namespace Realm {
        (wi->num_threads == 1) ||
        ((incr > 0) && (*plower > *pupper)) ||
        ((incr < 0) && (*plower < *pupper))) {
+      *pstride = *pupper - *plower + ((incr > 0) ? 1 : -1);
       return;
     }
 
@@ -1265,8 +1276,10 @@ namespace Realm {
 	T iters;
 	if(incr > 0) {
 	  iters = 1 + (*pupper - *plower) / incr;
+          *pstride = *pupper - *plower + 1;
 	} else {
 	  iters = 1 + (*plower - *pupper) / -incr;
+          *pstride = *pupper - *plower - 1;
 	}
 	T whole = iters / wi->num_threads;
 	T leftover = iters - (whole * wi->num_threads);

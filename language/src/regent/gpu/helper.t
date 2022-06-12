@@ -12,447 +12,124 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- Regent GPU Helper Code
+--
+-- This file contains helper code for the Regent GPU code generator.
+--
+-- IMPORTANT: the GPU implementation is broken into multiple files
+-- that contain DIFFERENT types of code.
+--
+--  * This file contains DEVICE INDEPENDENT code that depends on
+--    DEVICE-SPECIFIC configuration settings.
+--
+--  * gpu/cuda.t, gpu/hip.t: contain DEVICE-SPECIFIC code for a given
+--    platform. Ideally this should be minimized, because the goal is
+--    to share code between platforms.
+--
+--  * gpu/common.t: contains DEVICE INDEPENDENT code that does not
+--    depend on any device-specific settings.
+
 local ast = require("regent/ast")
 local base = require("regent/std_base")
-local config = require("regent/config").args()
 local data = require("common/data")
-local profile = require("regent/profile")
-local report = require("common/report")
 
-local cudahelper = {}
+local gpuhelper = {}
 
--- Exit early if the user turned off CUDA code generation
-
-if config["cuda"] == 0 then
-  function cudahelper.check_cuda_available()
-    return false
-  end
-  return cudahelper
-end
-
+local config = base.config
 local c = base.c
-local ef = terralib.externfunction
-local externcall_builtin = terralib.externfunction
-local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
-                    Linux =  "libcuda.so";
-                    Windows = "nvcuda.dll"; }
 
--- #####################################
--- ## CUDA Hijack API
--- #################
+local function is_disabled_value(v)
+  return v == "none" or v == "off" or v == ""
+end
+local function is_unspecified_value(v)
+  return v == "unspecified"
+end
 
-local HijackAPI = terralib.includec("regent_cudart_hijack.h")
+local requested = not (is_unspecified_value(config["gpu"]) or is_disabled_value(config["gpu"]))
+function gpuhelper.is_gpu_requested()
+  return requested
+end
 
-struct fat_bin_t {
-  magic : int,
-  seq : int,
-  data : &opaque,
-  filename : &opaque,
-}
-
--- #####################################
--- ## CUDA Device API
--- #################
-
-local struct CUctx_st
-local struct CUmod_st
-local struct CUlinkState_st
-local struct CUfunc_st
-local CUdevice = int32
-local CUjit_option = uint32
-local CU_JIT_ERROR_LOG_BUFFER = 5
-local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
-local CU_JIT_INPUT_PTX = 1
-local CU_JIT_TARGET = 9
-local DriverAPI = {
-  CU_JIT_ERROR_LOG_BUFFER = 5;
-  CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
-  CU_JIT_INPUT_PTX = 1;
-  CU_JIT_TARGET = 9;
-
-  CUlinkState = &CUlinkState_st;
-  CUjit_option = uint32;
-
-  cuInit = ef("cuInit", {uint32} -> uint32);
-  cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
-  cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
-  cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
-  cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
-  cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
-  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
-    {&int32,&int32,int32} -> uint32);
-  cuLinkCreate_v2 = ef("cuLinkCreate_v2",{uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
-  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
-    {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
-  cuLinkComplete = ef("cuLinkComplete",{&CUlinkState_st,&&opaque,&uint64} -> uint32);
-  cuLinkDestroy = ef("cuLinkDestroy",{&CUlinkState_st} -> uint32);
-}
-
-local RuntimeAPI = false
-do
-  if not terralib.cudacompile then
-    function cudahelper.check_cuda_available()
-      return false, "Terra is built without CUDA support"
-    end
+local reason
+if is_disabled_value(config["gpu"]) then
+  reason = "GPU support was disabled on the command line"
+elseif is_unspecified_value(config["gpu"]) then
+  -- If unspecified, try to detect CUDA first, then fall back to off (for now).
+  local cudaimpl = require("regent/gpu/cuda")
+  local available, cuda_reason = cudaimpl.check_gpu_available()
+  if available then
+    config["gpu"] = "cuda"
   else
-    -- Try to load the CUDA runtime header
-    pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
-
-    if RuntimeAPI == nil then
-      function cudahelper.check_cuda_available()
-        return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
-      end
-    elseif config["offline"] or config["cuda-offline"] then
-      function cudahelper.check_cuda_available()
-        return true
-      end
-    else
-      local dlfcn = terralib.includec("dlfcn.h")
-      local terra has_symbol(symbol : rawstring)
-        var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-        var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-        dlfcn.dlclose(lib)
-        return has_symbol
-      end
-
-      if has_symbol("cuInit") then
-        local r = DriverAPI.cuInit(0)
-        if r == 0 then
-          function cudahelper.check_cuda_available()
-            return true
-          end
-        else
-          function cudahelper.check_cuda_available()
-            return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
-          end
-        end
-      else
-        function cudahelper.check_cuda_available()
-          return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
-        end
-      end
-    end
+    config["gpu"] = "none"
+    reason = "GPU auto-detect failed: " .. tostring(cuda_reason)
   end
 end
 
+-- Exit early if the user turned off GPU code generation (or auto-detect failed).
+local impl
+if is_disabled_value(config["gpu"]) then
+  function gpuhelper.check_gpu_available()
+    return false, reason
+  end
+  return gpuhelper
+elseif config["gpu"] == "cuda" then
+  impl = require("regent/gpu/cuda")
+elseif config["gpu"] == "hip" then
+  impl = require("regent/gpu/hip")
+else
+  assert(false)
+end
+
+gpuhelper.check_gpu_available = impl.check_gpu_available
+
 do
-  local available, error_message = cudahelper.check_cuda_available()
+  local available, error_message = gpuhelper.check_gpu_available()
   if not available then
-    if config["cuda"] == 1 then
-      print("CUDA code generation failed since " .. error_message)
+    if requested then
+      print("GPU code generation failed since " .. error_message)
       os.exit(-1)
     else
-      return cudahelper
+      return gpuhelper
     end
   end
 end
 
-do
-  local ffi = require('ffi')
-  local cudaruntimelinked = false
-  function cudahelper.link_driver_library()
-    if cudaruntimelinked then return end
-    local path = assert(cudapaths[ffi.os],"unknown OS?")
-    base.linklibrary(path)
-    cudaruntimelinked = true
-  end
-end
+gpuhelper.link_driver_library = impl.link_driver_library
 
--- #####################################
--- ## Printf for CUDA (not exposed to the user for the moment)
--- #################
+gpuhelper.driver_library_link_flags = impl.driver_library_link_flags
 
-local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
+gpuhelper.jit_compile_kernels_and_register = impl.jit_compile_kernels_and_register
 
-local function createbuffer(args)
-  local Buf = terralib.types.newstruct()
-  for i,e in ipairs(args) do
-    local typ = e:gettype()
-    local field = "_"..tonumber(i)
-    typ = typ == float and double or typ
-    table.insert(Buf.entries,{field,typ})
-  end
-  return quote
-    var buf : Buf
-    escape
-        for i,e in ipairs(args) do
-            emit quote
-               buf.["_"..tonumber(i)] = e
-            end
-        end
-    end
-  in
-    [&int8](&buf)
-  end
-end
+gpuhelper.global_thread_id = impl.global_thread_id
 
-local cuda_printf = macro(function(fmt,...)
-  local buf = createbuffer({...})
-  return `vprintf(fmt,buf)
-end)
+gpuhelper.generate_atomic_update = impl.generate_atomic_update
 
--- #####################################
--- ## Supported CUDA compute versions
--- #################
+gpuhelper.get_gpu_variant = impl.get_gpu_variant
 
-local supported_archs = {
-  ["fermi"]   = 20,
-  ["kepler"]  = 30,
-  ["k20"]     = 35,
-  ["maxwell"] = 52,
-  ["pascal"]  = 60,
-  ["volta"]   = 70,
-  ["ampere"]  = 80,
-}
-
-local function parse_cuda_arch(arch)
-  arch = string.lower(arch)
-  local sm = supported_archs[arch]
-  if sm == nil then
-    local archs
-    for k, v in pairs(supported_archs) do
-      archs = (not archs and k) or (archs and archs .. ", " .. k)
-    end
-    print("Error: Unsupported GPU architecture " .. arch ..
-          ". Supported architectures: " .. archs)
-    os.exit(1)
-  end
-  return sm
-end
-
--- #####################################
--- ## Registration functions
--- #################
-
-local terra register_ptx(ptxc : rawstring) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](c.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
-  fat_bin.magic = 0x466243b1
-  fat_bin.seq = 1
-  fat_bin.data = ptxc
-  fat_bin.filename = nil
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
-local terra register_cubin(cubin : rawstring) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](c.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_cubin")
-  fat_bin.magic = 0x466243b1
-  fat_bin.seq = 1
-  fat_bin.data = cubin
-  fat_bin.filename = nil
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
-local function find_device_library(target)
-  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
-  local libdevice = nil
-  for f in io.popen("ls " .. device_lib_dir):lines() do
-    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
-    if version <= target then
-      libdevice = device_lib_dir .. f
-    end
-  end
-  assert(libdevice ~= nil, "Failed to find a device library")
-  return libdevice
-end
-
-local get_cuda_version
-do
-  local cached_cuda_version = nil
-  local terra get_cuda_version_terra() : uint64
-    var cx : &CUctx_st
-    var cx_created = false
-    var r = DriverAPI.cuCtxGetCurrent(&cx)
-    base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
-    var device : int32
-    if cx ~= nil then
-      r = DriverAPI.cuCtxGetDevice(&device)
-      base.assert(r == 0, "CUDA error in cuCtxGetDevice")
-    else
-      r = DriverAPI.cuDeviceGet(&device, 0)
-      base.assert(r == 0, "CUDA error in cuDeviceGet")
-      r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
-      base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
-      cx_created = true
-    end
-
-    var major : int, minor : int
-    r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
-    base.assert(r == 0, "CUDA error in cuDeviceComputeCapability")
-    var version = [uint64](major * 10 + minor)
-    if cx_created then
-      DriverAPI.cuCtxDestroy(cx)
-    end
-    return version
-  end
-
-  get_cuda_version = function()
-    if cached_cuda_version ~= nil then
-      return cached_cuda_version
-    end
-    if not (config["offline"] or config["cuda-offline"]) then
-      cached_cuda_version = get_cuda_version_terra()
-    else
-      cached_cuda_version = parse_cuda_arch(config["cuda-arch"])
-    end
-    return cached_cuda_version
-  end
-end
-
-local struct cubin_t {
-  data : rawstring,
-  size : uint64
-}
-
-local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
-  var linkState : DriverAPI.CUlinkState
-  var cubin : &opaque
-  var cubinSize : uint64
-  var error_str : rawstring = nil
-  var error_sz : uint64 = 0
-
-  var options = arrayof(
-    DriverAPI.CUjit_option,
-    DriverAPI.CU_JIT_TARGET,
-    DriverAPI.CU_JIT_ERROR_LOG_BUFFER,
-    DriverAPI.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES
-  )
-  var option_values = arrayof(
-    [&opaque],
-    [&opaque](version),
-    &error_str,
-    [&opaque](&error_sz)
-  );
-
-  var cx : &CUctx_st
-  var cx_created = false
-
-  var r = DriverAPI.cuCtxGetCurrent(&cx)
-  base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
-  var device : int32
-  if cx ~= nil then
-    r = DriverAPI.cuCtxGetDevice(&device)
-    base.assert(r == 0, "CUDA error in cuCtxGetDevice")
-  else
-    r = DriverAPI.cuDeviceGet(&device, 0)
-    base.assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
-    base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
-    cx_created = true
-  end
-
-  r = DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
-  base.assert(r == 0, "CUDA error in cuLinkCreate_v2")
-  r = DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil)
-  base.assert(r == 0, "CUDA error in cuLinkAddData_v2")
-  r = DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize)
-  base.assert(r == 0, "CUDA error in cuLinkComplete")
-
-  -- Make a copy of the returned cubin before we destroy the linker and cuda context,
-  -- which may deallocate the cubin
-  var to_return : rawstring = [rawstring](c.malloc(cubinSize + 1))
-  to_return[cubinSize] = 0
-  c.memcpy([&opaque](to_return), cubin, cubinSize)
-
-  r = DriverAPI.cuLinkDestroy(linkState)
-  base.assert(r == 0, "CUDA error in cuLinkDestroy")
-  if cx_created then
-    DriverAPI.cuCtxDestroy(cx)
-  end
-
-  return cubin_t { to_return, cubinSize }
-end
-
-function cudahelper.jit_compile_kernels_and_register(kernels)
-  local module = {}
-  kernels:map(function(kernel) module[kernel.name] = kernel.kernel end)
-  local version = get_cuda_version()
-  local ptx = profile('cuda:ptx_gen', nil, function()
-    return cudalib.toptx(module, nil, version, base.gpu_opt_profile)
-  end)()
-
-  if config["cuda-dump-ptx"] then io.write(ptx) end
-
-  local cubin = nil
-  local offline = config["offline"] or config["cuda-offline"]
-  if not offline and config["cuda-generate-cubin"] then
-    local ffi = require('ffi')
-    cubin = profile('cuda:cubin_gen', nil, function()
-      local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
-      return ffi.string(result.data, result.size)
-    end)()
-  end
-
-  local handle = terralib.newsymbol(&&opaque, "handle")
-  local register = nil
-  if cubin == nil then
-    local ptxc = terralib.constant(ptx)
-    register = quote
-      var [handle] = register_ptx(ptxc)
-    end
-  else
-    local cubin = terralib.constant(cubin)
-    register = quote
-      var [handle] = register_cubin(cubin)
-    end
-  end
-
-  register = quote
-    [register]
-    [kernels:map(function(kernel)
-      return quote
-        var kernel_id : int64 = 0
-        [c.murmur_hash3_32]([kernel.name], [string.len(kernel.name)], 0, &kernel_id)
-        [c.regent_register_kernel_id](kernel_id)
-        [HijackAPI.hijackCudaRegisterFunction]([handle], [&opaque](kernel_id), [kernel.name])
-      end
-    end)]
-  end
-
-  register = quote
-    [register]
-    [HijackAPI.hijackCudaRegisterFatBinaryEnd]([handle])
-  end
-
-  return register
-end
+gpuhelper.codegen_kernel_call = impl.codegen_kernel_call
 
 -- #####################################
 -- ## Primitives
 -- #################
 
-local THREAD_BLOCK_SIZE = 128
-local NUM_THREAD_X = 16
-local NUM_THREAD_Y = THREAD_BLOCK_SIZE / NUM_THREAD_X
-local MAX_NUM_BLOCK = 32768
-local GLOBAL_RED_BUFFER = 256
-assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
+local THREAD_BLOCK_SIZE = impl.THREAD_BLOCK_SIZE
+local NUM_THREAD_X = impl.NUM_THREAD_X
+local NUM_THREAD_Y = impl.NUM_THREAD_Y
+local MAX_SIZE_INLINE_KERNEL_PARAMS = impl.MAX_SIZE_INLINE_KERNEL_PARAMS
+local GLOBAL_RED_BUFFER = impl.GLOBAL_RED_BUFFER
 
-local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
-local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
-local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
-local n_bid_x = cudalib.nvvm_read_ptx_sreg_nctaid_x
+local tid_x = impl.tid_x
+local tid_y = impl.tid_y
+local tid_z = impl.tid_z
+local bid_x = impl.bid_x
+local bid_y = impl.bid_y
+local bid_z = impl.bid_z
 
-local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
-local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
-local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
-local n_bid_y = cudalib.nvvm_read_ptx_sreg_nctaid_y
+local barrier = impl.barrier
 
-local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
-local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
-local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
-local n_bid_z = cudalib.nvvm_read_ptx_sreg_nctaid_z
-
-local barrier = cudalib.nvvm_barrier0
+-- #####################################
+-- ## Code generation for scalar reduction
+-- #################
 
 local supported_scalar_red_ops = {
   ["+"]   = true,
@@ -461,114 +138,133 @@ local supported_scalar_red_ops = {
   ["min"] = true,
 }
 
-function cudahelper.global_thread_id()
-  local bid = `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
-  local num_threads = `(n_tid_x())
-  return `([bid] * [num_threads] + tid_x())
-end
-
-function cudahelper.global_block_id()
-  return `(bid_x() + n_bid_x() * bid_y() + n_bid_x() * n_bid_y() * bid_z())
-end
-
-function cudahelper.get_thread_block_size()
-  return THREAD_BLOCK_SIZE
-end
-
-function cudahelper.get_num_thread_x()
-  return NUM_THREAD_X
-end
-
-function cudahelper.get_num_thread_y()
-  return NUM_THREAD_Y
-end
-
--- Slow atomic operation implementations (copied and modified from Ebb)
-local terra cas_uint64(address : &uint64, compare : uint64, value : uint64)
-  return terralib.asm(terralib.types.uint64,
-                      "atom.global.cas.b64 $0, [$1], $2, $3;",
-                      "=l,l,l,l", true, address, compare, value)
-end
-cas_uint64:setinlined(true)
-
-local terra cas_uint32(address : &uint32, compare : uint32, value : uint32)
-  return terralib.asm(terralib.types.uint32,
-                      "atom.global.cas.b32 $0, [$1], $2, $3;",
-                      "=r,l,r,r", true, address, compare, value)
-end
-cas_uint32:setinlined(true)
-
-function cudahelper.generate_atomic_update(op, typ)
-  if terralib.llvmversion <= 38 then
-    if op == "+" and typ == float then
-      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
-                                {&float,float} -> {float})
-    elseif op == "+" and typ == double and get_cuda_version() >= 60 then
-      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
-                                {&double,double} -> {double})
+function gpuhelper.compute_reduction_buffer_size(cx, node, reductions)
+  local size = 0
+  for k, v in pairs(reductions) do
+    if not supported_scalar_red_ops[v] then
+      report.error(node,
+          "Scalar reduction with operator " .. v .. " is not supported yet")
+    elseif not (sizeof(k.type) == 4 or sizeof(k.type) == 8) then
+      report.error(node,
+          "Scalar reduction for type " .. tostring(k.type) .. " is not supported yet")
     end
-  else
-    local opname
-    if op == "+" then
-      if typ:isfloat() then
-        opname = "fadd"
-      else
-        opname = "add"
-      end
-    elseif op == "min" and typ:isintegral() then
-      if typ.signed then
-        opname = "min"
-      else
-        opname = "umin"
-      end
-    elseif op == "max" and typ:isintegral() then
-      if typ.signed then
-        opname = "max"
-      else
-        opname = "umax"
-      end
-    end
-    if opname then
-      local terra atomic_op(addr : &typ, value : typ)
-        return terralib.atomicrmw(opname, addr, value, {ordering = "monotonic"})
-      end
-      atomic_op:setinlined(true)
-      return atomic_op
-    end
+    size = size + THREAD_BLOCK_SIZE * sizeof(k.type)
+  end
+  size = size + cx:compute_reduction_buffer_size()
+  return size
+end
+
+local internal_kernels = terralib.newlist()
+local INTERNAL_KERNEL_PREFIX = "__internal"
+
+function gpuhelper.get_internal_kernels()
+  return internal_kernels
+end
+
+gpuhelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
+  local value = base.reduction_op_init[op][type]
+  local op_name = base.reduction_ops[op].name
+  local kernel_name =
+    INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
+    "__" .. tostring(op_name) .. "__"
+  local terra init(buffer : &type)
+    var tid = [impl.global_thread_id_flat()]
+    buffer[tid] = [value]
+  end
+  init:setname(kernel_name)
+  internal_kernels:insert({
+    name = kernel_name,
+    kernel = init,
+  })
+  return init
+end)
+
+gpuhelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
+  local value = base.reduction_op_init[op][type]
+  local op_name = base.reduction_ops[op].name
+  local kernel_name =
+    INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
+    "__" .. tostring(op_name) .. "__"
+
+  local tid = terralib.newsymbol(c.size_t, "tid")
+  local input = terralib.newsymbol(&type, "input")
+  local result = terralib.newsymbol(&type, "result")
+  local shared_mem_ptr = impl.sharedmemory(type, THREAD_BLOCK_SIZE)
+
+  local shared_mem_init = `([input][ [tid] ])
+  for i = 1, (GLOBAL_RED_BUFFER / THREAD_BLOCK_SIZE) - 1 do
+    shared_mem_init =
+      base.quote_binary_op(op, shared_mem_init,
+                           `([input][ [tid] + [i * THREAD_BLOCK_SIZE] ]))
+  end
+  local terra red([input], [result])
+    var [tid] = tid_x()
+    [shared_mem_ptr][ [tid] ] = [shared_mem_init]
+    barrier()
+    [gpuhelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, op, type)]
+    barrier()
+    if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
   end
 
-  local cas_type
-  local cas_func
-  if sizeof(typ) == 4 then
-    cas_type = uint32
-    cas_func = cas_uint32
-  else
-    assert(sizeof(typ) == 8)
-    cas_type = uint64
-    cas_func = cas_uint64
-  end
-  local terra atomic_op(address : &typ, operand : typ)
-    var old : typ = @address
-    var assumed : typ
-    var new     : typ
+  red:setname(kernel_name)
+  internal_kernels:insert({
+    name = kernel_name,
+    kernel = red,
+  })
+  return red
+end)
 
-    var new_b     : &cas_type = [&cas_type](&new)
-    var assumed_b : &cas_type = [&cas_type](&assumed)
-    var res       :  cas_type
+function gpuhelper.generate_reduction_preamble(cx, reductions)
+  local preamble = terralib.newlist()
+  local device_ptrs = terralib.newlist()
+  local buffer_cleanups = terralib.newlist()
+  local device_ptrs_map = {}
+  local host_ptrs_map = {}
 
-    var mask = false
-    repeat
-      if not mask then
-        assumed = old
-        new     = [base.quote_binary_op(op, assumed, operand)]
-        res     = cas_func([&cas_type](address), @assumed_b, @new_b)
-        old     = @[&typ](&res)
-        mask    = @assumed_b == @[&cas_type](&old)
+  for red_var, red_op in pairs(reductions) do
+    local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local device_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__d_buffer_" .. red_var.displayname)
+    local host_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__h_buffer_" .. red_var.displayname)
+    local init_kernel = gpuhelper.generate_buffer_init_kernel(red_var.type, red_op)
+    local init_args = terralib.newlist({device_ptr})
+    preamble:insert(quote
+      var [device_ptr] = [&red_var.type](nil)
+      var [host_ptr] = [&red_var.type](nil)
+      var [device_buffer]
+      var [host_buffer]
+      do
+        var bounds : c.legion_rect_1d_t
+        bounds.lo.x[0] = 0
+        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
+        [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
+        [device_ptr] =
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
+        [gpuhelper.codegen_kernel_call(cx, init_kernel, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
-    until mask
+      do
+        var bounds : c.legion_rect_1d_t
+        bounds.lo.x[0] = 0
+        bounds.hi.x[0] = [sizeof(red_var.type) - 1]
+        [host_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
+        [host_ptr] =
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([host_buffer], bounds.lo)))
+      end
+    end)
+    device_ptrs:insert(device_ptr)
+    device_ptrs_map[device_ptr] = red_var
+    host_ptrs_map[device_ptr] = host_ptr
+    buffer_cleanups:insert(quote
+      c.legion_deferred_buffer_char_1d_destroy([host_buffer])
+      c.legion_deferred_buffer_char_1d_destroy([device_buffer])
+    end)
   end
-  atomic_op:setinlined(true)
-  return atomic_op
+
+  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble, buffer_cleanups
 end
 
 local function generate_element_reduction(lhs, rhs, op, volatile)
@@ -601,140 +297,7 @@ local function generate_element_reductions(lhs, rhs, op, type, volatile)
   return quote [actions] end
 end
 
--- #####################################
--- ## Code generation for scalar reduction
--- #################
-
-function cudahelper.compute_reduction_buffer_size(cx, node, reductions)
-  local size = 0
-  for k, v in pairs(reductions) do
-    if not supported_scalar_red_ops[v] then
-      report.error(node,
-          "Scalar reduction with operator " .. v .. " is not supported yet")
-    elseif not (sizeof(k.type) == 4 or sizeof(k.type) == 8) then
-      report.error(node,
-          "Scalar reduction for type " .. tostring(k.type) .. " is not supported yet")
-    end
-    size = size + THREAD_BLOCK_SIZE * sizeof(k.type)
-  end
-  size = size + cx:compute_reduction_buffer_size()
-  return size
-end
-
-local internal_kernels = terralib.newlist()
-local INTERNAL_KERNEL_PREFIX = "__internal"
-
-function cudahelper.get_internal_kernels()
-  return internal_kernels
-end
-
-cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
-  local value = base.reduction_op_init[op][type]
-  local op_name = base.reduction_ops[op].name
-  local kernel_name =
-    INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
-    "__" .. tostring(op_name) .. "__"
-  local terra init(buffer : &type)
-    var tid = tid_x() + bid_x() * n_tid_x()
-    buffer[tid] = [value]
-  end
-  init:setname(kernel_name)
-  internal_kernels:insert({
-    name = kernel_name,
-    kernel = init,
-  })
-  return kernel_name
-end)
-
-cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
-  local value = base.reduction_op_init[op][type]
-  local op_name = base.reduction_ops[op].name
-  local kernel_name =
-    INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
-    "__" .. tostring(op_name) .. "__"
-
-  local tid = terralib.newsymbol(c.size_t, "tid")
-  local input = terralib.newsymbol(&type, "input")
-  local result = terralib.newsymbol(&type, "result")
-  local shared_mem_ptr = cudalib.sharedmemory(type, THREAD_BLOCK_SIZE)
-
-  local shared_mem_init = `([input][ [tid] ])
-  for i = 1, (GLOBAL_RED_BUFFER / THREAD_BLOCK_SIZE) - 1 do
-    shared_mem_init =
-      base.quote_binary_op(op, shared_mem_init,
-                           `([input][ [tid] + [i * THREAD_BLOCK_SIZE] ]))
-  end
-  local terra red([input], [result])
-    var [tid] = tid_x()
-    [shared_mem_ptr][ [tid] ] = [shared_mem_init]
-    barrier()
-    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, op, type)]
-    barrier()
-    if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
-  end
-
-  red:setname(kernel_name)
-  internal_kernels:insert({
-    name = kernel_name,
-    kernel = red,
-  })
-  return kernel_name
-end)
-
-function cudahelper.generate_reduction_preamble(cx, reductions)
-  local preamble = terralib.newlist()
-  local device_ptrs = terralib.newlist()
-  local buffer_cleanups = terralib.newlist()
-  local device_ptrs_map = {}
-  local host_ptrs_map = {}
-
-  for red_var, red_op in pairs(reductions) do
-    local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
-    local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
-    local device_buffer =
-      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
-                         "__d_buffer_" .. red_var.displayname)
-    local host_buffer =
-      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
-                         "__h_buffer_" .. red_var.displayname)
-    local init_kernel_name = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
-    local init_args = terralib.newlist({device_ptr})
-    preamble:insert(quote
-      var [device_ptr] = [&red_var.type](nil)
-      var [host_ptr] = [&red_var.type](nil)
-      var [device_buffer]
-      var [host_buffer]
-      do
-        var bounds : c.legion_rect_1d_t
-        bounds.lo.x[0] = 0
-        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
-        [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
-        [device_ptr] =
-          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
-        [cudahelper.codegen_kernel_call(cx, init_kernel_name, GLOBAL_RED_BUFFER, init_args, 0, true)]
-      end
-      do
-        var bounds : c.legion_rect_1d_t
-        bounds.lo.x[0] = 0
-        bounds.hi.x[0] = [sizeof(red_var.type) - 1]
-        [host_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
-        [host_ptr] =
-          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([host_buffer], bounds.lo)))
-      end
-    end)
-    device_ptrs:insert(device_ptr)
-    device_ptrs_map[device_ptr] = red_var
-    host_ptrs_map[device_ptr] = host_ptr
-    buffer_cleanups:insert(quote
-      c.legion_deferred_buffer_char_1d_destroy([host_buffer])
-      c.legion_deferred_buffer_char_1d_destroy([device_buffer])
-    end)
-  end
-
-  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble, buffer_cleanups
-end
-
-function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, red_op, type)
+function gpuhelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, red_op, type)
   local outer_reductions = terralib.newlist()
   local step = num_threads
   while step > 64 do
@@ -752,9 +315,11 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, re
   while step > 1 do
     step = step / 2
     unrolled_reductions:insert(quote
-      [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
-                                   `([shared_mem_ptr][ [tid] + [step] ]),
-                                   red_op, type, false)]
+      if [tid] < [step] then
+        [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
+                                     `([shared_mem_ptr][ [tid] + [step] ]),
+                                     red_op, type, false)]
+      end
       barrier()
     end)
   end
@@ -772,13 +337,13 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, re
   end
 end
 
-function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
+function gpuhelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
   local preamble = terralib.newlist()
   local postamble = terralib.newlist()
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
     local shared_mem_ptr =
-      cudalib.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
+      impl.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
     local init = base.reduction_op_init[red_op][red_var.type]
     preamble:insert(quote
       var [red_var] = [init]
@@ -787,16 +352,16 @@ function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
 
     local tid = terralib.newsymbol(c.size_t, "tid")
     local reduction_tree =
-      cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, red_op, red_var.type)
+      gpuhelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, red_op, red_var.type)
     postamble:insert(quote
       do
         var [tid] = tid_x()
-        var bid = [cudahelper.global_block_id()]
+        var bid = [impl.global_block_id()]
         [shared_mem_ptr][ [tid] ] = [red_var]
         barrier()
         [reduction_tree]
         if [tid] == 0 then
-          [cudahelper.generate_atomic_update(red_op, red_var.type)](
+          [gpuhelper.generate_atomic_update(red_op, red_var.type)](
             &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
         end
       end
@@ -809,17 +374,17 @@ function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
   return preamble, postamble
 end
 
-function cudahelper.generate_reduction_postamble(cx, reductions, device_ptrs_map, host_ptrs_map)
+function gpuhelper.generate_reduction_postamble(cx, reductions, device_ptrs_map, host_ptrs_map)
   local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
-    local red_kernel_name = cudahelper.generate_buffer_reduction_kernel(red_var.type, red_op)
+    local red_kernel_name = gpuhelper.generate_buffer_reduction_kernel(red_var.type, red_op)
     local host_ptr = host_ptrs_map[device_ptr]
     local red_args = terralib.newlist({device_ptr, host_ptr})
     local shared_mem_size = terralib.sizeof(red_var.type) * THREAD_BLOCK_SIZE
     postamble = quote
       [postamble];
-      [cudahelper.codegen_kernel_call(cx, red_kernel_name, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
+      [gpuhelper.codegen_kernel_call(cx, red_kernel_name, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
     end
   end
 
@@ -828,7 +393,7 @@ function cudahelper.generate_reduction_postamble(cx, reductions, device_ptrs_map
     if needs_sync then
       postamble = quote
         [postamble];
-        RuntimeAPI.cudaDeviceSynchronize()
+        impl.device_synchronize()
       end
       needs_sync = false
     end
@@ -917,7 +482,7 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
                      [dir])
     var [idx]
     var t = tid_x()
-    var bid = [cudahelper.global_block_id()]
+    var bid = [impl.global_block_id()]
     [advance_ptrs(lhs_ptr, rhs_ptr, bid)]
     var lr = [int]([dir] >= 0)
 
@@ -990,7 +555,7 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
                   [dir])
     var [idx]
     var t = tid_x()
-    var bid = [cudahelper.global_block_id()]
+    var bid = [impl.global_block_id()]
     [lhs_ptr] = &([lhs_ptr][ bid * [offset] * [NUM_LEAVES] ])
     var lr = [int]([dir] >= 0)
 
@@ -1097,10 +662,10 @@ end
 --   * rhs: rhs[idx]
 --
 -- The code generator below captures 'idx' and 'res' to change the meaning of these values
-function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
+function gpuhelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
                                                res, idx, dir, op, elem_type)
   local BLOCK_SIZE = THREAD_BLOCK_SIZE * 2
-  local shmem = cudalib.sharedmemory(elem_type, BLOCK_SIZE)
+  local shmem = impl.sharedmemory(elem_type, BLOCK_SIZE)
   local init = base.reduction_op_init[op][elem_type]
 
   local prescan_full, prescan_arbitrary =
@@ -1113,7 +678,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
                             offset : uint64,
                             num_elmts : uint64,
                             [dir])
-    var t = [cudahelper.global_thread_id()]
+    var t = [gpuhelper.global_thread_id()]
     if t >= num_elmts - [BLOCK_SIZE] or t % [BLOCK_SIZE] == [BLOCK_SIZE - 1] then return end
 
     var sum_loc = t / [BLOCK_SIZE] * [BLOCK_SIZE] + [BLOCK_SIZE - 1]
@@ -1131,7 +696,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
       [res] = [base.quote_binary_op(op, v1, v2)]
       [lhs_wr.actions]
     else
-      var t = [cudahelper.global_thread_id()]
+      var t = [gpuhelper.global_thread_id()]
       if t % [BLOCK_SIZE] == [BLOCK_SIZE - 1] then return end
 
       [idx].__ptr = (num_elmts - 1 - sum_loc) * [offset]
@@ -1150,19 +715,19 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
   return prescan_full, prescan_arbitrary, scan_full, scan_arbitrary, postscan_full
 end
 
-function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr,
+function gpuhelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr,
                                                 rhs_ptr, res, idx, dir, op, elem_type)
   local BLOCK_SIZE = THREAD_BLOCK_SIZE * 2
   local SHMEM_SIZE = terralib.sizeof(elem_type) * THREAD_BLOCK_SIZE * 2
 
   local pre_full, pre_arb, scan_full, scan_arb, post_full, post2, post3 =
-    cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
+    gpuhelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
                                           res, idx, dir, op, elem_type)
-  local prescan_full_id = variant:add_cuda_kernel(pre_full)
-  local prescan_arb_id = variant:add_cuda_kernel(pre_arb)
-  local scan_full_id = variant:add_cuda_kernel(scan_full)
-  local scan_arb_id = variant:add_cuda_kernel(scan_arb)
-  local postscan_full_id = variant:add_cuda_kernel(post_full)
+  variant:add_cuda_kernel(pre_full)
+  variant:add_cuda_kernel(pre_arb)
+  variant:add_cuda_kernel(scan_full)
+  variant:add_cuda_kernel(scan_arb)
+  variant:add_cuda_kernel(post_full)
 
   local num_leaves = terralib.newsymbol(c.size_t, "num_leaves")
   local num_elmts = terralib.newsymbol(c.size_t, "num_elmts")
@@ -1174,27 +739,27 @@ function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_
   local prescan_full_args = terralib.newlist()
   prescan_full_args:insertall({lhs_ptr_arg, rhs_ptr_arg, dir})
   local call_prescan_full =
-    cudahelper.codegen_kernel_call(cx, prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
+    gpuhelper.codegen_kernel_call(cx, pre_full, num_threads, prescan_full_args, SHMEM_SIZE, true)
 
   local prescan_arb_args = terralib.newlist()
   prescan_arb_args:insertall({lhs_ptr_arg, rhs_ptr_arg, num_elmts, num_leaves, dir})
   local call_prescan_arbitrary =
-    cudahelper.codegen_kernel_call(cx, prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
+    gpuhelper.codegen_kernel_call(cx, pre_arb, num_threads, prescan_arb_args, SHMEM_SIZE, true)
 
   local scan_full_args = terralib.newlist()
   scan_full_args:insertall({lhs_ptr_arg, offset, dir})
   local call_scan_full =
-    cudahelper.codegen_kernel_call(cx, scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
+    gpuhelper.codegen_kernel_call(cx, scan_full, num_threads, scan_full_args, SHMEM_SIZE, true)
 
   local scan_arb_args = terralib.newlist()
   scan_arb_args:insertall({lhs_ptr_arg, num_elmts, num_leaves, offset, dir})
   local call_scan_arbitrary =
-    cudahelper.codegen_kernel_call(cx, scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
+    gpuhelper.codegen_kernel_call(cx, scan_arb, num_threads, scan_arb_args, SHMEM_SIZE, true)
 
   local postscan_full_args = terralib.newlist()
   postscan_full_args:insertall({lhs_ptr, offset, num_elmts, dir})
   local call_postscan_full =
-    cudahelper.codegen_kernel_call(cx, postscan_full_id, num_threads, postscan_full_args, 0, true)
+    gpuhelper.codegen_kernel_call(cx, post_full, num_threads, postscan_full_args, 0, true)
 
   local terra recursive_scan :: {uint64,uint64,uint64,lhs_ptr.type,dir.type} -> {}
 
@@ -1314,159 +879,6 @@ function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_
   return launch
 end
 
-local function count_primitive_fields(ty)
-  if ty:isprimitive() or ty:ispointer() then return 1
-  elseif ty:isarray() then return count_primitive_fields(ty.type) * ty.N
-  else
-    assert(ty:isstruct())
-    local num_fields = 0
-    ty.entries:map(function(entry)
-      local field_ty = entry[2] or entry.type
-      num_fields = num_fields + count_primitive_fields(field_ty)
-    end)
-    return num_fields
-  end
-end
-
-local function count_arguments(args)
-  local num_args = 0
-  for i = 1, #args do
-    num_args = num_args + count_primitive_fields(args[i].type)
-  end
-  return num_args
-end
-
-local function generate_arg_setup(output, arr, arg, ty, idx)
-  if ty:isprimitive() or ty:ispointer() then
-    output:insert(quote [arr][ [idx] ] = &[arg] end)
-    return idx + 1
-  elseif ty:isarray() then
-    for k = 1, ty.N do
-      idx = generate_arg_setup(output, arr, `([arg][ [k - 1] ]), ty.type, idx)
-    end
-    return idx
-  else
-    assert(ty:isstruct())
-    ty.entries:map(function(entry)
-      local field_name = entry[1] or entry.field
-      local field_ty = entry[2] or entry.type
-      idx = generate_arg_setup(output, arr, `([arg].[field_name]), field_ty, idx)
-    end)
-    return idx
-  end
-end
-
-function cudahelper.codegen_kernel_call(cx, kernel_name, count, args, shared_mem_size, tight)
-  local setupArguments = terralib.newlist()
-
-  local arglen = count_arguments(args)
-  local arg_arr = terralib.newsymbol((&opaque)[arglen], "__args")
-  setupArguments:insert(quote var [arg_arr]; end)
-  local idx = 0
-  for i = 1, #args do
-    local arg = args[i]
-    -- Need to flatten the arguments into individual primitive values
-    idx = generate_arg_setup(setupArguments, arg_arr, arg, arg.type, idx)
-  end
-
-  local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
-  local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
-  local num_blocks = terralib.newsymbol(int64, "num_blocks")
-
-  local function round_exp(v, n)
-    return `((v + (n - 1)) / n)
-  end
-
-  local launch_domain_init = nil
-  if not cx.use_2d_launch then
-    launch_domain_init = quote
-      if [count] <= THREAD_BLOCK_SIZE and tight then
-        [block].x, [block].y, [block].z = [count], 1, 1
-      else
-        [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
-      end
-      var [num_blocks] = [round_exp(count, THREAD_BLOCK_SIZE)]
-    end
-  else
-    launch_domain_init = quote
-      if [count] <= NUM_THREAD_X and tight then
-        [block].x, [block].y, [block].z = [count], NUM_THREAD_Y, 1
-      else
-        [block].x, [block].y, [block].z = NUM_THREAD_X, NUM_THREAD_Y, 1
-      end
-      var [num_blocks] = [round_exp(count, NUM_THREAD_X)]
-    end
-  end
-
-  launch_domain_init = quote
-    [launch_domain_init]
-    if [num_blocks] <= MAX_NUM_BLOCK then
-      [grid].x, [grid].y, [grid].z = [num_blocks], 1, 1
-    elseif [num_blocks] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
-      [grid].x, [grid].y, [grid].z =
-        MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
-    else
-      [grid].x, [grid].y, [grid].z =
-        MAX_NUM_BLOCK, MAX_NUM_BLOCK,
-        [round_exp(num_blocks, MAX_NUM_BLOCK * MAX_NUM_BLOCK)]
-    end
-  end
-
-  return quote
-    if [count] > 0 then
-      var [grid], [block]
-      [launch_domain_init]
-      [setupArguments]
-      var kid : int64 = 0
-      [c.murmur_hash3_32]([kernel_name], [string.len(kernel_name)], 0, &kid)
-      var result = [RuntimeAPI.cudaLaunchKernel](
-        [&int8](kid), [grid], [block], [arg_arr], [shared_mem_size], nil)
-      base.assert(result == 0, "kernel launch failed")
-    end
-  end
-end
-
-local function get_nv_fn_name(name, type)
-  assert(type:isfloat())
-  local nv_name = "__nv_" .. name
-
-  -- Okay. a little divergence from the C standard...
-  if name == "isnan" or name == "isinf" then
-    if type == double then
-      nv_name = nv_name .. "d"
-    else
-      nv_name = nv_name .. "f"
-    end
-  -- Seriously?
-  elseif name == "finite" then
-    if type == double then
-      nv_name = "__nv_isfinited"
-    else
-      nv_name = "__nv_finitef"
-    end
-  elseif type == float then
-    nv_name = nv_name .. "f"
-  end
-  return nv_name
-end
-
-local function get_cuda_definition(self)
-  if self:has_variant("cuda") then
-    return self:get_variant("cuda")
-  else
-    local fn_type = self.super:get_definition().type
-    local fn_name = get_nv_fn_name(self:get_name(), self:get_arg_type())
-    assert(fn_name ~= nil)
-    local fn = externcall_builtin(fn_name, fn_type)
-    self:set_variant("cuda", fn)
-    return fn
-  end
-end
-
-function cudahelper.get_cuda_variant(math_fn)
-  return math_fn:override(get_cuda_definition)
-end
-
 -- #####################################
 -- ## CUDA Codegen Context
 -- #################
@@ -1498,7 +910,7 @@ function context:reduction_buffer(ref_type, value_type, op, generator)
   local tbl = self.buffered_reductions[ref_type]
   if tbl == nil then
     tbl = {
-      buffer = cudalib.sharedmemory(value_type, THREAD_BLOCK_SIZE),
+      buffer = impl.sharedmemory(value_type, THREAD_BLOCK_SIZE),
       type = value_type,
       op = op,
       generator = generator,
@@ -1525,6 +937,7 @@ function context:generate_preamble()
     end)
   end
 
+  local need_barrier = false
   for k, tbl in self.buffered_reductions:items() do
     if tbl.type:isarray() then
       local init = base.reduction_op_init[tbl.op][tbl.type.type]
@@ -1533,12 +946,20 @@ function context:generate_preamble()
           [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ][k] = [init]
         end
       end)
+      need_barrier = true
     else
       local init = base.reduction_op_init[tbl.op][tbl.type]
       preamble:insert(quote
         [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ] = [init]
       end)
+      need_barrier = true
     end
+  end
+
+  if need_barrier then
+    preamble:insert(quote
+      impl.barrier()
+    end)
   end
 
   return preamble
@@ -1553,7 +974,7 @@ function context:generate_postamble()
         var tid = tid_y()
         var buf = &[tbl.buffer][ tid_x() * [NUM_THREAD_Y] ]
         barrier()
-        [cudahelper.generate_reduction_tree(tid, buf, NUM_THREAD_Y, tbl.op, tbl.type)]
+        [gpuhelper.generate_reduction_tree(tid, buf, NUM_THREAD_Y, tbl.op, tbl.type)]
         if tid == 0 then [tbl.generator(`(@buf))] end
       end
     end)
@@ -1580,12 +1001,12 @@ local function check_2d_launch_profitable(node)
   return false, false
 end
 
-function cudahelper.new_kernel_context(node)
+function gpuhelper.new_kernel_context(node)
   local use_2d_launch, offset_2d = check_2d_launch_profitable(node)
   return context.new(use_2d_launch, offset_2d)
 end
 
-function cudahelper.optimize_loop(cx, node, block)
+function gpuhelper.optimize_loop(cx, node, block)
   if cx.use_2d_launch then
     local inner_loop = block.stats[1]
     local index_type = inner_loop.symbol:gettype()
@@ -1620,7 +1041,7 @@ function cudahelper.optimize_loop(cx, node, block)
   return block
 end
 
-function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_type, value_type, gen)
+function gpuhelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_type, value_type, gen)
   if cx.use_2d_launch then
     local needs_buffer = base.types.is_ref(lhs_type) and
                          (value_type:isprimitive() or value_type:isarray()) and
@@ -1647,15 +1068,13 @@ end
 -- ## Code generation for kernel argument spill
 -- #################
 
-local MAX_SIZE_INLINE_KERNEL_PARAMS = 1024
-
-function cudahelper.check_arguments_need_spill(args)
+function gpuhelper.check_arguments_need_spill(args)
   local param_size = 0
   args:map(function(arg) param_size = param_size + terralib.sizeof(arg.type) end)
   return param_size > MAX_SIZE_INLINE_KERNEL_PARAMS
 end
 
-function cudahelper.generate_argument_spill(args)
+function gpuhelper.generate_argument_spill(args)
   local arg_type = terralib.types.newstruct("cuda_kernel_arg")
   arg_type.entries = terralib.newlist()
   local mapping = {}
@@ -1700,4 +1119,4 @@ function cudahelper.generate_argument_spill(args)
   return param_pack, param_unpack, spill_cleanup, kernel_arg
 end
 
-return cudahelper
+return gpuhelper
