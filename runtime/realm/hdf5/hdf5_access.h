@@ -35,7 +35,7 @@ namespace Realm {
   // dimension-agnostic form for piece info allows us to get to it without
   //  having to know the template parameters of the HDF5LayoutPiece holding
   //  it
-  struct HDF5PieceInfo {
+  struct REALM_PUBLIC_API HDF5PieceInfo {
     std::string dsetname;
     // TODO: small vectors
     // this is the offset within the hdf5 dataset, uses its dimensionality
