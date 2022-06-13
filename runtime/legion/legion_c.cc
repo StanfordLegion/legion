@@ -6164,7 +6164,7 @@ legion_runtime_local_shard_without_context(void)
     return 0; // no shard if we're not inside a task
   Runtime *runtime = Runtime::get_runtime();
   const Task *task = runtime->get_local_task(ctx);
-  return task->get_total_shards();
+  return task->get_shard_id();
 }
 
 size_t
