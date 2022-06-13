@@ -304,17 +304,17 @@ namespace Legion {
     enum LgTaskID {
       LG_SCHEDULER_ID,
       LG_POST_END_ID,
-      LG_DEFERRED_READY_TRIGGER_ID,
-      LG_DEFERRED_EXECUTION_TRIGGER_ID,
-      LG_DEFERRED_RESOLUTION_TRIGGER_ID,
-      LG_DEFERRED_COMMIT_TRIGGER_ID,
-      LG_DEFERRED_EXECUTE_ID,
-      LG_DEFERRED_COMPLETE_ID,
+      LG_TRIGGER_READY_ID,
+      LG_TRIGGER_EXECUTION_ID,
+      LG_TRIGGER_RESOLUTION_ID,
+      LG_TRIGGER_COMMIT_ID,
+      LG_DEFERRED_EXECUTION_ID,
+      LG_DEFERRED_COMPLETION_ID,
       LG_DEFERRED_COMMIT_ID,
       LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
-      LG_TRIGGER_COMPLETE_ID,
+      LG_TRIGGER_COMPLETION_ID,
       LG_TRIGGER_OP_ID,
       LG_TRIGGER_TASK_ID,
       LG_DEFER_MAPPER_SCHEDULER_TASK_ID,
@@ -347,13 +347,12 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
-      LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
-      LG_DEFER_DISTRIBUTE_TASK_ID,
+      LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
-      LG_DEFER_LAUNCH_TASK_ID,
+      LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_FIND_COPY_PRE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
@@ -417,19 +416,19 @@ namespace Legion {
       const char *name[LG_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Post-Task Execution",                                    \
-        "Deferred Ready Trigger",                                 \
-        "Deferred Execution Trigger",                             \
-        "Deferred Resolution Trigger",                            \
-        "Deferred Commit Trigger",                                \
-        "Deferred Execute",                                       \
-        "Deferred Complete",                                      \
+        "Trigger Ready",                                          \
+        "Trigger Execution",                                      \
+        "Trigger Resolution",                                     \
+        "Trigger Commit",                                         \
+        "Deferred Execution",                                     \
+        "Deferred Completion",                                    \
         "Deferred Commit",                                        \
         "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
-        "Trigger Complete",                                       \
-        "Operation Physical Dependence Analysis",                 \
-        "Task Physical Dependence Analysis",                      \
+        "Trigger Completion",                                     \
+        "Trigger Operation Mapping",                              \
+        "Trigger Task Mapping",                                   \
         "Defer Mapper Scheduler",                                 \
         "Must Individual Task Dependence Analysis",               \
         "Must Index Task Dependence Analysis",                    \
@@ -460,13 +459,12 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
-        "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
         "Remote View Creation",                                   \
-        "Defer Task Distribution",                                \
+        "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
-        "Defer Task Launch",                                      \
+        "Deferred Task Launch",                                   \
         "Handle Mapping Misspeculation",                          \
         "Defer Find Copy Preconditions",                          \
         "Defer Materialized View Registration",                   \

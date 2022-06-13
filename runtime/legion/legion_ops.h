@@ -121,6 +121,7 @@ namespace Legion {
       public:
         Operation *const op;
       };
+#if 0
       struct DeferredReadyArgs : public LgTaskArgs<DeferredReadyArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_READY_TRIGGER_ID;
@@ -216,6 +217,7 @@ namespace Legion {
         Operation *proxy_this;
         bool deactivate;
       };
+#endif
       struct DeferReleaseAcquiredArgs : 
         public LgTaskArgs<DeferReleaseAcquiredArgs> {
       public:
@@ -380,6 +382,10 @@ namespace Legion {
       // placed on the ready queue in order for the runtime to
       // perform this mapping
       virtual void trigger_mapping(void);
+      // Helper function for trigger execution 
+      // (only used in a limited set of operations and not
+      // part of the default pipeline)
+      virtual void trigger_execution(void);
       // The function to trigger once speculation is
       // ready to be resolved
       virtual void trigger_resolution(void);
@@ -388,12 +394,6 @@ namespace Legion {
       // The function to call when commit the operation is
       // ready to commit
       virtual void trigger_commit(void);
-      // Helper function for deferring complete operations
-      // (only used in a limited set of operations and not
-      // part of the default pipeline)
-      virtual void deferred_execute(void);
-      // Helper function for deferring commit operations
-      virtual void deferred_commit_trigger(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -2244,7 +2244,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       Future future;
@@ -3294,7 +3294,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -3754,7 +3754,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       TimingMeasurement measurement;
       std::set<Future> preconditions;
@@ -3786,7 +3786,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       TunableID tunable_id;
       MapperID mapper_id;
@@ -3822,7 +3822,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       FutureMap future_map;
       const ReductionOp *redop; 

@@ -2423,6 +2423,28 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         free_remote_contexts();
+      if (ready_comp_queue.exists())
+        ready_comp_queue.destroy();
+      if (enqueue_task_comp_queue.exists())
+        enqueue_task_comp_queue.destroy();
+      if (distribute_task_comp_queue.exists())
+        distribute_task_comp_queue.destroy();
+      if (launch_task_comp_queue.exists())
+        launch_task_comp_queue.destroy();
+      if (resolution_comp_queue.exists())
+        resolution_comp_queue.destroy();
+      if (trigger_execution_comp_queue.exists())
+        trigger_execution_comp_queue.destroy();
+      if (deferred_execution_comp_queue.exists())
+        deferred_execution_comp_queue.destroy();
+      if (trigger_completion_comp_queue.exists())
+        trigger_completion_comp_queue.destroy();
+      if (deferred_completion_comp_queue.exists())
+        deferred_completion_comp_queue.destroy();
+      if (trigger_commit_comp_queue.exists())
+        trigger_commit_comp_queue.destroy();
+      if (deferred_commit_comp_queue.exists())
+        deferred_commit_comp_queue.destroy();
       if (post_task_comp_queue.exists())
         post_task_comp_queue.destroy();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = 
@@ -7197,6 +7219,489 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, typename ARGS>
+    void InnerContext::add_to_queue(QueueEntry<T> entry, LocalLock &lock,
+                  std::list<QueueEntry<T> > &queue, CompletionQueue &comp_queue)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(entry.ready.exists());
+#endif
+      bool issue_task = false;
+      RtEvent precondition;
+      {
+        AutoLock l_lock(lock);
+        // Issue a task if there isn't one running right now
+        if (queue.empty())
+        {
+          issue_task = true;
+          // Add a reference to the context the first time we defer this
+          add_reference();
+        }
+        queue.push_back(entry);
+        if (comp_queue.exists())
+          comp_queue.add_event(entry.ready);
+        if (issue_task)
+        {
+          if (!comp_queue.exists())
+          {
+            // Find the precondition for the one with the minimum index
+            precondition = entry.ready;
+            size_t index = entry.index;
+            for (typename std::list<QueueEntry<T> >::const_iterator it =
+                  queue.begin(); it != queue.end(); it++)
+            {
+              if (it->index < index)
+              {
+                entry = *it;
+                index = it->index;
+                precondition = it->ready;
+              }
+            }
+          }
+          else
+            precondition = RtEvent(comp_queue.get_nonempty_event());
+        }
+      }
+      if (issue_task)
+      {
+        ARGS args(entry.op, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_ready_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerReadyArgs>(
+          QueueEntry<Operation*>(op, ready), ready_lock,
+          ready_queue, ready_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    T InnerContext::process_queue(LocalLock &lock, RtEvent &next_ready, 
+                                  std::list<QueueEntry<T> > &queue,
+                                  CompletionQueue &comp_queue,
+                                  std::vector<T> &to_perform) const
+    //--------------------------------------------------------------------------
+    {
+      T next{};
+      const size_t vector_width = context_configuration.meta_task_vector_width;
+      to_perform.reserve(vector_width);
+      AutoLock l_lock(lock);
+      if (!comp_queue.exists())
+      {
+        for (typename std::list<QueueEntry<T> >::iterator it =
+              queue.begin(); it != queue.end(); /*nothing*/)
+        {
+          if (it->ready.has_triggered())
+          {
+            to_perform.push_back(it->op);
+            it = queue.erase(it);
+            if (to_perform.size() == vector_width)
+              break;
+          }
+          else
+            it++;
+        }
+      }
+      else
+      {
+        std::vector<RtEvent> ready_events(vector_width);
+        size_t num_ready =
+          comp_queue.pop_events(&ready_events.front(), vector_width);
+#ifdef DEBUG_LEGION
+        assert(num_ready > 0);
+#endif
+        std::sort(ready_events.begin(), ready_events.end());
+        // Find the entries
+        for (typename std::list<QueueEntry<T> >::iterator it =
+              queue.begin(); it != queue.end(); /*nothing*/)
+        {
+          if (std::binary_search(ready_events.begin(), 
+                        ready_events.end(), it->ready))
+          {
+            to_perform.push_back(it->op);
+            it = queue.erase(it);
+            if (to_perform.size() == num_ready)
+              break;
+          }
+          else
+            it++;
+        }
+      }
+      if (!queue.empty())
+      {
+        if (!comp_queue.exists())
+        {
+          // See if we want to switch over to using a completion queue
+          if (queue.size() < vector_width)
+          {
+#ifdef DEBUG_LEGION
+            assert(!next_ready.exists());
+#endif
+            // Find the one with the minimum index
+            size_t min_index = 0;
+            for (typename std::list<QueueEntry<T> >::const_iterator it =
+                  queue.begin(); it != queue.end(); it++)
+            {
+              if (!next_ready.exists() || (it->index < min_index))
+              {
+                next_ready = it->ready;
+                min_index = it->index;
+                next = it->op;
+              }
+            }
+          }
+          else
+          {
+            comp_queue = CompletionQueue::create_completion_queue(0);
+            // Populate the completion queue with events
+            for (typename std::list<QueueEntry<T> >::const_iterator it =
+                  queue.begin(); it != queue.end(); it++)
+              comp_queue.add_event(it->ready);
+            next_ready = RtEvent(comp_queue.get_nonempty_event());
+            next = queue.front().op;
+          }
+        }
+        else
+        {
+          next_ready = RtEvent(comp_queue.get_nonempty_event());
+          next = queue.front().op;
+        }
+      }
+      return next;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_ready_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(ready_lock, precondition,
+                                 ready_queue, ready_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerReadyArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_ready();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredEnqueueTaskArgs>(
+          QueueEntry<TaskOp*>(task, ready), enqueue_task_lock,
+          enqueue_task_queue, enqueue_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_enqueue_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(enqueue_task_lock, precondition,
+                    enqueue_task_queue, enqueue_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredEnqueueTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->enqueue_ready_task(false/*use target*/);
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_distribute_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredDistributeTaskArgs>(
+          QueueEntry<TaskOp*>(task, ready), distribute_task_lock,
+          distribute_task_queue, distribute_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_distribute_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(distribute_task_lock, precondition,
+                distribute_task_queue, distribute_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredDistributeTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->distribute_task();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_launch_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredLaunchTaskArgs>(
+          QueueEntry<TaskOp*>(task, ready), launch_task_lock,
+          launch_task_queue, launch_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_launch_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(launch_task_lock, precondition,
+                    launch_task_queue, launch_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredLaunchTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->launch_task();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_resolution_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerResolutionArgs>(
+          QueueEntry<Operation*>(op, ready), resolution_lock,
+          resolution_queue, resolution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_resolution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(resolution_lock, precondition,
+                           resolution_queue, resolution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerResolutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_resolution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_execution_queue(Operation *op, 
+                                                      RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerExecutionArgs>(
+          QueueEntry<Operation*>(op, ready), trigger_execution_lock,
+          trigger_execution_queue, trigger_execution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_execution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_execution_lock,
+          precondition, trigger_execution_queue, 
+          trigger_execution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredExecutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_execution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_execution_queue(Operation *op,
+                                                       RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,DeferredExecutionArgs>(
+          QueueEntry<Operation*>(op, ready), deferred_execution_lock,
+          deferred_execution_queue, deferred_execution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_execution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(deferred_execution_lock,
+          precondition, deferred_execution_queue, 
+          deferred_execution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredExecutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->complete_execution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_completion_queue(Operation *op,
+                                                       RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerCompletionArgs>(
+          QueueEntry<Operation*>(op, ready),
+          trigger_completion_lock, trigger_completion_queue,
+          trigger_completion_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_completion_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_completion_lock,
+          precondition, trigger_completion_queue,
+          trigger_completion_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerCompletionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_complete();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_completion_queue(Operation *op,
+                                                        RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,DeferredCompletionArgs>(
+          QueueEntry<Operation*>(op, ready), deferred_completion_lock,
+          deferred_completion_queue, deferred_completion_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_completion_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(deferred_completion_lock,
+          precondition, deferred_completion_queue,
+          deferred_completion_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredCompletionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->complete_operation();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_commit_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerCommitArgs>(
+          QueueEntry<Operation*>(op, ready), trigger_commit_lock,
+          trigger_commit_queue, trigger_commit_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_commit_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_commit_lock,
+          precondition, trigger_commit_queue,
+          trigger_commit_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerCommitArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_commit();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_commit_queue(Operation *op,
+                                                 RtEvent ready, bool deactivate)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<std::pair<Operation*,bool>,DeferredCommitArgs>(
+          QueueEntry<std::pair<Operation*,bool> >(std::pair<Operation*,bool>(
+              op, deactivate), op->get_ctx_index(), ready),
+          deferred_commit_lock, deferred_commit_queue, 
+          deferred_commit_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_commit_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<std::pair<Operation*,bool> > to_perform;
+      std::pair<Operation*,bool> next =
+        process_queue<std::pair<Operation*,bool> >(deferred_commit_lock,
+          precondition, deferred_commit_queue, 
+          deferred_commit_comp_queue, to_perform);
+      if (next.first != NULL)
+      {
+        DeferredCommitArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<std::pair<Operation*,bool> >::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        it->first->commit_operation(it->second);
+      return (next.first == NULL);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                               const void *result, size_t size, 
                                               PhysicalInstance inst,
@@ -9822,6 +10327,123 @@ namespace Legion {
     {
       const DependenceArgs *dargs = (const DependenceArgs*)args;
       dargs->context->process_dependence_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_ready_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerReadyArgs *targs = (const TriggerReadyArgs*)args;
+      if (targs->context->process_ready_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_enqueue_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredEnqueueTaskArgs *dargs = 
+        (const DeferredEnqueueTaskArgs*)args;
+      if (dargs->context->process_enqueue_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_distribute_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredDistributeTaskArgs *dargs = 
+        (const DeferredDistributeTaskArgs*)args;
+      if (dargs->context->process_distribute_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_launch_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredLaunchTaskArgs *dargs = 
+        (const DeferredLaunchTaskArgs*)args;
+      if (dargs->context->process_launch_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_resolution_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerResolutionArgs *targs = (const TriggerResolutionArgs*)args;
+      if (targs->context->process_resolution_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_execution_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerExecutionArgs *targs = (const TriggerExecutionArgs*)args;
+      if (targs->context->process_trigger_execution_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_execution_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredExecutionArgs *dargs = (const DeferredExecutionArgs*)args;
+      if (dargs->context->process_deferred_execution_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_completion_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerCompletionArgs *targs = (const TriggerCompletionArgs*)args;
+      if (targs->context->process_trigger_completion_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_completion_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredCompletionArgs *dargs = (const DeferredCompletionArgs*)args;
+      if (dargs->context->process_deferred_completion_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_commit_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerCommitArgs *targs = (const TriggerCommitArgs*)args;
+      if (targs->context->process_trigger_commit_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_commit_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredCommitArgs *dargs = (const DeferredCommitArgs*)args;
+      if (dargs->context->process_deferred_commit_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
     }
 
     //--------------------------------------------------------------------------

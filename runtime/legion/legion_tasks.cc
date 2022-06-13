@@ -837,7 +837,7 @@ namespace Legion {
                       LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, ready);
+                task->enqueue_ready_task(false/*target*/, ready);
             }
             break;
           }
@@ -859,7 +859,7 @@ namespace Legion {
                       LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, ready);
+                task->enqueue_ready_task(false/*target*/, ready);
             }
             break;
           }
@@ -1272,12 +1272,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_distribute_task(RtEvent precondition)
+    void TaskOp::defer_distribute_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferDistributeArgs args(this);
-      return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      parent_ctx->add_to_distribute_task_queue(this, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -1298,12 +1296,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_launch_task(RtEvent precondition)
+    void TaskOp::defer_launch_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferLaunchArgs args(this);
-      return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      parent_ctx->add_to_launch_task_queue(this, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -1312,12 +1308,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (use_target_processor)
-      {
         set_current_proc(target_proc);
-        runtime->add_to_ready_queue(target_proc, this, wait_on);
+      if (!wait_on.exists() || wait_on.has_triggered())
+      {
+        // Need to invoke select task options here for top-level tasks
+        if (!options_selected)
+          select_task_options(false/*prioritize*/);
+        runtime->add_to_ready_queue(current_proc, this);
       }
       else
-        runtime->add_to_ready_queue(current_proc, this, wait_on);
+        parent_ctx->add_to_task_queue(this, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -5997,7 +5997,7 @@ namespace Legion {
         orig_task->sent_remotely = false;
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
-        runtime->add_to_ready_queue(current_proc, orig_task);
+        orig_task->enqueue_ready_task(true/*current*/);
         deactivate();
         return false;
       }
