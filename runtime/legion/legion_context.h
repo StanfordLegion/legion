@@ -701,39 +701,7 @@ namespace Legion {
             context(ctx) { }
       public:
         InnerContext *const context;
-      };
-      template<typename T>
-      struct QueueEntry {
-      public:
-        QueueEntry(void) : index(0) { }
-        QueueEntry(T o, size_t idx, RtEvent r) : op(o), index(idx), ready(r) { }
-      public:
-        T op;
-        size_t index;
-        RtEvent ready;
-      };
-      template<>
-      struct QueueEntry<Operation*> {
-      public:
-        QueueEntry(void) : op(NULL), index(0) { }
-        QueueEntry(Operation *o, RtEvent r)
-          : op(o), index(op->get_ctx_index()), ready(r) { }
-      public:
-        Operation *op;
-        size_t index;
-        RtEvent ready;
-      };
-      template<>
-      struct QueueEntry<TaskOp*> {
-      public:
-        QueueEntry(void) : op(NULL), index(0) { }
-        QueueEntry(TaskOp *o, RtEvent r)
-          : op(o), index(op->get_ctx_index()), ready(r) { }
-      public:
-        TaskOp *op;
-        size_t index;
-        RtEvent ready;
-      };
+      }; 
       struct TriggerReadyArgs : public LgTaskArgs<TriggerReadyArgs> {
       public:
         static const LgTaskID TASK_ID = LG_TRIGGER_READY_ID;
@@ -920,6 +888,15 @@ namespace Legion {
         const IndexPartition pid;
         const PartitionKind kind;
         const char *const func;
+      };
+      template<typename T>
+      struct QueueEntry {
+      public:
+        QueueEntry(void) { op = {}; }
+        QueueEntry(T o, RtEvent r) : op(o), ready(r) { }
+      public:
+        T op;
+        RtEvent ready;
       };
       struct LocalFieldInfo {
       public:
@@ -1347,7 +1324,7 @@ namespace Legion {
                                            bool unordered = false);
       void process_dependence_stage(void);
     public:
-      template<typename T, typename ARGS>
+      template<typename T, typename ARGS, bool HAS_BOUNDS>
       void add_to_queue(QueueEntry<T> entry, LocalLock &lock,
                         std::list<QueueEntry<T> > &queue,
                         CompletionQueue &comp_queue);

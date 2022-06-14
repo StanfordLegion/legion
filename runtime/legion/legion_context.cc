@@ -2354,6 +2354,17 @@ namespace Legion {
         total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
+        ready_comp_queue(CompletionQueue::NO_QUEUE),
+        enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
+        distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
+        launch_task_comp_queue(CompletionQueue::NO_QUEUE),
+        resolution_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_execution_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_execution_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_completion_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_completion_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_commit_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_commit_comp_queue(CompletionQueue::NO_QUEUE),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
         physical_trace_replay_status(0), valid_wait_event(false), 
@@ -7219,7 +7230,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, typename ARGS>
+    template<typename T, typename ARGS, bool HAS_BOUND>
     void InnerContext::add_to_queue(QueueEntry<T> entry, LocalLock &lock,
                   std::list<QueueEntry<T> > &queue, CompletionQueue &comp_queue)
     //--------------------------------------------------------------------------
@@ -7237,31 +7248,15 @@ namespace Legion {
           issue_task = true;
           // Add a reference to the context the first time we defer this
           add_reference();
+          // Make the queue the first time if necessary
+          if (!comp_queue.exists())
+            comp_queue = CompletionQueue::create_completion_queue(
+                HAS_BOUND ? context_configuration.max_window_size : 0);
         }
         queue.push_back(entry);
-        if (comp_queue.exists())
-          comp_queue.add_event(entry.ready);
+        comp_queue.add_event(entry.ready);
         if (issue_task)
-        {
-          if (!comp_queue.exists())
-          {
-            // Find the precondition for the one with the minimum index
-            precondition = entry.ready;
-            size_t index = entry.index;
-            for (typename std::list<QueueEntry<T> >::const_iterator it =
-                  queue.begin(); it != queue.end(); it++)
-            {
-              if (it->index < index)
-              {
-                entry = *it;
-                index = it->index;
-                precondition = it->ready;
-              }
-            }
-          }
-          else
-            precondition = RtEvent(comp_queue.get_nonempty_event());
-        }
+          precondition = RtEvent(comp_queue.get_nonempty_event());
       }
       if (issue_task)
       {
@@ -7275,7 +7270,7 @@ namespace Legion {
     void InnerContext::add_to_ready_queue(Operation *op, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,TriggerReadyArgs>(
+      add_to_queue<Operation*,TriggerReadyArgs,true/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), ready_lock,
           ready_queue, ready_comp_queue);
     }
@@ -7292,86 +7287,34 @@ namespace Legion {
       const size_t vector_width = context_configuration.meta_task_vector_width;
       to_perform.reserve(vector_width);
       AutoLock l_lock(lock);
-      if (!comp_queue.exists())
-      {
-        for (typename std::list<QueueEntry<T> >::iterator it =
-              queue.begin(); it != queue.end(); /*nothing*/)
-        {
-          if (it->ready.has_triggered())
-          {
-            to_perform.push_back(it->op);
-            it = queue.erase(it);
-            if (to_perform.size() == vector_width)
-              break;
-          }
-          else
-            it++;
-        }
-      }
-      else
-      {
-        std::vector<RtEvent> ready_events(vector_width);
-        size_t num_ready =
-          comp_queue.pop_events(&ready_events.front(), vector_width);
+      std::vector<RtEvent> ready_events(vector_width);
+      size_t num_ready =
+        comp_queue.pop_events(&ready_events.front(), vector_width);
 #ifdef DEBUG_LEGION
-        assert(num_ready > 0);
+      assert(num_ready > 0);
 #endif
-        std::sort(ready_events.begin(), ready_events.end());
-        // Find the entries
-        for (typename std::list<QueueEntry<T> >::iterator it =
-              queue.begin(); it != queue.end(); /*nothing*/)
+      ready_events.resize(num_ready);
+      std::sort(ready_events.begin(), ready_events.end());
+      // Find the entries
+      for (typename std::list<QueueEntry<T> >::iterator it =
+            queue.begin(); it != queue.end(); /*nothing*/)
+      {
+        if (std::binary_search(ready_events.begin(), 
+                      ready_events.end(), it->ready))
         {
-          if (std::binary_search(ready_events.begin(), 
-                        ready_events.end(), it->ready))
-          {
-            to_perform.push_back(it->op);
-            it = queue.erase(it);
-            if (to_perform.size() == num_ready)
-              break;
-          }
-          else
-            it++;
+          to_perform.push_back(it->op);
+          it = queue.erase(it);
+          // You might think you can break out early here when you've seen
+          // all the ready events once but you can't because there might
+          // be duplicates!
         }
+        else
+          it++;
       }
       if (!queue.empty())
       {
-        if (!comp_queue.exists())
-        {
-          // See if we want to switch over to using a completion queue
-          if (queue.size() < vector_width)
-          {
-#ifdef DEBUG_LEGION
-            assert(!next_ready.exists());
-#endif
-            // Find the one with the minimum index
-            size_t min_index = 0;
-            for (typename std::list<QueueEntry<T> >::const_iterator it =
-                  queue.begin(); it != queue.end(); it++)
-            {
-              if (!next_ready.exists() || (it->index < min_index))
-              {
-                next_ready = it->ready;
-                min_index = it->index;
-                next = it->op;
-              }
-            }
-          }
-          else
-          {
-            comp_queue = CompletionQueue::create_completion_queue(0);
-            // Populate the completion queue with events
-            for (typename std::list<QueueEntry<T> >::const_iterator it =
-                  queue.begin(); it != queue.end(); it++)
-              comp_queue.add_event(it->ready);
-            next_ready = RtEvent(comp_queue.get_nonempty_event());
-            next = queue.front().op;
-          }
-        }
-        else
-        {
-          next_ready = RtEvent(comp_queue.get_nonempty_event());
-          next = queue.front().op;
-        }
+        next_ready = RtEvent(comp_queue.get_nonempty_event());
+        next = queue.front().op;
       }
       return next;
     }
@@ -7400,7 +7343,7 @@ namespace Legion {
     void InnerContext::add_to_task_queue(TaskOp *task, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<TaskOp*,DeferredEnqueueTaskArgs>(
+      add_to_queue<TaskOp*,DeferredEnqueueTaskArgs,false/*has bounds*/>(
           QueueEntry<TaskOp*>(task, ready), enqueue_task_lock,
           enqueue_task_queue, enqueue_task_comp_queue);
     }
@@ -7429,7 +7372,7 @@ namespace Legion {
     void InnerContext::add_to_distribute_task_queue(TaskOp *task, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<TaskOp*,DeferredDistributeTaskArgs>(
+      add_to_queue<TaskOp*,DeferredDistributeTaskArgs,false/*has bounds*/>(
           QueueEntry<TaskOp*>(task, ready), distribute_task_lock,
           distribute_task_queue, distribute_task_comp_queue);
     }
@@ -7458,7 +7401,7 @@ namespace Legion {
     void InnerContext::add_to_launch_task_queue(TaskOp *task, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<TaskOp*,DeferredLaunchTaskArgs>(
+      add_to_queue<TaskOp*,DeferredLaunchTaskArgs,false/*has bounds*/>(
           QueueEntry<TaskOp*>(task, ready), launch_task_lock,
           launch_task_queue, launch_task_comp_queue);
     }
@@ -7487,7 +7430,7 @@ namespace Legion {
     void InnerContext::add_to_resolution_queue(Operation *op, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,TriggerResolutionArgs>(
+      add_to_queue<Operation*,TriggerResolutionArgs,true/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), resolution_lock,
           resolution_queue, resolution_comp_queue);
     }
@@ -7517,7 +7460,7 @@ namespace Legion {
                                                       RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,TriggerExecutionArgs>(
+      add_to_queue<Operation*,TriggerExecutionArgs,false/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), trigger_execution_lock,
           trigger_execution_queue, trigger_execution_comp_queue);
     }
@@ -7533,7 +7476,7 @@ namespace Legion {
           trigger_execution_comp_queue, to_perform);
       if (next != NULL)
       {
-        DeferredExecutionArgs args(next, this);
+        TriggerExecutionArgs args(next, this);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
@@ -7548,7 +7491,7 @@ namespace Legion {
                                                        RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,DeferredExecutionArgs>(
+      add_to_queue<Operation*,DeferredExecutionArgs,false/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), deferred_execution_lock,
           deferred_execution_queue, deferred_execution_comp_queue);
     }
@@ -7579,7 +7522,7 @@ namespace Legion {
                                                        RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,TriggerCompletionArgs>(
+      add_to_queue<Operation*,TriggerCompletionArgs,false/*has bounds*/>(
           QueueEntry<Operation*>(op, ready),
           trigger_completion_lock, trigger_completion_queue,
           trigger_completion_comp_queue);
@@ -7611,7 +7554,7 @@ namespace Legion {
                                                         RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,DeferredCompletionArgs>(
+      add_to_queue<Operation*,DeferredCompletionArgs,false/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), deferred_completion_lock,
           deferred_completion_queue, deferred_completion_comp_queue);
     }
@@ -7641,7 +7584,7 @@ namespace Legion {
     void InnerContext::add_to_trigger_commit_queue(Operation *op, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<Operation*,TriggerCommitArgs>(
+      add_to_queue<Operation*,TriggerCommitArgs,false/*has bounds*/>(
           QueueEntry<Operation*>(op, ready), trigger_commit_lock,
           trigger_commit_queue, trigger_commit_comp_queue);
     }
@@ -7672,11 +7615,11 @@ namespace Legion {
                                                  RtEvent ready, bool deactivate)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<std::pair<Operation*,bool>,DeferredCommitArgs>(
-          QueueEntry<std::pair<Operation*,bool> >(std::pair<Operation*,bool>(
-              op, deactivate), op->get_ctx_index(), ready),
-          deferred_commit_lock, deferred_commit_queue, 
-          deferred_commit_comp_queue);
+      add_to_queue<std::pair<Operation*,bool>,
+          DeferredCommitArgs,false/*has bounds*/>(
+            QueueEntry<std::pair<Operation*,bool> >(std::pair<Operation*,bool>(
+              op, deactivate), ready), deferred_commit_lock,
+          deferred_commit_queue, deferred_commit_comp_queue);
     }
 
     //--------------------------------------------------------------------------

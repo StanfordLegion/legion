@@ -121,18 +121,6 @@ namespace Legion {
       public:
         TaskOp *const op;
       };
-#if 0
-      struct DeferDistributeArgs : public LgTaskArgs<DeferDistributeArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_DISTRIBUTE_TASK_ID;
-      public:
-        DeferDistributeArgs(TaskOp *op)
-          : LgTaskArgs<DeferDistributeArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        TaskOp *const proxy_this;
-      };
-#endif
       struct DeferMappingArgs : public LgTaskArgs<DeferMappingArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
@@ -153,18 +141,6 @@ namespace Legion {
         std::vector<unsigned> *const performed_regions;
         std::vector<ApEvent> *const effects;
       };
-#if 0
-      struct DeferLaunchArgs : public LgTaskArgs<DeferLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_LAUNCH_TASK_ID;
-      public:
-        DeferLaunchArgs(TaskOp *op)
-          : LgTaskArgs<DeferLaunchArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        TaskOp *const proxy_this;
-      };
-#endif
       struct DeferredFutureSetArgs : public LgTaskArgs<DeferredFutureSetArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_SET_ID;

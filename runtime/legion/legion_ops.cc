@@ -780,7 +780,10 @@ namespace Legion {
       {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
-        parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
+        if (trigger_pre.exists() && !trigger_pre.has_triggered())
+          parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
+        else
+          trigger_complete();
       }
       else // Do the trigger now
         trigger_complete();
@@ -893,9 +896,12 @@ namespace Legion {
         // Inner task completion also relies upon this to work correctly
         if (!completion_event.has_triggered_faultignorant())
         {
-          parent_ctx->add_to_deferred_commit_queue(this,
-              Runtime::protect_event(completion_event), do_deactivate);
-          return;
+          const RtEvent safe = Runtime::protect_event(completion_event);
+          if (safe.exists() && !safe.has_triggered())
+          {
+            parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
+            return;
+          }
         }
         parent_ctx->register_child_commit(this);
       }
