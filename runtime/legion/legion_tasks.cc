@@ -805,6 +805,8 @@ namespace Legion {
         early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
+      // Already had our options selected
+      options_selected = true;
     }
 
     //--------------------------------------------------------------------------
@@ -5995,9 +5997,14 @@ namespace Legion {
 #endif
         // If we were sent back then mark that we are no longer remote
         orig_task->sent_remotely = false;
+        if (deferred_complete_mapping.exists())
+        {
+          orig_task->deferred_complete_mapping = deferred_complete_mapping;
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
-        orig_task->enqueue_ready_task(true/*current*/);
+        orig_task->enqueue_ready_task(false/*target*/);
         deactivate();
         return false;
       }
