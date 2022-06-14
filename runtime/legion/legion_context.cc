@@ -7393,7 +7393,8 @@ namespace Legion {
       }
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
-        (*it)->distribute_task();
+        if ((*it)->distribute_task())
+          (*it)->launch_task();
       return (next == NULL);
     }
 
