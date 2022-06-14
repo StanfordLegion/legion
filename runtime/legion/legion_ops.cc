@@ -11867,8 +11867,13 @@ namespace Legion {
       complete_mapping();
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
       if (!barrier.has_triggered_faultignorant())
-        parent_ctx->add_to_trigger_execution_queue(this,
-                        Runtime::protect_event(barrier));
+      {
+        const RtEvent safe = Runtime::protect_event(barrier);
+        if (safe.exists() && !safe.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, safe);
+        else
+          trigger_execution();
+      }
       else
         trigger_execution();
     }
@@ -16400,8 +16405,13 @@ namespace Legion {
         // If we have a future value see if its event has triggered
         ApEvent future_ready_event = future.impl->get_ready_event();
         if (!future_ready_event.has_triggered_faultignorant())
-          parent_ctx->add_to_trigger_execution_queue(this,
-                Runtime::protect_event(future_ready_event));
+        {
+          const RtEvent safe = Runtime::protect_event(future_ready_event);
+          if (safe.exists() && !safe.has_triggered())
+            parent_ctx->add_to_trigger_execution_queue(this, safe);
+          else
+            trigger_execution();
+        }
         else
           trigger_execution(); // can do the completion now
       }
