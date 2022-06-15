@@ -3319,6 +3319,16 @@ namespace Legion {
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific ordering
+      DeferredBuffer(Memory::Kind kind,
+                     const Domain &bounds,
+                     std::array<DimensionKind,DIM> ordering,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
+      DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
+                     Memory::Kind kind,
+                     std::array<DimensionKind,DIM> ordering,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
       DeferredBuffer(Memory memory,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
