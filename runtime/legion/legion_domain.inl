@@ -244,10 +244,14 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     static_assert(std::is_same<coord_t,long long>::value,"coord_t changed");
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
     assert(!CHECK || 
         (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
+#endif
+#endif
     return coord_t(value);
   }
 
@@ -752,10 +756,14 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     static_assert(std::is_same<coord_t,long long>::value, "coord_t changed");
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
     assert(!CHECK ||
         (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
+#endif
+#endif
     return coord_t(value);
   }
 
@@ -1012,8 +1020,12 @@ namespace Legion {
     DomainT<DIM,T> result;
     if (is_id > 0)
     {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
       TypeTag type = Internal::NT_TemplateHelper::template encode_tag<DIM,T>();
       assert(is_type == type); 
+#endif
+#endif
       result.sparsity.id = is_id;
     }
     else
