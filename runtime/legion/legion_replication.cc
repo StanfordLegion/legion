@@ -13829,21 +13829,21 @@ namespace Legion {
     void SingleTaskTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      ShardEventTree::pack_collective(rez);
       rez.serialize(future_size);
       rez.serialize(has_future_size);
+      ShardEventTree::pack_collective(rez);
     }
 
     //--------------------------------------------------------------------------
     void SingleTaskTree::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardEventTree::unpack_collective(derez);
       derez.deserialize(future_size);
       derez.deserialize(has_future_size);
       if ((future != NULL) && has_future_size)
         future->set_future_result_size(future_size, 
                   context->runtime->address_space);
+      ShardEventTree::unpack_collective(derez);
     }
 
     /////////////////////////////////////////////////////////////
