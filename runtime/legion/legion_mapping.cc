@@ -139,6 +139,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalInstance::has_collective_point(const DomainPoint &point) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl == NULL) || !impl->is_physical_manager())
+        return false;
+      return impl->as_physical_manager()->has_collective_point(point);
+    }
+
+    //--------------------------------------------------------------------------
     Domain PhysicalInstance::get_instance_domain(void) const
     //--------------------------------------------------------------------------
     {

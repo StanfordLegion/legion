@@ -57,6 +57,12 @@ namespace Legion {
       unsigned long get_instance_id(const DomainPoint *point = NULL) const;
       size_t get_instance_size(void) const;
       Domain get_instance_domain(void) const;
+      // Collective instances have a "domain" of points associated with
+      // them to name the individual instances in the collective instance
+      // Use this to check if a collective point is contained in that domain
+      // Note that if you call this on a non-collective instance then it
+      // will always return false
+      bool has_collective_point(const DomainPoint &point) const;
       // For collective instances find nearest points
       void find_points_in_memory(Memory memory,
           std::vector<DomainPoint> &points) const;

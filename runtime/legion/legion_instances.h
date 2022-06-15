@@ -349,6 +349,8 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
       virtual ApEvent get_unique_event(const DomainPoint &point) const = 0;
+      virtual bool has_collective_point(const DomainPoint &p) const 
+        { return false; }
       virtual PhysicalInstance get_instance(const DomainPoint &point,
                                             bool from_mapper = false) const = 0;
       virtual PointerConstraint 
@@ -904,6 +906,8 @@ namespace Legion {
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual ApEvent get_unique_event(const DomainPoint &point) const;
+      virtual bool has_collective_point(const DomainPoint &point) const
+        { return contains_point(point); }
       virtual PhysicalInstance get_instance(const DomainPoint &point, 
                                             bool from_mapper = false) const;
       virtual PointerConstraint
