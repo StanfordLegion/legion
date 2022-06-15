@@ -4445,7 +4445,12 @@ namespace Legion {
       assert(collective_mapping != NULL);
 #endif
       if (dense_points.get_dim() > 0)
+      {
+        // If the dimensionalities are different then this will never succeed
+        if (dense_points.get_dim() != point.get_dim())
+          return false;
         return dense_points.contains(point);
+      }
       // If the dimensionalities are different then this will never succeed
       if (!instance_points.empty() &&
           (instance_points.front().get_dim() != point.get_dim()))
