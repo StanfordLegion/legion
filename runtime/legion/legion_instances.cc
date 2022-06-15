@@ -1689,7 +1689,6 @@ namespace Legion {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
-        assert(gc_state == VALID_GC_STATE);
 #endif
         pending_changes--;
         return true;
@@ -2368,7 +2367,6 @@ namespace Legion {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
-        assert(gc_state == VALID_GC_STATE);
 #endif
         pending_changes--;
       }
