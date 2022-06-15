@@ -4305,6 +4305,9 @@ namespace Legion {
         multi_instance(multi)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((dense_points.get_dim() == 0) || dense_points.dense());
+#endif
 #ifdef LEGION_GC
       log_garbage.info("GC Collective Manager %lld %d",
                         LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 

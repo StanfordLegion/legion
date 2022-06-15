@@ -3418,6 +3418,9 @@ namespace Legion {
           if ((it->second.total_points == total_points) && !has_dense_points)
           {
             dense_points = get_collective_dense_points();
+#ifdef DEBUG_LEGION
+            assert((dense_points.get_dim() == 0) || dense_points.dense());
+#endif
             has_dense_points = true;
           }
           bool multi_instance = true;
