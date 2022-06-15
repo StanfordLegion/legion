@@ -2275,7 +2275,7 @@ namespace Legion {
       virtual bool supports_collective_instances(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       // From collective instance creator
-      virtual IndexSpace get_collective_space(void) const;
+      virtual Domain get_collective_dense_points(void) const;
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:

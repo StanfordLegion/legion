@@ -835,7 +835,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MANAGER_TASK_ID;
       public:
         DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
-            IndexSpace p, size_t tp, CollectiveMapping *map, size_t f,
+            const Domain &pts, size_t tp, CollectiveMapping *map, size_t f,
             IndexSpaceExpression *lx, const PendingRemoteExpression &pending,
             FieldSpace h, RegionTreeID tid, LayoutConstraintID l,
             ReductionOpID redop, const void *piece_list,size_t piece_list_size,
@@ -844,7 +844,7 @@ namespace Legion {
       public:
         const DistributedID did;
         const AddressSpaceID owner;
-        IndexSpace point_space;
+        const Domain dense_points;
         const size_t total_points;
         CollectiveMapping *const mapping;
         const size_t footprint;
@@ -876,7 +876,7 @@ namespace Legion {
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
-                        AddressSpaceID owner_space, IndexSpaceNode *point_space,
+                        AddressSpaceID owner_space, const Domain &dense_points,
                         size_t total_pts, CollectiveMapping *mapping,
                         IndexSpaceExpression *instance_domain,
                         const void *piece_list, size_t piece_list_size,
@@ -1285,7 +1285,7 @@ namespace Legion {
                                              Deserializer &derez);
       static void handle_deletion(Runtime *runtime, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
-          AddressSpaceID owner_space, IndexSpaceNode *point_space,
+          AddressSpaceID owner_space, const Domain &dense_points,
           size_t points, CollectiveMapping *collective_mapping,
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size, 
@@ -1304,8 +1304,9 @@ namespace Legion {
           CollectiveManager *manager, RtEvent man_ready, Runtime *runtime);
     public:
       const size_t total_points;
-      // This can be NULL if the point set is implicit
-      IndexSpaceNode *const point_space;
+      // This domain should only be valid if it is a dense rectangle
+      // No sparsity maps!
+      const Domain dense_points;
       static constexpr size_t GUARD_SIZE = std::numeric_limits<size_t>::max();
     protected:
       // Note that there is a collective mapping from DistributedCollectable
@@ -1449,7 +1450,7 @@ namespace Legion {
     class PendingCollectiveManager : public Collectable {
     public:
       PendingCollectiveManager(DistributedID did, size_t total_points,
-                               IndexSpace point_space,
+                               const Domain &dense_points,
                                CollectiveMapping *mapping, bool multi_instance);
       PendingCollectiveManager(const PendingCollectiveManager &rhs) = delete;
       ~PendingCollectiveManager(void);
@@ -1458,7 +1459,7 @@ namespace Legion {
     public:
       const DistributedID did;
       const size_t total_points;
-      const IndexSpace point_space;
+      const Domain dense_points;
       CollectiveMapping *const collective_mapping;
       const bool multi_instance;
     public:

@@ -7353,7 +7353,7 @@ namespace Legion {
                 "task's sharding space.", mapper->get_mapper_name(),
                 parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                 get_shard_point()[0])
-          if (collective->point_space->get_volume() !=
+          if (collective->total_points !=
               repl_ctx->shard_manager->total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                 "Invalid mapper output from invocation of 'map_inline' "
@@ -7434,10 +7434,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplMapOp::get_collective_space(void) const
+    Domain ReplMapOp::get_collective_dense_points(void) const
     //--------------------------------------------------------------------------
     {
-      return shard_space;
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const Domain &points = repl_ctx->shard_manager->shard_domain;
+      if (points.dense())
+        return points;
+      else
+        return Domain::NO_DOMAIN;
     }
 
     //--------------------------------------------------------------------------
@@ -7952,11 +7962,11 @@ namespace Legion {
           assert(layout != NULL);
           assert(shard_space.exists());
 #endif
-          IndexSpaceNode *point_node = NULL;
-          if (shard_space.exists())
-            point_node = runtime->forest->get_node(shard_space);
+          Domain dense_points;
+          if (shard_manager->shard_domain.dense())
+            dense_points = shard_manager->shard_domain;
           manager = new CollectiveManager(runtime->forest, manager_did,
-              runtime->determine_owner(manager_did), point_node,
+              runtime->determine_owner(manager_did), dense_points,
               shard_manager->total_shards,
               &shard_manager->get_collective_mapping(), node->row_source,
               NULL/*piece list*/, 0/*no piece list*/, field_node,

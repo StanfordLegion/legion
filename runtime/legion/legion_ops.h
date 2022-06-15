@@ -839,7 +839,7 @@ namespace Legion {
       void activate_collective_instance_creator(void);
       void deactivate_collective_instance_creator(void);
     public:
-      virtual IndexSpace get_collective_space(void) const = 0;
+      virtual Domain get_collective_dense_points(void) const = 0;
       // In theory this should be a pure virtual method that is overridden by
       // all derived classes, but there is the special case of ReplMapOp where
       // the base MapOp class does not inherit from this class so we provide
@@ -1663,8 +1663,7 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
-      virtual IndexSpace get_collective_space(void) const 
-        { return launch_space->handle; }
+      virtual Domain get_collective_dense_points(void) const;
       virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
@@ -3627,8 +3626,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const;
     public:
       // From CollectiveInstanceCreator
-      virtual IndexSpace get_collective_space(void) const 
-        { return launch_space->handle; }
+      virtual Domain get_collective_dense_points(void) const;
       virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:
@@ -3937,8 +3935,7 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
-      virtual IndexSpace get_collective_space(void) const 
-        { return launch_space->handle; }
+      virtual Domain get_collective_dense_points(void) const;
       virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
     public:

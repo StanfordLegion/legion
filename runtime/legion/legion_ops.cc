@@ -3401,7 +3401,8 @@ namespace Legion {
       }
       else
       {
-        IndexSpace total_point_space = IndexSpace::NO_SPACE;
+        Domain dense_points;
+        bool has_dense_points = false;
         const size_t total_points = get_total_collective_instance_points();
         for (typename std::map<size_t,PendingCollective>::const_iterator it =
               instances.begin(); it != instances.end(); it++)
@@ -3414,12 +3415,10 @@ namespace Legion {
 #endif
           // We can only use the collective space as the point space if
           // we know that it contains all the points
-          IndexSpace point_space = IndexSpace::NO_SPACE;
-          if (it->second.total_points == total_points)
+          if ((it->second.total_points == total_points) && !has_dense_points)
           {
-            if (!total_point_space.exists())
-              total_point_space = get_collective_space();
-            point_space = total_point_space;
+            dense_points = get_collective_dense_points();
+            has_dense_points = true;
           }
           bool multi_instance = true;
           std::vector<AddressSpaceID> unique_spaces;
@@ -3445,7 +3444,7 @@ namespace Legion {
             did = this->runtime->get_remote_distributed_id(
                 collective_mapping->find_nearest(this->runtime->address_space));
           managers[it->first] = new PendingCollectiveManager(did,
-              it->second.total_points, point_space,
+              it->second.total_points, dense_points,
               collective_mapping, multi_instance);
         }
       }
@@ -8865,6 +8864,20 @@ namespace Legion {
       complete_mapping();
       complete_execution();
       resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    Domain IndexCopyOp::get_collective_dense_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      ApEvent ready;
+      Domain domain = launch_space->get_domain(ready, true/*tight*/);
+      // No need to wait for the event to be ready since we just care
+      // about whether the domain is dense or not
+      if (domain.dense())
+        return domain;
+      else
+        return Domain::NO_DOMAIN;
     }
 
     //--------------------------------------------------------------------------
@@ -19150,6 +19163,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain DependentPartitionOp::get_collective_dense_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      ApEvent ready;
+      Domain domain = launch_space->get_domain(ready, true/*tight*/);
+      // No need to wait for the event to be ready since we just care
+      // about whether the domain is dense or not
+      if (domain.dense())
+        return domain;
+      else
+        return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent DependentPartitionOp::acquire_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, Memory target)
     //--------------------------------------------------------------------------
@@ -20873,6 +20900,20 @@ namespace Legion {
       complete_mapping();
       complete_execution();
       resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    Domain IndexFillOp::get_collective_dense_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      ApEvent ready;
+      Domain domain = launch_space->get_domain(ready, true/*tight*/);
+      // No need to wait for the event to be ready since we just care
+      // about whether the domain is dense or not
+      if (domain.dense())
+        return domain;
+      else
+        return Domain::NO_DOMAIN;
     }
 
     //--------------------------------------------------------------------------

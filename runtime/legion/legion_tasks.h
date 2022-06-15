@@ -1270,8 +1270,7 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From CollectiveInstanceCreator
-      virtual IndexSpace get_collective_space(void) const
-        { return launch_space->handle; }
+      virtual Domain get_collective_dense_points(void) const;
       virtual size_t get_total_collective_instance_points(void)
         { return total_points; }
     public:
@@ -1468,8 +1467,7 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       // For collective instance creation
-      virtual IndexSpace get_collective_space(void) const
-        { return launch_space->handle; }
+      virtual Domain get_collective_dense_points(void) const;
       virtual size_t get_total_collective_instance_points(void)
         { return points.size(); }
       // Special invocations of these methods to forward on the
