@@ -2305,6 +2305,10 @@ std.rect_type = terralib.memoize(function(index_type)
       elseif std.type_eq(to, c.legion_domain_t) then
         return `([expr]:to_domain())
       end
+    elseif std.is_rect_type(to) then
+      if std.type_eq(from, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        return `([to] { lo = [expr].lo, hi = [expr].hi })
+      end
     end
     assert(false)
   end
