@@ -419,10 +419,63 @@ end
 -- ## Maps
 -- #################
 
+-- This is an insertion ordered map data structure. It supports the
+-- following operations:
+--
+--  * Put: O(1)
+--  * Get: O(1)
+--  * Iterate keys: O(M)
+--  * Iterate values: O(M)
+--  * Iterate key/value pairs: O(M)
+--
+-- Where N is the number of live entries, and M is the number of total
+-- (live + dead) entries. Right now there isn't any effort to do
+-- compaction (to reduce iteration from O(M) to O(N)), but this could
+-- be added in the future if it is determined to be an important use
+-- case.
+--
+-- Keys may be any value that supports data.hash().
+--
+-- The following APIs are supported on a map M:
+--
+--     M[k]                   -- equivalent to M:get(k)
+--     M[k] = v               -- equivalent to M:put(k, v)
+--     M:get(k)
+--     M:has(k)               -- equivalent to M:get(k) (but see default_map)
+--     M:put(k, v)
+--     for _, k in M:keys()   -- note that the _ is undefined
+--     for _, v in M:values() -- note that the _ is undefined
+--     for k, v in M:items()
+--     M:is_empty()
+--     M:copy()               -- note: a shallow copy
+--     M:map(fn)              -- map fn over k, v pairs and return a map
+--     M:map_list(fn)         -- map fn over k, v pairs and return a list
+--     tostring(M)            -- human readable representation of the map
+--
+-- The following APIs are NOT SUPPORTED:
+--
+--     for k, v in pairs(M)   -- DON'T DO THIS: IT WON'T WORK
+--     for k, v in ipairs(M)  -- DON'T DO THIS: IT WON'T WORK
+
 data.map = {}
 
+do
+-- Sentinels that won't accidentally collide with keys supplied by the user.
+local keys_by_hash = {}
+local values_by_hash = {}
+local next_insertion_index = {}
+local hash_by_insertion_index = {}
+local insertion_index_by_hash = {}
+
 function data.newmap()
-  return setmetatable({ __keys_by_hash = {}, __values_by_hash = {} }, data.map)
+  return setmetatable(
+    {
+      [keys_by_hash] = {},
+      [values_by_hash] = {},
+      [next_insertion_index] = 1,
+      [hash_by_insertion_index] = {},
+      [insertion_index_by_hash] = {},
+    }, data.map)
 end
 
 function data.map_from_table(t)
@@ -438,7 +491,7 @@ function data.is_map(x)
 end
 
 function data.map:__index(k)
-  return self.__values_by_hash[data.hash(k)] or data.map[k]
+  return self[values_by_hash][data.hash(k)] or data.map[k]
 end
 
 function data.map:__newindex(k, v)
@@ -446,44 +499,97 @@ function data.map:__newindex(k, v)
 end
 
 function data.map:has(k)
-  return self.__values_by_hash[data.hash(k)]
+  return self[values_by_hash][data.hash(k)]
 end
 
 function data.map:get(k)
-  return self.__values_by_hash[data.hash(k)]
+  return self[values_by_hash][data.hash(k)]
 end
 
-function data.map:put(k, v)
+function data.map:put(k, v, verbose)
   local kh = data.hash(k)
   if v == nil then
     k = nil
   end
-  self.__keys_by_hash[kh] = k
-  self.__values_by_hash[kh] = v
+
+  local idx = self[insertion_index_by_hash][kh]
+  if not idx and v ~= nil then
+    idx = self[next_insertion_index]
+    self[next_insertion_index] = self[next_insertion_index] + 1
+  end
+
+  self[keys_by_hash][kh] = k
+  self[values_by_hash][kh] = v
+  self[insertion_index_by_hash][kh] = v ~= nil and idx or nil
+  if idx then
+    if v ~= nil then
+      self[hash_by_insertion_index][idx] = kh
+    else
+      self[hash_by_insertion_index][idx] = nil
+    end
+  end
 end
 
-function data.map:next_item(k)
-  local next_kh, next_k = next(self.__keys_by_hash, data.hash(k))
-  if next_kh == nil then
-    return
-  end
-  return next_k, self.__values_by_hash[next_kh]
+function data.map:next_item(last_k, verbose)
+  local idx = last_k ~= nil and
+    self[insertion_index_by_hash][data.hash(last_k)] or 0
+
+  local k, v
+  repeat
+    idx = idx + 1
+    local kh = self[hash_by_insertion_index][idx]
+    if kh ~= nil then
+      k = self[keys_by_hash][kh]
+      v = self[values_by_hash][kh]
+    else
+      k, v = nil, nil
+    end
+  until k ~= nil or idx + 1 >= self[next_insertion_index]
+  return k, v
 end
 
 function data.map:items()
   return data.map.next_item, self, nil
 end
 
+function data.map:next_key(idx)
+  local k
+  repeat
+    idx = idx + 1
+    local kh = self[hash_by_insertion_index][idx]
+    if kh ~= nil then
+      k = self[keys_by_hash][kh]
+    else
+      k = nil
+    end
+  until k ~= nil or idx + 1 >= self[next_insertion_index]
+  return k ~= nil and idx or nil, k
+end
+
 function data.map:keys()
-  return pairs(self.__keys_by_hash)
+  return data.map.next_key, self, 0
+end
+
+function data.map:next_value(idx)
+  local v
+  repeat
+    idx = idx + 1
+    local kh = self[hash_by_insertion_index][idx]
+    if kh ~= nil then
+      v = self[values_by_hash][kh]
+    else
+      v = nil
+    end
+  until v ~= nil or idx + 1 >= self[next_insertion_index]
+  return v ~= nil and idx or nil, v
 end
 
 function data.map:values()
-  return pairs(self.__values_by_hash)
+  return data.map.next_value, self, 0
 end
 
 function data.map:is_empty()
-  return next(self.__values_by_hash) == nil
+  return next(self[values_by_hash]) == nil
 end
 
 function data.map:copy()
@@ -513,9 +619,46 @@ function data.map:__tostring()
     end):concat(",") .. "}"
 end
 
+function data.map:inspect()
+  print("keys_by_hash:")
+  for k, v in pairs(self[keys_by_hash]) do
+    print("", k, v)
+  end
+  print("values_by_hash:")
+  for k, v in pairs(self[values_by_hash]) do
+    print("", k, v)
+  end
+  print("insertion_index_by_hash:")
+  for k, v in pairs(self[insertion_index_by_hash]) do
+    print("", k, v)
+  end
+  print("hash_by_insertion_index:")
+  for k, v in pairs(self[hash_by_insertion_index]) do
+    print("", k, v)
+  end
+  print("next_insertion_index:", self[next_insertion_index])
+end
+end -- data.map
+
 -- #####################################
 -- ## Default Maps
 -- #################
+
+-- Default maps are like maps with the following differences:
+--
+-- The factory, supplied to data.new_default_map is called to
+-- construct new keys on the following API calls:
+--
+--     M:get(k) -- returns factory(k) if value does not exist
+--     M[k]     -- equivalent to M:get(k)
+--
+-- The following API calls DO NOT construct default values:
+--
+--     M:has(k) -- returns nil if the value does not exist
+
+do
+-- Sentinels that won't accidentally collide with keys supplied by the user.
+local default_factory = {}
 
 data.default_map = setmetatable(
   {
@@ -526,14 +669,10 @@ data.default_map = setmetatable(
     __index = data.map,
 })
 
-function data.new_default_map(default)
-  return setmetatable(
-    {
-      __keys_by_hash = {},
-      __values_by_hash = {},
-      __default = default,
-    },
-    data.default_map)
+function data.new_default_map(factory)
+  local map = data.newmap()
+  rawset(map, default_factory, factory)
+  return setmetatable(map, data.default_map)
 end
 
 local function make_recursive_map(depth)
@@ -555,7 +694,7 @@ end
 function data.default_map:__index(k)
   local lookup = data.map.get(self, k) or data.default_map[k]
   if lookup == nil then
-    lookup = self.__default(k)
+    lookup = self[default_factory](k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
@@ -568,10 +707,11 @@ end
 function data.default_map:get(k)
   local lookup = data.map.get(self, k)
   if lookup == nil then
-    lookup = self.__default(k)
+    lookup = self[default_factory](k)
     if lookup ~= nil then self:put(k, lookup) end
   end
   return lookup
 end
+end -- data.default_map
 
 return data

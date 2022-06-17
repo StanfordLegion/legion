@@ -433,6 +433,13 @@ class Future(object):
         value_size = c.legion_future_get_untyped_size(self.handle)
         return ffi.buffer(value_ptr, value_size)
 
+    def is_ready(self):
+        self.resolve_handle()
+
+        if self.handle is None:
+            return True
+        return c.legion_future_is_ready(self.handle)
+
 class FutureMap(object):
     __slots__ = ['handle', 'value_type']
     def __init__(self, handle, value_type=None):
