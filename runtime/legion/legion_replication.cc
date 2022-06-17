@@ -7485,6 +7485,7 @@ namespace Legion {
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
+                                   map_applied_conditions,
                                    has_blocking_call, this);
         if (!current_template->is_replayable())
         {
@@ -7794,6 +7795,7 @@ namespace Legion {
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
+                                   map_applied_conditions,
                                    has_blocking_call, this);
         if (!current_template->is_replayable())
         {
@@ -10030,6 +10032,144 @@ namespace Legion {
       derez.deserialize(done_event);
 
       physical_template->record_trace_shard_event(event, result);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_trace_frontier_request(
+        ShardedPhysicalTemplate *physical_template, ShardID shard_source, 
+        AddressSpaceID template_source, size_t template_index, ApEvent event,
+        AddressSpaceID event_space, unsigned frontier, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // See whether we are on the right node to handle this request, if not
+      // then forward the request onto the proper node
+      if (event_space != runtime->address_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(template_source == runtime->address_space);
+#endif
+        // Check to see if we have a shard on that address space, if not
+        // then we know that this event can't have come from there
+        bool found = false;
+        for (unsigned idx = 0; idx < address_spaces->size(); idx++)
+        {
+          if ((*address_spaces)[idx] != event_space)
+            continue;
+          found = true;
+          break;
+        }
+        if (found)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(repl_id);
+            rez.serialize(physical_template);
+            rez.serialize(template_index);
+            rez.serialize(shard_source);
+            rez.serialize(event);
+            rez.serialize(frontier);
+            rez.serialize(done_event);
+          }
+          runtime->send_control_replicate_trace_frontier_request(event_space,
+                                                                 rez);
+        }
+        else // Can just trigger the done event as there is nothing to send
+          Runtime::trigger_event(done_event);
+      }
+      else
+      {
+        // Ask each of our local shards to check for the event in the template
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          const ApBarrier result =
+            (*it)->handle_find_trace_shard_frontier(template_index, 
+                                                    event, shard_source);
+          // If we found it then we are done
+          if (result.exists())
+          {
+            send_trace_frontier_response(physical_template, template_source,
+                                         frontier, result, done_event);
+            return;
+          }
+        }
+        // If we make it here then we didn't find it so just trigger done
+        Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_frontier_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      size_t template_index;
+      derez.deserialize(template_index);
+      ShardID shard_source;
+      derez.deserialize(shard_source);
+      ApEvent event;
+      derez.deserialize(event);
+      unsigned frontier;
+      derez.deserialize(frontier);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->send_trace_frontier_request(physical_template, shard_source,
+          source, template_index, event, runtime->address_space, frontier,
+          done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_trace_frontier_response(
+        ShardedPhysicalTemplate *physical_template, AddressSpaceID temp_source,
+        unsigned frontier, ApBarrier result, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      if (temp_source != runtime->address_space)
+      {
+        // Not local so send the response message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(physical_template);
+          rez.serialize(frontier);
+          rez.serialize(result);
+          rez.serialize(done_event);
+        }
+        runtime->send_control_replicate_trace_frontier_response(temp_source,
+                                                                rez);
+      }
+      else // This is local so handle it here
+      {
+        physical_template->record_trace_shard_frontier(frontier, result);
+        Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_frontier_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      unsigned frontier;
+      derez.deserialize(frontier);
+      ApBarrier result;
+      derez.deserialize(result);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      physical_template->record_trace_shard_frontier(frontier, result);
       Runtime::trigger_event(done_event);
     }
 

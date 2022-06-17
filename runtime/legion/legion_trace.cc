@@ -1300,7 +1300,8 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id,
+                                   map_applied_conditions, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1503,7 +1504,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id,
+                                   map_applied_conditions, has_blocking_call);
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -3855,25 +3857,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), coordinates(rhs.coordinates),
-        replayable(false, "uninitialized"), fence_completion_id(0),
-        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalTemplate::~PhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock tpl_lock(template_lock);
-        for (std::set<InstUser*>::iterator it = all_users.begin();
-             it != all_users.end(); ++it)
-          delete (*it);
         for (std::vector<TraceConditionSet*>::const_iterator it =
               conditions.begin(); it != conditions.end(); it++)
         {
@@ -4037,9 +4025,13 @@ namespace Legion {
       LegionVector<VersionInfo> version_infos(trace_regions.size());
       for (FieldMaskSet<RegionNode>::const_iterator it =
             trace_regions.begin(); it != trace_regions.end(); it++, index++)
+      {
         it->first->perform_versioning_analysis(ctx, context, 
             &version_infos[index], it->second, opid, 
             trace->runtime->address_space, eq_events);
+        if (it->first->remove_base_resource_ref(TRACE_REF))
+          delete it->first;
+      }
       trace_regions.clear();
       if (!eq_events.empty())
       {
@@ -4189,6 +4181,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
+                                    std::set<RtEvent> &applied_events,
                                     bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
@@ -4200,12 +4193,12 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(op, true/*do transitive reduction inline*/);
+          optimize(op, applied_events, true/*do transitive reduction inline*/);
           dump_template();
         }
         return;
       }
-      optimize(op, false/*do transitive reduction inline*/);
+      optimize(op, applied_events, false/*do transitive reduction inline*/);
       size_t num_events = events.size();
       events.clear();
       events.resize(num_events);
@@ -4225,20 +4218,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::optimize(ReplTraceOp *op, 
+                                    std::set<RtEvent> &applied_events,
                                     bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> gen;
       if (trace->perform_fence_elision)
-        elide_fences(gen, op);
+        elide_fences(gen, op, applied_events);
       else
       {
+        find_all_last_instance_user_events(applied_events);
 #ifdef DEBUG_LEGION
         assert(instructions.size() == events.size());
 #endif
         gen.resize(events.size());
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
+        compute_frontiers(applied_events);
       }
       if (!trace->runtime->no_trace_optimization)
       {
@@ -4253,6 +4249,7 @@ namespace Legion {
       // After elide fences we can clear these views
       op_insts.clear();
       copy_insts.clear();
+      instance_last_users.clear();
       // Check to see if the indirection fields for any across copies are
       // mutated during the execution of the trace. If they aren't then we
       // know that we don't need to recompute preimages on back-to-back replays
@@ -4261,7 +4258,7 @@ namespace Legion {
         for (std::vector<IssueAcross*>::const_iterator it =
               across_copies.begin(); it != across_copies.end(); it++)
         {
-          std::map<unsigned,InstExprs>::iterator finder =
+          std::map<unsigned,InstUsers>::iterator finder =
             src_indirect_insts.find((*it)->lhs);
           if ((finder != src_indirect_insts.end()) &&
               are_read_only_users(finder->second))
@@ -4275,13 +4272,137 @@ namespace Legion {
         src_indirect_insts.clear();
         dst_indirect_insts.clear();
       }
+      // We don't need the expression or view references anymore
+      for (std::set<InstanceView*>::const_iterator it =
+            recorded_views.begin(); it != recorded_views.end(); it++)
+        if ((*it)->remove_base_valid_ref(TRACE_REF))
+          delete (*it);
+      recorded_views.clear();
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+           recorded_expressions.begin(); it != recorded_expressions.end(); it++)
+        if ((*it)->remove_base_expression_reference(TRACE_REF))
+          delete (*it);
+      recorded_expressions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::find_all_last_instance_user_events(
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<TraceLocalID,InstUsers>::const_iterator it =
+            op_insts.begin(); it != op_insts.end(); it++)
+        find_last_instance_events(it->second, ready_events);
+      for (std::map<unsigned,InstUsers>::const_iterator it =
+            copy_insts.begin(); it != copy_insts.end(); it++)
+        find_last_instance_events(it->second, ready_events);
+      for (std::map<unsigned,InstUsers>::const_iterator it =
+            src_indirect_insts.begin(); it != src_indirect_insts.end(); it++)
+        find_last_instance_events(it->second, ready_events);
+      for (std::map<unsigned,InstUsers>::const_iterator it =
+            dst_indirect_insts.begin(); it != dst_indirect_insts.end(); it++)
+        find_last_instance_events(it->second, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::find_last_instance_events(const InstUsers &users,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      for (InstUsers::const_iterator uit =
+            users.begin(); uit != users.end(); uit++)
+      {
+        std::deque<LastUserResult> &results =
+          instance_last_users[uit->instance];
+        // Scan through all the queries we've done so far for this instance
+        // and see if we've already done one for these parameters
+        bool found = false;
+        for (std::deque<LastUserResult>::const_iterator it =
+              results.begin(); it != results.end(); it++)
+        {
+          if (!it->user.matches(*uit))
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+        {
+          results.emplace_back(LastUserResult(*uit));
+          LastUserResult &result = results.back();
+          // Query the view for the events that it needs
+          uit->instance.view->find_last_users(result.events,
+              uit->instance.collective_point, uit->usage,
+              uit->mask, uit->expr, ready_events);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::compute_frontiers(std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // We need to wait for all the last user instance events to be ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      // Now we can convert all the results to frontiers
+      std::map<ApEvent,unsigned> frontier_map;
+      for (std::map<UniqueInst,std::deque<LastUserResult> >::iterator lit =
+           instance_last_users.begin(); lit != instance_last_users.end(); lit++)
+      {
+        for (std::deque<LastUserResult>::iterator uit =
+              lit->second.begin(); uit != lit->second.end(); uit++)
+        {
+          // For each event convert it into a frontier
+          for (std::set<ApEvent>::const_iterator it =
+                uit->events.begin(); it != uit->events.end(); it++)
+          {
+            std::map<ApEvent,unsigned>::const_iterator finder =
+              frontier_map.find(*it);
+            if (finder == frontier_map.end())
+            {
+              unsigned index = find_frontier_event(*it, ready_events);
+              uit->frontiers.push_back(index);
+              frontier_map[*it] = index;
+            }
+            else
+              uit->frontiers.push_back(finder->second);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PhysicalTemplate::find_frontier_event(ApEvent event,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if it is an event we know about
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
+      // If it's not an event we recognize we can just return the start event
+      if (finder == event_map.end())
+        return 0;
+#ifdef DEBUG_LEGION
+      assert(frontiers.find(finder->second) == frontiers.end());
+#endif
+      // Make a new frontier event
+      const unsigned next_event_id = events.size();
+      frontiers[finder->second] = next_event_id;
+      events.resize(next_event_id + 1);
+      return next_event_id;
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::elide_fences(std::vector<unsigned> &gen, 
-                                        ReplTraceOp *op)
+                               ReplTraceOp *op, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
+      // find all the last instance user events
+      find_all_last_instance_user_events(ready_events);
       // Reserve some events for merges to be added during fence elision
       unsigned num_merges = 0;
       for (std::vector<Instruction*>::iterator it = instructions.begin();
@@ -4359,8 +4480,13 @@ namespace Legion {
       // the generator of events[idx] is instructions[idx].
       // After fence elision, the generator of events[idx] is
       // instructions[gen[idx]].
-      gen.resize(events.size());
+      gen.resize(events.size(), 0);
       std::vector<Instruction*> new_instructions;
+
+      // Now compute the frontiers for the last instance users to get 
+      // them in flight and have all the results ready by the time 
+      // we go to do the fence elision
+      compute_frontiers(ready_events);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -4372,11 +4498,11 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              std::map<TraceLocalID, InstExprs>::iterator finder =
+              std::map<TraceLocalID, InstUsers>::iterator finder =
                 op_insts.find(replay->owner);
               if (finder == op_insts.end()) break;
               std::set<unsigned> users;
-              find_all_last_users(finder->second, users, ready_events);
+              find_all_last_users(finder->second, users);
               rewrite_preconditions(replay->rhs, users, instructions, 
                   new_instructions, gen, ready_events, merge_starts);
               break;
@@ -4384,13 +4510,13 @@ namespace Legion {
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              std::map<unsigned, InstExprs>::iterator finder =
+              std::map<unsigned, InstUsers>::iterator finder =
                 copy_insts.find(copy->lhs);
 #ifdef DEBUG_LEGION
               assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
-              find_all_last_users(finder->second, users, ready_events);
+              find_all_last_users(finder->second, users);
               rewrite_preconditions(copy->precondition_idx, users,
                   instructions, new_instructions, gen, 
                   ready_events, merge_starts);
@@ -4399,13 +4525,13 @@ namespace Legion {
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              std::map<unsigned, InstExprs>::iterator finder =
+              std::map<unsigned, InstUsers>::iterator finder =
                 copy_insts.find(fill->lhs);
 #ifdef DEBUG_LEGION
               assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
-              find_all_last_users(finder->second, users, ready_events);
+              find_all_last_users(finder->second, users);
               rewrite_preconditions(fill->precondition_idx, users,
                   instructions, new_instructions, gen,
                   ready_events, merge_starts);
@@ -4414,13 +4540,13 @@ namespace Legion {
           case ISSUE_ACROSS:
             {
               IssueAcross *across = inst->as_issue_across();
-              std::map<unsigned, InstExprs>::iterator finder =
+              std::map<unsigned, InstUsers>::iterator finder =
                 copy_insts.find(across->lhs);
 #ifdef DEBUG_LEGION
               assert(finder != copy_insts.end());
 #endif
               std::set<unsigned> users;
-              find_all_last_users(finder->second, users, ready_events);
+              find_all_last_users(finder->second, users);
               // This is super subtle: for indirections that are
               // working collectively together on a set of indirect
               // source or destination instances, we actually have
@@ -4447,7 +4573,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(finder != src_indirect_insts.end());
 #endif
-                find_all_last_users(finder->second, users, ready_events);
+                find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->src_indirect_precondition, users,
                     instructions, new_instructions, gen,
                     ready_events, merge_starts);
@@ -4459,7 +4585,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(finder != dst_indirect_insts.end());
 #endif
-                find_all_last_users(finder->second, users, ready_events);
+                find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->dst_indirect_precondition, users,
                     instructions, new_instructions, gen,
                     ready_events, merge_starts);
@@ -6233,8 +6359,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_op_inst(const TraceLocalID &tlid,
                                           unsigned idx,
-                                          PhysicalInstance inst,
-                                          DistributedID inst_did,
+                                          const UniqueInst &inst,
                                           RegionNode *node,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
@@ -6242,22 +6367,68 @@ namespace Legion {
                                           std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      const UniqueInst key(inst, inst_did);
       AutoLock tpl_lock(template_lock);
-      unsigned entry = find_memo_entry(tlid);
-
-      FieldMaskSet<IndexSpaceExpression> &insts = op_insts[tlid][key];
-      IndexSpaceNode *expr = node->row_source;
-      insts.insert(expr, user_mask);
+      if (trace_regions.insert(node, user_mask))
+        node->add_base_resource_ref(TRACE_REF);
       if (update_validity)
-        add_inst_user(key, usage, entry, expr, user_mask, applied);
-      trace_regions.insert(node, user_mask);
+        record_instance_user(op_insts[tlid], inst, usage, 
+                             node->row_source, user_mask, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_instance_user(InstUsers &users,
+                                                const UniqueInst &instance,
+                                                const RegionUsage &usage,
+                                                IndexSpaceExpression *expr,
+                                                const FieldMask &mask,
+                                                std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      if (!IS_READ_ONLY(usage))
+        record_mutated_instance(instance, expr, mask, applied);
+      for (InstUsers::iterator it = users.begin(); it != users.end(); it++)
+      {
+        if (!it->matches(instance, usage, expr))
+          continue;
+        it->mask |= mask;
+        return;
+      }
+      users.emplace_back(InstanceUser(instance, usage, expr, mask));
+      if (recorded_views.insert(instance.view).second)
+      {
+        WrapperReferenceMutator mutator(applied);
+        instance.view->add_base_valid_ref(TRACE_REF, &mutator);
+      }
+      if (recorded_expressions.insert(expr).second)
+      {
+        WrapperReferenceMutator mutator(applied);
+        expr->add_base_expression_reference(TRACE_REF, &mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_mutated_instance(const UniqueInst &inst,
+                              IndexSpaceExpression *expr, const FieldMask &mask,
+                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<IndexSpaceExpression> &insts = mutated_insts[inst];
+      if (insts.empty() && recorded_views.insert(inst.view).second)
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        inst.view->add_base_valid_ref(TRACE_REF, &mutator);
+      }
+      if (insts.insert(expr,mask) && recorded_expressions.insert(expr).second)
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        expr->add_base_expression_reference(TRACE_REF, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_inst(ApEvent lhs,
                                  IndexSpaceExpression *expr,
-                                 PhysicalInstance inst, DistributedID inst_did,
+                                 const UniqueInst &inst,
                                  const FieldMask &fill_mask,
                                  std::set<RtEvent> &applied_events,
                                  const bool reduction_initialization)
@@ -6268,9 +6439,9 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_inst(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
-                  inst, inst_did, fill_mask, applied_events);
-      record_expression_inst(copy_insts[lhs_], expr, inst, inst_did, fill_mask);
+      const RegionUsage usage(LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, 0);
+      record_instance_user(copy_insts[lhs_], inst, usage, expr, 
+                           fill_mask, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6278,8 +6449,7 @@ namespace Legion {
                          const TraceLocalID &tlid,
                          unsigned src_idx, unsigned dst_idx,
                          IndexSpaceExpression *expr,
-                         PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                         DistributedID src_did, DistributedID dst_did,
+                         const UniqueInst &src_inst, const UniqueInst &dst_inst,
                          const FieldMask &src_mask, const FieldMask &dst_mask,
                          PrivilegeMode src_mode, PrivilegeMode dst_mode,
                          ReductionOpID redop, std::set<RtEvent> &applied_events)
@@ -6290,12 +6460,12 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_inst(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
-                  src_inst, src_did, src_mask, applied_events);
-      record_expression_inst(copy_insts[lhs_], expr, src_inst,src_did,src_mask);
-      record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, redop),
-                   dst_inst, dst_did, dst_mask, applied_events);
-      record_expression_inst(copy_insts[lhs_], expr, dst_inst,dst_did,dst_mask);
+      const RegionUsage src_usage(src_mode, LEGION_EXCLUSIVE, 0);
+      const RegionUsage dst_usage(dst_mode, LEGION_EXCLUSIVE, redop);
+      record_instance_user(copy_insts[lhs_], src_inst, src_usage,
+                           expr, src_mask, applied_events);
+      record_instance_user(copy_insts[lhs_], dst_inst, dst_usage,
+                           expr, dst_mask, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6315,24 +6485,18 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
+      const RegionUsage src_usage(src_mode, LEGION_EXCLUSIVE, 0);
       for (AcrossInsts::const_iterator it =
             src_insts.begin(); it != src_insts.end(); it++)
-      {
-        record_inst(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
-            it->first.first, it->first.second, it->second, applied_events);
-        record_expression_inst(src_indirect ? 
-            src_indirect_insts[lhs_] : copy_insts[lhs_], 
-            expr, it->first.first, it->first.second, it->second);
-      }
+        record_instance_user(src_indirect ? 
+            src_indirect_insts[lhs_] : copy_insts[lhs_],
+            it->first, src_usage, expr, it->second, applied_events);
+      const RegionUsage dst_usage(dst_mode, LEGION_EXCLUSIVE, 0);
       for (AcrossInsts::const_iterator it =
             dst_insts.begin(); it != dst_insts.end(); it++)
-      {
-        record_inst(lhs_, expr, RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
-             it->first.first, it->first.second, it->second, applied_events);
-        record_expression_inst(dst_indirect ?
-            dst_indirect_insts[lhs_] : copy_insts[lhs_], 
-            expr, it->first.first, it->first.second, it->second);
-      }
+        record_instance_user(dst_indirect ?
+            dst_indirect_insts[lhs_] : copy_insts[lhs_],
+            it->first, dst_usage, expr, it->second, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -6347,113 +6511,11 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned indirect = find_event(indirect_done, tpl_lock);
-      const unsigned all = find_event(all_done, tpl_lock);
-      // The thing about indirect views is that the event for which they
-      // are done being used is not always the same as the indirect copy
-      // that generated them because they can be collective, so we need to
-      // record the summary event for when all the indirect copies are done
-      // for their view user
+      const RegionUsage usage(privilege, LEGION_EXCLUSIVE, 0);
       for (AcrossInsts::const_iterator it = 
             insts.begin(); it != insts.end(); it++)
-      {
-        record_inst(all, expr, RegionUsage(privilege, LEGION_EXCLUSIVE, 0),
-                    it->first.first, it->first.second, it->second, applied);
-        record_expression_inst(copy_insts[indirect], expr,
-            it->first.first, it->first.second, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_inst(unsigned entry,
-                                       IndexSpaceExpression *expr,
-                                       const RegionUsage &usage,
-                                       PhysicalInstance inst,
-                                       DistributedID inst_did,
-                                       const FieldMask &inst_mask,
-                                       std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      const UniqueInst key(inst, inst_did);
-      add_inst_user(key, usage, entry, expr, inst_mask, applied);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate::InstUser::InstUser(const RegionUsage &r, unsigned u, 
-                                         IndexSpaceExpression *e, ShardID s)
-      : usage(r), user(u), expr(e), shard(s)
-    //--------------------------------------------------------------------------
-    {
-      expr->add_base_expression_reference(TRACE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate::InstUser::~InstUser(void)
-    //--------------------------------------------------------------------------
-    {
-      if (expr->remove_base_expression_reference(TRACE_REF))
-        delete expr;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::add_inst_user(const UniqueInst &inst,
-                                         const RegionUsage &usage,
-                                         unsigned user_index,
-                                         IndexSpaceExpression *user_expr,
-                                         const FieldMask &user_mask,
-                                         std::set<RtEvent> &applied,
-                                         int owner_shard)
-    //--------------------------------------------------------------------------
-    {
-      InstUser *user = new InstUser(usage, user_index, user_expr, owner_shard);
-      all_users.insert(user);
-      RegionTreeForest *forest = trace->runtime->forest;
-      FieldMaskSet<InstUser> &users = inst_users[inst];
-      FieldMaskSet<InstUser> to_delete;
-      for (FieldMaskSet<InstUser>::iterator it = users.begin();
-           it != users.end(); ++it)
-      {
-        FieldMask overlap = user_mask & it->second;
-        if (!overlap)
-          continue;
-
-        IndexSpaceExpression *expr1 = user->expr;
-        IndexSpaceExpression *expr2 = it->first->expr;
-        if (forest->intersect_index_spaces(expr1, expr2)->is_empty())
-          continue;
-
-        DependenceType dep =
-          check_dependence_type<false>(it->first->usage, user->usage);
-        if (dep == LEGION_NO_DEPENDENCE)
-          continue;
-
-        to_delete.insert(it->first, overlap);
-      }
-
-      for (FieldMaskSet<InstUser>::iterator it = to_delete.begin();
-           it != to_delete.end(); ++it)
-      {
-        FieldMaskSet<InstUser>::iterator finder = users.find(it->first);
-#ifdef DEBUG_LEGION
-        assert(finder != users.end());
-#endif
-        finder.filter(it->second);
-        if (!finder->second)
-          users.erase(finder);
-      }
-
-      users.insert(user, user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalTemplate::record_expression_inst(InstExprs &cviews,
-                                        IndexSpaceExpression *expr,
-                                        PhysicalInstance inst,
-                                        DistributedID inst_did,
-                                        const FieldMask &inst_mask)
-    //--------------------------------------------------------------------------
-    {
-      const UniqueInst key(inst, inst_did);
-      cviews[key].insert(expr, inst_mask);
+        record_instance_user(copy_insts[indirect], it->first, 
+                             usage, expr, it->second, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -6683,11 +6745,9 @@ namespace Legion {
     void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      for (InstUsers::const_iterator it = inst_users.begin();
-            it != inst_users.end(); ++it)
-        for (FieldMaskSet<InstUser>::const_iterator uit = it->second.begin();
-              uit != it->second.end(); ++uit)
-          postconditions.insert(events[uit->first->user]);
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        postconditions.insert(events[it->second]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
       // Now we can remove the operations as well
@@ -6827,94 +6887,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::find_all_last_users(InstExprs &inst_exprs,
-                                               std::set<unsigned> &users,
-                                               std::set<RtEvent> &ready_events)
+    void PhysicalTemplate::find_all_last_users(const InstUsers &inst_users,
+                                               std::set<unsigned> &users) const
     //--------------------------------------------------------------------------
     {
-      for (InstExprs::iterator it = inst_exprs.begin(); it != inst_exprs.end();
-           ++it)
-        for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
-             it->second.begin(); eit != it->second.end(); ++eit)
-          find_last_users(it->first,eit->first,eit->second,users,ready_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::find_last_users(const UniqueInst &inst,
-                                           IndexSpaceExpression *expr,
-                                           const FieldMask &mask,
-                                           std::set<unsigned> &users,
-                                           std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      if (expr->is_empty()) return;
-
-      InstUsers::const_iterator finder = inst_users.find(inst);
-      if (finder == inst_users.end()) return;
-
-      RegionTreeForest *forest = trace->runtime->forest;
-      for (FieldMaskSet<InstUser>::const_iterator uit = 
-            finder->second.begin(); uit != finder->second.end(); ++uit)
-        if (!!(uit->second & mask))
-        {
-          InstUser *user = uit->first;
-          IndexSpaceExpression *intersect =
-            forest->intersect_index_spaces(expr, user->expr);
-          if (!intersect->is_empty())
-          {
-            std::map<unsigned,unsigned>::const_iterator finder =
-              frontiers.find(user->user);
-            // See if we have recorded this frontier yet or not
-            if (finder == frontiers.end())
-            {
-              const unsigned next_event_id = events.size();
-              frontiers[user->user] = next_event_id;
-              events.resize(next_event_id + 1);
-              users.insert(next_event_id);
-            }
-            else
-              users.insert(finder->second);
-          }
-        }
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::are_read_only_users(InstExprs &inst_exprs)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeForest *forest = trace->runtime->forest;
-      for (InstExprs::const_iterator vit = 
-            inst_exprs.begin(); vit != inst_exprs.end(); vit++)
+      for (InstUsers::const_iterator uit =
+            inst_users.begin(); uit != inst_users.end(); uit++)
       {
-        InstUsers::const_iterator finder = inst_users.find(vit->first);
+        std::map<UniqueInst,std::deque<LastUserResult> >::const_iterator
+          finder = instance_last_users.find(uit->instance);
 #ifdef DEBUG_LEGION
-        assert(finder != inst_users.end());
+        assert(finder != instance_last_users.end());
 #endif
-        for (FieldMaskSet<InstUser>::const_iterator uit =
-              finder->second.begin(); uit != finder->second.end(); uit++)
+        for (std::deque<LastUserResult>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
         {
-          // If the user is read-only then we don't care
-          if (IS_READ_ONLY(uit->first->usage))
+          if (!it->user.matches(*uit))
             continue;
-          // If there are no overlapping fields then there is nothing
-          // to care about
-          if (uit->second * vit->second.get_valid_mask())
+#ifdef DEBUG_LEGION
+          assert(it->events.size() == it->frontiers.size());
+#endif
+          users.insert(it->frontiers.begin(), it->frontiers.end());
+          break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::are_read_only_users(InstUsers &inst_users)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (InstUsers::const_iterator vit = 
+            inst_users.begin(); vit != inst_users.end(); vit++)
+      {
+        // Scan through the other users and look for anything overlapping
+        LegionMap<UniqueInst,
+                  FieldMaskSet<IndexSpaceExpression> >::const_iterator
+          finder = mutated_insts.find(vit->instance);
+        if (finder == mutated_insts.end())
+          continue;
+        if (vit->mask * finder->second.get_valid_mask())
+          continue;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if (vit->mask * it->second)
             continue;
-          // Now check all the expressions and see if they are independent
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); it++)
-          {
-            // If there are no overlapping fields then we are good
-            if (uit->second * it->second)
-              continue;
-            // Last chance: check to see if the expressions are independent
-            IndexSpaceExpression *intersect = 
-              forest->intersect_index_spaces(uit->first->expr, it->first);
-            if (intersect->is_empty())
-              continue;
-            // Not immutable
-            return false;
-          }
+          IndexSpaceExpression *intersect = 
+            forest->intersect_index_spaces(vit->expr, it->first);
+          if (intersect->is_empty())
+            continue;
+          // Not immutable
+          return false;
         }
       }
       return true;
@@ -7437,6 +7462,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ShardedPhysicalTemplate::find_trace_shard_frontier(ApEvent event,
+                                                           ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      // Check to see if we made this event
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
+      // If we didn't make this event then we don't do anything
+      if (finder == event_map.end() || (finder->second == NO_INDEX))
+        return ApBarrier::NO_AP_BARRIER;
+      std::map<unsigned,ApBarrier>::const_iterator barrier_finder =
+        local_frontiers.find(finder->second);
+      if (barrier_finder == local_frontiers.end())
+      {
+        // Make a barrier and record it 
+        const ApBarrier result(
+            Realm::Barrier::create_barrier(1/*arrival count*/));
+        barrier_finder = local_frontiers.insert(
+            std::make_pair(finder->second, result)).first;
+      }
+      // Record that this shard depends on this event
+      local_subscriptions[finder->second].insert(remote_shard);
+      return barrier_finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_trace_shard_frontier(
+                                           unsigned frontier, ApBarrier barrier)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      remote_frontiers.emplace_back(std::make_pair(barrier, frontier));
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::handle_trace_update(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -7448,196 +7508,26 @@ namespace Legion {
       std::set<RtEvent> applied;
       switch (kind)
       {
-        case UPDATE_INST_USER:
+        case UPDATE_MUTATED_INST:
           {
             derez.deserialize(done);
             UniqueInst inst;
-            derez.deserialize(inst.first);
-            derez.deserialize(inst.second);
+            RtEvent inst_ready = inst.deserialize(derez, runtime);
             PendingRemoteExpression pending;
             RtEvent expr_ready;
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                     source, pending, expr_ready);
-            if (expr_ready.exists())
+            if (expr_ready.exists() || inst_ready.exists())
             {
               DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
+              runtime->issue_runtime_meta_task(args,LG_LATENCY_MESSAGE_PRIORITY,
+                  Runtime::merge_events(expr_ready, inst_ready));
               return;
             }
-            else if (handle_update_inst_user(inst, user_expr, 
-                                             derez, applied, done))
+            else if (handle_update_mutated_inst(inst, user_expr, 
+                                                derez, applied, done))
               return;
-            break;
-          }
-        case UPDATE_LAST_USER:
-          {
-            size_t num_users;
-            derez.deserialize(num_users);
-            {
-              AutoLock tpl_lock(template_lock);
-              for (unsigned idx = 0; idx < num_users; idx++)
-              {
-                unsigned user;
-                derez.deserialize(user);
-                local_last_users.insert(user);
-              }
-            }
-            derez.deserialize(done);
-            break;
-          }
-        case FIND_LAST_USERS_REQUEST:
-          {
-            derez.deserialize(done);
-            UniqueInst inst;
-            derez.deserialize(inst.first);
-            derez.deserialize(inst.second);
-            PendingRemoteExpression pending;
-            RtEvent expr_ready;
-            IndexSpaceExpression *user_expr = 
-              IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
-                                                source, pending, expr_ready); 
-            if (expr_ready.exists())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
-              return;
-            }
-            else
-              handle_find_last_users(inst, user_expr, derez, applied); 
-            break;
-          }
-        case FIND_LAST_USERS_RESPONSE:
-          {
-            std::set<unsigned> *users;
-            derez.deserialize(users);
-            derez.deserialize(done);
-            size_t num_barriers;
-            derez.deserialize(num_barriers);
-            {
-              AutoLock tpl_lock(template_lock);
-              for (unsigned idx = 0; idx < num_barriers; idx++)
-              {
-                unsigned event_index;
-                derez.deserialize(event_index);
-                // Check to see if we already made a frontier for this
-                std::map<unsigned,unsigned>::const_iterator finder =
-                  frontiers.find(event_index);
-                // See if we have recorded this frontier yet or not
-                if (finder == frontiers.end())
-                {
-                  const unsigned next_event_id = events.size();
-                  frontiers[event_index] = next_event_id;
-                  events.resize(next_event_id + 1);
-                  users->insert(next_event_id);
-                }
-                else
-                  users->insert(finder->second);
-              }
-            }
-            break;
-          }
-        case FIND_FRONTIER_REQUEST:
-          {
-            ShardID source_shard;
-            derez.deserialize(source_shard);
-#ifdef DEBUG_LEGION
-            assert(source_shard != repl_ctx->owner_shard->shard_id);
-#endif
-            std::set<unsigned> *target;
-            derez.deserialize(target);
-            size_t num_events;
-            derez.deserialize(num_events);
-            std::vector<ApBarrier> result_frontiers;
-            {
-              AutoLock tpl_lock(template_lock);
-              for (unsigned idx = 0; idx < num_events; idx++)
-              {
-                unsigned event_index;
-                derez.deserialize(event_index);
-                // Translate this to a local frontier first
-                std::map<unsigned,unsigned>::const_iterator finder =
-                  frontiers.find(event_index);
-                // See if we have recorded this frontier yet or not
-                if (finder == frontiers.end())
-                {
-                  const unsigned next_event_id = events.size();
-                  frontiers[event_index] = next_event_id;
-                  events.resize(next_event_id + 1);
-                  finder = frontiers.find(event_index);
-                }
-                // Check to see if we have a barrier for this event yet
-                std::map<unsigned,ApBarrier>::const_iterator barrier_finder =
-                  local_frontiers.find(finder->second);
-                if (barrier_finder == local_frontiers.end())
-                {
-                  // Make a barrier and record it 
-                  const ApBarrier result(
-                      Realm::Barrier::create_barrier(1/*arrival count*/));
-                  local_frontiers[finder->second] = result;
-                  result_frontiers.push_back(result);
-                }
-                else
-                  result_frontiers.push_back(barrier_finder->second);
-                // Record that this shard depends on this event
-                local_subscriptions[finder->second].insert(source_shard);
-              }
-            }
-            RtUserEvent remote_done;
-            derez.deserialize(remote_done);
-            // Send the respose back to the source shard
-            ShardManager *manager = repl_ctx->shard_manager;
-            Serializer rez;
-            rez.serialize(manager->repl_id);
-            rez.serialize(source_shard);
-            rez.serialize(template_index);
-            rez.serialize(FIND_FRONTIER_RESPONSE);
-            rez.serialize(target);
-            rez.serialize<size_t>(result_frontiers.size());
-            for (std::vector<ApBarrier>::const_iterator it = 
-                  result_frontiers.begin(); it != result_frontiers.end(); it++)
-              rez.serialize(*it);
-            rez.serialize(remote_done);
-            manager->send_trace_update(source_shard, rez); 
-            break;
-          }
-        case FIND_FRONTIER_RESPONSE:
-          {
-            std::set<unsigned> *users;
-            derez.deserialize(users);
-            size_t num_barriers;
-            derez.deserialize(num_barriers);
-            {
-              AutoLock tpl_lock(template_lock);
-              for (unsigned idx = 0; idx < num_barriers; idx++)
-              {
-                ApBarrier barrier;
-                derez.deserialize(barrier);
-                // Scan through and see if we already have it
-                bool found = false;
-                for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator
-                      it = remote_frontiers.begin(); 
-                      it != remote_frontiers.end(); it++)
-                {
-                  if (it->first != barrier)
-                    continue;
-                  users->insert(it->second);
-                  found = true;
-                  break;
-                }
-                if (!found)
-                {
-                  const unsigned next_event_id = events.size();
-                  remote_frontiers.push_back(
-                      std::pair<ApBarrier,unsigned>(barrier, next_event_id));
-                  events.resize(next_event_id + 1);
-                  users->insert(next_event_id);
-                }
-              }
-            }
-            derez.deserialize(done);
             break;
           }
         case READ_ONLY_USERS_REQUEST:
@@ -7647,32 +7537,32 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(source_shard != repl_ctx->owner_shard->shard_id);
 #endif
-            InstExprs inst_exprs;
-            size_t num_insts;
-            derez.deserialize(num_insts);
+            size_t num_users;
+            derez.deserialize(num_users);
+            InstUsers inst_users(num_users);
             RegionTreeForest *forest = trace->runtime->forest;
-            for (unsigned vidx = 0; vidx < num_insts; vidx++)
+            std::vector<RtEvent> ready_events;
+            for (unsigned vidx = 0; vidx < num_users; vidx++)
             {
-              UniqueInst inst;
-              derez.deserialize(inst.first);
-              derez.deserialize(inst.second);
-              FieldMaskSet<IndexSpaceExpression> &exprs = inst_exprs[inst];
-              size_t num_exprs;
-              derez.deserialize(num_exprs);
-              for (unsigned idx = 0; idx < num_exprs; idx++)
-              {
-                IndexSpaceExpression *expr = 
+              InstanceUser &user = inst_users[vidx];
+              RtEvent ready = user.instance.deserialize(derez, trace->runtime);
+              if (ready.exists())
+                ready_events.push_back(ready);
+              user.expr = 
                  IndexSpaceExpression::unpack_expression(derez, forest, source);
-                FieldMask mask;
-                derez.deserialize(mask);
-                exprs.insert(expr, mask);
-              }
+              derez.deserialize(user.mask);
             }
             std::atomic<bool> *result;
             derez.deserialize(result);
             derez.deserialize(done);
             ShardManager *manager = repl_ctx->shard_manager;
-            if (!PhysicalTemplate::are_read_only_users(inst_exprs))
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            if (!PhysicalTemplate::are_read_only_users(inst_users))
             {
               Serializer rez;
               rez.serialize(manager->repl_id);
@@ -7888,37 +7778,21 @@ namespace Legion {
       Deserializer derez(dargs->buffer, dargs->buffer_size);
       switch (dargs->kind)
       {
-        case UPDATE_INST_USER:
+        case UPDATE_MUTATED_INST:
           {
             if (dargs->expr != NULL)
             {
-              if (dargs->target->handle_update_inst_user(dargs->inst,
-                    dargs->expr, derez, applied, dargs->done, dargs))
+              if (dargs->target->handle_update_mutated_inst(dargs->inst,
+                        dargs->expr, derez, applied, dargs->done, dargs))
                 return;
             }
             else
             {
               IndexSpaceExpression *expr = 
                 runtime->forest->find_remote_expression(dargs->pending);
-              if (dargs->target->handle_update_inst_user(dargs->inst,
-                    expr, derez, applied, dargs->done, dargs))
+              if (dargs->target->handle_update_mutated_inst(dargs->inst,
+                              expr, derez, applied, dargs->done, dargs))
                 return;
-            }
-            break;
-          }
-        case FIND_LAST_USERS_REQUEST:
-          {
-            if (dargs->expr != NULL)
-            {
-              dargs->target->handle_find_last_users(dargs->inst,
-                  dargs->expr, derez, applied);
-            }
-            else
-            {
-              IndexSpaceExpression *expr = 
-                runtime->forest->find_remote_expression(dargs->pending);
-              dargs->target->handle_find_last_users(dargs->inst,
-                                                    expr, derez,applied);
             }
             break;
           }
@@ -7941,7 +7815,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::handle_update_inst_user(
+    bool ShardedPhysicalTemplate::handle_update_mutated_inst(
                                               const UniqueInst &inst,
                                               IndexSpaceExpression *user_expr, 
                                               Deserializer &derez, 
@@ -7966,7 +7840,7 @@ namespace Legion {
           pre = tpl_lock.try_next();
         if (dargs == NULL)
         {
-          DeferTraceUpdateArgs args(this, UPDATE_INST_USER, done, inst,
+          DeferTraceUpdateArgs args(this, UPDATE_MUTATED_INST, done, inst,
                                     derez, user_expr, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
@@ -7983,125 +7857,11 @@ namespace Legion {
         }
         return true;
       }
-      RegionUsage usage;
-      derez.deserialize(usage);
-      unsigned user_index;
-      derez.deserialize(user_index);
       FieldMask user_mask;
       derez.deserialize(user_mask);
-      int owner_shard;
-      derez.deserialize(owner_shard);
-      PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr,
-                                      user_mask, applied, owner_shard);
+      PhysicalTemplate::record_mutated_instance(inst, user_expr,
+                                                user_mask, applied);
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_find_last_users(const UniqueInst &inst,
-                                                IndexSpaceExpression *user_expr,
-                                                Deserializer &derez, 
-                                                std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      ShardID source_shard;
-      derez.deserialize(source_shard);
-      std::set<unsigned> *target;
-      derez.deserialize(target);
-      // This is a local operation and all the data structures are
-      // read-only for this part so there is no need for the lock yet
-      std::set<std::pair<unsigned,ShardID> > sharded_users;
-      find_last_users_sharded(inst, user_expr, user_mask, sharded_users);
-      // Sort these into where they should go
-      std::map<ShardID,std::vector<unsigned> > requests;
-      for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
-            sharded_users.begin(); it != sharded_users.end(); it++)
-        requests[it->second].push_back(it->first);
-      // Send out the requests/responses
-      ShardManager *manager = repl_ctx->shard_manager;
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
-            requests.begin(); rit != requests.end(); rit++)
-      {
-        RtUserEvent remote_done = Runtime::create_rt_user_event();
-        if (rit->first == source_shard)
-        {
-          // Special case for sending values directly back to the user
-          Serializer rez;
-          rez.serialize(manager->repl_id);
-          rez.serialize(source_shard);
-          rez.serialize(template_index);
-          rez.serialize(FIND_LAST_USERS_RESPONSE);
-          rez.serialize(target);
-          rez.serialize(remote_done);
-          rez.serialize<size_t>(rit->second.size());
-          for (std::vector<unsigned>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize(*it);
-          manager->send_trace_update(source_shard, rez);
-        }
-        else if (rit->first == local_shard)
-        {
-          // Special case for ourselves so we can return the result as
-          // though we handled the remote frontier request
-          std::vector<ApBarrier> result_frontiers;
-          {
-            AutoLock tpl_lock(template_lock);
-            for (std::vector<unsigned>::const_iterator it = 
-                  rit->second.begin(); it != rit->second.end(); it++)
-            {
-              // These events have already been translated to frontiers
-              // so we just need to look up the local frontiers
-              // Check to see if we have a barrier for this event yet
-              std::map<unsigned,ApBarrier>::const_iterator finder =
-                local_frontiers.find(*it);
-              if (finder == local_frontiers.end())
-              {
-                // Make a barrier and record it 
-                const ApBarrier result(
-                    Realm::Barrier::create_barrier(1/*arrival count*/));
-                local_frontiers[*it] = result;
-                result_frontiers.push_back(result);
-              }
-              else
-                result_frontiers.push_back(finder->second);
-              // Record that this shard depends on this event
-              local_subscriptions[*it].insert(source_shard);
-            }
-          }
-          Serializer rez;
-          rez.serialize(manager->repl_id);
-          rez.serialize(source_shard);
-          rez.serialize(template_index);
-          rez.serialize(FIND_FRONTIER_RESPONSE);
-          rez.serialize(target);
-          rez.serialize<size_t>(result_frontiers.size());
-          for (std::vector<ApBarrier>::const_iterator it = 
-                result_frontiers.begin(); it != 
-                result_frontiers.end(); it++)
-            rez.serialize(*it);
-          rez.serialize(remote_done);
-          manager->send_trace_update(source_shard, rez);
-        }
-        else
-        {
-          Serializer rez;
-          rez.serialize(manager->repl_id);
-          rez.serialize(rit->first);
-          rez.serialize(template_index);
-          rez.serialize(FIND_FRONTIER_REQUEST);
-          rez.serialize(source_shard);
-          rez.serialize(target);
-          rez.serialize<size_t>(rit->second.size());
-          for (std::vector<unsigned>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize(*it); 
-          rez.serialize(remote_done);
-          manager->send_trace_update(rit->first, rez);
-        }
-        applied.insert(remote_done);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8144,48 +7904,6 @@ namespace Legion {
        PhysicalTemplate::check_replayable(op, context, opid, has_blocking_call);
       if (result)
       {
-        // One extra step to do here, since we sharded the view_users we
-        // need to send them back to the owner shards so that we can do
-        // the right thing for any calls to the get_completion
-        // Note we do this before the exchange so that we can use the 
-        // exchange as a barrier for everyone being done with the exchange
-        // In some cases we might do some unnecessary extra work, but its
-        // only for non-replayable traces so it should be minimal
-        std::map<ShardID,std::set<unsigned> > remote_last_users;
-        const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-        for (InstUsers::const_iterator vit = inst_users.begin();
-              vit != inst_users.end(); vit++)
-        {
-          for (FieldMaskSet<InstUser>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); it++)
-            if (it->first->shard != local_shard)
-              remote_last_users[it->first->shard].insert(it->first->user);
-        }
-        if (!remote_last_users.empty())
-        {
-          std::set<RtEvent> done_events;
-          ShardManager *manager = repl_ctx->shard_manager;
-          for (std::map<ShardID,std::set<unsigned> >::const_iterator sit = 
-                remote_last_users.begin(); sit != 
-                remote_last_users.end(); sit++)
-          {
-            RtUserEvent done = Runtime::create_rt_user_event();
-            Serializer rez;
-            rez.serialize(manager->repl_id);
-            rez.serialize(sit->first);
-            rez.serialize(template_index);
-            rez.serialize(UPDATE_LAST_USER);
-            rez.serialize<size_t>(sit->second.size());
-            for (std::set<unsigned>::const_iterator it = 
-                  sit->second.begin(); it != sit->second.end(); it++)
-              rez.serialize(*it);
-            rez.serialize(done);
-            manager->send_trace_update(sit->first, rez);
-          }
-          const RtEvent wait_on = Runtime::merge_events(done_events);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
         // Now we can do the exchange
         if (op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
@@ -8456,19 +8174,13 @@ namespace Legion {
                                               std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (InstUsers::const_iterator it = inst_users.begin();
-           it != inst_users.end(); ++it)
-        for (FieldMaskSet<InstUser>::const_iterator uit = it->second.begin();
-             uit != it->second.end(); ++uit)
-          // Check to see if this is a user from our shard
-          if (uit->first->shard == local_shard)
-            postconditions.insert(events[uit->first->user]);
-      // Also get any events for users that are sharded to remote shards
-      // but which originated on this node
-      for (std::set<unsigned>::const_iterator it = 
-            local_last_users.begin(); it != local_last_users.end(); it++)
-        postconditions.insert(events[*it]);
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        postconditions.insert(events[it->second]);
+      // Also need to do any local frontiers that we have here as well
+      for (std::map<unsigned,ApBarrier>::const_iterator it = 
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+        postconditions.insert(events[it->first]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
       // Now we can remove the operations as well
@@ -8502,13 +8214,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::add_inst_user(const UniqueInst &inst,
-                                                const RegionUsage &usage,
-                                                unsigned user_index,
+    void ShardedPhysicalTemplate::record_mutated_instance(
+                                                const UniqueInst &inst,
                                                 IndexSpaceExpression *user_expr,
                                                 const FieldMask &user_mask,
-                                                std::set<RtEvent> &applied,
-                                                int owner_shard)
+                                                std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       const ShardID target_shard = find_inst_owner(inst); 
@@ -8521,27 +8231,17 @@ namespace Legion {
         rez.serialize(manager->repl_id);
         rez.serialize(target_shard);
         rez.serialize(template_index);
-        rez.serialize(UPDATE_INST_USER);
+        rez.serialize(UPDATE_MUTATED_INST);
         rez.serialize(done);
-        rez.serialize(inst.first);
-        rez.serialize(inst.second);
+        inst.serialize(rez);
         user_expr->pack_expression(rez, manager->get_shard_space(target_shard));
-        rez.serialize(usage);
-        rez.serialize(user_index);
         rez.serialize(user_mask);
-#ifdef DEBUG_LEGION
-        assert(owner_shard < 0); // shouldn't have set this yet
-#endif
-        rez.serialize(repl_ctx->owner_shard->shard_id);
         manager->send_trace_update(target_shard, rez);
         applied.insert(done);
       }
-      else if (owner_shard < 0)
-        PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr,
-                      user_mask, applied, repl_ctx->owner_shard->shard_id);
       else
-        PhysicalTemplate::add_inst_user(inst, usage, user_index, user_expr, 
-                      user_mask, applied, owner_shard);
+        PhysicalTemplate::record_mutated_instance(inst, user_expr, 
+                                                  user_mask, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -8558,16 +8258,17 @@ namespace Legion {
       // that node. This algorithm guarantees that all the related instances
       // end up on the same shard for analysis to determine if the trace is
       // replayable or not.
-      const AddressSpaceID inst_owner = inst.first.address_space();
+      const AddressSpaceID inst_owner = inst.get_analysis_space();
       std::vector<ShardID> owner_shards;
       find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION
       assert(!owner_shards.empty());
 #endif
-      // Figure out which shard we should be sending this view to based on
-      // its tree ID
+      // Round-robin based on the distributed IDs for the views in the
+      // case where there are multiple shards, this should relatively
+      // balance things out
       if (owner_shards.size() > 1)
-        return owner_shards[inst.first.id % owner_shards.size()];
+        return owner_shards[inst.view->did % owner_shards.size()];
       else // If there's only one shard then there is only one choice
         return owner_shards.front();
     }
@@ -8790,100 +8491,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::find_last_users(const UniqueInst &inst,
-                                                IndexSpaceExpression *expr,
-                                                const FieldMask &mask,
-                                                std::set<unsigned> &users,
+    unsigned ShardedPhysicalTemplate::find_frontier_event(ApEvent event,
                                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      if (expr->is_empty()) return;
-
-      // Check to see if we own this view, if we do then we can handle this
-      // analysis locally, otherwise we'll need to message the owner
-      const ShardID owner_shard = find_inst_owner(inst);
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      if (owner_shard != local_shard)
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        ShardManager *manager = repl_ctx->shard_manager;
-        // This is the remote case, send a message to find the remote users
-        Serializer rez;
-        rez.serialize(manager->repl_id);
-        rez.serialize(owner_shard);
-        rez.serialize(template_index);
-        rez.serialize(FIND_LAST_USERS_REQUEST);
-        rez.serialize(done);
-        rez.serialize(inst.first);
-        rez.serialize(inst.second);
-        expr->pack_expression(rez, manager->get_shard_space(owner_shard));
-        rez.serialize(mask);
-        rez.serialize(repl_ctx->owner_shard->shard_id);
-        rez.serialize(&users);
-        manager->send_trace_update(owner_shard, rez);
-        ready_events.insert(done);
-      }
-      else
-      {
-        std::set<std::pair<unsigned,ShardID> > sharded_users;
-        find_last_users_sharded(inst, expr, mask, sharded_users);
-        std::map<ShardID,std::vector<unsigned> > remote_requests;
-        for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
-              sharded_users.begin(); it != sharded_users.end(); it++)
-        {
-          if (it->second == local_shard)
-          {
-            // Need the lock to prevent races on return values
-            AutoLock tpl_lock(template_lock);
-            users.insert(it->first);
-          }
-          else
-            remote_requests[it->second].push_back(it->first);
-        }
-        // If we have any remote requests then send them now
-        if (!remote_requests.empty())
-        {
-          ShardManager *manager = repl_ctx->shard_manager;
-          for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
-                remote_requests.begin(); rit != remote_requests.end(); rit++)
-          {
-            RtUserEvent done = Runtime::create_rt_user_event();
-            Serializer rez;
-            rez.serialize(manager->repl_id);
-            rez.serialize(rit->first);
-            rez.serialize(template_index);
-            rez.serialize(FIND_FRONTIER_REQUEST);
-            rez.serialize(local_shard);
-            rez.serialize(&users);
-            rez.serialize<size_t>(rit->second.size());
-            for (std::vector<unsigned>::const_iterator it = 
-                  rit->second.begin(); it != rit->second.end(); it++)
-              rez.serialize(*it); 
-            rez.serialize(done);
-            manager->send_trace_update(rit->first, rez);
-            ready_events.insert(done);
-          }
-        }
-      }
+      // Check to see which shard should own this event
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
+      if (finder != event_map.end())
+        return PhysicalTemplate::find_frontier_event(event, ready_events);
+      const AddressSpaceID event_space = find_event_space(event);
+      // Allocate a slot for this event though we might not use it 
+      const unsigned next_event_id = events.size(); 
+      const RtUserEvent done_event = Runtime::create_rt_user_event();
+      repl_ctx->shard_manager->send_trace_frontier_request(this,
+          repl_ctx->owner_shard->shard_id, repl_ctx->runtime->address_space,
+          template_index, event, event_space, next_event_id, done_event);
+      events.resize(next_event_id + 1);
+      ready_events.insert(done_event);
+      return next_event_id;
     }
 
     //--------------------------------------------------------------------------
-    bool ShardedPhysicalTemplate::are_read_only_users(InstExprs &inst_exprs)
+    bool ShardedPhysicalTemplate::are_read_only_users(InstUsers &inst_users)
     //--------------------------------------------------------------------------
     {
-      std::map<ShardID,InstExprs> shard_inst_exprs;
-      for (InstExprs::iterator vit = 
-            inst_exprs.begin(); vit != inst_exprs.end(); vit++)
+      std::map<ShardID,InstUsers> shard_inst_users;
+      for (InstUsers::iterator vit = 
+            inst_users.begin(); vit != inst_users.end(); vit++)
       {
-        const ShardID owner_shard = find_inst_owner(vit->first); 
-        shard_inst_exprs[owner_shard][vit->first].swap(vit->second);
+        const ShardID owner_shard = find_inst_owner(vit->instance); 
+        shard_inst_users[owner_shard].push_back(*vit);
       }
       std::atomic<bool> result(true);
       std::vector<RtEvent> done_events;
       ShardManager *manager = repl_ctx->shard_manager;
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (std::map<ShardID,InstExprs>::iterator sit = 
-            shard_inst_exprs.begin(); sit != shard_inst_exprs.end(); sit++)
+      for (std::map<ShardID,InstUsers>::iterator sit = 
+            shard_inst_users.begin(); sit != shard_inst_users.end(); sit++)
       {
         if (sit->first != local_shard)
         {
@@ -8896,18 +8540,12 @@ namespace Legion {
           rez.serialize(READ_ONLY_USERS_REQUEST);
           rez.serialize(local_shard);
           rez.serialize<size_t>(sit->second.size());
-          for (InstExprs::const_iterator vit = 
+          for (InstUsers::const_iterator vit = 
                 sit->second.begin(); vit != sit->second.end(); vit++)
           {
-            rez.serialize(vit->first.first);
-            rez.serialize(vit->first.second);
-            rez.serialize<size_t>(vit->second.size());
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  vit->second.begin(); it != vit->second.end(); it++)
-            {
-              it->first->pack_expression(rez, target);
-              rez.serialize(it->second);
-            }
+            vit->instance.serialize(rez);
+            vit->expr->pack_expression(rez, target);
+            rez.serialize(vit->mask);
           }
           rez.serialize(&result);
           rez.serialize(done);
@@ -8929,59 +8567,6 @@ namespace Legion {
           wait_on.wait();
       }
       return result.load();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::find_last_users_sharded(
-                                                  const UniqueInst &inst,
-                                                  IndexSpaceExpression *expr,
-                                                  const FieldMask &mask,
-                          std::set<std::pair<unsigned,ShardID> > &sharded_users)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // We should own this view if we are here
-      assert(find_inst_owner(inst) == repl_ctx->owner_shard->shard_id);
-#endif
-      InstUsers::const_iterator finder = inst_users.find(inst);
-      if (finder == inst_users.end()) return;
-
-      RegionTreeForest *forest = trace->runtime->forest;
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      for (FieldMaskSet<InstUser>::const_iterator uit = 
-            finder->second.begin(); uit != finder->second.end(); ++uit)
-        if (!!(uit->second & mask))
-        {
-          InstUser *user = uit->first;
-          IndexSpaceExpression *intersect =
-            forest->intersect_index_spaces(expr, user->expr);
-          if (!intersect->is_empty())
-          {
-            // See if it is local or not
-            if (user->shard == local_shard)
-            {
-              // This is a local user so we can do the translation now
-              AutoLock tpl_lock(template_lock);
-              std::map<unsigned,unsigned>::const_iterator finder =
-                frontiers.find(user->user);
-              // See if we have recorded this frontier yet or not
-              if (finder == frontiers.end())
-              {
-                const unsigned next_event_id = events.size();
-                frontiers[user->user] = next_event_id;
-                events.resize(next_event_id + 1);
-                sharded_users.insert(
-                    std::pair<unsigned,ShardID>(next_event_id, local_shard));
-              }
-              else
-                sharded_users.insert(
-                    std::pair<unsigned,ShardID>(finder->second, local_shard));
-            }
-            else // Not local so just record it
-              sharded_users.insert(
-                  std::pair<unsigned,ShardID>(user->user, user->shard));
-          }
-        }
     }
 
     //--------------------------------------------------------------------------

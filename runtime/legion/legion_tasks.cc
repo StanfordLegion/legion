@@ -8256,6 +8256,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ShardTask::handle_find_trace_shard_frontier(size_t template_index,
+                                            ApEvent event, ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      return repl_ctx->handle_find_trace_shard_frontier(template_index, event,
+                                                        remote_shard);
+    }
+
+    //--------------------------------------------------------------------------
     ReplicateContext* ShardTask::get_shard_execution_context(void) const
     //--------------------------------------------------------------------------
     {

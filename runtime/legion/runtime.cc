@@ -12155,6 +12155,17 @@ namespace Legion {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
+          case SEND_VIEW_FIND_LAST_USERS_REQUEST:
+            {
+              runtime->handle_view_find_last_users_request(derez,
+                                            remote_address_space);
+              break;
+            }
+          case SEND_VIEW_FIND_LAST_USERS_RESPONSE:
+            {
+              runtime->handle_view_find_last_users_response(derez);
+              break;
+            }
 #ifdef ENABLE_VIEW_REPLICATION
           case SEND_VIEW_REPLICATION_REQUEST:
             {
@@ -12266,6 +12277,17 @@ namespace Legion {
           case SEND_REPL_TRACE_EVENT_RESPONSE:
             {
               runtime->handle_control_replicate_trace_event_response(derez);
+              break;
+            }
+          case SEND_REPL_TRACE_FRONTIER_REQUEST:
+            {
+              runtime->handle_control_replicate_trace_frontier_request(derez,
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_REPL_TRACE_FRONTIER_RESPONSE:
+            {
+              runtime->handle_control_replicate_trace_frontier_response(derez);
               break;
             }
           case SEND_REPL_TRACE_UPDATE:
@@ -22168,6 +22190,24 @@ namespace Legion {
                                                           true/*flush*/);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_find_last_users_request(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_VIEW_FIND_LAST_USERS_REQUEST>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_find_last_users_response(AddressSpaceID target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_VIEW_FIND_LAST_USERS_RESPONSE>(
+                                          rez, true/*flush*/, true/*response*/);
+    }
+
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void Runtime::send_view_replication_request(AddressSpaceID target,
@@ -22357,6 +22397,24 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_REPL_TRACE_EVENT_RESPONSE>(
                                       rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_trace_frontier_request(
+                                         AddressSpaceID target, Serializer &rez) 
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPL_TRACE_FRONTIER_REQUEST>(
+                                                      rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_trace_frontier_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPL_TRACE_FRONTIER_RESPONSE>(
+                                        rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24326,6 +24384,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_trace_frontier_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trace_frontier_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_trace_frontier_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trace_frontier_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_trace_update(Deserializer &derez,
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24371,6 +24445,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceView::handle_view_add_copy_user(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_find_last_users_request(Deserializer &derez,
+                                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_last_users_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_find_last_users_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_last_users_response(derez);
     }
 
     //--------------------------------------------------------------------------

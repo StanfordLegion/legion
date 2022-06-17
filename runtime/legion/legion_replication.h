@@ -2611,6 +2611,14 @@ namespace Legion {
       void send_trace_event_response(ShardedPhysicalTemplate *physical_template,
                           AddressSpaceID template_source, ApEvent event,
                           ApBarrier result, RtUserEvent done_event);
+      void send_trace_frontier_request(ShardedPhysicalTemplate *physical_template,
+                          ShardID shard_source, AddressSpaceID template_source, 
+                          size_t template_index, ApEvent event, 
+                          AddressSpaceID event_space, unsigned frontier,
+                          RtUserEvent done_event);
+      void send_trace_frontier_response(ShardedPhysicalTemplate *physical_template,
+                          AddressSpaceID template_source, unsigned frontier,
+                          ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
     public:
@@ -2634,6 +2642,9 @@ namespace Legion {
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);
+      static void handle_trace_frontier_request(Deserializer &derez,Runtime *rt,
+                                                AddressSpaceID request_source);
+      static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
       static void handle_barrier_refresh(Deserializer &derez, Runtime *rt);
