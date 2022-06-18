@@ -70,7 +70,7 @@ local default = ast.default_annotations()
 
 local function check(node, allowed_set)
   -- Sanity check the allowed set.
-  for option, _ in pairs(allowed_set) do
+  for _, option in allowed_set:keys() do
     assert(node.annotations[option]:is(ast.annotation))
   end
 
