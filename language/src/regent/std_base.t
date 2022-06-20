@@ -33,17 +33,6 @@ end
 base.opt_profile = {fastmath = cpu_fast}
 base.gpu_opt_profile = {fastmath = gpu_fast}
 
--- Hack: Terra symbols don't support the hash() method so monkey patch
--- it in here. This allows deterministic hashing of Terra symbols,
--- which is currently required by OpenMP codegen.
-do
-  local terralib_symbol = getmetatable(terralib.newsymbol(int))
-  function terralib_symbol:hash()
-    local hash_value = "__terralib_symbol_#" .. tostring(self.id)
-    return hash_value
-  end
-end
-
 -- Helpers for zero/min/max values of various types.
 
 local function zero(value_type) return terralib.cast(value_type, 0) end
@@ -679,17 +668,17 @@ function base.group_task_privileges_by_field_path(privileges, privilege_field_pa
                                                   privilege_field_types,
                                                   privilege_coherence_modes,
                                                   privilege_flags)
-  local privileges_by_field_path = {}
+  local privileges_by_field_path = data.newmap()
   local coherence_modes_by_field_path
   if privilege_coherence_modes ~= nil then
-    coherence_modes_by_field_path = {}
+    coherence_modes_by_field_path = data.newmap()
   end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
-      privileges_by_field_path[field_path:hash()] = privilege
+      privileges_by_field_path[field_path] = privilege
       if coherence_modes_by_field_path ~= nil then
-        coherence_modes_by_field_path[field_path:hash()] =
+        coherence_modes_by_field_path[field_path] =
           privilege_coherence_modes[i]
       end
     end
@@ -983,11 +972,6 @@ function symbol:getlabel()
     self.symbol_label = terralib.newlabel(self.symbol_name)
   end
   return self.symbol_label
-end
-
-function symbol:hash()
-  local hash_value = "__symbol_#" .. tostring(self.symbol_id)
-  return hash_value
 end
 
 function symbol:__tostring()
