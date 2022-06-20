@@ -314,9 +314,10 @@ namespace Legion {
         IndexPartNode *node = create_node(pid, parent_node, color_node, 
             partition_color, disjointness_event, complete, did, partition_ready,
             partial_pending, RtEvent::NO_RT_EVENT, NULL, &applied);
-        IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
+        WrapperReferenceMutator mutator(applied);
         // Get a reference for the node to hold until disjointness is computed
-        node->add_base_resource_ref(APPLICATION_REF);
+        node->add_base_valid_ref(APPLICATION_REF, &mutator);
+        IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
         Runtime::trigger_event(disjointness_event,
             runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY,
@@ -676,9 +677,10 @@ namespace Legion {
         part_node->update_creation_set(mapping);
         if (disjointness_event.exists())
         {
-          IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
           // Hold a reference on the node until disjointness is performed
-          part_node->add_base_resource_ref(APPLICATION_REF);
+          WrapperReferenceMutator mutator(applied);
+          part_node->add_base_valid_ref(APPLICATION_REF, &mutator);
+          IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
           // Don't do the disjointness test until all the partition
           // is ready and has been created on all the nodes
           Runtime::trigger_event(disjointness_event,
@@ -751,9 +753,10 @@ namespace Legion {
         part_node->update_creation_set(mapping);
         if (disjointness_event.exists())
         {
-          IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
           // Hold a reference on the node until disjointness is performed
-          part_node->add_base_resource_ref(APPLICATION_REF);
+          WrapperReferenceMutator mutator(applied);
+          part_node->add_base_valid_ref(APPLICATION_REF, &mutator);
+          IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
           // We only need to wait for the creation to be ready 
           // if we're not the owner
           Runtime::trigger_event(disjointness_event,
@@ -11395,7 +11398,7 @@ namespace Legion {
       if (dargs->disjointness_collective != NULL)
         delete dargs->disjointness_collective;
       // Remove the reference on our node as well
-      if (node->remove_base_resource_ref(APPLICATION_REF))
+      if (node->remove_base_valid_ref(APPLICATION_REF))
         delete node;
     }
 
