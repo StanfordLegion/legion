@@ -9193,13 +9193,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = util.get_base_indexed_node(region_arg.value)
-      local partition_type = std.as_read(partition_expr.expr_type):partition()
+      local partition_expr = util.get_base_indexed_node(region_arg)
+      local partition_type = std.as_read(partition_expr.expr_type)
       partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
-      local region_expr = ast.typed.expr.IndexAccess {
-        value = ast.typed.expr.Internal {
+      local region_expr = util.replace_base_indexed_node(
+        region_arg,
+        ast.typed.expr.Internal {
           value = values.value(
             node,
             expr.just(quote end, partition.value),
@@ -9207,12 +9208,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           expr_type = partition_type,
           annotations = node.annotations,
           span = node.span,
-        },
-        index = region_arg.index,
-        expr_type = region_arg.expr_type,
-        annotations = node.annotations,
-        span = node.span,
-      }
+        })
 
       if arg:is(ast.typed.expr.Projection) then
         region_expr = arg {
