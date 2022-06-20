@@ -4235,6 +4235,11 @@ namespace Legion {
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
         compute_frontiers(applied_events);
+        // Increase the gen by however many frontiers we have
+        for (std::map<unsigned,unsigned>::const_iterator it =
+              frontiers.begin(); it != frontiers.end(); it++)
+          if (it->second >= gen.size())
+            gen.resize(it->second+1, 0);
       }
       if (!trace->runtime->no_trace_optimization)
       {
@@ -6747,7 +6752,7 @@ namespace Legion {
     {
       for (std::map<unsigned,unsigned>::const_iterator it =
             frontiers.begin(); it != frontiers.end(); it++)
-        postconditions.insert(events[it->second]);
+        postconditions.insert(events[it->first]);
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->lhs]);
       // Now we can remove the operations as well
@@ -8176,7 +8181,7 @@ namespace Legion {
     {
       for (std::map<unsigned,unsigned>::const_iterator it =
             frontiers.begin(); it != frontiers.end(); it++)
-        postconditions.insert(events[it->second]);
+        postconditions.insert(events[it->first]);
       // Also need to do any local frontiers that we have here as well
       for (std::map<unsigned,ApBarrier>::const_iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)
