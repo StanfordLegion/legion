@@ -245,24 +245,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::find_or_create_sharded_index_space(TaskContext *ctx,
-                                       IndexSpace handle, IndexSpace local,
-                                       DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      // Quick unsafe test to see if we already have it
-      // in which case we can skip the rest of this
-      if (has_node(handle))
-        return;
-      IndexSpaceNode *local_node = get_node(local); 
-      local_node->create_sharded_alias(handle, did);
-      if (ctx != NULL)
-        ctx->register_index_space_creation(handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::create_pending_partition(TaskContext *ctx,
                                                        IndexPartition pid,
                                                        IndexSpace parent,
@@ -8684,12 +8666,12 @@ namespace Legion {
       if ((canon != NULL) && (canon != this) &&
           !canon->try_add_canonical_reference(did))
       {
+        canonical.store(NULL);
         // We were unsuccessful at adding our canonical reference so 
         // remove the resource reference to the canonical object and
         // and mark that we no longer have a canonical expression
         if (canon->remove_tree_expression_reference(did))
           delete canon;
-        canonical.store(NULL);
       }
     }
 
