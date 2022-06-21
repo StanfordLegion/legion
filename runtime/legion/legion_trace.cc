@@ -4226,7 +4226,7 @@ namespace Legion {
       {
         compute_frontiers(frontier_events);
         gen.resize(events.size(), 0/*fence instruction*/);
-        for (unsigned idx = 0; idx < events.size(); ++idx)
+        for (unsigned idx = 0; idx < instructions.size(); ++idx)
           gen[idx] = idx;
       }
       else
@@ -8535,6 +8535,44 @@ namespace Legion {
         op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
       else
         op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
+      // Check for any empty remote frontiers which were not actually
+      // contained in the trace and therefore need to be pruned out of
+      // any event mergers
+      std::vector<unsigned> to_filter;
+      for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it =
+            remote_frontiers.begin(); it != remote_frontiers.end(); /*nothing*/)
+      {
+        if (!it->first.exists())
+        {
+          to_filter.push_back(it->second);
+          it = remote_frontiers.erase(it);
+        }
+        else
+          it++;
+      }
+      if (!to_filter.empty())
+      {
+        for (std::vector<Instruction*>::const_iterator it = 
+              instructions.begin(); it != instructions.end(); it++)
+        {
+          if ((*it)->get_kind() != MERGE_EVENT)
+            continue;
+          MergeEvent *merge = (*it)->as_merge_event();
+          for (unsigned idx = 0; idx < to_filter.size(); idx++)
+          {
+            std::set<unsigned>::iterator finder =
+              merge->rhs.find(to_filter[idx]);
+            if (finder == merge->rhs.end())
+              continue;
+            // Found one, filter it out from the set
+            merge->rhs.erase(finder);
+            // Handle a weird case where we pruned them all out
+            // Go back to the case of just pointing at the completion event
+            if (merge->rhs.empty())
+              merge->rhs.insert(0/*fence completion id*/);
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

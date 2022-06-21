@@ -10035,8 +10035,9 @@ namespace Legion {
           runtime->send_control_replicate_trace_frontier_request(event_space,
                                                                  rez);
         }
-        else // Can just trigger the done event as there is nothing to send
-          Runtime::trigger_event(done_event);
+        else
+          send_trace_frontier_response(physical_template, template_source,
+                          frontier, ApBarrier::NO_AP_BARRIER, done_event);
       }
       else
       {
@@ -10055,8 +10056,9 @@ namespace Legion {
             return;
           }
         }
-        // If we make it here then we didn't find it so just trigger done
-        Runtime::trigger_event(done_event);
+        // If we couldn't find it then send back a NO_BARRIER
+        send_trace_frontier_response(physical_template, template_source,
+                        frontier, ApBarrier::NO_AP_BARRIER, done_event);
       }
     }
 
