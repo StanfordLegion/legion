@@ -172,7 +172,7 @@ namespace Legion {
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
-                                   std::set<RtEvent> &ready_events) const = 0;
+                                   std::vector<RtEvent> &applied) const = 0;
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -624,7 +624,7 @@ namespace Legion {
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
-                                   std::set<RtEvent> &ready_events) const;
+                                   std::vector<RtEvent> &ready_events) const;
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -799,7 +799,7 @@ namespace Legion {
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
-                                   std::set<RtEvent> &ready_events) const;
+                                   std::vector<RtEvent> &ready_events) const;
     protected: 
       void find_reducing_preconditions(const RegionUsage &usage,
                                        const FieldMask &user_mask,

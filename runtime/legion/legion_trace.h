@@ -851,7 +851,6 @@ namespace Legion {
     public:
       void find_execution_fence_preconditions(std::set<ApEvent> &preconditions);
       void finalize(InnerContext *context, UniqueID opid,
-                    std::set<RtEvent> &applied_events,
                     bool has_blocking_call, ReplTraceOp *op = NULL);
     public:
       struct Replayable {
@@ -875,15 +874,16 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op, 
           InnerContext *context, UniqueID opid, bool has_blocking_call);
     public:
-      void optimize(ReplTraceOp *op, std::set<RtEvent> &applied_events,
+      void optimize(ReplTraceOp *op,
                     bool do_transitive_reduction);
     private:
-      void elide_fences(std::vector<unsigned> &gen, ReplTraceOp *op,
-                        std::set<RtEvent> &ready_events);
-      void find_all_last_instance_user_events(std::set<RtEvent> &ready_events);
+      void find_all_last_instance_user_events(
+                             std::vector<RtEvent> &frontier_events);
       void find_last_instance_events(const InstUsers &users,
-                                     std::set<RtEvent> &ready_events);
-      void compute_frontiers(std::set<RtEvent> &ready_events);
+                             std::vector<RtEvent> &frontier_events);
+      void compute_frontiers(std::vector<RtEvent> &frontier_events);
+      void elide_fences(std::vector<unsigned> &gen,
+                        std::vector<RtEvent> &ready_events);
       void propagate_merges(std::vector<unsigned> &gen);
       void transitive_reduction(bool deferred);
       void finalize_transitive_reduction(
@@ -894,6 +894,8 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     protected:
+      virtual void sync_compute_frontiers(ReplTraceOp *op,
+                          const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
                           const std::vector<unsigned> &gen,
@@ -1104,12 +1106,8 @@ namespace Legion {
       // tuples in the inst_exprs, not that this is the 
       void find_all_last_users(const InstUsers &inst_users,
                                std::set<unsigned> &last_users) const;
-      // Synchronization methods for elide fences that do nothing in 
-      // the base case but can synchronize for multiple shards
-      virtual void elide_fences_pre_sync(ReplTraceOp *op) { }
-      virtual void elide_fences_post_sync(ReplTraceOp *op) { }
       virtual unsigned find_frontier_event(ApEvent event, 
-                        std::set<RtEvent> &ready_events);
+                               std::vector<RtEvent> &ready_events);
       // Check to see if any users are mutating these fields and expressions
       virtual bool are_read_only_users(InstUsers &inst_users);
       void rewrite_preconditions(unsigned &precondition,
@@ -1117,7 +1115,6 @@ namespace Legion {
                            const std::vector<Instruction*> &instructions,
                            std::vector<Instruction*> &new_instructions,
                            std::vector<unsigned> &gen,
-                           std::set<RtEvent> &ready_events,
                            unsigned &merge_starts);
       void parallelize_replay_event(unsigned &event_to_check,
                            unsigned slice_index,
@@ -1161,7 +1158,7 @@ namespace Legion {
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
       std::map<ApEvent,unsigned> event_map;
-    private:
+    protected:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
@@ -1391,16 +1388,19 @@ namespace Legion {
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
     protected:
-      virtual void elide_fences_pre_sync(ReplTraceOp *op);
-      virtual void elide_fences_post_sync(ReplTraceOp *op); 
       virtual unsigned find_frontier_event(ApEvent event,
-                        std::set<RtEvent> &ready_events);
+                        std::vector<RtEvent> &ready_events);
       virtual void record_mutated_instance(const UniqueInst &inst,
                                            IndexSpaceExpression *expr,
                                            const FieldMask &mask,
                                            std::set<RtEvent> &applied_events);
       virtual bool are_read_only_users(InstUsers &inst_users);
+      virtual void sync_compute_frontiers(ReplTraceOp *op,
+                          const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
+      virtual void initialize_eliminate_dead_code_frontiers(
+                          const std::vector<unsigned> &gen,
+                                std::vector<bool> &used);
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
                           std::vector<unsigned> &inv_topo_order);

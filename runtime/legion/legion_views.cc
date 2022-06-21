@@ -511,7 +511,7 @@ namespace Legion {
       derez.deserialize(done);
 
       std::set<ApEvent> result;
-      std::set<RtEvent> applied;
+      std::vector<RtEvent> applied;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 #ifdef DEBUG_LEGION
@@ -3253,11 +3253,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_last_users(std::set<ApEvent> &events,
-                                          const DomainPoint &collective_point,
-                                          const RegionUsage &usage,
-                                          const FieldMask &mask,
-                                          IndexSpaceExpression *expr,
-                                          std::set<RtEvent> &ready_events) const
+                                      const DomainPoint &collective_point,
+                                      const RegionUsage &usage,
+                                      const FieldMask &mask,
+                                      IndexSpaceExpression *expr,
+                                      std::vector<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // Check to see if we're on the right node to perform this analysis
@@ -3277,7 +3277,7 @@ namespace Legion {
           rez.serialize(ready);
         }
         runtime->send_view_find_last_users_request(target_space, rez);
-        ready_events.insert(ready);
+        ready_events.push_back(ready);
       }
       else
       {
@@ -5033,7 +5033,7 @@ namespace Legion {
                                         const RegionUsage &usage,
                                         const FieldMask &mask,
                                         IndexSpaceExpression *expr,
-                                        std::set<RtEvent> &ready_events) const
+                                        std::vector<RtEvent> &ready_events)const
     //--------------------------------------------------------------------------
     {
       // Check to see if we're on the right node to perform this analysis
@@ -5053,7 +5053,7 @@ namespace Legion {
           rez.serialize(ready);
         }
         runtime->send_view_find_last_users_request(target_space, rez);
-        ready_events.insert(ready);
+        ready_events.push_back(ready);
       }
       else
       {

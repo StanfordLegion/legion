@@ -1300,8 +1300,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id,
-                                   map_applied_conditions, has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1504,8 +1503,7 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(parent_ctx, unique_op_id,
-                                   map_applied_conditions, has_blocking_call);
+        current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -4181,7 +4179,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::finalize(InnerContext *context, UniqueID opid,
-                                    std::set<RtEvent> &applied_events,
                                     bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
@@ -4193,15 +4190,13 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          optimize(op, applied_events, true/*do transitive reduction inline*/);
+          optimize(op, true/*do transitive reduction inline*/);
           dump_template();
         }
         return;
       }
-      optimize(op, applied_events, false/*do transitive reduction inline*/);
-      size_t num_events = events.size();
-      events.clear();
-      events.resize(num_events);
+      optimize(op, false/*do transitive reduction inline*/);
+      std::fill(events.begin(), events.end(), ApEvent::NO_AP_EVENT);
       event_map.clear();
       // Defer performing the transitive reduction because it might
       // be expensive (see comment above)
@@ -4217,47 +4212,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::optimize(ReplTraceOp *op, 
-                                    std::set<RtEvent> &applied_events,
+    void PhysicalTemplate::optimize(ReplTraceOp *op,
                                     bool do_transitive_reduction)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> gen;
-      if (trace->perform_fence_elision)
-        elide_fences(gen, op, applied_events);
-      else
-      {
-        find_all_last_instance_user_events(applied_events);
 #ifdef DEBUG_LEGION
-        assert(instructions.size() == events.size());
+      assert(instructions.size() == events.size());
 #endif
-        gen.resize(events.size());
+      std::vector<RtEvent> frontier_events;
+      find_all_last_instance_user_events(frontier_events);
+      std::vector<unsigned> gen;
+      if (!trace->perform_fence_elision)
+      {
+        compute_frontiers(frontier_events);
+        gen.resize(events.size(), 0/*fence instruction*/);
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
-        compute_frontiers(applied_events);
-        // Increase the gen by however many frontiers we have
-        for (std::map<unsigned,unsigned>::const_iterator it =
-              frontiers.begin(); it != frontiers.end(); it++)
-          if (it->second >= gen.size())
-            gen.resize(it->second+1, 0);
       }
-      if (!trace->runtime->no_trace_optimization)
-      {
-        propagate_merges(gen);
-        if (do_transitive_reduction)
-          transitive_reduction(false/*deferred*/);
-        propagate_copies(&gen);
-        eliminate_dead_code(gen);
-      }
-      prepare_parallel_replay(gen);
-      push_complete_replays();
-      // After elide fences we can clear these views
-      op_insts.clear();
-      copy_insts.clear();
-      instance_last_users.clear();
+      else
+        elide_fences(gen, frontier_events);
       // Check to see if the indirection fields for any across copies are
       // mutated during the execution of the trace. If they aren't then we
       // know that we don't need to recompute preimages on back-to-back replays
+      // Do this here so we can also use the 'sync_compute_frontiers' barrier
+      // to know that all these analyses are done as well
       if (!across_copies.empty())
       {
         for (std::vector<IssueAcross*>::const_iterator it =
@@ -4274,9 +4252,27 @@ namespace Legion {
             (*it)->executor->record_trace_immutable_indirection(false/*dst*/);
         }
         across_copies.clear();
-        src_indirect_insts.clear();
-        dst_indirect_insts.clear();
       }
+      // Sync the frontier computation so we know that all our frontier data
+      // structures such as 'local_frontiers' and 'remote_frontiers' are ready
+      sync_compute_frontiers(op, frontier_events);
+      if (!trace->runtime->no_trace_optimization)
+      {
+        propagate_merges(gen);
+        if (do_transitive_reduction)
+          transitive_reduction(false/*deferred*/);
+        propagate_copies(&gen);
+        eliminate_dead_code(gen);
+      }
+      prepare_parallel_replay(gen);
+      push_complete_replays();
+      // After elide fences we can clear these views
+      op_insts.clear();
+      copy_insts.clear();
+      mutated_insts.clear();
+      src_indirect_insts.clear();
+      dst_indirect_insts.clear();
+      instance_last_users.clear();
       // We don't need the expression or view references anymore
       for (std::set<InstanceView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
@@ -4292,26 +4288,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::find_all_last_instance_user_events(
-                                                std::set<RtEvent> &ready_events)
+                                          std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
       for (std::map<TraceLocalID,InstUsers>::const_iterator it =
             op_insts.begin(); it != op_insts.end(); it++)
-        find_last_instance_events(it->second, ready_events);
+        find_last_instance_events(it->second, frontier_events);
       for (std::map<unsigned,InstUsers>::const_iterator it =
             copy_insts.begin(); it != copy_insts.end(); it++)
-        find_last_instance_events(it->second, ready_events);
+        find_last_instance_events(it->second, frontier_events);
       for (std::map<unsigned,InstUsers>::const_iterator it =
             src_indirect_insts.begin(); it != src_indirect_insts.end(); it++)
-        find_last_instance_events(it->second, ready_events);
+        find_last_instance_events(it->second, frontier_events);
       for (std::map<unsigned,InstUsers>::const_iterator it =
             dst_indirect_insts.begin(); it != dst_indirect_insts.end(); it++)
-        find_last_instance_events(it->second, ready_events);
+        find_last_instance_events(it->second, frontier_events);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::find_last_instance_events(const InstUsers &users,
-                                                std::set<RtEvent> &ready_events)
+                                          std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
       for (InstUsers::const_iterator uit =
@@ -4337,20 +4333,21 @@ namespace Legion {
           // Query the view for the events that it needs
           uit->instance.view->find_last_users(result.events,
               uit->instance.collective_point, uit->usage,
-              uit->mask, uit->expr, ready_events);
+              uit->mask, uit->expr, frontier_events);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::compute_frontiers(std::set<RtEvent> &ready_events)
+    void PhysicalTemplate::compute_frontiers(
+                                          std::vector<RtEvent> &frontier_events)
     //--------------------------------------------------------------------------
     {
       // We need to wait for all the last user instance events to be ready
-      if (!ready_events.empty())
+      if (!frontier_events.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
+        const RtEvent wait_on = Runtime::merge_events(frontier_events);
+        frontier_events.clear();
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
@@ -4370,7 +4367,7 @@ namespace Legion {
               frontier_map.find(*it);
             if (finder == frontier_map.end())
             {
-              unsigned index = find_frontier_event(*it, ready_events);
+              unsigned index = find_frontier_event(*it, frontier_events);
               uit->frontiers.push_back(index);
               frontier_map[*it] = index;
             }
@@ -4383,7 +4380,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     unsigned PhysicalTemplate::find_frontier_event(ApEvent event,
-                                                std::set<RtEvent> &ready_events)
+                                             std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // Check to see if it is an event we know about
@@ -4402,12 +4399,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::elide_fences(std::vector<unsigned> &gen, 
-                               ReplTraceOp *op, std::set<RtEvent> &ready_events)
+    void PhysicalTemplate::elide_fences(std::vector<unsigned> &gen,
+                                        std::vector<RtEvent> &ready_events) 
     //--------------------------------------------------------------------------
     {
-      // find all the last instance user events
-      find_all_last_instance_user_events(ready_events);
       // Reserve some events for merges to be added during fence elision
       unsigned num_merges = 0;
       for (std::vector<Instruction*>::iterator it = instructions.begin();
@@ -4479,25 +4474,19 @@ namespace Legion {
       unsigned merge_starts = events.size();
       events.resize(events.size() + num_merges);
 
-      elide_fences_pre_sync(op);
+      compute_frontiers(ready_events);
 
       // We are now going to break the invariant that
       // the generator of events[idx] is instructions[idx].
       // After fence elision, the generator of events[idx] is
       // instructions[gen[idx]].
-      gen.resize(events.size(), 0);
+      gen.resize(events.size(), 0/*fence instruction*/);
       std::vector<Instruction*> new_instructions;
-
-      // Now compute the frontiers for the last instance users to get 
-      // them in flight and have all the results ready by the time 
-      // we go to do the fence elision
-      compute_frontiers(ready_events);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
         InstructionKind kind = inst->get_kind();
-        std::set<RtEvent> ready_events;
         switch (kind)
         {
           case COMPLETE_REPLAY:
@@ -4509,7 +4498,7 @@ namespace Legion {
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
               rewrite_preconditions(replay->rhs, users, instructions, 
-                  new_instructions, gen, ready_events, merge_starts);
+                  new_instructions, gen, merge_starts);
               break;
             }
           case ISSUE_COPY:
@@ -4523,8 +4512,7 @@ namespace Legion {
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
               rewrite_preconditions(copy->precondition_idx, users,
-                  instructions, new_instructions, gen, 
-                  ready_events, merge_starts);
+                  instructions, new_instructions, gen, merge_starts);
               break;
             }
           case ISSUE_FILL:
@@ -4538,8 +4526,7 @@ namespace Legion {
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
               rewrite_preconditions(fill->precondition_idx, users,
-                  instructions, new_instructions, gen,
-                  ready_events, merge_starts);
+                  instructions, new_instructions, gen, merge_starts);
               break;
             }
           case ISSUE_ACROSS:
@@ -4564,12 +4551,10 @@ namespace Legion {
               // indirect->collective_precondition so use that instead for this
               if (across->collective_precondition == 0)
                 rewrite_preconditions(across->copy_precondition, users,
-                    instructions, new_instructions, gen, 
-                    ready_events, merge_starts);
+                    instructions, new_instructions, gen, merge_starts);
               else
                 rewrite_preconditions(across->collective_precondition, users,
-                    instructions, new_instructions, gen,
-                    ready_events, merge_starts);
+                    instructions, new_instructions, gen, merge_starts);
               // Also do the rewrites for any indirection preconditions
               if (across->src_indirect_precondition != 0)
               {
@@ -4580,8 +4565,7 @@ namespace Legion {
 #endif
                 find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->src_indirect_precondition, users,
-                    instructions, new_instructions, gen,
-                    ready_events, merge_starts);
+                    instructions, new_instructions, gen, merge_starts);
               }
               if (across->dst_indirect_precondition != 0)
               {
@@ -4592,8 +4576,7 @@ namespace Legion {
 #endif
                 find_all_last_users(finder->second, users);
                 rewrite_preconditions(across->dst_indirect_precondition, users,
-                    instructions, new_instructions, gen,
-                    ready_events, merge_starts);
+                    instructions, new_instructions, gen, merge_starts);
               }
               break;
             }
@@ -4607,12 +4590,6 @@ namespace Legion {
       }
       instructions.swap(new_instructions);
       new_instructions.clear();
-      elide_fences_post_sync(op);
-      // If we added events for fence elision then resize events so that
-      // all the new events from a previous trace are generated by the 
-      // fence instruction at the beginning of the template
-      if (events.size() > gen.size())
-        gen.resize(events.size(), 0/*fence instruction*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4621,18 +4598,9 @@ namespace Legion {
                               const std::vector<Instruction*> &instructions,
                               std::vector<Instruction*> &new_instructions,
                               std::vector<unsigned> &gen,
-                              std::set<RtEvent> &ready_events, 
                               unsigned &merge_starts)
     //--------------------------------------------------------------------------
     {
-      // If we have any ready events then wait for them to be ready
-      if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
       if (users.empty())
         return;
       Instruction *generator_inst = instructions[precondition];
@@ -4793,6 +4761,17 @@ namespace Legion {
       gen.swap(new_gen);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+                                    const std::vector<RtEvent> &frontier_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op == NULL);
+      assert(frontier_events.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6707,6 +6686,7 @@ namespace Legion {
         if (runtime->dump_physical_traces)
           dump_template();
       }
+
       if (recurrent)
       {
         fence_completion = ApEvent::NO_AP_EVENT;
@@ -8460,50 +8440,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::elide_fences_pre_sync(ReplTraceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      op->elide_fences_pre_sync();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::elide_fences_post_sync(ReplTraceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      op->elide_fences_post_sync();
-      // Propagate any frontiers through our local frontiers such that
-      // we can update local_frontiers without waiting for frontiers first
-      for (std::map<unsigned,unsigned>::const_iterator it =
-            frontiers.begin(); it != frontiers.end(); it++)
-      {
-        std::map<unsigned,ApBarrier>::iterator finder = 
-          local_frontiers.find(it->second); 
-        if (finder == local_frontiers.end())
-          continue;
-        std::map<unsigned,std::set<ShardID> >::iterator subscription_finder =
-          local_subscriptions.find(it->second);
-#ifdef DEBUG_LEGION
-        assert(local_frontiers.find(it->first) == local_frontiers.end());
-        assert(subscription_finder != local_subscriptions.end());
-        assert(local_subscriptions.find(it->first) ==
-                local_subscriptions.end());
-#endif
-        local_frontiers[it->first] = finder->second;
-        local_frontiers.erase(finder);
-        local_subscriptions[it->first].swap(subscription_finder->second);
-        local_subscriptions.erase(subscription_finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     unsigned ShardedPhysicalTemplate::find_frontier_event(ApEvent event,
-                                                std::set<RtEvent> &ready_events)
+                                             std::vector<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // Check to see which shard should own this event
       std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
       if (finder != event_map.end())
-        return PhysicalTemplate::find_frontier_event(event, ready_events);
+      {
+        if (finder->second == NO_INDEX)
+          return 0; // start fence event
+        else
+          return PhysicalTemplate::find_frontier_event(event, ready_events);
+      }
       const AddressSpaceID event_space = find_event_space(event);
       // Allocate a slot for this event though we might not use it 
       const unsigned next_event_id = events.size(); 
@@ -8512,7 +8461,7 @@ namespace Legion {
           repl_ctx->owner_shard->shard_id, repl_ctx->runtime->address_space,
           template_index, event, event_space, next_event_id, done_event);
       events.resize(next_event_id + 1);
-      ready_events.insert(done_event);
+      ready_events.push_back(done_event);
       return next_event_id;
     }
 
@@ -8575,6 +8524,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::sync_compute_frontiers(ReplTraceOp *op,
+                                    const std::vector<RtEvent> &frontier_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
+      if (!frontier_events.empty())
+        op->sync_compute_frontiers(Runtime::merge_events(frontier_events));
+      else
+        op->sync_compute_frontiers(RtEvent::NO_RT_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::initialize_generators(
                                                  std::vector<unsigned> &new_gen)
     //--------------------------------------------------------------------------
@@ -8583,6 +8546,21 @@ namespace Legion {
       for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
             remote_frontiers.begin(); it != remote_frontiers.end(); it++)
         new_gen[it->second] = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::initialize_eliminate_dead_code_frontiers(
+                      const std::vector<unsigned> &gen, std::vector<bool> &used)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::initialize_eliminate_dead_code_frontiers(gen, used);
+      for (std::map<unsigned,ApBarrier>::const_iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+      {
+        unsigned g = gen[it->first];
+        if (g != -1U && g < instructions.size())
+          used[g] = true;
+      }
     }
 
     //--------------------------------------------------------------------------

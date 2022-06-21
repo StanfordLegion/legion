@@ -7304,15 +7304,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceOp::elide_fences_pre_sync(void)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by derived classes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceOp::elide_fences_post_sync(void)
+    void ReplTraceOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       // Should only be called by derived classes
@@ -7376,10 +7368,8 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_85); 
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
-      pre_elide_fences_collective_id =
+      sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
-      post_elide_fences_collective_id =
-        ctx->get_next_collective_index(COLLECTIVE_LOC_93);
     }
 
     //--------------------------------------------------------------------------
@@ -7485,7 +7475,6 @@ namespace Legion {
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
-                                   map_applied_conditions,
                                    has_blocking_call, this);
         if (!current_template->is_replayable())
         {
@@ -7538,7 +7527,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCaptureOp::elide_fences_pre_sync(void)
+    void ReplTraceCaptureOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7547,22 +7536,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      SlowBarrier pre_sync_barrier(repl_ctx, pre_elide_fences_collective_id);
-      pre_sync_barrier.perform_collective_sync();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCaptureOp::elide_fences_post_sync(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      SlowBarrier post_sync_barrier(repl_ctx, post_elide_fences_collective_id);
-      post_sync_barrier.perform_collective_sync();
+      SlowBarrier pre_sync_barrier(repl_ctx,
+          sync_compute_frontiers_collective_id);
+      pre_sync_barrier.perform_collective_sync(precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7623,10 +7599,8 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_86);
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
-      pre_elide_fences_collective_id =
+      sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
-      post_elide_fences_collective_id =
-        ctx->get_next_collective_index(COLLECTIVE_LOC_93);
     }
 
     //--------------------------------------------------------------------------
@@ -7795,7 +7769,6 @@ namespace Legion {
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
-                                   map_applied_conditions,
                                    has_blocking_call, this);
         if (!current_template->is_replayable())
         {
@@ -7866,7 +7839,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::elide_fences_pre_sync(void)
+    void ReplTraceCompleteOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7875,22 +7848,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      SlowBarrier pre_sync_barrier(repl_ctx, pre_elide_fences_collective_id);
-      pre_sync_barrier.perform_collective_sync();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::elide_fences_post_sync(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      SlowBarrier post_sync_barrier(repl_ctx, post_elide_fences_collective_id);
-      post_sync_barrier.perform_collective_sync();
+      SlowBarrier pre_sync_barrier(repl_ctx,
+          sync_compute_frontiers_collective_id);
+      pre_sync_barrier.perform_collective_sync(precondition);
     }
 
     /////////////////////////////////////////////////////////////

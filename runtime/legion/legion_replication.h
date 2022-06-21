@@ -2199,8 +2199,7 @@ namespace Legion {
       virtual void execute_dependence_analysis(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       LegionTrace *local_trace;
     };
@@ -2231,15 +2230,13 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
-      CollectiveID pre_elide_fences_collective_id;
-      CollectiveID post_elide_fences_collective_id;
+      CollectiveID sync_compute_frontiers_collective_id;
       bool has_blocking_call;
       bool remove_trace_reference;
       bool is_recording;
@@ -2270,16 +2267,14 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
-      CollectiveID pre_elide_fences_collective_id;
-      CollectiveID post_elide_fences_collective_id;
+      CollectiveID sync_compute_frontiers_collective_id;
       bool replayed;
       bool has_blocking_call;
       bool is_recording;
