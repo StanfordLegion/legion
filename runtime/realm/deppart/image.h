@@ -32,6 +32,8 @@ namespace Realm {
 
     ImageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N2,T2> _inst_space,
 		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
+
+    ImageMicroOp(IndexSpace<N,T> _parent_space);
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(IndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
@@ -89,6 +91,10 @@ namespace Realm {
 		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     ImageOperation(const IndexSpace<N,T>& _parent,
+		   const ProfilingRequestSet &reqs,
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
+
+    ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
 		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
@@ -113,7 +119,40 @@ namespace Realm {
     std::vector<IndexSpace<N,T> > diff_rhss;
     std::vector<SparsityMap<N,T> > images;
   };
-    
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  class StructuredImageMicroOp : public ImageMicroOp<N, T, N2, T2> {
+   public:
+    StructuredImageMicroOp(IndexSpace<N, T> _parent_space,
+                           const TRANSFORM& transform);
+
+    virtual ~StructuredImageMicroOp(void);
+
+    template <typename BM>
+    void populate_bitmasks_structured(std::map<int, BM*>& bitmasks);
+
+    virtual void execute(void);
+
+    void dispatch(PartitioningOperation* op, bool inline_ok);
+
+   protected:
+    TRANSFORM transform;
+  };
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  class StructuredImageOperation : public ImageOperation<N, T, N2, T2> {
+   public:
+    StructuredImageOperation(const IndexSpace<N, T>& _parent,
+                             const TRANSFORM& transform,
+                             const ProfilingRequestSet& reqs,
+                             GenEventImpl* _finish_event,
+                             EventImpl::gen_t _finish_gen);
+
+    virtual void execute(void);
+
+   protected:
+    TRANSFORM transform;
+  };
 };
 
 #endif // REALM_DEPPART_IMAGE_H

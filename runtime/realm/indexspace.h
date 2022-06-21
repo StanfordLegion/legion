@@ -82,6 +82,24 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
+  template <int M, int N, typename T = int>
+  struct AffineTransform {
+   public:
+    AffineTransform() = default;
+    template <typename T2, typename T3>
+    AffineTransform(const Realm::Matrix<M, N, T2> _transform,
+                    const Point<M, T3> _offset)
+        : transform(_transform), offset(_offset) {}
+
+    template <typename T2>
+    Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const {
+      return (transform * point) + offset;
+    }
+
+    Realm::Matrix<M, N, T> transform;
+    Point<M, T> offset;
+  };
+
   class IndirectionInfo;
 
   template <int N, typename T = int>
@@ -359,12 +377,20 @@ namespace Realm {
     //  ours and is used to compute the image of each source - i.e. upon return (and waiting
     //  for the finish event), the following invariant holds:
     //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
+
     template <int N2, typename T2>
     Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
 				   const IndexSpace<N2,T2>& source,
 				   IndexSpace<N,T>& image,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspaces_by_image(
+        const TRANSFORM& transform,
+        const std::vector<IndexSpace<N2, T2> >& sources,
+        std::vector<IndexSpace<N, T> >& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,

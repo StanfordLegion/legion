@@ -1146,7 +1146,6 @@ public:
   virtual int perform_dynamic_checks(void)
   {
     int errors = 0;
-
     // compute the intermediates for the checks - these duplicate things we
     //  already have, but we're not supposed to know that here
     std::vector<IndexSpace<1> > p_pvt_and_shr, p_all;
@@ -2200,80 +2199,306 @@ void top_level_task(const void *args, size_t arglen,
   printf("all done!\n");
 }
 
-int main(int argc, char **argv)
+template <int N1, typename T1, int N2, typename T2, typename FT>
+class RandomAffineTest : public TestInterface {
+public:
+  RandomAffineTest(int argc, const char *argv[]);
+  virtual ~RandomAffineTest(void);
+
+  virtual void print_info(void);
+
+  virtual Event initialize_data(const std::vector<Memory>& memories,
+				const std::vector<Processor>& procs);
+
+  virtual Event perform_partitioning(void);
+
+  virtual int perform_dynamic_checks(void);
+
+  virtual int check_partitioning(void);
+
+  void fill_instance_data(IndexSpace<N1,T1> ibounds, RegionInstance inst);
+
+protected:
+  T1 base1_min, base1_max, extent1_min, extent1_max;
+  T2 base2_min, base2_max, extent2_min, extent2_max;
+  int num_pieces, num_colors;
+
+  AffineTransform<N2, N1, T2> transform;
+
+  std::vector<IndexSpace<N2, T1>> ss_images;
+  std::vector<IndexSpace<N1,T1> > ss_by_color;
+
+  Rect<N1,T1> bounds1;
+  Rect<N2,T2> bounds2;
+  IndexSpace<N1,T1> root1;
+  IndexSpace<N2,T2> root2;
+  std::vector<FT> colors;
+  std::vector<RegionInstance> ri_data1;
+  std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, FT> > fd_vals1;
+};
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
+  : base1_min(0), base1_max(0), extent1_min(4), extent1_max(6)
+  , base2_min(0), base2_max(0), extent2_min(4), extent2_max(6)
+  , num_pieces(2), num_colors(4)
 {
+  RandStream<> rs(random_seed+0);
+
+  for(int i = 0; i < N1; i++) {
+    bounds1.lo[i] = base1_min + rs.rand_int(base1_max - base1_min + 1);
+    bounds1.hi[i] = (bounds1.lo[i] +
+		     extent1_min + rs.rand_int(extent1_max - extent1_min + 1));
+  }
+  for(int i = 0; i < N2; i++) {
+    bounds2.lo[i] = base2_min + rs.rand_int(base2_max - base2_min + 1);
+    bounds2.hi[i] = (bounds2.lo[i] +
+		     extent2_min + rs.rand_int(extent2_max - extent2_min + 1));
+  }
+
+  colors.resize(num_colors);
+  for(int i = 0; i < num_colors; i++)
+    colors[i] = randval<FT>(rs);
+
+  Realm::Matrix<N2, N1, T2> matrix;
+  for (int i = 0; i < N2; i++)
+    for (int j = 0; j < N1; j++) matrix[i][j] = (i == j);
+  transform.transform = matrix;
+  Point<N2, T2> offset = Point<N2, T2>::ZEROES();
+  offset[0] = 2;
+  transform.offset = offset;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+RandomAffineTest<N1,T1,N2,T2,FT>::~RandomAffineTest(void)
+{}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+void RandomAffineTest<N1,T1,N2,T2,FT>::print_info(void)
+{
+  printf("Realm dependent partitioning test - random affine\n");
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+void RandomAffineTest<N1, T1, N2, T2, FT>::fill_instance_data(
+    IndexSpace<N1, T1> ibounds, RegionInstance inst) {
+  {
+    // start with value field
+    AffineAccessor<FT, N1, T1> a_vals(inst, 0);
+
+    // iterate over all points in root1 with initial random values
+    RandStream<> rs1(random_seed + 1);
+    for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
+      FT v = colors[rs1.rand_int(colors.size())];
+      if (ibounds.contains(pir.p)) a_vals.write(pir.p, v);
+    }
+
+    // print results
+    for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
+      if (ibounds.contains(pir.p))
+        log_app.debug() << "v[" << pir.p << "] = " << a_vals.read(pir.p);
+    }
+  }
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& memories,
+						  const std::vector<Processor>& procs)
+{
+  root1 = IndexSpace<N1,T1>(bounds1);
+  root2 = IndexSpace<N2,T2>(bounds2);
+  log_app.debug() << "root1 = " << root1;
+  log_app.debug() << "root2 = " << root2;
+
+  // create instances to hold actual data
+  size_t num_insts = memories.size();
+  log_app.debug() << "procs: " << procs;
+  log_app.debug() << "mems: " << memories;
+  std::vector<IndexSpace<N1,T1> > ss_inst1;
+  root1.create_equal_subspaces(num_insts, 1, ss_inst1,
+			       Realm::ProfilingRequestSet()).wait();
+
+  std::vector<size_t> field_sizes;
+  field_sizes.push_back(sizeof(FT));
+  field_sizes.push_back(sizeof(Point<N2,T2>));
+
+  ri_data1.resize(num_insts);
+  fd_vals1.resize(num_insts);
+
+  for(size_t i = 0; i < num_insts; i++) {
+    RegionInstance ri;
+    RegionInstance::create_instance(ri,
+				    memories[i],
+				    ss_inst1[i],
+				    field_sizes,
+				    0 /*SOA*/,
+				    Realm::ProfilingRequestSet()).wait();
+    log_app.debug() << "inst[" << i << "] = " << ri << " (" << ss_inst1[i] << ")";
+    ri_data1[i] = ri;
+
+    fd_vals1[i].index_space = ss_inst1[i];
+    fd_vals1[i].inst = ri;
+    fd_vals1[i].field_offset = 0;
+  }
+
+  log_app.debug() << "colors = " << colors;
+
+  for(size_t i = 0; i < num_insts; i++) {
+    fill_instance_data(root1/*ss_inst1[i]*/, ri_data1[i]);
+  }
+
+  return Event::NO_EVENT;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
+{
+  // start by filtering root1 by color
+  std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
+ // std::vector<IndexSpace<N1,T1> > ss_by_color;
+  Event e1 = root1.create_subspaces_by_field(fd_vals1,
+					     piece_colors,
+					     ss_by_color,
+					     ProfilingRequestSet());
+  e1.wait();
+
+  for(int i = 0; i < num_pieces; i++) {
+    log_app.debug() << "bycolor[" << i << "] (" << colors[i] << ") = " << ss_by_color[i];
+    dump_sparse_index_space("", ss_by_color[i]);
+  }
+
+  // images
+  //std::vector<IndexSpace<N2,T2> > ss_images;
+  Event e2 = root2.create_subspaces_by_image(transform,
+					     ss_by_color,
+					     ss_images,
+					     ProfilingRequestSet(),
+					     e1);
+
+  e2.wait();
+
+  for(int i = 0; i < num_pieces; i++) {
+    log_app.debug() << "image[" << i << "] = " << ss_images[i];
+    dump_sparse_index_space("", ss_images[i]);
+  }
+
+  return Event::NO_EVENT;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+int RandomAffineTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
+{
+  return 0;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
+  // Check the result of preimage operation.
+  for (const auto& source : ss_by_color) {
+    for (IndexSpaceIterator<N1, T1> it(source); it.valid; it.step()) {
+      for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
+           point.step()) {
+        auto target_point = transform[point.p];
+        if (root2.contains(target_point)) {
+          bool found = false;
+          for (const auto image : ss_images) {
+            if (image.contains(target_point)) {
+              found = true; break;
+            }
+          }
+          std::cout << "point=" << target_point << " found=" << found
+                    << std::endl;
+          assert(found);
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+int main(int argc, char **argv) {
   Runtime rt;
 
   rt.init(&argc, &argv);
 
   // parse global options
-  for(int i = 1; i < argc; i++) {
-    if(!strcmp(argv[i], "-seed")) {
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "-seed")) {
       random_seed = atoi(argv[++i]);
       continue;
     }
 
-    if(!strcmp(argv[i], "-random")) {
+    if (!strcmp(argv[i], "-random")) {
       random_colors = true;
       continue;
     }
 
-    if(!strcmp(argv[i], "-wait")) {
+    if (!strcmp(argv[i], "-wait")) {
       wait_on_events = true;
       continue;
     }
 
-    if(!strcmp(argv[i], "-show")) {
+    if (!strcmp(argv[i], "-show")) {
       show_graph = true;
       continue;
     }
 
-    if(!strcmp(argv[i], "-nocheck")) {
+    if (!strcmp(argv[i], "-nocheck")) {
       skip_check = true;
       continue;
     }
 
     // test cases consume the rest of the args
-    if(!strcmp(argv[i], "circuit")) {
-      testcfg = new CircuitTest(argc-i, const_cast<const char **>(argv+i));
-      break;
-    }
-  
-    if(!strcmp(argv[i], "pennant")) {
-      testcfg = new PennantTest(argc-i, const_cast<const char **>(argv+i));
-      break;
-    }
-  
-    if(!strcmp(argv[i], "miniaero")) {
-      testcfg = new MiniAeroTest(argc-i, const_cast<const char **>(argv+i));
+    if (!strcmp(argv[i], "circuit")) {
+      testcfg = new CircuitTest(argc - i, const_cast<const char **>(argv + i));
       break;
     }
 
-    if(!strcmp(argv[i], "random")) {
-      testcfg = new RandomTest<1,int,2,int,int>(argc-i, const_cast<const char **>(argv+i));
+    if (!strcmp(argv[i], "pennant")) {
+      testcfg = new PennantTest(argc - i, const_cast<const char **>(argv + i));
       break;
     }
 
-    //printf("unknown parameter: %s\n", argv[i]);
+    if (!strcmp(argv[i], "miniaero")) {
+      testcfg = new MiniAeroTest(argc - i, const_cast<const char **>(argv + i));
+      break;
+    }
+
+    if (!strcmp(argv[i], "random")) {
+      testcfg = new RandomTest<1, int, 2, int, int>(
+          argc - i, const_cast<const char **>(argv + i));
+      break;
+    }
+
+    if (!strcmp(argv[i], "affine")) {
+      testcfg = new RandomAffineTest<1, int, 2, int, int>(
+          argc, const_cast<const char **>(argv));
+      break;
+    }
+
+    // printf("unknown parameter: %s\n", argv[i]);
   }
 
   // if no test specified, use circuit (with default parameters)
-  if(!testcfg)
+  if (!testcfg) {
     testcfg = new CircuitTest(0, 0);
+  }
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(INIT_CIRCUIT_DATA_TASK, CircuitTest::init_data_task_wrapper);
   rt.register_task(INIT_PENNANT_DATA_TASK, PennantTest::init_data_task_wrapper);
-  rt.register_task(INIT_MINIAERO_DATA_TASK, MiniAeroTest::init_data_task_wrapper);
+  rt.register_task(INIT_MINIAERO_DATA_TASK,
+                   MiniAeroTest::init_data_task_wrapper);
 
   signal(SIGALRM, sigalrm_handler);
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
-    .only_kind(Processor::LOC_PROC)
-    .first();
+                    .only_kind(Processor::LOC_PROC)
+                    .first();
   assert(p.exists());
 
-  // collective launch of a single task - everybody gets the same finish event
+  // collective launch of a single task - everybody gets the same finish
+  // event
   Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
 
   // request shutdown once that task is complete
@@ -2283,6 +2508,6 @@ int main(int argc, char **argv)
   rt.wait_for_shutdown();
 
   delete testcfg;
-  
+
   return 0;
 }
