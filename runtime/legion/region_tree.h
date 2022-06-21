@@ -205,9 +205,6 @@ namespace Legion {
                               const bool notify_remote = true,
                               IndexSpaceExprID expr_id = 0,
                               std::set<RtEvent> *applied = NULL);
-      void find_or_create_sharded_index_space(TaskContext *ctx,
-                              IndexSpace handle, IndexSpace local,
-                              DistributedID did);
       RtEvent create_pending_partition(TaskContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
