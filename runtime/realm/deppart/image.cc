@@ -48,7 +48,7 @@ namespace Realm {
     images.resize(n);
     for (size_t i = 0; i < n; i++) {
       images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "Image: " << *this << " src=" << sources[i] << " -> "
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> "
                        << images[i] << " (" << e << ")";
     }
 
@@ -75,7 +75,7 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "Image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
     op->launch(wait_on);
@@ -101,7 +101,7 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "IImage: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
  //   op->launch(wait_on);
@@ -128,7 +128,7 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source_with_difference(sources[i], diff_rhss[i]);
-      log_dpops.info() << "IIImage: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
+      log_dpops.info() << "iImage: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
     }
 
     op->launch(wait_on);
@@ -870,20 +870,21 @@ namespace Realm {
         // iterate over each point in the source and see if it points into the
         // parent space
         for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
-          // TODO(apriakhin): This can be probably done faster.
-          Point<N, T> ptr = transform[pir.p];
-          if (this->parent_space.contains(ptr)) {
+          // TODO(apriakhin): This can probably be done faster.
+          Point<N, T> source_point = transform[pir.p];
+
+          if (this->parent_space.contains(source_point)) {
             // optional filter
             if (!this->diff_rhss.empty())
-              if (this->diff_rhss[i].contains(ptr)) {
-                // std::cout << "point " << ptr << " filtered!\n";
+              if (this->diff_rhss[i].contains(source_point)) {
+                // std::cout << "point " << source_point << " filtered!\n";
                 continue;
               }
             // std::cout << "image " << i << "(" << this->sources[i] << ") -> "
-            //<< pir.p << " -> " << ptr << std::endl;
+            //<< source_point.p << " -> " << source_point << std::endl;
             if (!bmpp) bmpp = &bitmasks[i];
             if (!*bmpp) *bmpp = new BM;
-            (*bmpp)->add_point(ptr);
+            (*bmpp)->add_point(source_point);
           }
         }
       }
