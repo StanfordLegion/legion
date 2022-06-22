@@ -121,12 +121,15 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  class StructuredImageMicroOp : public ImageMicroOp<N, T, N2, T2> {
+  class StructuredImageMicroOp : public PartitioningMicroOp {
    public:
     StructuredImageMicroOp(IndexSpace<N, T> _parent_space,
                            const TRANSFORM& transform);
 
     virtual ~StructuredImageMicroOp(void);
+
+    void add_sparsity_output(IndexSpace<N2, T2> _source,
+                             SparsityMap<N, T> _sparsity);
 
     template <typename BM>
     void populate_bitmasks(std::map<int, BM*>& bitmasks);
@@ -136,6 +139,9 @@ namespace Realm {
     void dispatch(PartitioningOperation* op, bool inline_ok);
 
    protected:
+    IndexSpace<N,T> parent_space;
+    std::vector<IndexSpace<N2,T2> > sources;
+    std::vector<SparsityMap<N,T> > sparsity_outputs;
     TRANSFORM transform;
   };
 

@@ -752,11 +752,7 @@ namespace Realm {
                                                               transform);
 
       for (size_t j = 0; j < this->sources.size(); j++) {
-        if (this->diff_rhss.empty())
-          micro_op->add_sparsity_output(this->sources[j], this->images[j]);
-        else
-          micro_op->add_sparsity_output_with_difference(
-              this->sources[j], this->diff_rhss[j], this->images[j]);
+        micro_op->add_sparsity_output(this->sources[j], this->images[j]);
       }
 
       micro_op->dispatch(this, true /* ok to run in this thread */);
@@ -770,16 +766,23 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::StructuredImageMicroOp(
       IndexSpace<N, T> _parent_space, const TRANSFORM &_transform)
-      : ImageMicroOp<N, T, N2, T2>(_parent_space), transform(_transform) {}
+      :  parent_space(_parent_space), transform(_transform) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::~StructuredImageMicroOp() {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::add_sparsity_output(
+      IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
+    sources.push_back(_source);
+    sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::execute(void) {
     TimeStamp ts("StructuredImageMicroOp::execute", true, &log_uop_timing);
 
-    if (!this->sparsity_outputs.empty()) {
+    if (!sparsity_outputs.empty()) {
       std::map<int, HybridRectangleList<N, T> *> rect_map;
 
       populate_bitmasks(rect_map);
@@ -795,11 +798,10 @@ namespace Realm {
 #endif
 
       // iterate over sparsity outputs and contribute to all (even if we didn't
-      // have any
-      //  points found for it)
-      for (size_t i = 0; i < this->sparsity_outputs.size(); i++) {
+      // have any points found for it)
+      for (size_t i = 0; i < sparsity_outputs.size(); i++) {
         SparsityMapImpl<N, T> *impl =
-            SparsityMapImpl<N, T>::lookup(this->sparsity_outputs[i]);
+            SparsityMapImpl<N, T>::lookup(sparsity_outputs[i]);
         typename std::map<int, HybridRectangleList<N, T> *>::const_iterator
             it2 = rect_map.find(i);
         if (it2 != rect_map.end()) {
@@ -810,36 +812,21 @@ namespace Realm {
           impl->contribute_nothing();
       }
     }
-    // TODO(apryakhin): Determine if approx. is needed for structured.
-    assert(this->approx_output_index == -1);
   }
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::dispatch(
       PartitioningOperation *op, bool inline_ok) {
     // need valid data for each source
-    for (size_t i = 0; i < this->sources.size(); i++) {
-      if (!this->sources[i].dense()) {
+    for (size_t i = 0; i < sources.size(); i++) {
+      if (!sources[i].dense()) {
         // it's safe to add the count after the registration only because we
         // initialized
         //  the count to 2 instead of 1
         bool registered =
-            SparsityMapImpl<N2, T2>::lookup(this->sources[i].sparsity)
+            SparsityMapImpl<N2, T2>::lookup(sources[i].sparsity)
                 ->add_waiter(this, true /*precise*/);
-        if (registered) this->wait_count.fetch_add(1);
-      }
-    }
-
-    // need valid data for each diff_rhs (if present)
-    for (size_t i = 0; i < this->diff_rhss.size(); i++) {
-      if (!this->diff_rhss[i].dense()) {
-        // it's safe to add the count after the registration only because we
-        // initialized
-        //  the count to 2 instead of 1
-        bool registered =
-            SparsityMapImpl<N, T>::lookup(this->diff_rhss[i].sparsity)
-                ->add_waiter(this, true /*precise*/);
-        if (registered) this->wait_count.fetch_add(1);
+        if (registered) wait_count.fetch_add(1);
       }
     }
 
@@ -849,9 +836,9 @@ namespace Realm {
       // initialized
       //  the count to 2 instead of 1
       bool registered =
-          SparsityMapImpl<N, T>::lookup(this->parent_space.sparsity)
+          SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
               ->add_waiter(this, true /*precise*/);
-      if (registered) this->wait_count.fetch_add(1);
+      if (registered) wait_count.fetch_add(1);
     }
 
     this->finish_dispatch(op, inline_ok);
@@ -859,11 +846,10 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   template <typename BM>
-  void
-  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
       std::map<int, BM *> &bitmasks) {
-    for (size_t i = 0; i < this->sources.size(); i++) {
-      for (IndexSpaceIterator<N2, T2> it2(this->sources[i]); it2.valid;
+    for (size_t i = 0; i < sources.size(); i++) {
+      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid;
            it2.step()) {
         BM **bmpp = 0;
         // iterate over each point in the source and see if it points into the
@@ -871,15 +857,7 @@ namespace Realm {
         for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
           // TODO(apriakhin): This can probably be done faster.
           Point<N, T> source_point = transform[pir.p];
-          if (this->parent_space.contains(source_point)) {
-            // optional filter
-            if (!this->diff_rhss.empty())
-              if (this->diff_rhss[i].contains(source_point)) {
-                // std::cout << "point " << source_point << " filtered!\n";
-                continue;
-              }
-            // std::cout << "image " << i << "(" << this->sources[i] << ") -> "
-            //<< source_point.p << " -> " << source_point << std::endl;
+          if (parent_space.contains(source_point)) {
             if (!bmpp) bmpp = &bitmasks[i];
             if (!*bmpp) *bmpp = new BM;
             (*bmpp)->add_point(source_point);
