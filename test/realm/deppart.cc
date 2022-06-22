@@ -1146,7 +1146,6 @@ public:
   virtual int perform_dynamic_checks(void)
   {
     int errors = 0;
-
     // compute the intermediates for the checks - these duplicate things we
     //  already have, but we're not supposed to know that here
     std::vector<IndexSpace<1> > p_pvt_and_shr, p_all;
@@ -1192,6 +1191,7 @@ public:
 						   Realm::ProfilingRequestSet(),
                                                    Event::merge_events(e2, e4));
 #endif
+
     errors += check_empty(e5, p_in_test, "p_in_test");
     errors += check_empty(e6, p_out_test, "p_out_test");
 
@@ -2262,11 +2262,15 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
     colors[i] = randval<FT>(rs);
 
   Realm::Matrix<N2, N1, T2> matrix;
-  for (int i = 0; i < N2; i++)
-    for (int j = 0; j < N1; j++) matrix[i][j] = (i == j);
-  transform.transform = matrix;
+  for (int i = 0; i < N2; i++) {
+    for (int j = 0; j < N1; j++) {
+      matrix[i][j] = (i == N1 - j - 1);
+    }
+  }
+
   Point<N2, T2> offset = Point<N2, T2>::ZEROES();
-  offset[0] = 2;
+  for (int i = 0; i < N2; i++) offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+  transform.transform = matrix;
   transform.offset = offset;
 }
 
@@ -2477,6 +2481,7 @@ int main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[i], "affine")) {
+      // TODO(apriakhin): Add tests with more dimensions.
       testcfg = new RandomAffineTest<1, int, 2, int, int>(
           argc, const_cast<const char **>(argv));
       break;

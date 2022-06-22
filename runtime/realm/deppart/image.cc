@@ -871,7 +871,6 @@ namespace Realm {
         for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
           // TODO(apriakhin): This can probably be done faster.
           Point<N, T> source_point = transform[pir.p];
-
           if (this->parent_space.contains(source_point)) {
             // optional filter
             if (!this->diff_rhss.empty())
