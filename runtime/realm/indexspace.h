@@ -82,19 +82,20 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
+  // a AffineTransform is used to describe an affine transformation
+  // Ax + b on point where A is a transform matrix and b is an offset
+  // vector.
   template <int M, int N, typename T = int>
-  struct AffineTransform {
+  class REALM_PUBLIC_API AffineTransform {
    public:
     AffineTransform() = default;
+
     template <typename T2, typename T3>
-    AffineTransform(const Realm::Matrix<M, N, T2> _transform,
-                    const Point<M, T3> _offset)
-        : transform(_transform), offset(_offset) {}
+    AffineTransform(const Realm::Matrix<M, N, T2>& _transform,
+                    const Point<M, T3>& _offset);
 
     template <typename T2>
-    Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const {
-      return (transform * point) + offset;
-    }
+    Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
 
     Realm::Matrix<M, N, T> transform;
     Point<M, T> offset;

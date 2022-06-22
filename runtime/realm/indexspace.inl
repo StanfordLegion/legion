@@ -32,6 +32,22 @@ namespace Realm {
   REALM_INTERNAL_API_EXTERNAL_LINKAGE
   extern Logger log_dpops;
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AfineTransform<M, N, T>
+
+  template <int M, int N, typename T>
+  template <typename T2, typename T3>
+  inline AffineTransform<M, N, T>::AffineTransform(
+      const Realm::Matrix<M, N, T2>& _transform, const Point<M, T3>& _offset)
+      : transform(_transform), offset(_offset) {}
+
+  template <int M, int N, typename T>
+  template <typename T2>
+  inline Realm::Point<M, T> AffineTransform<M, N, T>::operator[](
+      const Realm::Point<N, T2>& point) const {
+    return (transform * point) + offset;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
