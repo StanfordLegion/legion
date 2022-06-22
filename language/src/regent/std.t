@@ -1541,7 +1541,7 @@ function std.compute_serialized_size_inner(value_type, value)
   end
 end
 
-local compute_serialized_size_helper = terralib.memoize(function(value_type)
+local compute_serialized_size_helper = data.weak_memoize(function(value_type)
   local value = terralib.newsymbol(value_type, "value")
   local actions, result = std.compute_serialized_size_inner(value_type, value)
   if actions then
@@ -1605,7 +1605,7 @@ function std.serialize_inner(value_type, value, fixed_ptr, data_ptr)
   return actions
 end
 
-local serialize_helper = terralib.memoize(function(value_type)
+local serialize_helper = data.weak_memoize(function(value_type)
   local value = terralib.newsymbol(value_type, "value")
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
@@ -1669,7 +1669,7 @@ function std.deserialize_inner(value_type, fixed_ptr, data_ptr)
   end
 end
 
-local deserialize_helper = terralib.memoize(function(value_type)
+local deserialize_helper = data.weak_memoize(function(value_type)
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local actions, result = std.deserialize_inner(value_type, fixed_ptr, data_ptr)
@@ -2006,9 +2006,9 @@ end
 -- var y = new(ptr(t, s))
 --
 -- The types of x and y are distinct objects, but are still type_eq.
-local bounded_type = terralib.memoize(function(index_type, ...)
+local bounded_type = data.weak_memoize(function(index_type, ...)
   assert(std.is_index_type(index_type))
-  local bounds = data.newtuple(...)
+  local bounds = terralib.newlist({...})
   local points_to_type = false
   if #bounds > 0 then
     if terralib.types.istype(bounds[1]) then
@@ -2016,6 +2016,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       bounds:remove(1)
     end
   end
+  bounds = data.newtuple(unpack(bounds))
   if #bounds <= 0 then
     error(tostring(index_type) .. " expected at least one ispace or region, got none")
   end
@@ -2067,7 +2068,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   end
 
   function st:bounds(node)
-    local bounds = data.newtuple()
+    local bounds = terralib.newlist()
     local is_ispace = false
     local is_region = false
     for i, bound_symbol in ipairs(self.bounds_symbols) do
@@ -2111,7 +2112,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if node then report.error(node, message) end
       assert(false, message)
     end
-    return bounds
+    return data.newtuple(unpack(bounds))
   end
 
   st.metamethods.__eq = macro(function(a, b)
@@ -2245,7 +2246,7 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
-std.transform = terralib.memoize(function(M, N)
+std.transform = data.weak_memoize(function(M, N)
   local st = terralib.types.newstruct("transform(" .. tostring(M) .. "," ..tostring(N) .. ")")
   local impl_type = validate_transform_type(M, N)
   st.entries = terralib.newlist({
@@ -2275,7 +2276,7 @@ std.transform = terralib.memoize(function(M, N)
 
   return st
 end)
-std.rect_type = terralib.memoize(function(index_type)
+std.rect_type = data.weak_memoize(function(index_type)
   local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
   assert(not index_type:is_opaque())
   st.entries = terralib.newlist({
@@ -2304,6 +2305,10 @@ std.rect_type = terralib.memoize(function(index_type)
                         hi = [ty]([expr].hi) })
       elseif std.type_eq(to, c.legion_domain_t) then
         return `([expr]:to_domain())
+      end
+    elseif std.is_rect_type(to) then
+      if std.type_eq(from, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        return `([to] { lo = [expr].lo, hi = [expr].hi })
       end
     end
     assert(false)
@@ -2574,11 +2579,6 @@ do
     local id = next_ispace_id
     next_ispace_id = next_ispace_id + 1
 
-    local hash_value = "__ispace_#" .. tostring(id)
-    function st:hash()
-      return hash_value
-    end
-
     if std.config["debug"] then
       function st.metamethods.__typename(st)
         return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
@@ -2680,11 +2680,6 @@ do
 
     local id = next_region_id
     next_region_id = next_region_id + 1
-
-    local hash_value = "__region_#" .. tostring(id)
-    function st:hash()
-      return hash_value
-    end
 
     if std.config["debug"] then
       function st.metamethods.__typename(st)
@@ -2843,11 +2838,6 @@ do
     local id = next_partition_id
     next_partition_id = next_partition_id + 1
 
-    local hash_value = "__partition_#" .. tostring(id)
-    function st:hash()
-      return hash_value
-    end
-
     if std.config["debug"] then
       function st.metamethods.__typename(st)
         if st:colors():is_opaque() then
@@ -2990,11 +2980,6 @@ function std.cross_product(...)
   local id = next_cross_product_id
   next_cross_product_id = next_cross_product_id + 1
 
-  local hash_value = "__cross_product_#" .. tostring(id)
-  function st:hash()
-    return hash_value
-  end
-
   function st.metamethods.__typename(st)
     return "cross_product(" .. st.partition_symbols:mkstring(", ") .. ")"
   end
@@ -3004,7 +2989,7 @@ end
 end
 
 
-std.vptr = terralib.memoize(function(width, points_to_type, ...)
+std.vptr = data.weak_memoize(function(width, points_to_type, ...)
   local bounds = data.newtuple(...)
 
   local vec = vector(int64, width)
@@ -3082,7 +3067,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   return st
 end)
 
-std.sov = terralib.memoize(function(struct_type, width)
+std.sov = data.weak_memoize(function(struct_type, width)
   -- Sanity check that referee type is not a ref.
   assert(not std.is_ref(struct_type))
   assert(not std.is_rawref(struct_type))
@@ -3127,7 +3112,7 @@ end)
 -- different from ptr in that it is not intended to be used by code;
 -- it exists mainly to facilitate field-sensitive privilege checks in
 -- the type system.
-std.ref = terralib.memoize(function(pointer_type, ...)
+std.ref = data.weak_memoize(function(pointer_type, ...)
   if not terralib.types.istype(pointer_type) then
     error("ref expected a type as argument 1, got " .. tostring(pointer_type))
   end
@@ -3167,7 +3152,7 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   return st
 end)
 
-std.rawref = terralib.memoize(function(pointer_type)
+std.rawref = data.weak_memoize(function(pointer_type)
   if not terralib.types.istype(pointer_type) then
     error("rawref expected a type as argument 1, got " .. tostring(pointer_type))
   end
@@ -3190,7 +3175,7 @@ std.rawref = terralib.memoize(function(pointer_type)
   return st
 end)
 
-std.future = terralib.memoize(function(result_type)
+std.future = data.weak_memoize(function(result_type)
   if not terralib.types.istype(result_type) then
     error("future expected a type as argument 1, got " .. tostring(result_type))
   end
@@ -3214,7 +3199,7 @@ end)
 
 do
 local next_list_id = 1
-std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
+std.list = data.weak_memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
   end
@@ -3366,11 +3351,6 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   local id = next_list_id
   next_list_id = next_list_id + 1
 
-  local hash_value = "__list_#" .. tostring(id)
-  function st:hash()
-    return hash_value
-  end
-
   function st:force_cast(from, to, expr)
     assert(std.is_list_of_regions(from) and std.is_list_of_regions(to))
     -- FIXME: This would result in memory corruption if we ever freed
@@ -3480,7 +3460,7 @@ do
   end
 end
 
-std.dynamic_collective = terralib.memoize(function(result_type)
+std.dynamic_collective = data.weak_memoize(function(result_type)
   if not terralib.types.istype(result_type) then
     error("dynamic_collective expected a type as argument 1, got " .. tostring(result_type))
   end
@@ -3501,7 +3481,7 @@ std.dynamic_collective = terralib.memoize(function(result_type)
   return st
 end)
 
-std.array = terralib.memoize(function(elem_type, N)
+std.array = data.weak_memoize(function(elem_type, N)
   if not (terralib.types.istype(elem_type) and elem_type:isprimitive()) then
     error("array expected a primitive type as argument 1, got " .. tostring(elem_type))
   end
@@ -3718,7 +3698,7 @@ end
 local fspace = {}
 fspace.__index = fspace
 
-fspace.__call = terralib.memoize(function(fs, ...)
+fspace.__call = data.weak_memoize(function(fs, ...)
   -- Do NOT attempt to access fs.params or fs.fields; they are not ready yet.
 
   local args = data.newtuple(...)
@@ -3916,7 +3896,7 @@ local function make_ordering_constraint_from_annotation(layout, dimensions)
 end
 
 -- TODO: Field IDs should really be dynamic
-local generate_static_field_ids = terralib.memoize(function(region_type)
+local generate_static_field_ids = data.weak_memoize(function(region_type)
   local field_ids = data.newmap()
   -- XXX: The following code must be consisten with 'codegen.expr_region'
   local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
@@ -4953,7 +4933,7 @@ do
   end
 
   local function math_binary_op_factory(fname)
-    return terralib.memoize(function(arg_type)
+    return data.weak_memoize(function(arg_type)
       assert(arg_type:isvector())
       assert((arg_type.type == float and 4 <= arg_type.N and arg_type.N <= 8) or
              (arg_type.type == double and 2 <= arg_type.N and arg_type.N <= 4))
@@ -4976,7 +4956,7 @@ end
 
 std.layout = {}
 std.layout.spatial_dims = terralib.newlist()
-std.layout.spatial_dims_map = {}
+std.layout.spatial_dims_map = data.newmap()
 do
   for k, name in ipairs(data.take(max_dim, std.dim_names)) do
     local regent_name = "dim" .. name
@@ -5010,7 +4990,7 @@ function std.layout.make_index_ordering_from_constraint(constraint)
   return ordering
 end
 
-std.layout.default_layout = terralib.memoize(function(index_type)
+std.layout.default_layout = data.weak_memoize(function(index_type)
   local dimensions = data.take(index_type.dim, std.layout.spatial_dims)
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
