@@ -780,10 +780,9 @@ namespace Realm {
     TimeStamp ts("StructuredImageMicroOp::execute", true, &log_uop_timing);
 
     if (!this->sparsity_outputs.empty()) {
-      // std::map<int, DenseRectangleList<N,T> *> rect_map;
       std::map<int, HybridRectangleList<N, T> *> rect_map;
 
-      populate_bitmasks_structured(rect_map);
+      populate_bitmasks(rect_map);
 
 #ifdef DEBUG_PARTITIONING
       std::cout << rect_map.size() << " non-empty images present in instance "
@@ -811,7 +810,7 @@ namespace Realm {
           impl->contribute_nothing();
       }
     }
-
+    // TODO(apryakhin): Determine if approx. is needed for structured.
     assert(this->approx_output_index == -1);
   }
 
@@ -861,7 +860,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   template <typename BM>
   void
-  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks_structured(
+  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
       std::map<int, BM *> &bitmasks) {
     for (size_t i = 0; i < this->sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(this->sources[i]); it2.valid;

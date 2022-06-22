@@ -129,7 +129,7 @@ namespace Realm {
     virtual ~StructuredImageMicroOp(void);
 
     template <typename BM>
-    void populate_bitmasks_structured(std::map<int, BM*>& bitmasks);
+    void populate_bitmasks(std::map<int, BM*>& bitmasks);
 
     virtual void execute(void);
 
