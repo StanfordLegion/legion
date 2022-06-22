@@ -7438,7 +7438,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
              fsa, terralib.sizeof(field_type), c.AUTO_GENERATE_ID)
-           [attach_name_and_type(cx, field_space, `([field_id][i]), field_name, field_type)]
+           [attach_name_and_type(cx, field_space, `([field_ids][i]), field_name, field_type)]
          end
        end)]
     c.legion_field_allocator_destroy(fsa)
