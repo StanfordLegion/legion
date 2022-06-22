@@ -1146,6 +1146,7 @@ public:
   virtual int perform_dynamic_checks(void)
   {
     int errors = 0;
+
     // compute the intermediates for the checks - these duplicate things we
     //  already have, but we're not supposed to know that here
     std::vector<IndexSpace<1> > p_pvt_and_shr, p_all;
