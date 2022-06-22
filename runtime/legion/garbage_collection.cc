@@ -1798,7 +1798,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::register_with_runtime(
-                                  ReferenceMutator *mutator, bool notify_remote)
+                                                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1806,7 +1806,8 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (notify_remote && !is_owner() && (mutator != NULL))
+      if (!is_owner() && ((collective_mapping == NULL) ||
+            !collective_mapping->contains(local_space)))
         send_remote_registration(mutator);
     }
 

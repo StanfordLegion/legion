@@ -1245,7 +1245,8 @@ namespace Legion {
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
                          DistributedID did, RtEvent initialized, 
                          std::set<RtEvent> *applied,
-                         const bool notify_remote, IndexSpaceExprID new_expr_id)
+                         CollectiveMapping *collective_mapping,
+                         IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
       if (new_expr_id == 0)
@@ -1255,12 +1256,12 @@ namespace Legion {
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           realm_index_space_ready, new_expr_id, 
-                          notify_remote, applied);
+                          collective_mapping, applied);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           realm_index_space_ready, new_expr_id, 
-                          notify_remote, applied);
+                          collective_mapping, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -2145,9 +2146,10 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready,expr_id,init,dep),
-        linearization_ready(false)
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
+        CollectiveMapping *mapping)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
+          dep, mapping), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2169,33 +2171,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(const IndexSpaceNodeT &rhs)
-      : IndexSpaceNode(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
       if (is_owner())
         realm_index_space.destroy(
             tight_index_space ? tight_index_space_set : realm_index_space_set);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexSpaceNodeT<DIM,T>& IndexSpaceNodeT<DIM,T>::operator=(
-                                                     const IndexSpaceNodeT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2432,24 +2413,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::create_sharded_alias(IndexSpace alias,
-                                                      DistributedID alias_did)
-    //--------------------------------------------------------------------------
-    {
-      // Have to wait at least until we get our index space set
-      if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
-      context->create_node(alias, &realm_index_space_set, false/*is domain*/,
-                     NULL/*parent*/, 0/*color*/, alias_did, initialized,
-                     index_space_ready, expr_id/*alis*/,false/*notify remote*/);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
                          DistributedID did, RtEvent initialized, 
                          std::set<RtEvent> *applied,
-                         const bool notify_remote, IndexSpaceExprID new_expr_id)
+                         CollectiveMapping *collective_mapping,
+                         IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
       if (new_expr_id == 0)
@@ -2460,8 +2428,8 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
-                                  NULL/*parent*/, 0/*color*/, did, initialized,
-                                  ready, new_expr_id, notify_remote, applied);
+                              NULL/*parent*/, 0/*color*/, did, initialized,
+                              ready, new_expr_id, collective_mapping, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -7141,9 +7109,10 @@ namespace Legion {
                                         LegionColor c, bool disjoint, 
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
-                                        RtEvent init, ShardMapping *map)
+                                        RtEvent init, CollectiveMapping *map,
+                                        ShardMapping *shard_map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                      partition_ready, pend, init, map), kd_root(NULL), 
+                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7157,22 +7126,13 @@ namespace Legion {
                                         LegionColor c, RtEvent disjoint_event,
                                         int comp, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
-                                        RtEvent init, ShardMapping *map)
+                                        RtEvent init, CollectiveMapping *map,
+                                        ShardMapping *shard_map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                      partition_ready, pend, init, map), kd_root(NULL), 
+                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartNodeT<DIM,T>::IndexPartNodeT(const IndexPartNodeT &rhs)
-      : IndexPartNode(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -7189,17 +7149,6 @@ namespace Legion {
       if (sparse_shard_rects != NULL)
         delete sparse_shard_rects;
     }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartNodeT<DIM,T>& IndexPartNodeT<DIM,T>::operator=(
-                                                      const IndexPartNodeT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    } 
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

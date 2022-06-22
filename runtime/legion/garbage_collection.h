@@ -426,8 +426,7 @@ namespace Legion {
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
-      void register_with_runtime(ReferenceMutator *mutator,
-                                 bool notify_remote = true);
+      void register_with_runtime(ReferenceMutator *mutator);
       bool confirm_deletion(void);
     protected:
       bool try_unregister(void);
