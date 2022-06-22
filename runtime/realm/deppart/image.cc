@@ -206,7 +206,7 @@ namespace Realm {
   {
     // for now, one access for the whole instance
     AffineAccessor<Point<N,T>,N2,T2> a_data(inst, field_offset);
-    //std::cout << "ImageMicroOp Sources=" << sources.size() << std::endl;
+
     // double iteration - use the instance's space first, since it's probably smaller
     for(IndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       for(size_t i = 0; i < sources.size(); i++) {
