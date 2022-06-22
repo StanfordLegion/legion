@@ -4331,9 +4331,20 @@ namespace Legion {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
           // Query the view for the events that it needs
-          uit->instance.view->find_last_users(result.events,
-              uit->instance.collective_point, uit->usage,
-              uit->mask, uit->expr, frontier_events);
+          // Note that if we're not performing actual fence elision
+          // we switch the usage to full read-write privileges so 
+          // that we can capture all dependences for the end of the trace
+          if (!trace->perform_fence_elision)
+          {
+            const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
+            uit->instance.view->find_last_users(result.events,
+                uit->instance.collective_point, usage,
+                uit->mask, uit->expr, frontier_events);
+          }
+          else
+            uit->instance.view->find_last_users(result.events,
+                uit->instance.collective_point, uit->usage,
+                uit->mask, uit->expr, frontier_events);
         }
       }
     }
@@ -4738,7 +4749,7 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (!trace->runtime->no_fence_elision)
+          if (trace->perform_fence_elision)
           {
             if (inst->get_kind() == MERGE_EVENT)
             {
