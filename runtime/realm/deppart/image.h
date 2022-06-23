@@ -149,6 +149,8 @@ namespace Realm {
                              GenEventImpl* _finish_event,
                              EventImpl::gen_t _finish_gen);
 
+    virtual ~StructuredImageOperation(void);
+
     IndexSpace<N,T> add_source(const IndexSpace<N2,T2>& source);
 
     virtual void execute(void);

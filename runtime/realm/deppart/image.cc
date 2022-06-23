@@ -709,6 +709,10 @@ namespace Realm {
         transform(_transform) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  StructuredImageOperation<N, T, N2, T2,
+                           TRANSFORM>::~StructuredImageOperation() {}
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   IndexSpace<N, T> StructuredImageOperation<N, T, N2, T2, TRANSFORM>::add_source(
       const IndexSpace<N2, T2> &source) {
     // try to filter out obviously empty sources
