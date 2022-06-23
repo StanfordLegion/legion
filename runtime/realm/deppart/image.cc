@@ -141,19 +141,6 @@ namespace Realm {
   // class ImageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  ImageMicroOp<N,T,N2,T2>::ImageMicroOp(IndexSpace<N,T> _parent_space)
-    : parent_space(_parent_space)
-    , inst_space(IndexSpace<N2, T2>())
-    , inst(RegionInstance::NO_INST)
-    , field_offset(0)
-    , is_ranged(false)
-    , approx_output_index(-1)
-    , approx_output_op(0)
-  {
-    areg.force_instantiation();
-  }
-
-  template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::ImageMicroOp(IndexSpace<N,T> _parent_space,
 					IndexSpace<N2,T2> _inst_space,
 					RegionInstance _inst,
@@ -496,16 +483,6 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
-					    const ProfilingRequestSet &reqs,
-					    GenEventImpl *_finish_event,
-					    EventImpl::gen_t _finish_gen)
-    : PartitioningOperation(reqs, _finish_event, _finish_gen)
-    , parent(_parent)
-  {}
-
-
-  template <int N, typename T, int N2, typename T2>
-  ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
 					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 					    const ProfilingRequestSet &reqs,
 					    GenEventImpl *_finish_event,
@@ -727,36 +704,121 @@ namespace Realm {
       const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
       const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
       EventImpl::gen_t _finish_gen)
-      : ImageOperation<N, T, N2, T2>(_parent, reqs, _finish_event, _finish_gen),
+      : PartitioningOperation(reqs, _finish_event, _finish_gen),
+        parent(_parent),
         transform(_transform) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  IndexSpace<N, T> StructuredImageOperation<N, T, N2, T2, TRANSFORM>::add_source(
+      const IndexSpace<N2, T2> &source) {
+    // try to filter out obviously empty sources
+    if (parent.empty() || source.empty()) {
+      return IndexSpace<N, T>::make_empty();
+    }
+
+    // otherwise it'll be something smaller than the current parent
+    IndexSpace<N, T> image;
+    image.bounds = parent.bounds;
+
+    int target_node = 0;
+    if (!source.dense()) {
+      target_node = ID(source.sparsity).sparsity_creator_node();
+    }
+
+    SparsityMap<N, T> sparsity = get_runtime()
+                                     ->get_available_sparsity_impl(target_node)
+                                     ->me.convert<SparsityMap<N, T> >();
+    image.sparsity = sparsity;
+
+    sources.push_back(source);
+    images.push_back(sparsity);
+
+    return image;
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::execute(void) {
-    if (!DeppartConfig::cfg_disable_intersection_optimization && 1 == 2) {
+    if (!DeppartConfig::cfg_disable_intersection_optimization) {
       ComputeOverlapMicroOp<N2, T2> *uop =
           new ComputeOverlapMicroOp<N2, T2>(this);
 
-      // we will ask this uop to also prefetch the sources we will intersect
-      // test against it
-      for (size_t i = 0; i < this->sources.size(); i++)
-        uop->add_extra_dependency(this->sources[i]);
-
-      uop->dispatch(this, true /* ok to run in this thread */);
-    } else {
-      for(size_t i = 0; i < this->sources.size(); i++)
-        SparsityMapImpl<N, T>::lookup(this->images[i])
-            ->set_contributor_count(1);
-
-      StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
-          new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(this->parent,
-                                                              transform);
-
-      for (size_t j = 0; j < this->sources.size(); j++) {
-        micro_op->add_sparsity_output(this->sources[j], this->images[j]);
+      for (size_t i = 0; i < sources.size(); i++) {
+        uop->add_input_space(sources[i]);
       }
 
-      micro_op->dispatch(this, true /* ok to run in this thread */);
+      // we will ask this uop to also prefetch the sources we will intersect
+      // test against it
+      for (size_t i = 0; i < sources.size(); i++) {
+        uop->add_extra_dependency(sources[i]);
+      }
+
+      uop->dispatch(this, /*inline_ok=*/true);
+    } else {
+      for (size_t i = 0; i < sources.size(); i++) {
+        SparsityMapImpl<N, T>::lookup(images[i])
+            ->set_contributor_count(1);
+      }
+
+      StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
+          new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(parent,
+                                                              transform);
+
+      for (size_t j = 0; j < sources.size(); j++) {
+        micro_op->add_sparsity_output(sources[j], images[j]);
+      }
+
+      micro_op->dispatch(this, /*inline_ok=*/true);
     }
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::set_overlap_tester(
+      void *tester) {
+    OverlapTester<N2, T2> *overlap_tester =
+        static_cast<OverlapTester<N2, T2> *>(tester);
+
+    // we asked the overlap tester to prefetch all the source data we need, so
+    // we can use it right away (and then delete it)
+    std::vector<std::set<int> > overlaps_by_field_data(sources.size());
+    for (size_t i = 0; i < sources.size(); i++) {
+      std::set<int> overlaps_by_source;
+
+      overlap_tester->test_overlap(sources[i], overlaps_by_source,
+                                   true /*approx*/);
+
+      log_part.info() << overlaps_by_source.size() << " overlaps for source "
+                      << i;
+
+      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(
+          overlaps_by_source.size());
+
+      // now scatter these values into the overlaps_by_field_data
+      for (std::set<int>::const_iterator it = overlaps_by_source.begin();
+           it != overlaps_by_source.end(); it++) {
+        overlaps_by_field_data[*it].insert(i);
+      }
+    }
+    delete overlap_tester;
+
+    StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
+        new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(this->parent,
+                                                            transform);
+    for (const auto &overlaps : overlaps_by_field_data) {
+      size_t n = overlaps.size();
+      if (n == 0) continue;
+      for (std::set<int>::const_iterator it = overlaps.begin();
+           it != overlaps.end(); it++) {
+        int j = *it;
+        micro_op->add_sparsity_output(sources[j], images[j]);
+      }
+    }
+    micro_op->dispatch(this, /*inline_ok=*/true);
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::print(
+      std::ostream &os) const {
+    os << "StructuredImageOperation(" << parent << ")";
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -840,7 +902,6 @@ namespace Realm {
               ->add_waiter(this, true /*precise*/);
       if (registered) wait_count.fetch_add(1);
     }
-
     this->finish_dispatch(op, inline_ok);
   }
 

@@ -33,7 +33,6 @@ namespace Realm {
     ImageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N2,T2> _inst_space,
 		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
 
-    ImageMicroOp(IndexSpace<N,T> _parent_space);
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(IndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
@@ -91,10 +90,6 @@ namespace Realm {
 		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     ImageOperation(const IndexSpace<N,T>& _parent,
-		   const ProfilingRequestSet &reqs,
-		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
-
-    ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
 		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
@@ -146,7 +141,7 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  class StructuredImageOperation : public ImageOperation<N, T, N2, T2> {
+  class StructuredImageOperation : public PartitioningOperation {
    public:
     StructuredImageOperation(const IndexSpace<N, T>& _parent,
                              const TRANSFORM& transform,
@@ -154,9 +149,18 @@ namespace Realm {
                              GenEventImpl* _finish_event,
                              EventImpl::gen_t _finish_gen);
 
+    IndexSpace<N,T> add_source(const IndexSpace<N2,T2>& source);
+
     virtual void execute(void);
 
+    virtual void print(std::ostream& os) const;
+
+    virtual void set_overlap_tester(void *tester);
+
    protected:
+    IndexSpace<N,T> parent;
+    std::vector<IndexSpace<N2,T2> > sources;
+    std::vector<SparsityMap<N,T> > images;
     TRANSFORM transform;
   };
 };
