@@ -104,7 +104,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
- //   op->launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -128,7 +128,7 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source_with_difference(sources[i], diff_rhss[i]);
-      log_dpops.info() << "iImage: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
     }
 
     op->launch(wait_on);
