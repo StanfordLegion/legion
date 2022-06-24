@@ -2422,6 +2422,7 @@ namespace Legion {
                         std::vector<AddressSpaceID> &children) const;
       inline bool contains(const AddressSpaceID space) const
         { return unique_sorted_spaces.contains(space); }
+      AddressSpaceID find_nearest(AddressSpaceID space) const;
     public:
       void pack(Serializer &rez) const;
     protected:

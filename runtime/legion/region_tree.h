@@ -241,10 +241,10 @@ namespace Legion {
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied_events,
-                               const bool total_sharding_collective = false);
-      void destroy_index_partition(IndexPartition handle, 
+                               const CollectiveMapping *mapping = NULL);
+      void destroy_index_partition(IndexPartition handle,
                                std::set<RtEvent> &applied,
-                               const bool total_sharding_collective = false);
+                               const CollectiveMapping *mapping = NULL);
     public:
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
@@ -379,8 +379,9 @@ namespace Legion {
                                    ShardMapping *shard_mapping = NULL,
                                    RtEvent initialized = RtEvent::NO_RT_EVENT,
                                    std::set<RtEvent> *applied = NULL);
-      void destroy_field_space(FieldSpace handle, std::set<RtEvent> &applied,
-                               const bool total_sharding_collective = false);
+      void destroy_field_space(FieldSpace handle,
+                               std::set<RtEvent> &applied,
+                               const CollectiveMapping *mapping = NULL);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
@@ -420,7 +421,7 @@ namespace Legion {
       void free_local_fields(FieldSpace handle,
                              const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes,
-                             const bool collective = false);
+                             const CollectiveMapping *mapping = NULL);
       void update_local_fields(FieldSpace handle,
                                const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
@@ -441,9 +442,9 @@ namespace Legion {
                                     CollectiveMapping *mapping = NULL,
                                     RtEvent initialized = RtEvent::NO_RT_EVENT,
                                     std::set<RtEvent> *applied = NULL);
-      void destroy_logical_region(LogicalRegion handle, 
+      void destroy_logical_region(LogicalRegion handle,
                                   std::set<RtEvent> &applied,
-                                  const bool total_sharding_collective = false);
+                                  const CollectiveMapping *mapping = NULL);
     public:
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);
@@ -2025,8 +2026,6 @@ namespace Legion {
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
        const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
-      void update_creation_set(const ShardMapping &mapping);
-    public:
       RegionTreeForest *const context;
       const unsigned depth;
       const LegionColor color;
@@ -2122,18 +2121,16 @@ namespace Legion {
       };
       class InvalidateRootFunctor {
       public:
-        InvalidateRootFunctor(AddressSpaceID src, IndexSpaceNode *n, 
-                              ReferenceMutator &m, Runtime *rt,
-                              const std::map<AddressSpaceID,RtEvent> &e)
-          : source(src), node(n), runtime(rt), mutator(m), effects(e) { }
+        InvalidateRootFunctor(AddressSpaceID s, IndexSpaceNode *n,
+                              std::set<RtEvent> &a, Runtime *rt)
+          : source(s), node(n), runtime(rt), applied(a) { }
       public:
         void apply(AddressSpaceID target);
       public:
         const AddressSpaceID source;
         IndexSpaceNode *const node;
         Runtime *const runtime;
-        ReferenceMutator &mutator;
-        const std::map<AddressSpaceID,RtEvent> &effects;
+        std::set<RtEvent> &applied;
       };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
@@ -2199,9 +2196,9 @@ namespace Legion {
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
                              const SendNodeRecord &record);
       void invalidate_tree(void);
-      void invalidate_root(AddressSpaceID source,
+      bool invalidate_root(AddressSpaceID source,
                            std::set<RtEvent> &applied,
-                           bool total_sharding_functor);
+                           const CollectiveMapping *mapping);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -3679,14 +3676,12 @@ namespace Legion {
                                  std::vector<unsigned> &new_indexes);
       void free_local_fields(const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes,
-                             const bool collective);
+                             const CollectiveMapping *mapping);
       void update_local_fields(const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
                                const std::vector<unsigned> &indexes);
       void remove_local_fields(const std::vector<FieldID> &to_removes);
-    public:
-      void update_creation_set(const ShardMapping &mapping);
     public:
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
@@ -4092,7 +4087,6 @@ namespace Legion {
     public:
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }
-      void update_creation_set(const ShardMapping &mapping);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;

@@ -1764,6 +1764,9 @@ namespace Legion {
                                                AddressSpaceID remote_inst) const
     //--------------------------------------------------------------------------
     {
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(remote_inst))
+        return true;
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       return remote_instances.contains(remote_inst);
     }
@@ -1806,7 +1809,7 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner() && ((collective_mapping == NULL) ||
+      if (!is_owner() && (mutator != NULL) && ((collective_mapping == NULL) ||
             !collective_mapping->contains(local_space)))
         send_remote_registration(mutator);
     }

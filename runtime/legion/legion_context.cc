@@ -12221,12 +12221,9 @@ namespace Legion {
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_index_space(handle, domain, value.did, 
-              &collective_mapping, value.expr_id, ApEvent::NO_AP_EVENT,
-              creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_index_space(handle, domain, value.did, 
+            &collective_mapping, value.expr_id, ApEvent::NO_AP_EVENT,
+            creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12376,8 +12373,6 @@ namespace Legion {
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 &collective_mapping, value.expr_id, ready,
                                 creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12562,11 +12557,8 @@ namespace Legion {
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_union_space(handle, value.did, spaces, 
-            creation_barrier, &collective_mapping, value.expr_id, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_union_space(handle, value.did, spaces, 
+          creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12669,11 +12661,8 @@ namespace Legion {
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_intersection_space(handle, value.did, spaces,
-            creation_barrier, &collective_mapping, value.expr_id, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_intersection_space(handle, value.did, spaces,
+          creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12766,11 +12755,8 @@ namespace Legion {
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_difference_space(handle, value.did, left,
+        runtime->forest->create_difference_space(handle, value.did, left,
           right,creation_barrier, &collective_mapping, value.expr_id, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -16113,11 +16099,8 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
-        RegionNode *node = 
-          forest->create_logical_region(handle, value.did,
-              &collective_mapping, creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        forest->create_logical_region(handle, value.did,
+            &collective_mapping, creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,

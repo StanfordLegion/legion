@@ -1255,13 +1255,13 @@ namespace Legion {
       if (is_index_space_tight)
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id, 
-                          collective_mapping, applied);
+                          realm_index_space_ready, new_expr_id,
+                          collective_mapping, applied, true/*add root ref*/);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id, 
-                          collective_mapping, applied);
+                          realm_index_space_ready, new_expr_id,
+                          collective_mapping, applied, true/*add root ref*/);
     }
 
     //--------------------------------------------------------------------------

@@ -761,45 +761,57 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_space(IndexSpace handle,
-                                          AddressSpaceID source,
-                                          std::set<RtEvent> &applied,
-                                          const bool total_sharding_collective)
+                                              AddressSpaceID source,
+                                              std::set<RtEvent> &applied,
+                                              const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      WrapperReferenceMutator mutator(applied);
-      if (node->is_owner())
-      {
-        node->invalidate_root(source, applied, total_sharding_collective);
-        if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
-          delete node;
-      }
-      else
-      {
-        if (!total_sharding_collective)
-          runtime->send_index_space_destruction(handle, 
-                                                node->owner_space, applied);
-        if (node->remove_base_valid_ref(REMOTE_DID_REF, &mutator))
-          delete node;
-      }
+      if (node->invalidate_root(source, applied, mapping))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_partition(IndexPartition handle,
-               std::set<RtEvent> &applied, const bool total_sharding_collective)
+                                               std::set<RtEvent> &applied,
+                                               const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
         IndexPartNode::get_owner_space(handle, runtime);
-      if (owner_space == runtime->address_space)
+      if (mapping != NULL)
       {
-        IndexPartNode *node = get_node(handle);
-        WrapperReferenceMutator mutator(applied);
-        if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
-          delete node;
+        if (mapping->contains(owner_space))
+        {
+          // If we're the owner space node then we do the removal
+          if (owner_space == runtime->address_space)
+          {
+            IndexPartNode *node = get_node(handle);
+            WrapperReferenceMutator mutator(applied);
+            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+              delete node;
+          }
+        }
+        else
+        {
+          const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+          if (nearest == runtime->address_space)
+            runtime->send_index_partition_destruction(handle, 
+                                        owner_space, applied);
+        }
       }
-      else if (!total_sharding_collective)
-        runtime->send_index_partition_destruction(handle, owner_space, applied);
+      else
+      {
+        if (owner_space == runtime->address_space)
+        {
+          IndexPartNode *node = get_node(handle);
+          WrapperReferenceMutator mutator(applied);
+          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            delete node;
+        }
+        else
+          runtime->send_index_partition_destruction(handle,owner_space,applied);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1365,20 +1377,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_field_space(FieldSpace handle,
-               std::set<RtEvent> &applied, const bool total_sharding_collective)
+                                               std::set<RtEvent> &applied, 
+                                               const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
         FieldSpaceNode::get_owner_space(handle, runtime);
-      if (owner_space == runtime->address_space)
+      if (mapping != NULL)
       {
-        FieldSpaceNode *node = get_node(handle);
-        WrapperReferenceMutator mutator(applied);
-        if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
-          delete node;
+        if (mapping->contains(owner_space))
+        {
+          // If we're the owner space node then we do the removal
+          if (owner_space == runtime->address_space)
+          {
+            FieldSpaceNode *node = get_node(handle);
+            WrapperReferenceMutator mutator(applied);
+            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+              delete node;
+          }
+        }
+        else
+        {
+          const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+          if (nearest == runtime->address_space)
+            runtime->send_field_space_destruction(handle, owner_space, applied);
+        }
       }
-      else if (!total_sharding_collective)
-        runtime->send_field_space_destruction(handle, owner_space, applied);
+      else
+      {
+        if (owner_space == runtime->address_space)
+        {
+          FieldSpaceNode *node = get_node(handle);
+          WrapperReferenceMutator mutator(applied);
+          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            delete node;
+        }
+        else
+          runtime->send_field_space_destruction(handle, owner_space, applied);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1495,13 +1531,11 @@ namespace Legion {
     void RegionTreeForest::free_local_fields(FieldSpace handle,
                                            const std::vector<FieldID> &to_free,
                                            const std::vector<unsigned> &indexes,
-                                           const bool collective)
+                                           const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      if (collective && !has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
-      node->free_local_fields(to_free, indexes, collective);
+      node->free_local_fields(to_free, indexes, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -1571,20 +1605,45 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_logical_region(LogicalRegion handle,
-               std::set<RtEvent> &applied, const bool total_sharding_collective)
+                                               std::set<RtEvent> &applied,
+                                               const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
         RegionNode::get_owner_space(handle, runtime);
-      if (owner_space == runtime->address_space)
+      if (mapping != NULL)
       {
-        RegionNode *node = get_node(handle);
-        WrapperReferenceMutator mutator(applied);
-        if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
-          delete node;
+        if (mapping->contains(owner_space))
+        {
+          // If we're the owner space node then we do the removal
+          if (owner_space == runtime->address_space)
+          {
+            RegionNode *node = get_node(handle);
+            WrapperReferenceMutator mutator(applied);
+            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+              delete node;
+          }
+        }
+        else
+        {
+          const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+          if (nearest == runtime->address_space)
+            runtime->send_logical_region_destruction(handle, 
+                                      owner_space, applied);
+        }
       }
-      else if (!total_sharding_collective)
-        runtime->send_logical_region_destruction(handle, owner_space, applied);
+      else
+      {
+        if (owner_space == runtime->address_space)
+        {
+          RegionNode *node = get_node(handle);
+          WrapperReferenceMutator mutator(applied);
+          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            delete node;
+        }
+        else
+          runtime->send_logical_region_destruction(handle, owner_space,applied);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3777,12 +3836,19 @@ namespace Legion {
             result->remove_nested_valid_ref(parent->did, &mutator);
           }
         }
-        else 
+        else if (add_root_reference)
         {
-          if (result->is_owner())
-            result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          else if (add_root_reference)
-            result->add_base_valid_ref(REMOTE_DID_REF, &mutator);
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          // Check to see if we have a collective mapping and we're part of it
+          if ((mapping != NULL) && mapping->contains(result->local_space))
+          {
+            std::vector<AddressSpaceID> children;
+            mapping->get_children(result->owner_space,
+                                  result->local_space, children);
+            if (!children.empty())
+              result->add_base_valid_ref(REMOTE_DID_REF, &mutator,
+                                         children.size());
+          }
         }
       }
       if (local_initialized.exists())
@@ -3879,6 +3945,17 @@ namespace Legion {
           assert(result->is_owner());
 #endif
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          if (mapping != NULL)
+          {
+            // If we've got a collective mapping add remote did refs
+            // for any children in the mapping that we know are also valid
+            std::vector<AddressSpaceID> children;
+            mapping->get_children(result->local_space,
+                                  result->local_space, children);
+            if (!children.empty())
+              result->add_base_valid_ref(REMOTE_DID_REF, &mutator, 
+                                         children.size());
+          }
         }
       } 
       if (local_initialized.exists())
@@ -4272,7 +4349,10 @@ namespace Legion {
             result->add_base_valid_ref(APPLICATION_REF, &mutator);
           else
             result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-          result->register_with_runtime(&mutator);
+          // Root nodes get registered with the runtime since we
+          // know that they all have the same distributed ID
+          // No mutator so no notifications are sent
+          result->register_with_runtime(NULL/*no mutator*/);
         }
         else // not a root so we get a gc ref from our parent
           result->add_nested_gc_ref(parent->did, &mutator);
@@ -8560,19 +8640,6 @@ namespace Legion {
       return true;
     }
 
-    //--------------------------------------------------------------------------
-    void IndexTreeNode::update_creation_set(const ShardMapping &mapping)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-      {
-        const AddressSpaceID space = mapping[idx];
-        if (space != context->runtime->address_space)
-          update_remote_instances(space, false/*need lock*/);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Space Node 
     /////////////////////////////////////////////////////////////
@@ -8645,8 +8712,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, we add a valid reference to the owner
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+      // Note that we can skip this in the root_valid case because we 
+      // know the creation is collective and the create_node methods
+      // will add the appropriate references on each node without us
+      // needing to send any messages
+      if (!is_owner() && ((parent != NULL) || !root_valid))
+      {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          send_remote_valid_increment(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
       IndexSpaceExpression *canon = canonical.load();
       if ((canon != NULL) && (canon != this) &&
           !canon->try_add_canonical_reference(did))
@@ -8675,8 +8753,16 @@ namespace Legion {
         }
       }
       else
-        send_remote_valid_decrement(owner_space, mutator,
+      {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          send_remote_valid_decrement(
+           collective_mapping->get_parent(owner_space, local_space), mutator,
            RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
+        else
+          send_remote_valid_decrement(owner_space, mutator,
+           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
+      }
       // If we have a canonical reference that is not ourselves then 
       // we need to remove the nested reference that we are holding on it too
       IndexSpaceExpression *canon = canonical.load();
@@ -8719,6 +8805,16 @@ namespace Legion {
       }
       else
         context->unregister_remote_expression(expr_id);
+      // Broadcast out for any collective mappings
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          send_remote_gc_decrement(*it, mutator);
+      }
       // Invalidate any derived operations
       invalidate_derived_operations(did, context);
       IndexSpaceExpression *canon = canonical.load();
@@ -9473,6 +9569,8 @@ namespace Legion {
         else
           still_valid = false;
       }
+      if (add_root_reference)
+        add_base_valid_ref(REMOTE_DID_REF);
       // Record that we're going to send this node
       nodes_to_send.emplace_back(SendNodeRecord(this, still_valid,
             add_root_reference, pack_space, has_reference));
@@ -9563,34 +9661,78 @@ namespace Legion {
     {
       if (target == source)
         return;
-      std::map<AddressSpaceID,RtEvent>::const_iterator finder = 
-        effects.find(target);
-      if (finder != effects.end())
-        node->send_remote_valid_decrement(target, &mutator, finder->second);
-      else
-        node->send_remote_valid_decrement(target, &mutator);
+      runtime->send_index_space_destruction(node->handle, target, applied);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::invalidate_root(AddressSpaceID source,
-                        std::set<RtEvent> &applied, bool total_sharding_functor)
+    bool IndexSpaceNode::invalidate_root(AddressSpaceID source,
+                   std::set<RtEvent> &applied, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      assert(parent == NULL);
 #endif
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(root_valid);
-#endif
-      root_valid = false;
-      if (!total_sharding_functor && has_remote_instances())
+      bool need_broadcast = true;
+      if (source == local_space)
       {
-        WrapperReferenceMutator mutator(applied);
-        InvalidateRootFunctor functor(source, this, mutator, 
-                                      runtime, send_effects);
-        map_over_remote_instances(functor);
+        // Entry point
+        if (mapping != NULL)
+        {
+          if ((collective_mapping != NULL) && ((mapping == collective_mapping) 
+                || (*mapping == *collective_mapping)))
+          {
+            need_broadcast = false;
+          }
+          else if (mapping->contains(owner_space))
+          {
+            if (local_space != owner_space)
+              return false;
+          }
+          else
+          {
+            // Find the one closest to the owner space
+            const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+            if (nearest != local_space)
+              return false;
+            runtime->send_index_space_destruction(handle, owner_space, applied);
+          }
+        }
+        else
+        {
+          // If we're not the owner space, send the message there
+          if (!is_owner())
+            runtime->send_index_space_destruction(handle, owner_space, applied);
+        }
       }
+      if (need_broadcast && (collective_mapping != NULL) &&
+          collective_mapping->contains(local_space))
+      {
+#ifdef DEBUG_LEGION
+        // Should be from our parent
+        assert(source == 
+            collective_mapping->get_parent(owner_space, local_space));
+#endif
+        // Keep broadcasting this out to all the children
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          runtime->send_index_space_destruction(handle, *it, applied);
+      }
+      {
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(root_valid);
+#endif
+        root_valid = false;
+        if (is_owner() && has_remote_instances())
+        {
+          InvalidateRootFunctor functor(source, this, applied, runtime);
+          map_over_remote_instances(functor);
+        }
+      }
+      WrapperReferenceMutator mutator(applied);
+      return remove_base_valid_ref(APPLICATION_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -9621,6 +9763,9 @@ namespace Legion {
       derez.deserialize(index_space_size);
       const void *index_space_ptr = 
         (index_space_size > 0) ? derez.get_current_pointer() : NULL;
+      // Advance the pointer if necessary
+      if (index_space_size > 0)
+        derez.advance_pointer(index_space_size);
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = NULL;
@@ -9637,9 +9782,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
-      // Advance the pointer if necessary
-      if (index_space_size > 0)
-        derez.advance_pointer(index_space_size);
       size_t num_semantic;
       derez.deserialize(num_semantic);
       for (unsigned idx = 0; idx < num_semantic; idx++)
@@ -10393,7 +10535,14 @@ namespace Legion {
           parent->add_nested_valid_ref(did, mutator);
       }
       else
-        send_remote_valid_increment(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+          send_remote_valid_increment(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10408,6 +10557,14 @@ namespace Legion {
           // Make sure invalidation are not handled before send effects
           InvalidFunctor functor(this, mutator, send_effects);
           map_over_remote_instances(functor);
+        }
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            send_remote_gc_decrement(*it, mutator);
         }
         // Remove the valid reference that we hold on the color space
         if (color_space->parent != NULL)
@@ -10425,13 +10582,30 @@ namespace Legion {
           parent->remove_nested_valid_ref(did, mutator);
       }
       else // Remove the valid reference that we have on the owner
-        send_remote_valid_decrement(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_valid_decrement(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
     void IndexPartNode::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      // Continue propagating gc reference removals for collective mappings
+      if (!is_owner() && (collective_mapping != NULL) &&
+          collective_mapping->contains(local_space))
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          send_remote_gc_decrement(*it, mutator);
+      }
       // Finally remove valid references on all owner children and any trackers
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
@@ -12553,7 +12727,14 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_valid_increment(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12561,7 +12742,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_valid_decrement(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14226,15 +14414,43 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FieldSpaceNode::free_local_fields(const std::vector<FieldID> &to_free,
                                            const std::vector<unsigned> &indexes,
-                                           const bool collective)
+                                           const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(to_free.size() == indexes.size());
 #endif
-      if (!is_owner())
+      if (mapping != NULL)
       {
-        if (!collective)
+        if (mapping->contains(owner_space))
+        {
+          if (local_space != owner_space)
+            return;
+        }
+        else
+        {
+          const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+          if (nearest == local_space)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize<size_t>(to_free.size());
+              for (unsigned idx = 0; idx < to_free.size(); idx++)
+              {
+                rez.serialize(to_free[idx]);
+                rez.serialize(indexes[idx]);
+              }
+            }
+            context->runtime->send_local_field_free(owner_space, rez);
+          }
+          return;
+        }
+      }
+      else
+      {
+        if (!is_owner())
         {
           // Send a message to the owner to do the free of the fields
           Serializer rez;
@@ -14249,21 +14465,22 @@ namespace Legion {
             }
           }
           context->runtime->send_local_field_free(owner_space, rez);
+          return;
         }
       }
-      else
-      {
-        // Do the local free
-        AutoLock n_lock(node_lock); 
-        for (unsigned idx = 0; idx < to_free.size(); idx++)
-        {
-          std::map<FieldID,FieldInfo>::iterator finder = 
-            field_infos.find(to_free[idx]);
 #ifdef DEBUG_LEGION
-          assert(finder != field_infos.end());
+      assert(is_owner());
 #endif
-          field_infos.erase(finder);
-        }
+      // Do the local free
+      AutoLock n_lock(node_lock); 
+      for (unsigned idx = 0; idx < to_free.size(); idx++)
+      {
+        std::map<FieldID,FieldInfo>::iterator finder = 
+          field_infos.find(to_free[idx]);
+#ifdef DEBUG_LEGION
+        assert(finder != field_infos.end());
+#endif
+        field_infos.erase(finder);
       }
     }
 
@@ -14297,19 +14514,6 @@ namespace Legion {
           field_infos.find(to_remove[idx]);
         if (finder != field_infos.end())
           field_infos.erase(finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::update_creation_set(const ShardMapping &mapping)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-      {
-        const AddressSpaceID space = mapping[idx];
-        if (space != context->runtime->address_space)
-          update_remote_instances(space, false/*need lock*/);
       }
     }
 
@@ -15103,8 +15307,7 @@ namespace Legion {
       }
 
       FieldSpaceNode *node = forest->get_node(handle);
-      node->free_local_fields(fields, indexes, 
-                              false/*not a collective if we're here*/);
+      node->free_local_fields(fields, indexes, NULL/*no collective*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -20264,19 +20467,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::update_creation_set(const ShardMapping &mapping)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-      {
-        const AddressSpaceID space = mapping[idx];
-        if (space != context->runtime->address_space)
-          update_remote_instances(space, false/*need lock*/);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // Region Node 
     /////////////////////////////////////////////////////////////
@@ -20349,7 +20539,14 @@ namespace Legion {
           row_source->add_nested_valid_ref(did, mutator);
         }
         else
-          send_remote_valid_increment(owner_space, mutator);     
+        {
+          if ((collective_mapping != NULL) &&
+              collective_mapping->contains(local_space))
+            send_remote_valid_increment(
+              collective_mapping->get_parent(owner_space,local_space),mutator);
+          else
+            send_remote_valid_increment(owner_space, mutator);     
+        }
       }
       else
       {
@@ -20387,9 +20584,24 @@ namespace Legion {
             InvalidFunctor functor(this, mutator);
             map_over_remote_instances(functor);
           }
+          if (collective_mapping != NULL)
+          {
+            std::vector<AddressSpaceID> children;
+            collective_mapping->get_children(owner_space,local_space,children);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              send_remote_gc_decrement(*it, mutator);
+          }
         }
         else
-          send_remote_valid_decrement(owner_space, mutator);
+        {
+          if ((collective_mapping != NULL) &&
+              collective_mapping->contains(local_space))
+            send_remote_valid_decrement(
+              collective_mapping->get_parent(owner_space,local_space),mutator);
+          else
+            send_remote_valid_decrement(owner_space, mutator);
+        }
       }
       else
       {
@@ -20407,7 +20619,19 @@ namespace Legion {
       currently_active = false;
 #endif
       if (parent == NULL)
+      {
         context->runtime->release_tree_instances(handle.get_tree_id());
+        // Continue propagating gc reference removals
+        if (!is_owner() && (collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            send_remote_gc_decrement(*it, mutator);
+        }
+      }
       if (!partition_trackers.empty())
       {
 #ifdef DEBUG_LEGION
