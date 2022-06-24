@@ -9701,7 +9701,15 @@ namespace Legion {
         {
           // If we're not the owner space, send the message there
           if (!is_owner())
+          {
             runtime->send_index_space_destruction(handle, owner_space, applied);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
+            need_broadcast = false;
+          }
         }
       }
       if (need_broadcast && (collective_mapping != NULL) &&
@@ -9709,8 +9717,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         // Should be from our parent
-        assert(source == 
-            collective_mapping->get_parent(owner_space, local_space));
+        assert(is_owner() || (source == 
+            collective_mapping->get_parent(owner_space, local_space)));
 #endif
         // Keep broadcasting this out to all the children
         std::vector<AddressSpaceID> children;

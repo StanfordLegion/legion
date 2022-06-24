@@ -2429,7 +2429,8 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                               NULL/*parent*/, 0/*color*/, did, initialized,
-                              ready, new_expr_id, collective_mapping, applied);
+                              ready, new_expr_id, collective_mapping, applied,
+                              true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------
