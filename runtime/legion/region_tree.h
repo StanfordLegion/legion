@@ -2096,16 +2096,14 @@ namespace Legion {
       };
       class IndexSpaceSetFunctor {
       public:
-        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, 
-                             Serializer &r, ShardMapping *m)
-          : runtime(rt), source(src), rez(r), mapping(m) { }
+        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
+          : runtime(rt), source(src), rez(r) { }
       public:
         void apply(AddressSpaceID target);
       public:
         Runtime *const runtime;
         const AddressSpaceID source;
         Serializer &rez;
-        ShardMapping *const mapping;
       };
       class InactiveFunctor {
       public:

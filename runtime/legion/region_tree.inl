@@ -2163,7 +2163,6 @@ namespace Legion {
           realm_index_space = 
             *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
-        index_space_set = true;
       }
       else
         add_base_resource_ref(RUNTIME_REF);
@@ -2217,10 +2216,6 @@ namespace Legion {
                                                        RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!index_space_set);
-      assert(!realm_index_space_set.has_triggered());
-#endif
       bool need_broadcast = true;
       const AddressSpaceID owner_space = get_owner_space();
       if (source == local_space)
@@ -2248,8 +2243,14 @@ namespace Legion {
               RezCheck z(rez);
               rez.serialize(handle);
               rez.serialize(value);
+              rez.serialize(ready_event);
             }
             runtime->send_index_space_set(owner_space, rez);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
           }
         }
         else
@@ -2262,6 +2263,7 @@ namespace Legion {
               RezCheck z(rez);
               rez.serialize(handle);
               rez.serialize(value);
+              rez.serialize(ready_event);
             }
             runtime->send_index_space_set(owner_space, rez);
             // If we're part of the broadcast tree then we'll get sent back here
@@ -2291,6 +2293,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(handle);
             rez.serialize(value);
+            rez.serialize(realm_index_space_set);
           }
           for (std::vector<AddressSpaceID>::const_iterator it =
                 children.begin(); it != children.end(); it++)
@@ -2301,8 +2304,30 @@ namespace Legion {
       // flag has to be done while holding the node_lock on the owner
       // node so that it is serialized with respect to queries from 
       // remote nodes for copies about the remote instance
-      realm_index_space = value;
-      Runtime::trigger_event(realm_index_space_set, ready_event);
+      {
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(!index_space_set);
+        assert(!realm_index_space_set.has_triggered());
+#endif
+        realm_index_space = value;
+        Runtime::trigger_event(realm_index_space_set, ready_event);
+        index_space_set = true;
+        if (has_remote_instances())
+        {
+          // We're the owner, send messages to everyone else that we've 
+          // sent this node to except the source
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            pack_index_space(rez, false/*include size*/);
+            rez.serialize(realm_index_space_set);
+          }
+          IndexSpaceSetFunctor functor(context->runtime, source, rez);
+          map_over_remote_instances(functor);
+        }
+      }
       // Now we can tighten it
       tighten_index_space();
       // Remove the reference we were holding until this was set
@@ -3241,7 +3266,9 @@ namespace Legion {
     {
       Realm::IndexSpace<DIM,T> result_space;
       derez.deserialize(result_space);
-      return set_realm_index_space(source, result_space);
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      return set_realm_index_space(source, result_space, NULL, ready_event);
     }
 
     //--------------------------------------------------------------------------

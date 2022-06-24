@@ -9380,13 +9380,6 @@ namespace Legion {
         return;
       if (target == runtime->address_space)
         return;
-      if (mapping != NULL)
-      {
-        const ShardMapping &shard_mapping = *mapping;
-        for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
-          if (shard_mapping[idx] == target)
-            return;
-      }
       runtime->send_index_space_set(target, rez);
     } 
 
@@ -9695,6 +9688,11 @@ namespace Legion {
             if (nearest != local_space)
               return false;
             runtime->send_index_space_destruction(handle, owner_space, applied);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
           }
         }
         else
