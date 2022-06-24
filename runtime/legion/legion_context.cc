@@ -12415,7 +12415,7 @@ namespace Legion {
       }
       creator_op->initialize_index_space(this, node, future,
           shard_manager->is_first_local_shard(owner_shard), 
-          &(shard_manager->get_mapping()));
+          &(shard_manager->get_collective_mapping()));
       add_to_dependence_queue(creator_op);
       delete collective.first;
       pending_index_spaces.pop_front();

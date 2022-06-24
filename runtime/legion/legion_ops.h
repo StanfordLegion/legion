@@ -1670,7 +1670,7 @@ namespace Legion {
       void initialize_fence(InnerContext *ctx, RtEvent precondition);
       void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node, 
                             const Future &future, bool owner = true,
-                            ShardMapping *shard_mapping = NULL);
+                            const CollectiveMapping *mapping = NULL);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
                             FieldID fid, const Future &field_size,
                             RtEvent precondition, bool owner = true);
@@ -1696,7 +1696,7 @@ namespace Legion {
       std::vector<Future> futures;
       std::vector<FieldID> fields;
       RtEvent mapping_precondition;
-      ShardMapping *shard_mapping;
+      const CollectiveMapping *mapping;
       bool owner;
     };
 

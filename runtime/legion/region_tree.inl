@@ -2213,7 +2213,7 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source,
                                           const Realm::IndexSpace<DIM,T> &value,
-                                                       ShardMapping *mapping,
+                                          const CollectiveMapping *mapping,
                                                        RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
@@ -2221,50 +2221,88 @@ namespace Legion {
       assert(!index_space_set);
       assert(!realm_index_space_set.has_triggered());
 #endif
+      bool need_broadcast = true;
+      const AddressSpaceID owner_space = get_owner_space();
+      if (source == local_space)
+      {
+        if (mapping != NULL)
+        {
+          if ((collective_mapping != NULL) && ((mapping == collective_mapping)
+                || (*mapping == *collective_mapping)))
+          {
+            need_broadcast = false;
+          }
+          else if (mapping->contains(owner_space))
+          {
+            if (local_space != owner_space)
+              return false;
+          }
+          else
+          {
+            // Find the one closest to the owner space
+            const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+            if (nearest != local_space)
+              return false;
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(value);
+            }
+            runtime->send_index_space_set(owner_space, rez);
+          }
+        }
+        else
+        {
+          // If we're not the owner space, send the message there
+          if (!is_owner())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(value);
+            }
+            runtime->send_index_space_set(owner_space, rez);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
+            need_broadcast = false;
+          }
+        }
+      }
+      if (need_broadcast && (collective_mapping != NULL) &&
+          collective_mapping->contains(local_space))
+      {
+#ifdef DEBUG_LEGION
+        // Should be from our parent
+        assert(is_owner() || (source == 
+            collective_mapping->get_parent(owner_space, local_space)));
+#endif
+        // Keep broadcasting this out to all the children
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        if (!children.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(value);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            runtime->send_index_space_set(*it, rez);
+        }
+      }
       // We can set this now and trigger the event but setting the
       // flag has to be done while holding the node_lock on the owner
       // node so that it is serialized with respect to queries from 
       // remote nodes for copies about the remote instance
       realm_index_space = value;
       Runtime::trigger_event(realm_index_space_set, ready_event);
-      // If we're not the owner, send a message back to the
-      // owner specifying that it can set the index space value
-      const AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
-      {
-        index_space_set = true;
-        // We're not the owner, if this is not from the owner then
-        // send a message there telling the owner that it is set
-        if ((source != owner_space) && (mapping == NULL))
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            pack_index_space(rez, false/*include size*/);
-          }
-          context->runtime->send_index_space_set(owner_space, rez);
-        }
-      }
-      else
-      {
-        // Hold the lock while walking over the node set
-        AutoLock n_lock(node_lock);
-        index_space_set = true;
-        if (has_remote_instances())
-        {
-          // We're the owner, send messages to everyone else that we've 
-          // sent this node to except the source
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            pack_index_space(rez, false/*include size*/);
-          }
-          IndexSpaceSetFunctor functor(context->runtime, source, rez, mapping);
-          map_over_remote_instances(functor);
-        }
-      }
       // Now we can tighten it
       tighten_index_space();
       // Remove the reference we were holding until this was set
@@ -2299,18 +2337,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
-                             AddressSpaceID source, ShardMapping *shard_mapping)
+                        AddressSpaceID source, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       const DomainT<DIM,T> realm_space = domain;
-      return set_realm_index_space(source, realm_space, shard_mapping);
+      return set_realm_index_space(source, realm_space, mapping);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
-                          const std::map<DomainPoint,DomainPoint> &output_sizes,
-                              AddressSpaceID space, ShardMapping *shard_mapping)
+                         const std::map<DomainPoint,DomainPoint> &output_sizes,
+                         AddressSpaceID space, const CollectiveMapping *mapping)
     //-------------------------------------------------------------------------- 
     {
       std::vector<Realm::Rect<DIM,T> > output_rects;
@@ -2336,7 +2374,7 @@ namespace Legion {
         output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
       }
       const Realm::IndexSpace<DIM,T> output_space(output_rects);
-      return set_realm_index_space(space, output_space, shard_mapping);
+      return set_realm_index_space(space, output_space, mapping);
     }
 
     //--------------------------------------------------------------------------

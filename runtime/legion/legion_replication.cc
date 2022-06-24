@@ -1227,8 +1227,11 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      ShardMapping *shard_mapping = &repl_ctx->shard_manager->get_mapping();
+      if (!repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+        return;
       RegionTreeForest *forest = runtime->forest;
+      const CollectiveMapping &mapping =
+        repl_ctx->shard_manager->get_collective_mapping();
 
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
@@ -1252,15 +1255,14 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(
-                root_domain, runtime->address_space, shard_mapping))
+          if (parent->set_domain(root_domain, runtime->address_space, &mapping))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
         else if (parent->set_output_union(all_output_sizes[idx],
-                          runtime->address_space, shard_mapping))
+                              runtime->address_space, &mapping))
           delete parent;
       }
     }

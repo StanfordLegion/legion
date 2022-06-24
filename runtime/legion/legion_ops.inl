@@ -16,6 +16,7 @@
 // Included from legion_ops.h - do not include this directly
 
 // Useful for IDEs
+#include "legion/legion_ops.h"
 #include "legion/legion_trace.h"
 
 namespace Legion {

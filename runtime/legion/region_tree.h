@@ -2230,10 +2230,10 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
-                              ShardMapping *shard_mapping = NULL) = 0;
+                              const CollectiveMapping *mapping = NULL) = 0;
       virtual bool set_output_union(
-                const std::map<DomainPoint,DomainPoint> &sizes,
-                AddressSpaceID space, ShardMapping *shard_mapping = NULL) = 0;
+            const std::map<DomainPoint,DomainPoint> &sizes,
+            AddressSpaceID space, const CollectiveMapping *mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -2485,7 +2485,7 @@ namespace Legion {
 				    bool need_tight_result);
       bool set_realm_index_space(AddressSpaceID source,
                                  const Realm::IndexSpace<DIM,T> &value,
-                                 ShardMapping *shard_mapping = NULL,
+                                 const CollectiveMapping *mapping = NULL,
                                  RtEvent ready_event = RtEvent::NO_RT_EVENT);
     public:
       // From IndexSpaceExpression
@@ -2493,10 +2493,10 @@ namespace Legion {
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, AddressSpaceID space,
-                              ShardMapping *shard_mapping = NULL);
+                              const CollectiveMapping *mapping = NULL);
       virtual bool set_output_union(
-                    const std::map<DomainPoint,DomainPoint> &sizes,
-                    AddressSpaceID space, ShardMapping *shard_mapping = NULL);
+                const std::map<DomainPoint,DomainPoint> &sizes,
+                AddressSpaceID space, const CollectiveMapping *mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
