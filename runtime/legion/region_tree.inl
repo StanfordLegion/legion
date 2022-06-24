@@ -2163,6 +2163,7 @@ namespace Legion {
           realm_index_space = 
             *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
+        index_space_set = true;
       }
       else
         add_base_resource_ref(RUNTIME_REF);
