@@ -730,9 +730,11 @@ namespace Legion {
       void perform_missing_acquires(Operation *op,
                                std::map<PhysicalManager*,unsigned> &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
+#ifdef DEBUG_LEGION
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
+#endif
     public:
       // We know the domain of the index space
       IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 

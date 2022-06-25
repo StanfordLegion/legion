@@ -426,7 +426,7 @@ namespace Legion {
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
-      void register_with_runtime(ReferenceMutator *mutator);
+      void register_with_runtime(void);
       bool confirm_deletion(void);
     protected:
       bool try_unregister(void);
@@ -439,7 +439,7 @@ namespace Legion {
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
-      virtual void send_remote_registration(ReferenceMutator *mutator);
+      RtEvent send_remote_registration(void);
       // Return events indicate when message is on the virtual channel
       RtEvent send_remote_valid_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,

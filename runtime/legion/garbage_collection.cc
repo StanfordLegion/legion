@@ -1666,6 +1666,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
       resource_references++;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_resource_references.find(source);
@@ -1687,6 +1690,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
       resource_references++;
       std::map<DistributedID,int>::iterator finder = 
         detailed_nested_resource_references.find(did);
@@ -1800,8 +1806,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::register_with_runtime(
-                                                      ReferenceMutator *mutator)
+    void DistributedCollectable::register_with_runtime(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1809,9 +1814,6 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner() && (mutator != NULL) && ((collective_mapping == NULL) ||
-            !collective_mapping->contains(local_space)))
-        send_remote_registration(mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1942,8 +1944,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_registration(
-                                                      ReferenceMutator *mutator)
+    RtEvent DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1958,7 +1959,7 @@ namespace Legion {
         rez.serialize(registered_event);
       }
       runtime->send_did_remote_registration(owner_space, rez);     
-      mutator->record_reference_mutation_effect(registered_event);
+      return registered_event;
     }
 
     //--------------------------------------------------------------------------

@@ -2842,7 +2842,7 @@ namespace Legion {
                               kind, op);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
-      man->register_with_runtime(NULL/*no remote registration needed*/);
+      man->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
@@ -3995,7 +3995,7 @@ namespace Legion {
                                   use_event, external_instance);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
-      man->register_with_runtime(NULL/*no remote registration needed*/);
+      man->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------

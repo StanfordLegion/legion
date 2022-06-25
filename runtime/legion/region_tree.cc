@@ -3737,28 +3737,19 @@ namespace Legion {
           acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
     }
 
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
     //--------------------------------------------------------------------------
     {
-      std::map<RegionTreeID,RegionNode*> trees;
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        // Need to hold references to prevent deletion race
-        for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
-              tree_nodes.begin(); it != tree_nodes.end(); it++)
-          it->second->add_base_resource_ref(REGION_TREE_REF);
-        trees = tree_nodes;
-      }
       CurrentInitializer init(ctx.get_id());
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      // Need to hold references to prevent deletion race
       for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
-            trees.begin(); it != trees.end(); it++)
-      {
+            tree_nodes.begin(); it != tree_nodes.end(); it++)
         it->second->visit_node(&init);
-        if (it->second->remove_base_resource_ref(REGION_TREE_REF))
-          delete it->second;
-      }
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
@@ -3820,7 +3811,7 @@ namespace Legion {
         if (!result->is_owner())
           // Always add a base gc ref for all index spaces
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
         if (parent != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -3926,7 +3917,7 @@ namespace Legion {
         // Otherwise the valid ref comes from parent partition
         if (!result->is_owner())
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
         if (parent != NULL)
         {
           // Always add a valid reference from the parent
@@ -4037,7 +4028,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -4115,7 +4106,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -4179,7 +4170,7 @@ namespace Legion {
         // safely collected
         if (result->is_owner())
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
       }
       if (local_initialized.exists())
       {
@@ -4234,7 +4225,7 @@ namespace Legion {
         // safely collected
         if (result->is_owner())
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime();
       }
       if (!local_applied.empty())
         Runtime::trigger_event(local_initialized,
@@ -4349,10 +4340,7 @@ namespace Legion {
             result->add_base_valid_ref(APPLICATION_REF, &mutator);
           else
             result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-          // Root nodes get registered with the runtime since we
-          // know that they all have the same distributed ID
-          // No mutator so no notifications are sent
-          result->register_with_runtime(NULL/*no mutator*/);
+          result->register_with_runtime();
         }
         else // not a root so we get a gc ref from our parent
           result->add_nested_gc_ref(parent->did, &mutator);

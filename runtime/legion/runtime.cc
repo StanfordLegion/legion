@@ -2408,7 +2408,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(mutator != NULL);
 #endif
-        send_remote_registration(mutator);
+        mutator->record_reference_mutation_effect(send_remote_registration());
       }
     }
 
@@ -3561,7 +3561,7 @@ namespace Legion {
       registered_with_runtime = true;
       if (!is_owner())
         // Send the remote registration notice
-        send_remote_registration(mutator);
+        mutator->record_reference_mutation_effect(send_remote_registration());
     }
 
     //--------------------------------------------------------------------------
@@ -14819,18 +14819,13 @@ namespace Legion {
       LayoutConstraints *new_constraints = 
         new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
-      std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
       // Now try to register this with the runtime
-      if (!runtime->register_layout(new_constraints, &mutator))
+      if (!runtime->register_layout(new_constraints))
         delete new_constraints;
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      if (!preconditions.empty())
-        Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
-      else
-        Runtime::trigger_event(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -28941,7 +28936,7 @@ namespace Legion {
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
-      if (register_layout(constraints, NULL/*mutator*/))
+      if (register_layout(constraints))
       {
         // These constraints are available on all the nodes so if we own
         // them then record that we have remote instances for everything else
@@ -28965,13 +28960,12 @@ namespace Legion {
     {
       LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle, internal);
-      register_layout(constraints, NULL/*mutator*/);
+      register_layout(constraints);
       return constraints;
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::register_layout(LayoutConstraints *new_constraints,
-                                  ReferenceMutator *mutator)
+    bool Runtime::register_layout(LayoutConstraints *new_constraints)
     //--------------------------------------------------------------------------
     {
       new_constraints->add_base_resource_ref(RUNTIME_REF);
@@ -28988,7 +28982,7 @@ namespace Legion {
       // Remove any pending requests
       pending_constraint_requests.erase(new_constraints->layout_id);
       // Now we can do the registration with the runtime
-      new_constraints->register_with_runtime(mutator);
+      new_constraints->register_with_runtime();
       return true;
     }
 
