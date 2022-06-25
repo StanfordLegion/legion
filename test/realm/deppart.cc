@@ -2437,6 +2437,19 @@ Event RandomAffineTest<N1, T1, N2, T2, FT,TRANSFORM>::perform_partitioning(void)
     }
   }
 
+  // preimages
+  std::cout << "START PREIMAGE" << std::endl;
+  Event e3 = root1.create_subspaces_by_preimage(
+      transform, ss_images, ss_preimages, ProfilingRequestSet(), e2);
+  e3.wait();
+  std::cout << "FINISHED PREIMAGE" << std::endl;
+
+  for(int i = 0; i < num_pieces; i++) {
+    log_app.debug() << "preimage[" << i << "] = " << ss_preimages[i];
+    // TODO(apryakhin@): Fix
+    dump_sparse_index_space("", ss_preimages[i]);
+  }
+
   return Event::NO_EVENT;
 }
 

@@ -125,6 +125,75 @@ namespace Realm {
 			       const void *data, size_t datalen);
   };
 
-};
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  class StructuredPreimageMicroOp : public PartitioningMicroOp {
+  public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
+    StructuredPreimageMicroOp(const TRANSFORM &_transform,
+                              IndexSpace<N, T> _parent_space);
+
+    virtual ~StructuredPreimageMicroOp(void);
+
+    void add_sparsity_output(IndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
+
+    virtual void execute(void);
+
+    void dispatch(PartitioningOperation *op, bool inline_ok);
+
+  protected:
+
+   template <typename BM>
+   void populate_bitmasks(std::map<int, BM *> &bitmasks);
+
+   TRANSFORM transform;
+   IndexSpace<N, T> parent_space;
+   std::vector<IndexSpace<N2, T2> > targets;
+   std::vector<SparsityMap<N, T> > sparsity_outputs;
+  };
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  class StructuredPreimageOperation : public PartitioningOperation {
+   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
+    StructuredPreimageOperation(const IndexSpace<N, T> &_parent,
+                                const TRANSFORM &_transform,
+                                const ProfilingRequestSet &reqs,
+                                GenEventImpl *_finish_event,
+                                EventImpl::gen_t _finish_gen);
+
+    virtual ~StructuredPreimageOperation(void);
+
+    IndexSpace<N, T> add_target(const IndexSpace<N2, T2> &target);
+
+    virtual void execute(void);
+
+    virtual void print(std::ostream &os) const;
+
+    virtual void set_overlap_tester(void *tester);
+
+    void provide_sparse_image(int index, const Rect<N2, T2> *rects,
+                              size_t count);
+
+   protected:
+    IndexSpace<N, T> parent;
+    TRANSFORM transform;
+    std::vector<IndexSpace<N2, T2> > targets;
+    std::vector<SparsityMap<N, T> > preimages;
+    Mutex mutex;
+    OverlapTester<N2, T2> *overlap_tester;
+    std::map<int, std::vector<Rect<N2, T2> > > pending_sparse_images;
+    atomic<int> remaining_sparse_images;
+    std::vector<atomic<int> > contrib_counts;
+    AsyncMicroOp *dummy_overlap_uop;
+  };
+  };  // namespace Realm
 
 #endif // REALM_DEPPART_PREIMAGE_H
