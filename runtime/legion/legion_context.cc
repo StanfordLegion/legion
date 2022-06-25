@@ -10526,6 +10526,9 @@ namespace Legion {
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
       }
+      // At this point we should have grabbed any references to these
+      // physical regions so we can clear them at this point
+      physical_regions.clear();
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
