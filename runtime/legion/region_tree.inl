@@ -2314,7 +2314,7 @@ namespace Legion {
         realm_index_space = value;
         Runtime::trigger_event(realm_index_space_set, ready_event);
         index_space_set = true;
-        if (has_remote_instances())
+        if (is_owner() && has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
           // sent this node to except the source
