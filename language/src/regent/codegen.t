@@ -4571,6 +4571,26 @@ function codegen.expr_ispace(cx, node)
   return values.value(node, expr.just(actions, i), ispace_type)
 end
 
+local function attach_name_and_type(cx, fs, field_id, field_name, field_type)
+  local actions = terralib.newlist()
+  actions:insert(
+    quote
+      c.legion_field_id_attach_name(
+        [cx.runtime], [fs], field_id, field_name, false)
+  end)
+  if std.get_type_id(field_type) then
+    actions:insert(
+      quote
+        var type_id : uint32 = [std.get_type_id(field_type)]
+        c.printf("attaching type tag %d to semantic id %d for field id %d\n",
+                 type_id, [std.get_type_semantic_tag()], field_id)
+        c.legion_field_id_attach_semantic_information(
+          [cx.runtime], [fs], field_id, [std.get_type_semantic_tag()], &type_id, terralib.sizeof(uint32), false)
+    end)
+  end
+  return actions
+end
+
 function codegen.expr_region(cx, node)
   local fspace_type = node.fspace_type
   local ispace = codegen.expr(cx, node.ispace):read(cx)
@@ -4650,28 +4670,24 @@ function codegen.expr_region(cx, node)
          function(field)
            local field_path, field_type, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
+           local actions = terralib.newlist()
            if std.is_regent_array(field_type) then
-             local attach_names = terralib.newlist()
              for idx = 0, field_type.N - 1 do
                local elem_name = field_name .. "[" .. tostring(idx) .. "]"
-               attach_names:insert(`(c.legion_field_id_attach_name(
-                          [cx.runtime], [fs], field_id + [idx], [elem_name], false)))
+               actions:insertall(
+                 attach_name_and_type(cx, fs, field_id + idx, elem_name, field_type.elem_type))
              end
-             return attach_names
            else
-             return `(c.legion_field_id_attach_name(
-                        [cx.runtime], [fs], field_id, field_name, false))
+             actions:insertall(
+               attach_name_and_type(cx, fs, field_id, field_name, field_type))
            end
+           return actions
          end,
          data.zip(field_paths, field_types, field_ids))]
     end
   else
     assert(#field_ids == 1)
-    fs_naming_actions = quote
-      [fs_naming_actions]
-      c.legion_field_id_attach_name(
-        [cx.runtime], [fs], [field_ids[1]], "__value", false)
-    end
+    fs_naming_actions = attach_name_and_type(cx, fs, field_ids[1], "__value", field_types[1])
   end
 
   local source_file = tostring(node.span.source)
@@ -7422,8 +7438,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
              fsa, terralib.sizeof(field_type), c.AUTO_GENERATE_ID)
-           c.legion_field_id_attach_name(
-             [cx.runtime], [field_space], [field_ids][i], field_name, false)
+           [attach_name_and_type(cx, field_space, `([field_ids][i]), field_name, field_type)]
          end
        end)]
     c.legion_field_allocator_destroy(fsa)
@@ -9193,13 +9208,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = util.get_base_indexed_node(region_arg.value)
-      local partition_type = std.as_read(partition_expr.expr_type):partition()
+      local partition_expr = util.get_base_indexed_node(region_arg)
+      local partition_type = std.as_read(partition_expr.expr_type)
       partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
-      local region_expr = ast.typed.expr.IndexAccess {
-        value = ast.typed.expr.Internal {
+      local region_expr = util.replace_base_indexed_node(
+        region_arg,
+        ast.typed.expr.Internal {
           value = values.value(
             node,
             expr.just(quote end, partition.value),
@@ -9207,12 +9223,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           expr_type = partition_type,
           annotations = node.annotations,
           span = node.span,
-        },
-        index = region_arg.index,
-        expr_type = region_arg.expr_type,
-        annotations = node.annotations,
-        span = node.span,
-      }
+        })
 
       if arg:is(ast.typed.expr.Projection) then
         region_expr = arg {

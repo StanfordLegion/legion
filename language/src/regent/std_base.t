@@ -447,6 +447,25 @@ function base.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
+-- Assign the basic types IDs for interop with Pygion.
+do
+  local primitive_types =
+    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double })
+  local base_id = 101
+  local type_ids = data.newmap()
+  for _, t in ipairs(primitive_types) do
+    local type_id = base_id
+    base_id = base_id + 1
+    type_ids[t] = type_id
+  end
+  function base.get_type_semantic_tag()
+    return 54321 -- Hack: pick a value that seems unlikely to conflict
+  end
+  function base.get_type_id(t)
+    return type_ids[t]
+  end
+end
+
 function base.meet_privilege(a, b)
   if a == b then
     return a
