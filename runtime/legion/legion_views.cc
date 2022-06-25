@@ -3973,7 +3973,7 @@ namespace Legion {
                                     logical_owner, inst_manager, 
                                     context_uid, false/*register now*/);
       // Register only after construction
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      view->register_with_runtime();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4154,7 +4154,7 @@ namespace Legion {
                             , op_uid
 #endif
                             );
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      view->register_with_runtime();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4445,7 +4445,7 @@ namespace Legion {
                                          wait_on);
         return;
       }
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      view->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
@@ -4462,7 +4462,7 @@ namespace Legion {
     {
       const DeferPhiViewRegistrationArgs *pargs = 
         (const DeferPhiViewRegistrationArgs*)args;
-      pargs->view->register_with_runtime(NULL/*no remote registration*/);
+      pargs->view->register_with_runtime();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4723,7 +4723,7 @@ namespace Legion {
         view = new ShardedView(runtime->forest, did, source, 
                                false/*register now*/);
       view->unpack_view(derez);
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      view->register_with_runtime();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5668,7 +5668,7 @@ namespace Legion {
                                  logical_owner, manager, 
                                  context_uid, false/*register now*/);
       // Only register after construction
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      view->register_with_runtime();
     }
 
   }; // namespace Internal 

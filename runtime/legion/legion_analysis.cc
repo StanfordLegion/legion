@@ -15572,7 +15572,7 @@ namespace Legion {
                                  node, false/*register now*/);
       set->unpack_replicated_states(derez);
       // Once construction is complete then we do the registration
-      set->register_with_runtime(NULL/*no remote registration needed*/);
+      set->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
