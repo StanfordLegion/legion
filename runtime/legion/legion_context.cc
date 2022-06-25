@@ -4059,7 +4059,7 @@ namespace Legion {
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
       IndexSpaceNode *node = runtime->forest->create_index_space(handle, 
-          NULL/*domain*/, did, true/*notify remote*/, 0/*expr id*/, ready);
+          NULL/*domain*/, did, NULL/*collective map*/, 0/*expr id*/, ready);
       creator_op->initialize_index_space(this, node, future);
       register_index_space_creation(handle);
       add_to_dependence_queue(creator_op);
@@ -10526,6 +10526,9 @@ namespace Legion {
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
       }
+      // At this point we should have grabbed any references to these
+      // physical regions so we can clear them at this point
+      physical_regions.clear();
       TaskContext::end_task(res, res_size, owned, deferred_result_instance,
           callback_functor, result_kind, freefunc, metadataptr, metadatasize);
     }
@@ -12213,18 +12216,17 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
         pending_index_spaces.front();
+      CollectiveMapping &collective_mapping =
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_index_space(handle, domain, value.did, 
-              false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
-              creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_index_space(handle, domain, value.did, 
+            &collective_mapping, value.expr_id, ApEvent::NO_AP_EVENT,
+            creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12256,7 +12258,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did,
-               false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
+               &collective_mapping, value.expr_id, ApEvent::NO_AP_EVENT,
                creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
@@ -12363,6 +12365,8 @@ namespace Legion {
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
+      CollectiveMapping &collective_mapping =
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -12370,10 +12374,8 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
-                                false/*notify remote*/, value.expr_id, ready,
+                                &collective_mapping, value.expr_id, ready,
                                 creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12405,7 +12407,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
-                                false/*notify remote*/, value.expr_id, ready,
+                                &collective_mapping, value.expr_id, ready,
                                 creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
@@ -12416,7 +12418,7 @@ namespace Legion {
       }
       creator_op->initialize_index_space(this, node, future,
           shard_manager->is_first_local_shard(owner_shard), 
-          &(shard_manager->get_mapping()));
+          &(shard_manager->get_collective_mapping()));
       add_to_dependence_queue(creator_op);
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -12550,17 +12552,16 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
         pending_index_spaces.front();
+      CollectiveMapping &collective_mapping =
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_union_space(handle, value.did, spaces, 
-            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_union_space(handle, value.did, spaces, 
+          creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12592,7 +12593,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, spaces, 
-            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
+            creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12655,17 +12656,16 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
         pending_index_spaces.front();
+      CollectiveMapping &collective_mapping =
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_intersection_space(handle, value.did, spaces,
-            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_intersection_space(handle, value.did, spaces,
+          creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12697,7 +12697,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did, spaces,
-          creation_barrier, false/*notify remote*/, value.expr_id, &applied);
+          creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12750,17 +12750,16 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
         pending_index_spaces.front();
+      CollectiveMapping &collective_mapping =
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
-        IndexSpaceNode *node = 
-          runtime->forest->create_difference_space(handle, value.did, left,
-          right,creation_barrier,false/*notify remote*/,value.expr_id,&applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->create_difference_space(handle, value.did, left,
+          right,creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12792,7 +12791,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, left, right,
-             creation_barrier, false/*notify remote*/, value.expr_id, &applied);
+             creation_barrier, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -13122,6 +13121,9 @@ namespace Legion {
       std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
         pending_index_partitions.front();
       const bool is_owner = (collective.second == owner_shard->shard_id);
+      CollectiveMapping &collective_mapping = 
+        shard_manager->get_collective_mapping();
+      ShardMapping &shard_mapping = shard_manager->get_mapping();
       if (is_owner)
       {
         const IPBroadcast value = collective.first->get_value(false);
@@ -13135,7 +13137,7 @@ namespace Legion {
                                            partition_ready.exists() ? 
                                              partition_ready :
                                              pending_partition_barrier,
-                                           shard_manager->get_mapping(),
+                                           &collective_mapping, &shard_mapping,
                                            creation_barrier, partition_ready);
         // Broadcast the color if we have to generate it
         if (color_generated)
@@ -13183,7 +13185,7 @@ namespace Legion {
                                          partition_ready.exists() ?
                                            partition_ready :
                                            pending_partition_barrier,
-                                         shard_manager->get_mapping(),
+                                         &collective_mapping, &shard_mapping,
                                          creation_barrier, partition_ready);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
@@ -15083,6 +15085,8 @@ namespace Legion {
         pending_field_spaces.front();
       if (creator != NULL)
         *creator = collective.first->origin;
+      CollectiveMapping &collective_mapping = 
+        shard_manager->get_collective_mapping();
       ShardMapping &shard_mapping = shard_manager->get_mapping();
       if (collective.second)
       {
@@ -15091,11 +15095,8 @@ namespace Legion {
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
         std::set<RtEvent> applied;
-        FieldSpaceNode *node = runtime->forest->create_field_space(space, 
-            value.did, false/*notify remote*/, creation_barrier, &applied,
-            &shard_mapping);
-        // Now we can update the creation set
-        node->update_creation_set(shard_mapping);
+        runtime->forest->create_field_space(space, value.did,
+            &collective_mapping, &shard_mapping, creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -15127,7 +15128,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did,
-            false/*notify remote*/, creation_barrier, &applied, &shard_mapping);
+            &collective_mapping, &shard_mapping, creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -16092,6 +16093,8 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
         pending_region_trees.front();
+      CollectiveMapping &collective_mapping = 
+        shard_manager->get_collective_mapping();
       if (collective.second)
       {
         const LRBroadcast value = collective.first->get_value(false);
@@ -16099,11 +16102,8 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
-        RegionNode *node = 
-          forest->create_logical_region(handle, value.did,
-              false/*notify remote*/, creation_barrier, &applied);
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        forest->create_logical_region(handle, value.did,
+            &collective_mapping, creation_barrier, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -16137,7 +16137,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         forest->create_logical_region(handle, value.did,
-            false/*notify remote*/, creation_barrier, &applied);
+            &collective_mapping, creation_barrier, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,

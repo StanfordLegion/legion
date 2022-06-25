@@ -27,6 +27,7 @@
 #include "legion/legion_views.h"
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_replication.h"
 
 #ifndef INST_N1
   #error INST_N1 must be defined!
