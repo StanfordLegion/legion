@@ -2451,8 +2451,11 @@ namespace Legion {
           index, recorded_events, trace_info.recording, runtime->address_space);
       }
       if (trace_info.recording)
-        trace_info.record_fill_inst(result, fill_expression, instance, did,
+      {
+        const UniqueInst dst_inst(dst_view);
+        trace_info.record_fill_inst(result, fill_expression, dst_inst,
                                     fill_mask, applied_events, (redop > 0));
+      }
       return result;
     }
 
@@ -2549,11 +2552,10 @@ namespace Legion {
       }
       if (trace_info.recording)
       {
-        DomainPoint dummy;
-        const PhysicalInstance src_inst = source_manager->get_instance(dummy); 
+        const UniqueInst src_inst(src_view);
+        const UniqueInst dst_inst(dst_view);
         trace_info.record_copy_insts(result, copy_expression, src_inst,
-            instance, source_manager->did, did, *src_mask, copy_mask,
-            reduction_op_id, applied_events);
+            dst_inst, *src_mask, copy_mask, reduction_op_id, applied_events);
       }
       if (across_helper != NULL)
         delete src_mask;

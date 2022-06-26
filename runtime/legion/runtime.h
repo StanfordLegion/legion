@@ -3183,6 +3183,10 @@ namespace Legion {
       void send_view_find_copy_preconditions_request(AddressSpaceID target,
                                                      Serializer &rez);
       void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
+      void send_view_find_last_users_request(AddressSpaceID target,
+                                             Serializer &rez);
+      void send_view_find_last_users_response(AddressSpaceID target,
+                                              Serializer &rez);
 #ifdef ENABLE_VIEW_REPLICATION
       void send_view_replication_request(AddressSpaceID target,Serializer &rez);
       void send_view_replication_response(AddressSpaceID target,
@@ -3217,6 +3221,10 @@ namespace Legion {
       void send_control_replicate_trace_event_request(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_trace_event_response(AddressSpaceID target,
+                                                       Serializer &rez);
+      void send_control_replicate_trace_frontier_request(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_control_replicate_trace_frontier_response(AddressSpaceID target,
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
@@ -3498,6 +3506,9 @@ namespace Legion {
       void handle_view_copy_pre_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
+      void handle_view_find_last_users_request(Deserializer &derez,
+                                               AddressSpaceID source);
+      void handle_view_find_last_users_response(Deserializer &derez);
 #ifdef ENABLE_VIEW_REPLICATION
       void handle_view_replication_request(Deserializer &derez,
                                            AddressSpaceID source);
@@ -3645,6 +3656,10 @@ namespace Legion {
       void handle_control_replicate_trace_event_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_control_replicate_trace_event_response(Deserializer &derez);
+      void handle_control_replicate_trace_frontier_request(Deserializer &derez,
+                                                        AddressSpaceID source);
+      void handle_control_replicate_trace_frontier_response(
+                                                        Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_control_replicate_implicit_request(Deserializer &derez,
@@ -5572,6 +5587,10 @@ namespace Legion {
           return UPDATE_VIRTUAL_CHANNEL;
         case SEND_VIEW_ADD_COPY_USER:
           return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_FIND_LAST_USERS_REQUEST:
+          break;
+        case SEND_VIEW_FIND_LAST_USERS_RESPONSE:
+          break;
         case SEND_VIEW_REPLICATION_REQUEST:
           return UPDATE_VIRTUAL_CHANNEL;
         case SEND_VIEW_REPLICATION_RESPONSE:
@@ -5613,6 +5632,10 @@ namespace Legion {
         case SEND_REPL_TRACE_EVENT_REQUEST:
           break;
         case SEND_REPL_TRACE_EVENT_RESPONSE:
+          break;
+        case SEND_REPL_TRACE_FRONTIER_REQUEST:
+          break;
+        case SEND_REPL_TRACE_FRONTIER_RESPONSE:
           break;
         case SEND_REPL_TRACE_UPDATE:
           break;
