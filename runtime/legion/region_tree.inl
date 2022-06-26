@@ -2147,9 +2147,9 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
-        CollectiveMapping *mapping)
+        CollectiveMapping *mapping, bool is_root)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, mapping), linearization_ready(false)
+          dep, mapping, is_root), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)

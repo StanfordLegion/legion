@@ -742,7 +742,7 @@ namespace Legion {
                                   bool add_root_reference = false,
                                   unsigned depth = UINT_MAX);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
-                                  IndexPartNode *par, LegionColor color,
+                                  IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   ApUserEvent is_ready,
                                   CollectiveMapping *mapping = NULL,
@@ -2132,7 +2132,7 @@ namespace Legion {
                      IndexPartNode *parent, LegionColor color,
                      DistributedID did, ApEvent index_space_ready,
                      IndexSpaceExprID expr_id, RtEvent initialized,
-                     unsigned depth, CollectiveMapping *mapping);
+                     unsigned depth, CollectiveMapping *mapping, bool is_root);
       IndexSpaceNode(const IndexSpaceNode &rhs) = delete;
       virtual ~IndexSpaceNode(void);
     public:
@@ -2475,7 +2475,7 @@ namespace Legion {
                       const void *bounds, bool is_domain,
                       DistributedID did, ApEvent ready_event,
                       IndexSpaceExprID expr_id, RtEvent init,
-                      unsigned depth, CollectiveMapping *mapping);
+                      unsigned depth, CollectiveMapping *mapping, bool is_root);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs) = delete;
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -3017,11 +3017,11 @@ namespace Legion {
     public:
       IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
                         bool is_dom, IndexPartNode *p, LegionColor c, 
-                        DistributedID d, ApEvent r, IndexSpaceExprID e,
-                        RtEvent init, unsigned dp, CollectiveMapping *m)
+                        DistributedID d, ApEvent a, IndexSpaceExprID e,
+                        RtEvent init, unsigned dp, CollectiveMapping *m, bool r)
         : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
-          color(c), did(d), ready(r), expr_id(e), initialized(init), depth(dp),
-          mapping(m), result(NULL) { }
+          color(c), did(d), ready(a), expr_id(e), initialized(init), depth(dp),
+          mapping(m), root(r), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
@@ -3029,7 +3029,7 @@ namespace Legion {
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
             creator->space, creator->parent, creator->color, creator->bounds,
             creator->is_domain, creator->did, creator->ready, creator->expr_id,
-            creator->initialized, creator->depth, creator->mapping);
+            creator->initialized,creator->depth,creator->mapping,creator->root);
       }
     public:
       RegionTreeForest *const forest;
@@ -3044,6 +3044,7 @@ namespace Legion {
       const RtEvent initialized;
       const unsigned depth;
       CollectiveMapping *const mapping;
+      const bool root;
       IndexSpaceNode *result;
     };
 
