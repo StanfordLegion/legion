@@ -3778,7 +3778,7 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
-                      did, is_ready, expr_id, initialized, depth, mapping);
+       did, is_ready, expr_id, initialized, depth, mapping, add_root_reference);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3862,7 +3862,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
                                                   const void *realm_is,
-                                                  IndexPartNode *parent,
+                                                  IndexPartNode &parent,
                                                   LegionColor color,
                                                   DistributedID did,
                                                   RtEvent initialized,
@@ -3882,8 +3882,8 @@ namespace Legion {
           local_applied.insert(initialized);
         initialized = local_initialized;
       }
-      IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, parent,
-              color, did, is_ready, 0/*expr id*/, initialized, depth, mapping);
+      IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, &parent,
+       color,did,is_ready,0/*expr id*/,initialized,depth,mapping,false/*root*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3918,35 +3918,14 @@ namespace Legion {
         if (!result->is_owner())
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime();
-        if (parent != NULL)
+        // Always add a valid reference from the parent
+        result->add_nested_valid_ref(parent.did, &mutator);
+        // Check to see if the parent is still tree valid
+        if (!parent.add_child(result))
         {
-          // Always add a valid reference from the parent
-          result->add_nested_valid_ref(parent->did, &mutator);
-          // Check to see if the parent is still tree valid
-          if (!parent->add_child(result))
-          {
-            result->invalidate_tree();
-            // If the parent is tree invalid then remove the reference
-            result->remove_nested_valid_ref(parent->did, &mutator);
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(result->is_owner());
-#endif
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          if (mapping != NULL)
-          {
-            // If we've got a collective mapping add remote did refs
-            // for any children in the mapping that we know are also valid
-            std::vector<AddressSpaceID> children;
-            mapping->get_children(result->local_space,
-                                  result->local_space, children);
-            if (!children.empty())
-              result->add_base_valid_ref(REMOTE_DID_REF, &mutator, 
-                                         children.size());
-          }
+          result->invalidate_tree();
+          // If the parent is tree invalid then remove the reference
+          result->remove_nested_valid_ref(parent.did, &mutator);
         }
       } 
       if (local_initialized.exists())
@@ -8637,7 +8616,7 @@ namespace Legion {
                                    IndexPartNode *par, LegionColor c,
                                    DistributedID did, ApEvent ready,
                                    IndexSpaceExprID exp_id, RtEvent init,
-                                   unsigned dep, CollectiveMapping *map)
+                                   unsigned dep, CollectiveMapping *map, bool r)
       : IndexTreeNode(ctx,
           (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
@@ -8652,7 +8631,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         tree_active(true),
 #endif
-        root_valid(parent == NULL)
+        root_valid(r)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8704,7 +8683,7 @@ namespace Legion {
       // know the creation is collective and the create_node methods
       // will add the appropriate references on each node without us
       // needing to send any messages
-      if (!is_owner() && ((parent != NULL) || !root_valid))
+      if (!is_owner() && !root_valid)
       {
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
@@ -10905,7 +10884,7 @@ namespace Legion {
           if (partial_pending.exists())
           {
             ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
-            result = context->create_node(is, NULL/*realm is*/, this, c, did, 
+            result = context->create_node(is, NULL/*realm is*/, *this, c, did,
                                           initialized, partial_event);
             Runtime::phase_barrier_arrive(partial_pending, 
                                         1/*count*/, partial_event);
