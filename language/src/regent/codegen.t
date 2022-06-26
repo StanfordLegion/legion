@@ -196,7 +196,7 @@ function context:check_divergence(region_types, field_paths)
       end
     end
     for _, field_path in ipairs(field_paths) do
-      if not divergence.valid_fields[data.hash(field_path)] then
+      if not divergence.valid_fields[field_path] then
         contained = false
         break
       end
@@ -373,37 +373,37 @@ function context:set_loop_symbol(loop_symbol)
 end
 
 function region:field_type(field_path)
-  local field_type = self.field_types[field_path:hash()]
+  local field_type = self.field_types[field_path]
   assert(field_type)
   return field_type
 end
 
 function region:field_id(field_path)
-  local field_id = self.field_ids[field_path:hash()]
+  local field_id = self.field_ids[field_path]
   assert(field_id)
   return field_id
 end
 
 function region:field_is_scratch(field_path)
-  local field_is_scratch = self.fields_are_scratch[field_path:hash()]
+  local field_is_scratch = self.fields_are_scratch[field_path]
   assert(field_is_scratch ~= nil)
   return field_is_scratch
 end
 
 function region:physical_region(field_path)
-  local physical_region = self.physical_regions[field_path:hash()]
+  local physical_region = self.physical_regions[field_path]
   assert(physical_region)
   return physical_region
 end
 
 function region:base_pointer(field_path)
-  local base_pointer = self.base_pointers[field_path:hash()]
+  local base_pointer = self.base_pointers[field_path]
   assert(base_pointer)
   return base_pointer
 end
 
 function region:stride(field_path)
-  local stride = self.strides[field_path:hash()]
+  local stride = self.strides[field_path]
   assert(stride)
   return stride
 end
@@ -455,19 +455,19 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
 end
 
 function list_of_regions:field_type(field_path)
-  local field_type = self.field_types[field_path:hash()]
+  local field_type = self.field_types[field_path]
   assert(field_type)
   return field_type
 end
 
 function list_of_regions:field_id(field_path)
-  local field_id = self.field_ids[field_path:hash()]
+  local field_id = self.field_ids[field_path]
   assert(field_id)
   return field_id
 end
 
 function list_of_regions:field_is_scratch(field_path)
-  local field_is_scratch = self.fields_are_scratch[field_path:hash()]
+  local field_is_scratch = self.fields_are_scratch[field_path]
   assert(field_is_scratch ~= nil)
   return field_is_scratch
 end
@@ -641,7 +641,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
   return actions, base_pointer, strides
 end
 
-local physical_region_get_base_pointer_thunk = terralib.memoize(
+local physical_region_get_base_pointer_thunk = data.weak_memoize(
   function(index_type, field_type, fastest_index, expected_stride)
     assert(index_type and field_type)
 
@@ -1270,13 +1270,13 @@ function ref:__ref(cx, expr_type)
     base_pointers = data.zip(absolute_field_paths, field_types):map(
       function(field)
         local field_path, field_type = unpack(field)
-        return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
+        return terralib.newsymbol(&field_type, "base_pointer_" .. tostring(field_path))
       end)
     strides = absolute_field_paths:map(
       function(field_path)
         return cx:region(region_types[1]):stride(field_path):map(
           function(_)
-            return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+            return terralib.newsymbol(c.size_t, "stride_" .. tostring(field_path))
           end)
       end)
 
@@ -1584,10 +1584,10 @@ function aref:__ref(cx, index)
     base_pointer = base_pointers_by_region[1]
     strides = strides_by_region[1]
   else
-    base_pointer = terralib.newsymbol(&field_type, "base_pointer_" .. absolute_field_path:hash())
+    base_pointer = terralib.newsymbol(&field_type, "base_pointer_" .. tostring(absolute_field_path))
     strides = cx:region(region_types[1]):stride(absolute_field_path):map(
       function(_)
-        return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+        return terralib.newsymbol(c.size_t, "stride_" .. tostring(field_path))
       end)
 
     local cases
@@ -1773,7 +1773,7 @@ function vref:read(cx, expr_type)
       end)
   -- if the vptr can point to multiple regions
   else
-    for field_idx, field_path in pairs(field_paths) do
+    for field_idx, field_path in ipairs(field_paths) do
       for vector_idx = 1, vector_width do
         local v = vars[vector_idx]
         for _, field_name in ipairs(field_path) do
@@ -1881,7 +1881,7 @@ function vref:write(cx, value, expr_type)
         end
       end)
   else
-    for field_idx, field_path in pairs(field_paths) do
+    for field_idx, field_path in ipairs(field_paths) do
       for vector_idx = 1, vector_width do
         local result = value_expr.value
         for _, field_name in ipairs(field_path) do
@@ -1970,7 +1970,7 @@ function vref:reduce(cx, value, op, expr_type)
         end
       end)
   else
-    for field_idx, field_path in pairs(field_paths) do
+    for field_idx, field_path in ipairs(field_paths) do
       for vector_idx = 1, vector_width do
         local result = value_expr.value
         for _, field_name in ipairs(field_path) do
@@ -2758,7 +2758,7 @@ local function expr_call_setup_task_args(
       -- field reordering.
 
       local arg_field_paths = std.flatten_struct_fields(arg_fs_type)
-      local field_id_index = data.dict(data.zip(arg_field_paths:map(data.hash),
+      local field_id_index = data.dict(data.zip(arg_field_paths,
                                                 data.range(0, #arg_field_paths)))
       local param_field_paths = std.flatten_struct_fields(param_fs_type)
       assert(#param_field_paths == #arg_field_paths)
@@ -2768,7 +2768,7 @@ local function expr_call_setup_task_args(
         [data.zip(param_field_paths, data.range(0, #param_field_paths)):map(
             function(pair)
               local param_field_path, param_i = unpack(pair)
-              local arg_i = field_id_index[param_field_path:hash()]
+              local arg_i = field_id_index[param_field_path]
               return
                 quote [fixed_ptr].[param_field_id_array][ [param_i] ] =
                       (@arg_field_id_array)[ [arg_i] ]
@@ -3002,7 +3002,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Hack: Rooting any ispaces present manually
   if free_vars then
-    for _, symbol in pairs(free_vars) do
+    for _, symbol in free_vars:keys() do
       local symbol_type = symbol:gettype()
       if cx:has_ispace(symbol_type) then
         local ispace = cx:ispace(symbol_type)
@@ -3108,7 +3108,7 @@ local function add_region_fields(cx, arg_type, field_paths, field_types, launche
     [data.zip(field_paths, field_types):map(
        function(field)
          local field_path, field_type = unpack(field)
-         local field_id = `(@field_id_array)[ [field_id_index[field_path:hash()] ] ]
+         local field_id = `(@field_id_array)[ [field_id_index[field_path] ] ]
          if std.is_regent_array(field_type) then
            return quote
              for idx = 0, [field_type.N] do
@@ -3223,7 +3223,7 @@ local function expr_call_setup_region_arg_local(
     local physical_region
     for _, field_path in ipairs(field_paths) do
       if not physical_region then
-        physical_region = cx:region(arg_type).physical_regions[field_path:hash()]
+        physical_region = cx:region(arg_type).physical_regions[field_path]
       end
       -- Better hope all the fields are in the same physical region...
     end
@@ -3393,7 +3393,7 @@ end
 local function index_launch_free_var_setup(free_vars)
   local free_vars_struct = terralib.types.newstruct()
   free_vars_struct.entries = terralib.newlist()
-  for i, symbol in ipairs(free_vars) do
+  for _, symbol in free_vars:keys() do
     free_vars_struct.entries:insert({
       field = tostring(symbol),
       type = symbol:gettype(),
@@ -3408,7 +3408,7 @@ local function index_launch_free_var_setup(free_vars)
     quote
       var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
     end)
-  for i, symbol in ipairs(free_vars) do
+  for _, symbol in free_vars:keys() do
     free_vars_setup:insert(
       quote
         var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
@@ -3437,13 +3437,13 @@ local function expr_call_setup_partition_arg(
     std.is_partition(
       std.as_read(util.get_base_indexed_node(arg_value).expr_type)))
   local proj_args_set = nil
-  if needs_non_identity_functor and #free_vars > 0 then
+  if needs_non_identity_functor and not free_vars:is_empty() then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
     args_setup:insert(
       quote
         var [proj_args_set]
       end)
-    for i, symbol in ipairs(free_vars) do
+    for _, symbol in free_vars:keys() do
       args_setup:insert(
         quote
           [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
@@ -3531,7 +3531,7 @@ local function expr_call_setup_remote(cx, node, task, arg_values, arg_types, par
 
   -- Pass phase barriers (from annotations on parameters).
   local param_conditions = task:get_conditions()
-  for condition, args_enabled in pairs(param_conditions) do
+  for condition, args_enabled in param_conditions:items() do
     for i, arg_type in ipairs(arg_types) do
       if args_enabled[i] then
         assert(std.is_phase_barrier(arg_type) or
@@ -4571,6 +4571,26 @@ function codegen.expr_ispace(cx, node)
   return values.value(node, expr.just(actions, i), ispace_type)
 end
 
+local function attach_name_and_type(cx, fs, field_id, field_name, field_type)
+  local actions = terralib.newlist()
+  actions:insert(
+    quote
+      c.legion_field_id_attach_name(
+        [cx.runtime], [fs], field_id, field_name, false)
+  end)
+  if std.get_type_id(field_type) then
+    actions:insert(
+      quote
+        var type_id : uint32 = [std.get_type_id(field_type)]
+        c.printf("attaching type tag %d to semantic id %d for field id %d\n",
+                 type_id, [std.get_type_semantic_tag()], field_id)
+        c.legion_field_id_attach_semantic_information(
+          [cx.runtime], [fs], field_id, [std.get_type_semantic_tag()], &type_id, terralib.sizeof(uint32), false)
+    end)
+  end
+  return actions
+end
+
 function codegen.expr_region(cx, node)
   local fspace_type = node.fspace_type
   local ispace = codegen.expr(cx, node.ispace):read(cx)
@@ -4624,14 +4644,14 @@ function codegen.expr_region(cx, node)
   cx:add_region_root(region_type, r,
                      field_paths,
                      terralib.newlist({field_paths}),
-                     data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
-                     data.dict(data.zip(field_paths:map(data.hash), field_types)),
-                     data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     data.dict(data.zip(field_paths, field_privileges)),
+                     data.dict(data.zip(field_paths, field_types)),
+                     data.dict(data.zip(field_paths, field_ids)),
                      field_id_array,
-                     data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
-                     data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
-                     data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
-                     data.dict(data.zip(field_paths:map(data.hash), strides)))
+                     data.dict(data.zip(field_paths, fields_are_scratch)),
+                     data.dict(data.zip(field_paths, physical_regions)),
+                     data.dict(data.zip(field_paths, base_pointers)),
+                     data.dict(data.zip(field_paths, strides)))
 
   local source_file = tostring(node.span.source)
   local source_line = tostring(node.span.start.line)
@@ -4650,28 +4670,24 @@ function codegen.expr_region(cx, node)
          function(field)
            local field_path, field_type, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
+           local actions = terralib.newlist()
            if std.is_regent_array(field_type) then
-             local attach_names = terralib.newlist()
              for idx = 0, field_type.N - 1 do
                local elem_name = field_name .. "[" .. tostring(idx) .. "]"
-               attach_names:insert(`(c.legion_field_id_attach_name(
-                          [cx.runtime], [fs], field_id + [idx], [elem_name], false)))
+               actions:insertall(
+                 attach_name_and_type(cx, fs, field_id + idx, elem_name, field_type.elem_type))
              end
-             return attach_names
            else
-             return `(c.legion_field_id_attach_name(
-                        [cx.runtime], [fs], field_id, field_name, false))
+             actions:insertall(
+               attach_name_and_type(cx, fs, field_id, field_name, field_type))
            end
+           return actions
          end,
          data.zip(field_paths, field_types, field_ids))]
     end
   else
     assert(#field_ids == 1)
-    fs_naming_actions = quote
-      [fs_naming_actions]
-      c.legion_field_id_attach_name(
-        [cx.runtime], [fs], [field_ids[1]], "__value", false)
-    end
+    fs_naming_actions = attach_name_and_type(cx, fs, field_ids[1], "__value", field_types[1])
   end
 
   local source_file = tostring(node.span.source)
@@ -5652,7 +5668,7 @@ function codegen.expr_list_cross_product_complete(cx, node)
     expr_type)
 end
 
-local gen_expr_list_phase_barriers = terralib.memoize(
+local gen_expr_list_phase_barriers = data.weak_memoize(
   function(product_type, expr_type)
     local result = terralib.newsymbol(expr_type, "result")
     local product = terralib.newsymbol(product_type, "product")
@@ -5744,7 +5760,7 @@ local function get_offset_in_rect(point, rect_size)
   end
 end
 
-local gen_expr_list_invert = terralib.memoize(
+local gen_expr_list_invert = data.weak_memoize(
   function(rhs_type, product_type, expr_type, barriers_type)
     local color_type = rhs_type:partition():colors().index_type
     if color_type:is_opaque() then  -- Treat `ptr` as `int1d`.
@@ -6249,7 +6265,7 @@ local function expr_advance_list_body(runtime, context, value, value_type)
   end
 end
 
-local expr_advance_list_helper = terralib.memoize(
+local expr_advance_list_helper = data.weak_memoize(
   function (value_type)
     local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
     local context = terralib.newsymbol(c.legion_context_t, "context")
@@ -7361,14 +7377,11 @@ function codegen.expr_detach_hdf5(cx, node)
   end
 
   -- Hack: De-duplicate physical regions by symbol.
-  local pr_set = {}
+  local pr_set = data.newmap()
   for _, field_path in ipairs(full_fields) do
     pr_set[cx:region(region_type):physical_region(field_path)] = true
   end
-  local pr_list = terralib.newlist()
-  for pr, _ in pairs(pr_set) do
-    pr_list:insert(pr)
-  end
+  local pr_list = pr_set:map_keys(function(x) return x end)
 
   local actions = quote
     [region.actions]
@@ -7425,8 +7438,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
              fsa, terralib.sizeof(field_type), c.AUTO_GENERATE_ID)
-           c.legion_field_id_attach_name(
-             [cx.runtime], [field_space], [field_ids][i], field_name, false)
+           [attach_name_and_type(cx, field_space, `([field_ids][i]), field_name, field_type)]
          end
        end)]
     c.legion_field_allocator_destroy(fsa)
@@ -7450,12 +7462,9 @@ function codegen.expr_with_scratch_fields(cx, node)
   assert(cx:has_region_or_list(region_type))
 
   local old_field_ids = cx:region_or_list(region_type).field_ids
-  local new_field_ids = {}
-  for k, v in pairs(old_field_ids) do
-    new_field_ids[k] = v
-  end
-  for i, field_path in pairs(node.region.fields) do
-    new_field_ids[field_path:hash()] = `([field_ids.value][ [i-1] ])
+  local new_field_ids = old_field_ids:copy()
+  for i, field_path in ipairs(node.region.fields) do
+    new_field_ids[field_path] = `([field_ids.value][ [i-1] ])
   end
 
   local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
@@ -7465,16 +7474,13 @@ function codegen.expr_with_scratch_fields(cx, node)
     [actions]
     var [new_field_id_array] = arrayof(
       c.legion_field_id_t,
-      [field_paths:map(function(field_path) return new_field_ids[field_path:hash()] end)])
+      [field_paths:map(function(field_path) return new_field_ids[field_path] end)])
   end
 
   local old_fields_are_scratch = cx:region_or_list(region_type).fields_are_scratch
-  local new_fields_are_scratch = {}
-  for k, v in pairs(old_fields_are_scratch) do
-    new_fields_are_scratch[k] = v
-  end
-  for i, field_path in pairs(node.region.fields) do
-    new_fields_are_scratch[field_path:hash()] = true
+  local new_fields_are_scratch = old_fields_are_scratch:copy()
+  for i, field_path in ipairs(node.region.fields) do
+    new_fields_are_scratch[field_path] = true
   end
 
   local value = expr.once_only(
@@ -7911,14 +7917,14 @@ function codegen.expr_import_region(cx, node)
   cx:add_region_root(region_type, r,
                      field_paths,
                      terralib.newlist({field_paths}),
-                     data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
-                     data.dict(data.zip(field_paths:map(data.hash), field_types)),
-                     data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     data.dict(data.zip(field_paths, field_privileges)),
+                     data.dict(data.zip(field_paths, field_types)),
+                     data.dict(data.zip(field_paths, field_ids)),
                      field_id_array,
-                     data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
-                     data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
-                     data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
-                     data.dict(data.zip(field_paths:map(data.hash), strides)))
+                     data.dict(data.zip(field_paths, fields_are_scratch)),
+                     data.dict(data.zip(field_paths, physical_regions)),
+                     data.dict(data.zip(field_paths, base_pointers)),
+                     data.dict(data.zip(field_paths, strides)))
 
   -- Consistency check on the imported logical region handle
   local check_actions = quote
@@ -8059,7 +8065,7 @@ function codegen.expr_import_cross_product(cx, node)
 
   local actions = quote end
 
-  for _, p in pairs(partitions) do
+  for _, p in ipairs(partitions) do
     actions = quote
       [actions];
       [p.actions];
@@ -8106,7 +8112,7 @@ function codegen.expr_projection(cx, node)
   local field_id_array_buffer =
     terralib.newsymbol(&c.legion_field_id_t[#orig_field_paths], "field_ids")
   local field_id_array = `(@[field_id_array_buffer])
-  local index_mapping = data.dict(data.zip(orig_region.field_paths:map(data.hash),
+  local index_mapping = data.dict(data.zip(orig_region.field_paths,
                                            data.range(0, #orig_region.field_paths)))
   local actions = quote
     [orig_region_value.actions]
@@ -8116,7 +8122,7 @@ function codegen.expr_projection(cx, node)
                                                          [terralib.sizeof(c.legion_field_id_t)]))
     [data.zip(data.range(0, #orig_field_paths), orig_field_paths):map(function(pair)
       local idx, orig_field_path = unpack(pair)
-      local orig_idx = index_mapping[orig_field_path:hash()]
+      local orig_idx = index_mapping[orig_field_path]
       assert(orig_idx ~= nil)
       return quote
         [field_id_array][ [idx] ] = [orig_region.field_id_array][ [orig_idx] ]
@@ -8125,11 +8131,11 @@ function codegen.expr_projection(cx, node)
   end
   cx:add_cleanup_item(quote c.free([field_id_array_buffer]) end)
 
-  local field_mapping = data.map_from_table(data.dict(data.zip(field_paths, orig_field_paths)))
+  local field_mapping = data.dict(data.zip(field_paths, orig_field_paths))
   local function map_dict(dict)
-    return data.dict(data.zip(field_paths:map(data.hash),
+    return data.dict(data.zip(field_paths,
                               field_paths:map(function(field_path)
-                                return dict[field_mapping[field_path]:hash()]
+                                return dict[field_mapping[field_path]]
                               end)))
   end
 
@@ -8521,7 +8527,7 @@ local function collect_symbols(cx, node, cuda)
   local defined =  data.map_from_table({ [node.symbol] = true })
   local accesses = data.newmap()
   local function collect_symbol_pre(node)
-    if rawget(node, "node_type") then
+    if ast.is_node(node) then
       if node:is(ast.typed.stat.Var) then
         defined[node.symbol] = true
       elseif node:is(ast.typed.stat.ForNum) or
@@ -8531,7 +8537,7 @@ local function collect_symbols(cx, node, cuda)
     end
   end
   local function collect_symbol_post(node)
-    if rawget(node, "node_type") then
+    if ast.is_node(node) then
       if node:is(ast.typed.expr.ID) and
              not defined[node.value] and
              not std.is_region(std.as_read(node.expr_type)) then
@@ -9202,13 +9208,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = util.get_base_indexed_node(region_arg.value)
-      local partition_type = std.as_read(partition_expr.expr_type):partition()
+      local partition_expr = util.get_base_indexed_node(region_arg)
+      local partition_type = std.as_read(partition_expr.expr_type)
       partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
-      local region_expr = ast.typed.expr.IndexAccess {
-        value = ast.typed.expr.Internal {
+      local region_expr = util.replace_base_indexed_node(
+        region_arg,
+        ast.typed.expr.Internal {
           value = values.value(
             node,
             expr.just(quote end, partition.value),
@@ -9216,12 +9223,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           expr_type = partition_type,
           annotations = node.annotations,
           span = node.span,
-        },
-        index = region_arg.index,
-        expr_type = region_arg.expr_type,
-        annotations = node.annotations,
-        span = node.span,
-      }
+        })
 
       if arg:is(ast.typed.expr.Projection) then
         region_expr = arg {
@@ -9316,7 +9318,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
   -- Pass phase barriers.
   local param_conditions = fn.value:get_conditions()
-  for condition, args_enabled in pairs(param_conditions) do
+  for condition, args_enabled in param_conditions:items() do
     for i, arg_type in ipairs(arg_types) do
       if args_enabled[i] then
         assert(std.is_phase_barrier(arg_type) or
@@ -9989,7 +9991,7 @@ local function find_region_roots_physical(cx, region_types)
       local privilege_field_paths = cx:region(region_type).privilege_field_paths
       for _, field_paths in ipairs(privilege_field_paths) do
         for _, field_path in ipairs(field_paths) do
-          result:insert(physical_regions[field_path:hash()])
+          result:insert(physical_regions[field_path])
         end
       end
     end
@@ -10553,8 +10555,8 @@ end
 
 local function filter_fields(fields, privileges)
   local remove = terralib.newlist()
-  for _, field in pairs(fields) do
-    local privilege = privileges[data.hash(field)]
+  for _, field in fields:keys() do
+    local privilege = privileges[field]
     if not privilege or std.is_reduction_op(privilege) then
       remove:insert(field)
     end
@@ -10565,7 +10567,7 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
-local unpack_param_helper = terralib.memoize(function(param_type)
+local unpack_param_helper = data.weak_memoize(function(param_type)
   local cx = context.new_global_scope()
 
   -- Inputs/outputs:
@@ -10666,7 +10668,7 @@ local function setup_regent_calling_convention_metadata(node, task)
   local fn_type = task:get_type()
   local param_types = task:get_type().parameters
   local param_field_id_labels = data.newmap()
-  for _, region_i in pairs(std.fn_params_with_privileges_by_index(fn_type)) do
+  for _, region_i in ipairs(std.fn_params_with_privileges_by_index(fn_type)) do
     local region = param_types[region_i]
     local field_paths, field_types =
       std.flatten_struct_fields(region:fspace())
@@ -10893,7 +10895,7 @@ function codegen.top_task(cx, node)
       std.flatten_struct_fields(region_type:fspace())
     local field_id_array = `(args.[param_field_id_labels[region_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
+      data.zip(field_paths, data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     local physical_regions = terralib.newlist()
     local physical_regions_by_field_path = {}
@@ -10917,7 +10919,7 @@ function codegen.top_task(cx, node)
 
       -- we still need physical regions for map/unmap operations to work
       for i, field_path in ipairs(field_paths) do
-        physical_regions_by_field_path[field_path:hash()] = physical_region
+        physical_regions_by_field_path[field_path] = physical_region
       end
 
       if not cx.variant:get_config_options().inner and
@@ -10928,7 +10930,7 @@ function codegen.top_task(cx, node)
           data.zip(field_paths, field_types):map(
             function(field)
               local field_path, field_type = unpack(field)
-              local field_id = field_ids_by_field_path[field_path:hash()]
+              local field_id = field_ids_by_field_path[field_path]
               return terralib.newlist({
                 physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, physical_region, field_id)})
         end))))
@@ -10937,9 +10939,9 @@ function codegen.top_task(cx, node)
         base_pointers:insert(pr_base_pointers)
 
         for i, field_path in ipairs(field_paths) do
-          if privileges_by_field_path[field_path:hash()] ~= "none" then
-            base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
-            strides_by_field_path[field_path:hash()] = pr_strides[i]
+          if privileges_by_field_path[field_path] ~= "none" then
+            base_pointers_by_field_path[field_path] = pr_base_pointers[i]
+            strides_by_field_path[field_path] = pr_strides[i]
           end
         end
       end
@@ -10996,13 +10998,13 @@ function codegen.top_task(cx, node)
     task_setup:insertall(physical_region_actions)
 
     -- Force inner tasks to unmap all regions
-    if not cx.variant:get_config_options().inner and
-      (not cx.region_usage or cx.region_usage[region_type])
+    if not (not cx.variant:get_config_options().inner and
+              (not cx.region_usage or cx.region_usage[region_type]))
     then
       local actions = quote
         c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
       end
-      task_setup:insertall(actions)
+      task_setup:insert(actions)
     end
 
     if not cx:has_ispace(region_type:ispace()) then
@@ -11038,10 +11040,10 @@ function codegen.top_task(cx, node)
                          field_paths,
                          privilege_field_paths,
                          privileges_by_field_path,
-                         data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                         data.dict(data.zip(field_paths, field_types)),
                          field_ids_by_field_path,
                          field_id_array,
-                         data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
+                         data.dict(data.zip(field_paths, field_types:map(function(_) return false end))),
                          physical_regions_by_field_path,
                          base_pointers_by_field_path,
                          strides_by_field_path)
@@ -11062,7 +11064,7 @@ function codegen.top_task(cx, node)
       std.flatten_struct_fields(list_type:fspace())
     local field_id_array = `(args.[param_field_id_labels[list_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
+      data.zip(field_paths, data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     -- We never actually access physical instances for lists, so don't
     -- build any accessors here.
@@ -11071,10 +11073,10 @@ function codegen.top_task(cx, node)
                            field_paths,
                            privilege_field_paths,
                            privileges_by_field_path,
-                           data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                           data.dict(data.zip(field_paths, field_types)),
                            field_ids_by_field_path,
                            field_id_array,
-                           data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))))
+                           data.dict(data.zip(field_paths, field_types:map(function(_) return false end))))
   end
 
   local preamble = quote
@@ -11087,7 +11089,7 @@ function codegen.top_task(cx, node)
     local region_divergence = terralib.newlist()
     local cases
     local diagnostic = quote end
-    for _, rs in pairs(node.region_divergence) do
+    for _, rs in node.region_divergence:values() do
       local r1 = rs[1]
       if cx:has_region(r1) then
         local contained = true
@@ -11095,7 +11097,7 @@ function codegen.top_task(cx, node)
         local rs_diagnostic = quote end
 
         local r1_fields = cx:region(r1).field_paths
-        local valid_fields = data.dict(data.zip(r1_fields, r1_fields))
+        local valid_fields = data.set(r1_fields)
         for _, r in ipairs(rs) do
           if not cx:has_region(r) then
             contained = false
@@ -11109,9 +11111,9 @@ function codegen.top_task(cx, node)
           for _, r in ipairs(rs) do
             if r1 ~= r then
               local r_base = cx:region(r).base_pointers
-              for field, _ in pairs(valid_fields) do
-                local r1_base = r1_bases[field:hash()]
-                local r_base = r_base[field:hash()]
+              for _, field in valid_fields:keys() do
+                local r1_base = r1_bases[field]
+                local r_base = r_base[field]
                 assert(r1_base and r_base)
                 if rs_cases == nil then
                   rs_cases = `([r1_base] == [r_base])

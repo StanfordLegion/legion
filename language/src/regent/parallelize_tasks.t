@@ -837,7 +837,6 @@ function parallel_param.new(params)
     __primary_partitions = false,
     __constraints = false,
     __block_id = false,
-    __hash = false,
   }
   if params.dop ~= nil then tbl.__dop = params.dop end
   if params.primary_partitions ~= nil then
@@ -850,28 +849,6 @@ function parallel_param.new(params)
     tbl.__block_id = params.block_id
   end
   return setmetatable(tbl, parallel_param)
-end
-
-function parallel_param:hash()
-  if not self.__hash then
-    local str = ""
-    if self.__dop then str = str .. "dop" .. tostring(self.__dop) end
-    if self.__primary_partitions then
-      for idx = 1, #self.__primary_partitions do
-        str = str .. "#" .. tostring(self.__primary_partitions[idx])
-      end
-    end
-    if self.__constraints then
-      for idx = 1, #self.__constraints do
-        str = str .. "#" .. ast_util.render(self.__constraints[idx])
-      end
-    end
-    if self.__block_id then
-      str = str .. "#" .. tostring(self.__block_id)
-    end
-    self.__hash = str
-  end
-  return self.__hash
 end
 
 function parallel_param:find_primary_partition_for(region_type)

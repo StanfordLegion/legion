@@ -413,4 +413,12 @@ function ast_util.get_base_indexed_node(node, previous_index)
   return node, previous_index
 end
 
+function ast_util.replace_base_indexed_node(node, replacement)
+  if node:is(ast.typed.expr.IndexAccess) then
+    return node { value = ast_util.replace_base_indexed_node(node.value, replacement) }
+  end
+  assert(std.type_eq(std.as_read(node.expr_type), std.as_read(replacement.expr_type)))
+  return replacement
+end
+
 return ast_util

@@ -15183,7 +15183,7 @@ namespace Legion {
         set = new EquivalenceSet(runtime, did, source, logical_owner,
                                  node, false/*register now*/);
       // Once construction is complete then we do the registration
-      set->register_with_runtime(NULL/*no remote registration needed*/);
+      set->register_with_runtime();
     }
 
     //--------------------------------------------------------------------------

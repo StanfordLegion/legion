@@ -10291,7 +10291,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreationOp::initialize_index_space(InnerContext *ctx, 
-            IndexSpaceNode *n, const Future &f, bool own, ShardMapping *mapping)
+     IndexSpaceNode *n, const Future &f, bool own, const CollectiveMapping *map)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10302,7 +10302,7 @@ namespace Legion {
       kind = INDEX_SPACE_CREATION;
       index_space_node = n;
       futures.push_back(f);
-      shard_mapping = mapping;
+      mapping = map;
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
@@ -10386,7 +10386,7 @@ namespace Legion {
       index_space_node = NULL;
       field_space_node = NULL;
       mapping_precondition = RtEvent::NO_RT_EVENT;
-      shard_mapping = NULL;
+      mapping = NULL;
       owner = true;
     }
 
@@ -10529,7 +10529,7 @@ namespace Legion {
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
             if (owner && index_space_node->set_domain(*domain, 
-                  runtime->address_space, shard_mapping))
+                  runtime->address_space, mapping))
               delete index_space_node;
             break;      
           }

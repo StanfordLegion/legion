@@ -1245,7 +1245,8 @@ namespace Legion {
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
                          DistributedID did, RtEvent initialized, 
                          std::set<RtEvent> *applied,
-                         const bool notify_remote, IndexSpaceExprID new_expr_id)
+                         CollectiveMapping *collective_mapping,
+                         IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
       if (new_expr_id == 0)
@@ -1254,13 +1255,13 @@ namespace Legion {
       if (is_index_space_tight)
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id, 
-                          notify_remote, applied);
+                          realm_index_space_ready, new_expr_id,
+                          collective_mapping, applied, true/*add root ref*/);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id, 
-                          notify_remote, applied);
+                          realm_index_space_ready, new_expr_id,
+                          collective_mapping, applied, true/*add root ref*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2145,9 +2146,10 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready,expr_id,init,dep),
-        linearization_ready(false)
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
+        CollectiveMapping *mapping)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
+          dep, mapping), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2169,33 +2171,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(const IndexSpaceNodeT &rhs)
-      : IndexSpaceNode(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
       if (is_owner())
         realm_index_space.destroy(
             tight_index_space ? tight_index_space_set : realm_index_space_set);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexSpaceNodeT<DIM,T>& IndexSpaceNodeT<DIM,T>::operator=(
-                                                     const IndexSpaceNodeT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2232,45 +2213,108 @@ namespace Legion {
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source,
                                           const Realm::IndexSpace<DIM,T> &value,
-                                                       ShardMapping *mapping,
+                                          const CollectiveMapping *mapping,
                                                        RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!index_space_set);
-      assert(!realm_index_space_set.has_triggered());
-#endif
-      // We can set this now and trigger the event but setting the
-      // flag has to be done while holding the node_lock on the owner
-      // node so that it is serialized with respect to queries from 
-      // remote nodes for copies about the remote instance
-      realm_index_space = value;
-      Runtime::trigger_event(realm_index_space_set, ready_event);
-      // If we're not the owner, send a message back to the
-      // owner specifying that it can set the index space value
+      bool need_broadcast = true;
       const AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
+      if (source == local_space)
       {
-        index_space_set = true;
-        // We're not the owner, if this is not from the owner then
-        // send a message there telling the owner that it is set
-        if ((source != owner_space) && (mapping == NULL))
+        if (mapping != NULL)
+        {
+          if ((collective_mapping != NULL) && ((mapping == collective_mapping)
+                || (*mapping == *collective_mapping)))
+          {
+            need_broadcast = false;
+          }
+          else if (mapping->contains(owner_space))
+          {
+            if (local_space != owner_space)
+              return false;
+          }
+          else
+          {
+            // Find the one closest to the owner space
+            const AddressSpaceID nearest = mapping->find_nearest(owner_space);
+            if (nearest != local_space)
+              return false;
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(value);
+              rez.serialize(ready_event);
+            }
+            runtime->send_index_space_set(owner_space, rez);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
+          }
+        }
+        else
+        {
+          // If we're not the owner space, send the message there
+          if (!is_owner())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(value);
+              rez.serialize(ready_event);
+            }
+            runtime->send_index_space_set(owner_space, rez);
+            // If we're part of the broadcast tree then we'll get sent back here
+            // later so we don't need to do anything now
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              return false;
+            need_broadcast = false;
+          }
+        }
+      }
+      if (need_broadcast && (collective_mapping != NULL) &&
+          collective_mapping->contains(local_space))
+      {
+#ifdef DEBUG_LEGION
+        // Should be from our parent
+        assert(is_owner() || (source == 
+            collective_mapping->get_parent(owner_space, local_space)));
+#endif
+        // Keep broadcasting this out to all the children
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        if (!children.empty())
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            pack_index_space(rez, false/*include size*/);
+            rez.serialize(value);
+            rez.serialize(realm_index_space_set);
           }
-          context->runtime->send_index_space_set(owner_space, rez);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            runtime->send_index_space_set(*it, rez);
         }
       }
-      else
+      // We can set this now and trigger the event but setting the
+      // flag has to be done while holding the node_lock on the owner
+      // node so that it is serialized with respect to queries from 
+      // remote nodes for copies about the remote instance
       {
-        // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(!index_space_set);
+        assert(!realm_index_space_set.has_triggered());
+#endif
+        realm_index_space = value;
+        Runtime::trigger_event(realm_index_space_set, ready_event);
         index_space_set = true;
-        if (has_remote_instances())
+        if (is_owner() && has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
           // sent this node to except the source
@@ -2279,8 +2323,9 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(handle);
             pack_index_space(rez, false/*include size*/);
+            rez.serialize(realm_index_space_set);
           }
-          IndexSpaceSetFunctor functor(context->runtime, source, rez, mapping);
+          IndexSpaceSetFunctor functor(context->runtime, source, rez);
           map_over_remote_instances(functor);
         }
       }
@@ -2318,18 +2363,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
-                             AddressSpaceID source, ShardMapping *shard_mapping)
+                        AddressSpaceID source, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       const DomainT<DIM,T> realm_space = domain;
-      return set_realm_index_space(source, realm_space, shard_mapping);
+      return set_realm_index_space(source, realm_space, mapping);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
-                          const std::map<DomainPoint,DomainPoint> &output_sizes,
-                              AddressSpaceID space, ShardMapping *shard_mapping)
+                         const std::map<DomainPoint,DomainPoint> &output_sizes,
+                         AddressSpaceID space, const CollectiveMapping *mapping)
     //-------------------------------------------------------------------------- 
     {
       std::vector<Realm::Rect<DIM,T> > output_rects;
@@ -2355,7 +2400,7 @@ namespace Legion {
         output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
       }
       const Realm::IndexSpace<DIM,T> output_space(output_rects);
-      return set_realm_index_space(space, output_space, shard_mapping);
+      return set_realm_index_space(space, output_space, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -2432,24 +2477,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::create_sharded_alias(IndexSpace alias,
-                                                      DistributedID alias_did)
-    //--------------------------------------------------------------------------
-    {
-      // Have to wait at least until we get our index space set
-      if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
-      context->create_node(alias, &realm_index_space_set, false/*is domain*/,
-                     NULL/*parent*/, 0/*color*/, alias_did, initialized,
-                     index_space_ready, expr_id/*alis*/,false/*notify remote*/);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
                          DistributedID did, RtEvent initialized, 
                          std::set<RtEvent> *applied,
-                         const bool notify_remote, IndexSpaceExprID new_expr_id)
+                         CollectiveMapping *collective_mapping,
+                         IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
       if (new_expr_id == 0)
@@ -2460,8 +2492,9 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
-                                  NULL/*parent*/, 0/*color*/, did, initialized,
-                                  ready, new_expr_id, notify_remote, applied);
+                              NULL/*parent*/, 0/*color*/, did, initialized,
+                              ready, new_expr_id, collective_mapping, applied,
+                              true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3234,7 +3267,9 @@ namespace Legion {
     {
       Realm::IndexSpace<DIM,T> result_space;
       derez.deserialize(result_space);
-      return set_realm_index_space(source, result_space);
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      return set_realm_index_space(source, result_space, NULL, ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7186,9 +7221,10 @@ namespace Legion {
                                         LegionColor c, bool disjoint, 
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
-                                        RtEvent init, ShardMapping *map)
+                                        RtEvent init, CollectiveMapping *map,
+                                        ShardMapping *shard_map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                      partition_ready, pend, init, map), kd_root(NULL), 
+                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7202,22 +7238,13 @@ namespace Legion {
                                         LegionColor c, RtEvent disjoint_event,
                                         int comp, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
-                                        RtEvent init, ShardMapping *map)
+                                        RtEvent init, CollectiveMapping *map,
+                                        ShardMapping *shard_map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                      partition_ready, pend, init, map), kd_root(NULL), 
+                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartNodeT<DIM,T>::IndexPartNodeT(const IndexPartNodeT &rhs)
-      : IndexPartNode(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -7234,17 +7261,6 @@ namespace Legion {
       if (sparse_shard_rects != NULL)
         delete sparse_shard_rects;
     }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartNodeT<DIM,T>& IndexPartNodeT<DIM,T>::operator=(
-                                                      const IndexPartNodeT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    } 
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

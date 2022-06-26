@@ -2733,7 +2733,6 @@ namespace Legion {
         {
           // Ignore additional processors in separate runtime instances
           output.target_procs.resize(1);
-          output.target_procs[0] = current_proc;
         }
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);
@@ -4010,9 +4009,15 @@ namespace Legion {
         // Create the shard tasks and have them complete their mapping
         for (unsigned shard_idx = 0; shard_idx < total_shards; shard_idx++)
         {
-          Processor target = output.control_replication_map.empty() ? 
-            output.task_mappings[shard_idx].target_procs[0] : 
-            output.control_replication_map[shard_idx];
+          Processor target;
+          if (!output.control_replication_map.empty())
+          {
+            target = output.control_replication_map[shard_idx];
+            output.task_mappings[shard_idx].target_procs.resize(1);
+            output.task_mappings[shard_idx].target_procs[0] = target;
+          }
+          else
+            target = output.task_mappings[shard_idx].target_procs[0];
           ShardTask *shard = shard_manager->create_shard(shard_idx, target);
           shard->clone_single_from(this);
           // Shard tasks are always effectively mapped locally
@@ -7843,7 +7848,7 @@ namespace Legion {
         remote_owner_uid = 
           manager->original_task->get_context()->get_unique_id();
       // Only make our termination event on the node where the shard will run
-      if (proc.address_space() == runtime->address_space)
+      if (runtime->find_address_space(proc) == runtime->address_space)
       {
         single_task_termination = Runtime::create_ap_user_event(NULL);
         task_effects_complete = single_task_termination;

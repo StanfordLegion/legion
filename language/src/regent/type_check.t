@@ -413,9 +413,9 @@ function type_check.conditions(cx, node, params)
     param_index_by_symbol[param.symbol] = i
   end
 
-  local result = {}
-  result[std.arrives] = {}
-  result[std.awaits] = {}
+  local result = data.newmap()
+  result[std.arrives] = data.newmap()
+  result[std.awaits] = data.newmap()
 
   node:map(
     function(condition)
@@ -1055,9 +1055,9 @@ function type_check.expr_call(cx, node)
         -- we individually check privileges for fields because they can be renamed via
         -- field polymorphism.
         if not std.is_fspace_instance(fspace) then
-          local field_path_mapping = data.map_from_table(data.dict(data.zip(
+          local field_path_mapping = data.dict(data.zip(
                   std.flatten_struct_fields(fspace),
-                  std.flatten_struct_fields(arg_region:gettype():fspace()))))
+                  std.flatten_struct_fields(arg_region:gettype():fspace())))
 
           std.get_absolute_field_paths(fspace, field_path):map(function(field_path)
             local arg_field_path = field_path_mapping[field_path]

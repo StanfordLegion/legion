@@ -18,7 +18,23 @@
 from __future__ import print_function
 
 import pygion
+from pygion import Region, RW, int32, void
 
-@pygion.task(task_id=2)
+@pygion.task(task_id=2,
+    argument_types=[],
+    return_type=int32,
+    calling_convention='regent')
 def hello():
     print('hello from Python')
+    return 123
+
+@pygion.task(
+    task_id=3,
+    argument_types=[Region, int32],
+    privileges=[RW],
+    return_type=void,
+    calling_convention='regent')
+def inc(R, x):
+    print(R.x)
+    R.x[:] += x
+    print(R.x)
