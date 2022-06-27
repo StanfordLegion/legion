@@ -692,8 +692,114 @@ namespace Realm {
     os << "ImageOperation(" << parent << ")";
   }
 
-  // instantiations of templates handled in image_tmpl.cc
-  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class StructuredImageMicroOp<N,T,N2,T2>
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::StructuredImageMicroOp(
+      IndexSpace<N, T> _parent_space, const TRANSFORM &_transform)
+      :  parent_space(_parent_space), transform(_transform) {}
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::~StructuredImageMicroOp() {}
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::add_sparsity_output(
+      IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
+    sources.push_back(_source);
+    sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::execute(void) {
+    TimeStamp ts("StructuredImageMicroOp::execute", true, &log_uop_timing);
+
+    if (!sparsity_outputs.empty()) {
+      std::map<int, HybridRectangleList<N, T> *> rect_map;
+
+      populate_bitmasks(rect_map);
+
+#ifdef DEBUG_PARTITIONING
+      std::cout << rect_map.size() << " non-empty images present in instance "
+                << inst << std::endl;
+      for (typename std::map<int, DenseRectangleList<N, T> *>::const_iterator
+               it = rect_map.begin();
+           it != rect_map.end(); it++)
+        std::cout << "  " << sources[it->first] << " = "
+                  << it->second->rects.size() << " rectangles" << std::endl;
+#endif
+
+      // iterate over sparsity outputs and contribute to all (even if we didn't
+      // have any points found for it)
+      for (size_t i = 0; i < sparsity_outputs.size(); i++) {
+        SparsityMapImpl<N, T> *impl =
+            SparsityMapImpl<N, T>::lookup(sparsity_outputs[i]);
+        typename std::map<int, HybridRectangleList<N, T> *>::const_iterator
+            it2 = rect_map.find(i);
+        if (it2 != rect_map.end()) {
+          impl->contribute_dense_rect_list(it2->second->convert_to_vector(),
+                                           false /*!disjoint*/);
+          delete it2->second;
+        } else
+          impl->contribute_nothing();
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::dispatch(
+      PartitioningOperation *op, bool inline_ok) {
+    // need valid data for each source
+    for (size_t i = 0; i < sources.size(); i++) {
+      if (!sources[i].dense()) {
+        // it's safe to add the count after the registration only because we
+        // initialized
+        //  the count to 2 instead of 1
+        bool registered =
+            SparsityMapImpl<N2, T2>::lookup(sources[i].sparsity)
+                ->add_waiter(this, true /*precise*/);
+        if (registered) wait_count.fetch_add(1);
+      }
+    }
+
+    // need valid data for the parent space too
+    if (!this->parent_space.dense()) {
+      // it's safe to add the count after the registration only because we
+      // initialized
+      //  the count to 2 instead of 1
+      bool registered =
+          SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
+              ->add_waiter(this, true /*precise*/);
+      if (registered) wait_count.fetch_add(1);
+    }
+    this->finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  template <typename BM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
+      std::map<int, BM *> &bitmasks) {
+    for (size_t i = 0; i < sources.size(); i++) {
+      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
+        BM **bmpp = 0;
+        Rect<N, T> source_bbox;
+        source_bbox.lo = transform[it2.rect.lo];
+        source_bbox.hi = transform[it2.rect.hi];
+
+        IndexSpace<N, T> intersection;
+        IndexSpace<N, T>::compute_intersection(
+            parent_space, IndexSpace<N, T>(source_bbox), intersection,
+            ProfilingRequestSet())
+            .wait();
+        if (intersection.is_valid() && intersection.volume() > 0) {
+          if (!bmpp) bmpp = &bitmasks[i];
+          if (!*bmpp) *bmpp = new BM;
+          (*bmpp)->add_rect(intersection.bounds);
+        }
+      }
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -825,113 +931,6 @@ namespace Realm {
     os << "StructuredImageOperation(" << parent << ")";
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class StructuredImageMicroOp<N,T,N2,T2>
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::StructuredImageMicroOp(
-      IndexSpace<N, T> _parent_space, const TRANSFORM &_transform)
-      :  parent_space(_parent_space), transform(_transform) {}
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::~StructuredImageMicroOp() {}
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::add_sparsity_output(
-      IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
-    sources.push_back(_source);
-    sparsity_outputs.push_back(_sparsity);
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::execute(void) {
-    TimeStamp ts("StructuredImageMicroOp::execute", true, &log_uop_timing);
-
-    if (!sparsity_outputs.empty()) {
-      std::map<int, HybridRectangleList<N, T> *> rect_map;
-
-      populate_bitmasks(rect_map);
-
-#ifdef DEBUG_PARTITIONING
-      std::cout << rect_map.size() << " non-empty images present in instance "
-                << inst << std::endl;
-      for (typename std::map<int, DenseRectangleList<N, T> *>::const_iterator
-               it = rect_map.begin();
-           it != rect_map.end(); it++)
-        std::cout << "  " << sources[it->first] << " = "
-                  << it->second->rects.size() << " rectangles" << std::endl;
-#endif
-
-      // iterate over sparsity outputs and contribute to all (even if we didn't
-      // have any points found for it)
-      for (size_t i = 0; i < sparsity_outputs.size(); i++) {
-        SparsityMapImpl<N, T> *impl =
-            SparsityMapImpl<N, T>::lookup(sparsity_outputs[i]);
-        typename std::map<int, HybridRectangleList<N, T> *>::const_iterator
-            it2 = rect_map.find(i);
-        if (it2 != rect_map.end()) {
-          impl->contribute_dense_rect_list(it2->second->convert_to_vector(),
-                                           false /*!disjoint*/);
-          delete it2->second;
-        } else
-          impl->contribute_nothing();
-      }
-    }
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::dispatch(
-      PartitioningOperation *op, bool inline_ok) {
-    // need valid data for each source
-    for (size_t i = 0; i < sources.size(); i++) {
-      if (!sources[i].dense()) {
-        // it's safe to add the count after the registration only because we
-        // initialized
-        //  the count to 2 instead of 1
-        bool registered =
-            SparsityMapImpl<N2, T2>::lookup(sources[i].sparsity)
-                ->add_waiter(this, true /*precise*/);
-        if (registered) wait_count.fetch_add(1);
-      }
-    }
-
-    // need valid data for the parent space too
-    if (!this->parent_space.dense()) {
-      // it's safe to add the count after the registration only because we
-      // initialized
-      //  the count to 2 instead of 1
-      bool registered =
-          SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
-              ->add_waiter(this, true /*precise*/);
-      if (registered) wait_count.fetch_add(1);
-    }
-    this->finish_dispatch(op, inline_ok);
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  template <typename BM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
-      std::map<int, BM *> &bitmasks) {
-    for (size_t i = 0; i < sources.size(); i++) {
-      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
-        BM **bmpp = 0;
-        Rect<N, T> source_bbox;
-        source_bbox.lo = transform[it2.rect.lo];
-        source_bbox.hi = transform[it2.rect.hi];
-
-        IndexSpace<N, T> intersection;
-        IndexSpace<N, T>::compute_intersection(
-            parent_space, IndexSpace<N, T>(source_bbox), intersection,
-            ProfilingRequestSet())
-            .wait();
-        if (intersection.is_valid() && intersection.volume() > 0) {
-          if (!bmpp) bmpp = &bitmasks[i];
-          if (!*bmpp) *bmpp = new BM;
-          (*bmpp)->add_rect(intersection.bounds);
-        }
-      }
-    }
-  }
+  // instantiations of templates handled in image_tmpl.cc
 
   };  // namespace Realm

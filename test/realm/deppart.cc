@@ -2270,6 +2270,7 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
 
   Point<N2, T2> offset = Point<N2, T2>::ZEROES();
   for (int i = 0; i < N2; i++) offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+  offset[0] = 12;
   transform.transform = matrix;
   transform.offset = offset;
 }
