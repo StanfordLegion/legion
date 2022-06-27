@@ -233,12 +233,10 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
-    std::cout << "DISPATH MICRO OP" << std::endl;
     // a PreimageMicroOp should always be executed on whichever node the field data lives
     NodeID exec_node = ID(inst).instance_owner_node();
 
     if(exec_node != Network::my_node_id) {
-      std::cout << "FORWARD" << std::endl;
       forward_microop<PreimageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }
@@ -526,7 +524,6 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void PreimageOperation<N,T,N2,T2>::set_overlap_tester(void *tester)
   {
-    std::cout << "PENDING SPARSE=" << pending_sparse_images.size() << std::endl;
     // atomically set the overlap tester and see if there are any pending entries
     std::map<int, std::vector<Rect<N2,T2> > > pending;
     {
@@ -612,10 +609,10 @@ namespace Realm {
 								const ApproxImageResponseMessage<T> &msg,
 								const void *data, size_t datalen)
   {
-    //T *op = reinterpret_cast<T *>(msg.approx_output_op);
-    //op->provide_sparse_image(msg.approx_output_index,
-	//		     static_cast<const Rect<T::DIM2, typename T::IDXTYPE2> *>(data),
-	//		     datalen / sizeof(Rect<T::DIM2, typename T::IDXTYPE2>));
+    T *op = reinterpret_cast<T *>(msg.approx_output_op);
+    op->provide_sparse_image(msg.approx_output_index,
+			     static_cast<const Rect<T::DIM2, typename T::IDXTYPE2> *>(data),
+			     datalen / sizeof(Rect<T::DIM2, typename T::IDXTYPE2>));
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -740,15 +737,11 @@ namespace Realm {
                                   EventImpl::gen_t _finish_gen)
       : PartitioningOperation(reqs, _finish_event, _finish_gen),
         parent(_parent),
-        transform(_transform),
-        overlap_tester(0),
-        dummy_overlap_uop(0) {}
+        transform(_transform) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredPreimageOperation<N, T, N2, T2,
-                              TRANSFORM>::~StructuredPreimageOperation(void) {
-    if (overlap_tester) delete overlap_tester;
-  }
+                              TRANSFORM>::~StructuredPreimageOperation(void) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   IndexSpace<N, T>
@@ -772,7 +765,6 @@ namespace Realm {
                                      ->get_available_sparsity_impl(target_node)
                                      ->me.convert<SparsityMap<N, T> >();
     preimage.sparsity = sparsity;
-
     targets.push_back(target);
     preimages.push_back(sparsity);
 
@@ -793,111 +785,6 @@ namespace Realm {
       micro_op->add_sparsity_output(targets[j], preimages[j]);
     }
     micro_op->dispatch(this, true);
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void
-  StructuredPreimageOperation<N, T, N2, T2, TRANSFORM>::provide_sparse_image(
-      int index, const Rect<N2, T2> *rects, size_t count) {
-    // atomically check the overlap tester's readiness and queue us if not
-    bool tester_ready = false;
-    {
-      AutoLock<> al(mutex);
-      if(overlap_tester != 0) {
-	tester_ready = true;
-      } else {
-	std::vector<Rect<N2,T2> >& r = pending_sparse_images[index];
-	r.insert(r.end(), rects, rects + count);
-      }
-    }
-
-    if (tester_ready) {
-      // see which of the targets this image overlaps
-      std::set<int> overlaps;
-      overlap_tester->test_overlap(rects, count, overlaps);
-
-      log_part.info() << "imag overlaps " << overlaps.size() << " targets";
-
-      StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM> *uop =
-          new StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM>(transform, parent);
-
-      for (std::set<int>::const_iterator it2 = overlaps.begin();
-           it2 != overlaps.end(); it2++) {
-        int j = *it2;
-        contrib_counts[j].fetch_add(1);
-        uop->add_sparsity_output(targets[j], preimages[j]);
-      }
-      uop->dispatch(this, false /* do not run in this thread */);
-
-      // if these were the last sparse images, we can now set the contributor
-      // counts
-      int v = remaining_sparse_images.fetch_sub(1) - 1;
-      if (v == 0) {
-        for (size_t j = 0; j < preimages.size(); j++) {
-          log_part.info() << contrib_counts[j].load()
-                          << " total contributors to preimage " << j;
-          SparsityMapImpl<N, T>::lookup(preimages[j])
-              ->set_contributor_count(contrib_counts[j].load());
-        }
-        dummy_overlap_uop->mark_finished(true /*successful*/);
-      }
-    }
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredPreimageOperation<N, T, N2, T2, TRANSFORM>::set_overlap_tester(
-      void *tester) {
-    std::cout << "StructuredPreimageOp Call SetOverlapTester" << std::endl;
-    // atomically set the overlap tester and see if there are any pending
-    // entries
-    std::map<int, std::vector<Rect<N2, T2> > > pending;
-    {
-      AutoLock<> al(mutex);
-      assert(overlap_tester == 0);
-      overlap_tester = static_cast<OverlapTester<N2, T2> *>(tester);
-      pending.swap(pending_sparse_images);
-    }
-
-    // now issue work for any sparse images we got before the tester was ready
-    if (!pending.empty()) {
-      for (typename std::map<int, std::vector<Rect<N2, T2> > >::const_iterator
-               it = pending.begin();
-           it != pending.end(); it++) {
-        // see which instance this is an image from
-        size_t idx = it->first;
-        // see which of the targets that image overlaps
-        std::set<int> overlaps;
-        assert(it->second.size() > 0);
-        overlap_tester->test_overlap(&it->second[0], it->second.size(),
-                                     overlaps);
-
-        StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM> *uop =
-            new StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM>(transform,
-                                                                   parent);
-        for (std::set<int>::const_iterator it2 = overlaps.begin();
-             it2 != overlaps.end(); it2++) {
-          int j = *it2;
-          contrib_counts[j].fetch_add(1);
-          uop->add_sparsity_output(targets[j], preimages[j]);
-        }
-        uop->dispatch(this, true /* ok to run in this thread */);
-      }
-
-      // if these were the last sparse images, we can now set the contributor
-      // counts
-      int v =
-          remaining_sparse_images.fetch_sub(pending.size()) - pending.size();
-      if (v == 0) {
-        for (size_t j = 0; j < preimages.size(); j++) {
-          log_part.info() << contrib_counts[j].load()
-                          << " total contributors to preimage " << j;
-          SparsityMapImpl<N, T>::lookup(preimages[j])
-              ->set_contributor_count(contrib_counts[j].load());
-        }
-        dummy_overlap_uop->mark_finished(true /*successful*/);
-      }
-    }
-    std::cout << "PP3" << std::endl;
   }
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>

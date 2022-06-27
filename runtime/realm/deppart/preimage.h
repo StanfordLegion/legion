@@ -177,22 +177,12 @@ namespace Realm {
 
     virtual void print(std::ostream &os) const;
 
-    virtual void set_overlap_tester(void *tester);
-
-    void provide_sparse_image(int index, const Rect<N2, T2> *rects,
-                              size_t count);
-
    protected:
     IndexSpace<N, T> parent;
     TRANSFORM transform;
     std::vector<IndexSpace<N2, T2> > targets;
     std::vector<SparsityMap<N, T> > preimages;
-    Mutex mutex;
-    OverlapTester<N2, T2> *overlap_tester;
-    std::map<int, std::vector<Rect<N2, T2> > > pending_sparse_images;
-    atomic<int> remaining_sparse_images;
     std::vector<atomic<int> > contrib_counts;
-    AsyncMicroOp *dummy_overlap_uop;
   };
   };  // namespace Realm
 
