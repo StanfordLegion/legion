@@ -792,6 +792,7 @@ namespace Realm {
             parent_space, IndexSpace<N, T>(source_bbox), intersection,
             ProfilingRequestSet())
             .wait();
+
         if (intersection.is_valid() && intersection.volume() > 0) {
           if (!bmpp) bmpp = &bitmasks[i];
           if (!*bmpp) *bmpp = new BM;
