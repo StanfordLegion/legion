@@ -2360,6 +2360,7 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 {
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
+
  // std::vector<IndexSpace<N1,T1> > ss_by_color;
   Event e1 = root1.create_subspaces_by_field(fd_vals1,
 					     piece_colors,

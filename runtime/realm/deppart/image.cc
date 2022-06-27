@@ -914,20 +914,20 @@ namespace Realm {
   void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
       std::map<int, BM *> &bitmasks) {
     for (size_t i = 0; i < sources.size(); i++) {
-      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid;
-           it2.step()) {
+      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
         BM **bmpp = 0;
-        // iterate over each point in the source and see if it points into the
-        // parent space
-        for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
-          // TODO(apriakhin): This can probably be done faster.
-          Point<N, T> source_point = transform[pir.p];
-          if (parent_space.contains(source_point)) {
-            if (!bmpp) bmpp = &bitmasks[i];
-            if (!*bmpp) *bmpp = new BM;
-            (*bmpp)->add_point(source_point);
-          }
-        }
+        Rect<N, T> source_bbox;
+        source_bbox.lo = transform[it2.rect.lo];
+        source_bbox.hi = transform[it2.rect.hi];
+
+        IndexSpace<N, T> intersection;
+        IndexSpace<N, T>::compute_intersection(
+            parent_space, IndexSpace<N, T>(source_bbox), intersection,
+            ProfilingRequestSet())
+            .wait();
+        if (!bmpp) bmpp = &bitmasks[i];
+        if (!*bmpp) *bmpp = new BM;
+        (*bmpp)->add_rect(intersection.bounds);
       }
     }
   }
