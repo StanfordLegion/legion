@@ -2399,31 +2399,31 @@ int RandomAffineTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
 int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
-  // Check the result of an image operation.
-  int num_src_points = 0;
-  for (const auto& source : ss_by_color) {
+  int actual_points = 0;
+  for (const auto &image : ss_images) {
+    actual_points += image.volume();
+  }
+  // Verify the result of an image operation.
+  for (const auto &source : ss_by_color) {
     for (IndexSpaceIterator<N1, T1> it(source); it.valid; it.step()) {
       for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
            point.step()) {
         auto target_point = transform[point.p];
         if (root2.contains(target_point)) {
-          num_src_points++;
           bool found = false;
           for (const auto image : ss_images) {
             if (image.contains(target_point)) {
-              found = true; break;
+              found = true;
+              actual_points--;
+              break;
             }
           }
-          log_app.info() << "point=" << target_point << " found=" << found;
-          assert(found);
+          if (!found) return 1;
         }
       }
     }
   }
-  int num_image_points = 0;
-  for (const auto &image : ss_images) num_image_points += image.volume();
-  assert(num_src_points == num_image_points);
-  return 0;
+  return !(actual_points == 0);
 }
 
 int main(int argc, char **argv) {
