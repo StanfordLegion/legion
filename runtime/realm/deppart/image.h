@@ -157,8 +157,6 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
-    virtual void set_overlap_tester(void *tester);
-
    protected:
     IndexSpace<N,T> parent;
     std::vector<IndexSpace<N2,T2> > sources;

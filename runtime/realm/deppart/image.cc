@@ -848,80 +848,17 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::execute(void) {
-    if (!DeppartConfig::cfg_disable_intersection_optimization) {
-      ComputeOverlapMicroOp<N2, T2> *uop =
-          new ComputeOverlapMicroOp<N2, T2>(this);
-
-      for (size_t i = 0; i < sources.size(); i++) {
-        uop->add_input_space(sources[i]);
-      }
-
-      // we will ask this uop to also prefetch the sources we will intersect
-      // test against it
-      for (size_t i = 0; i < sources.size(); i++) {
-        uop->add_extra_dependency(sources[i]);
-      }
-
-      uop->dispatch(this, /*inline_ok=*/true);
-    } else {
-      for (size_t i = 0; i < sources.size(); i++) {
-        SparsityMapImpl<N, T>::lookup(images[i])
-            ->set_contributor_count(1);
-      }
-
-      StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
-          new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(parent,
-                                                              transform);
-
-      for (size_t j = 0; j < sources.size(); j++) {
-        micro_op->add_sparsity_output(sources[j], images[j]);
-      }
-
-      micro_op->dispatch(this, /*inline_ok=*/true);
-    }
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::set_overlap_tester(
-      void *tester) {
-    OverlapTester<N2, T2> *overlap_tester =
-        static_cast<OverlapTester<N2, T2> *>(tester);
-
-    // we asked the overlap tester to prefetch all the source data we need, so
-    // we can use it right away (and then delete it)
-    std::vector<std::set<int> > overlaps_by_field_data(sources.size());
     for (size_t i = 0; i < sources.size(); i++) {
-      std::set<int> overlaps_by_source;
-
-      overlap_tester->test_overlap(sources[i], overlaps_by_source,
-                                   true /*approx*/);
-
-      log_part.info() << overlaps_by_source.size() << " overlaps for source "
-                      << i;
-
-      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(
-          overlaps_by_source.size());
-
-      // now scatter these values into the overlaps_by_field_data
-      for (std::set<int>::const_iterator it = overlaps_by_source.begin();
-           it != overlaps_by_source.end(); it++) {
-        overlaps_by_field_data[*it].insert(i);
-      }
+      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
     }
-    delete overlap_tester;
 
     StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
-        new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(this->parent,
-                                                            transform);
-    for (const auto &overlaps : overlaps_by_field_data) {
-      size_t n = overlaps.size();
-      if (n == 0) continue;
-      for (std::set<int>::const_iterator it = overlaps.begin();
-           it != overlaps.end(); it++) {
-        int j = *it;
-        micro_op->add_sparsity_output(sources[j], images[j]);
-      }
+        new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(parent, transform);
+
+    for (size_t j = 0; j < sources.size(); j++) {
+      micro_op->add_sparsity_output(sources[j], images[j]);
     }
+
     micro_op->dispatch(this, /*inline_ok=*/true);
   }
 
