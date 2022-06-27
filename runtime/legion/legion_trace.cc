@@ -4274,10 +4274,10 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
-      for (std::set<InstanceView*>::const_iterator it =
+      for (std::map<DistributedID,InstanceView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
-        if ((*it)->remove_base_valid_ref(TRACE_REF))
-          delete (*it);
+        if (it->second->remove_base_valid_ref(TRACE_REF))
+          delete it->second;
       recorded_views.clear();
       for (std::set<IndexSpaceExpression*>::const_iterator it =
            recorded_expressions.begin(); it != recorded_expressions.end(); it++)
@@ -4330,6 +4330,11 @@ namespace Legion {
         {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
+          std::map<DistributedID,InstanceView*>::const_iterator finder =
+            recorded_views.find(uit->instance.view_did);
+#ifdef DEBUG_LEGION
+          assert(finder != recorded_views.end());
+#endif
           // Query the view for the events that it needs
           // Note that if we're not performing actual fence elision
           // we switch the usage to full read-write privileges so 
@@ -4337,12 +4342,12 @@ namespace Legion {
           if (!trace->perform_fence_elision)
           {
             const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            uit->instance.view->find_last_users(result.events,
+            finder->second->find_last_users(result.events,
                 uit->instance.collective_point, usage,
                 uit->mask, uit->expr, frontier_events);
           }
           else
-            uit->instance.view->find_last_users(result.events,
+            finder->second->find_last_users(result.events,
                 uit->instance.collective_point, uit->usage,
                 uit->mask, uit->expr, frontier_events);
         }
@@ -6389,10 +6394,17 @@ namespace Legion {
         return;
       }
       users.emplace_back(InstanceUser(instance, usage, expr, mask));
-      if (recorded_views.insert(instance.view).second)
+      if (recorded_views.find(instance.view_did) == recorded_views.end())
       {
+        RtEvent ready;
+        InstanceView *view = static_cast<InstanceView*>(
+            trace->runtime->find_or_request_logical_view(
+                                instance.view_did, ready));
+        recorded_views[instance.view_did] = view;
         WrapperReferenceMutator mutator(applied);
-        instance.view->add_base_valid_ref(TRACE_REF, &mutator);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        view->add_base_valid_ref(TRACE_REF, &mutator);
       }
       if (recorded_expressions.insert(expr).second)
       {
@@ -6408,10 +6420,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMaskSet<IndexSpaceExpression> &insts = mutated_insts[inst];
-      if (insts.empty() && recorded_views.insert(inst.view).second)
+      if (insts.empty() &&
+          (recorded_views.find(inst.view_did) == recorded_views.end()))
       {
+        RtEvent ready;
+        InstanceView *view = static_cast<InstanceView*>(
+            trace->runtime->find_or_request_logical_view(inst.view_did, ready));
+        recorded_views[inst.view_did] = view;
         WrapperReferenceMutator mutator(applied_events);
-        inst.view->add_base_valid_ref(TRACE_REF, &mutator);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        view->add_base_valid_ref(TRACE_REF, &mutator);
       }
       if (insts.insert(expr,mask) && recorded_expressions.insert(expr).second)
       {
@@ -7508,17 +7527,17 @@ namespace Legion {
           {
             derez.deserialize(done);
             UniqueInst inst;
-            RtEvent inst_ready = inst.deserialize(derez, runtime);
+            inst.deserialize(derez);
             PendingRemoteExpression pending;
             RtEvent expr_ready;
             IndexSpaceExpression *user_expr = 
               IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
                                     source, pending, expr_ready);
-            if (expr_ready.exists() || inst_ready.exists())
+            if (expr_ready.exists())
             {
               DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
-              runtime->issue_runtime_meta_task(args,LG_LATENCY_MESSAGE_PRIORITY,
-                  Runtime::merge_events(expr_ready, inst_ready));
+              runtime->issue_runtime_meta_task(args,
+                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
               return;
             }
             else if (handle_update_mutated_inst(inst, user_expr, 
@@ -7537,13 +7556,10 @@ namespace Legion {
             derez.deserialize(num_users);
             InstUsers inst_users(num_users);
             RegionTreeForest *forest = trace->runtime->forest;
-            std::vector<RtEvent> ready_events;
             for (unsigned vidx = 0; vidx < num_users; vidx++)
             {
               InstanceUser &user = inst_users[vidx];
-              RtEvent ready = user.instance.deserialize(derez, trace->runtime);
-              if (ready.exists())
-                ready_events.push_back(ready);
+              user.instance.deserialize(derez);
               user.expr = 
                  IndexSpaceExpression::unpack_expression(derez, forest, source);
               derez.deserialize(user.mask);
@@ -7552,12 +7568,6 @@ namespace Legion {
             derez.deserialize(result);
             derez.deserialize(done);
             ShardManager *manager = repl_ctx->shard_manager;
-            if (!ready_events.empty())
-            {
-              const RtEvent wait_on = Runtime::merge_events(ready_events);
-              if (wait_on.exists() && !wait_on.has_triggered())
-                wait_on.wait();
-            }
             if (!PhysicalTemplate::are_read_only_users(inst_users))
             {
               Serializer rez;
@@ -8254,7 +8264,8 @@ namespace Legion {
       // that node. This algorithm guarantees that all the related instances
       // end up on the same shard for analysis to determine if the trace is
       // replayable or not.
-      const AddressSpaceID inst_owner = inst.get_analysis_space();
+      const AddressSpaceID inst_owner =
+        inst.get_analysis_space(trace->runtime);
       std::vector<ShardID> owner_shards;
       find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION
@@ -8264,7 +8275,7 @@ namespace Legion {
       // case where there are multiple shards, this should relatively
       // balance things out
       if (owner_shards.size() > 1)
-        return owner_shards[inst.view->did % owner_shards.size()];
+        return owner_shards[inst.view_did % owner_shards.size()];
       else // If there's only one shard then there is only one choice
         return owner_shards.front();
     }

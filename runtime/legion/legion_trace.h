@@ -1186,7 +1186,7 @@ namespace Legion {
       std::map<unsigned,InstUsers>     src_indirect_insts;
       std::map<unsigned,InstUsers>     dst_indirect_insts;
       std::vector<IssueAcross*>        across_copies;
-      std::set<InstanceView*>          recorded_views;
+      std::map<DistributedID,InstanceView*> recorded_views;
       std::set<IndexSpaceExpression*>  recorded_expressions;
     protected:
       // Capture the names of all the instances that are mutated by this trace

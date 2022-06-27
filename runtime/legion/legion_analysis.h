@@ -167,29 +167,29 @@ namespace Legion {
      */
     struct UniqueInst {
     public:
-      UniqueInst(void) : view(NULL) { }
+      UniqueInst(void) : view_did(0) { }
       UniqueInst(InstanceView *v, DomainPoint point = DomainPoint());
     public:
       inline bool operator<(const UniqueInst &rhs) const
       {
-        if (view < rhs.view) return true;
-        if (view > rhs.view) return false;
+        if (view_did < rhs.view_did) return true;
+        if (view_did > rhs.view_did) return false;
         return (collective_point < rhs.collective_point);
       }
       inline bool operator==(const UniqueInst &rhs) const
       {
-        if (view != rhs.view) return false;
+        if (view_did != rhs.view_did) return false;
         return (collective_point == rhs.collective_point);
       }
       inline bool operator!=(const UniqueInst &rhs) const
         { return !this->operator==(rhs); }
     public:
       void serialize(Serializer &rez) const;
-      RtEvent deserialize(Deserializer &derez, Runtime *runtime);
-      AddressSpaceID get_analysis_space(void) const;
+      void deserialize(Deserializer &derez);
+      AddressSpaceID get_analysis_space(Runtime *runtime) const;
     public:
-      // View to the instance
-      InstanceView *view;
+      // Distributed ID for the view to the instance
+      DistributedID view_did;
       // Point for the case of collective instances
       DomainPoint collective_point;
     };

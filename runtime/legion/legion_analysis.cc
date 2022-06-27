@@ -285,8 +285,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(InstanceView *v, DomainPoint point)
-      : view(v), collective_point(point)
+    UniqueInst::UniqueInst(InstanceView *view, DomainPoint point)
+      : view_did(view->did), collective_point(point)
     //--------------------------------------------------------------------------
     {
     }
@@ -296,29 +296,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(view != NULL);
+      assert(view_did != 0);
 #endif
-      rez.serialize(view->did);
+      rez.serialize(view_did);
       rez.serialize(collective_point);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent UniqueInst::deserialize(Deserializer &derez, Runtime *runtime)
+    void UniqueInst::deserialize(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      view = static_cast<InstanceView*>(
-          runtime->find_or_request_logical_view(did, ready));
+      derez.deserialize(view_did);
       derez.deserialize(collective_point);
-      return ready;
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID UniqueInst::get_analysis_space(void) const
+    AddressSpaceID UniqueInst::get_analysis_space(Runtime *runtime) const
     //--------------------------------------------------------------------------
     {
+      RtEvent ready;
+      InstanceView *view = static_cast<InstanceView*>(
+          runtime->find_or_request_logical_view(view_did, ready));
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       return view->get_analysis_space(collective_point);
     }
 
@@ -1282,18 +1282,14 @@ namespace Legion {
               IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
             UniqueInst src_inst, dst_inst;
-            RtEvent src_ready = src_inst.deserialize(derez, runtime);
-            RtEvent dst_ready = dst_inst.deserialize(derez, runtime);
+            src_inst.deserialize(derez);
+            dst_inst.deserialize(derez);
             FieldMask src_mask, dst_mask;
             derez.deserialize(src_mask);
             derez.deserialize(dst_mask);
             ReductionOpID redop;
             derez.deserialize(redop);
             std::set<RtEvent> ready_events;
-            if (src_ready.exists() && !src_ready.has_triggered())
-              src_ready.wait();
-            if (dst_ready.exists() && !dst_ready.has_triggered())
-              dst_ready.wait();
             tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr,
                                    src_inst, dst_inst, src_mask, dst_mask,
                                    src_mode, dst_mode, redop, ready_events);
@@ -1372,14 +1368,12 @@ namespace Legion {
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
             UniqueInst inst;
-            RtEvent inst_ready = inst.deserialize(derez, runtime);
+            inst.deserialize(derez);
             FieldMask inst_mask;
             derez.deserialize(inst_mask);
             bool reduction_initialization;
             derez.deserialize<bool>(reduction_initialization);
             std::set<RtEvent> ready_events;
-            if (inst_ready.exists() && !inst_ready.has_triggered())
-              inst_ready.wait();
             tpl->record_fill_inst(lhs, expr, inst, inst_mask,
                                   ready_events, reduction_initialization);
             if (!ready_events.empty())
@@ -1397,7 +1391,7 @@ namespace Legion {
             unsigned index;
             derez.deserialize(index);
             UniqueInst inst;
-            RtEvent inst_ready = inst.deserialize(derez, runtime);
+            inst.deserialize(derez);
             LogicalRegion handle;
             derez.deserialize(handle);
             RegionUsage usage;
@@ -1408,8 +1402,6 @@ namespace Legion {
             derez.deserialize<bool>(update_validity);
             RegionNode *node = runtime->forest->get_node(handle);
             std::set<RtEvent> effects;
-            if (inst_ready.exists() && !inst_ready.has_triggered())
-              inst_ready.wait();
             tpl->record_op_inst(tlid, index, inst, node, usage,
                                 user_mask, update_validity, effects);
             if (!effects.empty())
