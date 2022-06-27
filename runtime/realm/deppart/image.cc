@@ -803,7 +803,7 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ImageOperation<N,T,N2,T2>
+  // class StructuredImageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
