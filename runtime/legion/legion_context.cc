@@ -13039,8 +13039,8 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -13158,8 +13158,8 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -15597,8 +15597,8 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -15877,8 +15877,8 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered, allocator,
                                     (owner_shard->shard_id != 0));
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -16155,8 +16155,8 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered, 
                                      allocator, (owner_shard->shard_id != 0));
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -16411,8 +16411,8 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      op->initialize_replication(this, shard_manager->is_total_sharding(),
-                        shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -19688,7 +19688,7 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
                                             true/*skip dependence analysis*/);
-          op->initialize_replication(this, shard_manager->is_total_sharding(),
+          op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
           op->set_deletion_preconditions(precondition, dependences);
@@ -19747,7 +19747,7 @@ namespace Legion {
           op->initialize_field_deletions(this, it->first, it->second, 
               true/*unordered*/, allocator, (owner_shard->shard_id != 0),
               true/*skip dependence analysis*/);
-          op->initialize_replication(this, shard_manager->is_total_sharding(),
+          op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
           op->set_deletion_preconditions(precondition, dependences);
@@ -19832,7 +19832,7 @@ namespace Legion {
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
-          op->initialize_replication(this, shard_manager->is_total_sharding(),
+          op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
           op->set_deletion_preconditions(precondition, dependences);
@@ -19917,7 +19917,7 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, shard_manager->is_total_sharding(),
+          op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
           op->set_deletion_preconditions(precondition, dependences);
@@ -20003,7 +20003,7 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, shard_manager->is_total_sharding(),
+          op->initialize_replication(this,
                             shard_manager->is_first_local_shard(owner_shard),
                             &ready_barrier,&mapped_barrier,&execution_barrier);
           op->set_deletion_preconditions(precond, dependences);

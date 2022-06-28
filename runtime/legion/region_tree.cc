@@ -3954,12 +3954,10 @@ namespace Legion {
           // Check to see if we have a collective mapping and we're part of it
           if ((mapping != NULL) && mapping->contains(result->local_space))
           {
-            std::vector<AddressSpaceID> children;
-            mapping->get_children(result->owner_space,
-                                  result->local_space, children);
-            if (!children.empty())
-              result->add_base_valid_ref(REMOTE_DID_REF, &mutator,
-                                         children.size());
+            size_t children = mapping->count_children(result->owner_space,
+                                                      result->local_space);
+            if (children > 0)
+              result->add_base_valid_ref(REMOTE_DID_REF, &mutator, children);
           }
         }
       }

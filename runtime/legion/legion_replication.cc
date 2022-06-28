@@ -4484,7 +4484,6 @@ namespace Legion {
       ready_barrier = RtBarrier::NO_RT_BARRIER;
       mapping_barrier = RtBarrier::NO_RT_BARRIER;
       execution_barrier = RtBarrier::NO_RT_BARRIER;
-      is_total_sharding = false;
       is_first_local_shard = false;
     }
 
@@ -4544,8 +4543,7 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         // Field deletions need to compute their version infos
-        if ((is_total_sharding && is_first_local_shard) || 
-            (repl_ctx->owner_shard->shard_id == 0)) 
+        if (is_first_local_shard)
         {
           std::set<RtEvent> preconditions;
           version_infos.resize(deletion_requirements.size());
@@ -4757,7 +4755,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
-                                                bool is_total, bool is_first,
+                                                bool is_first,
                                                 RtBarrier *ready_bar,
                                                 RtBarrier *mapping_bar,
                                                 RtBarrier *execution_bar)
@@ -4768,7 +4766,6 @@ namespace Legion {
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
 #endif
-      is_total_sharding = is_total;
       is_first_local_shard = is_first;
       if (execution_bar != NULL)
       {

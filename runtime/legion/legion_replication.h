@@ -1853,8 +1853,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
-      void initialize_replication(ReplicateContext *ctx, 
-                                  bool is_total, bool is_first,
+      void initialize_replication(ReplicateContext *ctx, bool is_first,
                                   RtBarrier *ready_barrier = NULL,
                                   RtBarrier *mapping_barrier = NULL,
                                   RtBarrier *execution_barrier = NULL);
@@ -1869,7 +1868,6 @@ namespace Legion {
       RtBarrier ready_barrier;
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
-      bool is_total_sharding;
       bool is_first_local_shard;
     };
 
