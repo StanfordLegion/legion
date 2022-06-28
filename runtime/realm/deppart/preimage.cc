@@ -424,7 +424,6 @@ namespace Realm {
 	img->dispatch(this, false /* do not run in this thread */);
       }
 
-      std::cout << "CALL 2" << std::endl;
       uop->dispatch(this, true /* ok to run in this thread */);
     } else {
       for(size_t i = 0; i < preimages.size(); i++)
@@ -458,7 +457,6 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void PreimageOperation<N,T,N2,T2>::provide_sparse_image(int index, const Rect<N2,T2> *rects, size_t count)
   {
-    std::cout << "Provide SPARSE IMAGE" << std::endl;
     // atomically check the overlap tester's readiness and queue us if not
     bool tester_ready = false;
     {
