@@ -4830,7 +4830,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(p.get_dim() > 0);
       assert(collective_mapping != NULL);
 #endif
       if (from_mapper && (p.get_dim() == 0))
