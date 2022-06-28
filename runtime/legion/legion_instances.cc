@@ -8149,7 +8149,7 @@ namespace Legion {
       std::set<RtEvent> recorded_events, ready_events, applied_events;
       unpack_fields(src_fields, derez, ready_events, manager,man_ready,runtime);
       UniqueInst src_inst;
-      derez.deserialize(src_inst);
+      src_inst.deserialize(derez);
       ApEvent precondition;
       derez.deserialize(precondition);
       PredEvent predicate_guard;
