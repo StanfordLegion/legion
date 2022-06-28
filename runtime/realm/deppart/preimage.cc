@@ -688,9 +688,10 @@ namespace Realm {
       }
     }
 
-    if (empty_count > 0)
+    if (empty_count > 0) {
       log_part.info() << empty_count << " empty preimages (out of "
                       << sparsity_outputs.size() << ")";
+    }
   }
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
@@ -744,19 +745,18 @@ namespace Realm {
   IndexSpace<N, T>
   StructuredPreimageOperation<N, T, N2, T2, TRANSFORM>::add_target(
       const IndexSpace<N2, T2> &target) {
-    // try to filter out obviously empty targets
-    if (parent.empty() || target.empty()) return IndexSpace<N, T>::make_empty();
+    if (parent.empty() || target.empty()) {
+      return IndexSpace<N, T>::make_empty();
+    }
 
-    // otherwise it'll be something smaller than the current parent
     IndexSpace<N, T> preimage;
     preimage.bounds = parent.bounds;
 
-    // if the target has a sparsity map, use the same node - otherwise
-    // get a sparsity ID by round-robin'ing across the nodes that have field
-    // data
+    // if the target has a sparsity map, use the same node.
     int target_node = 0;
-    if (!target.dense())
+    if (!target.dense()) {
       target_node = ID(target.sparsity).sparsity_creator_node();
+    }
 
     SparsityMap<N, T> sparsity = get_runtime()
                                      ->get_available_sparsity_impl(target_node)
