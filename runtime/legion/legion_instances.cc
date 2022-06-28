@@ -8134,12 +8134,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID man_did, src_inst_did, dst_did;
+      DistributedID man_did, dst_did;
       derez.deserialize(man_did);
       RtEvent man_ready, dst_ready;
       CollectiveManager *manager = static_cast<CollectiveManager*>(
           runtime->find_or_request_instance_manager(man_did, man_ready));
-      derez.deserialize(src_inst_did);
       derez.deserialize(dst_did);
       InstanceView *dst_view = static_cast<InstanceView*>(
           runtime->find_or_request_logical_view(dst_did, dst_ready));
@@ -8680,7 +8679,6 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(this->did);
-          rez.serialize(source->did);
           rez.serialize(dst_view->did);
           pack_fields(rez, local_fields);
           local_inst.serialize(rez);
