@@ -9028,15 +9028,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceOp::elide_fences_pre_sync(void)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by derived classes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceOp::elide_fences_post_sync(void)
+    void ReplTraceOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       // Should only be called by derived classes
@@ -9100,10 +9092,8 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_85); 
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
-      pre_elide_fences_collective_id =
+      sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
-      post_elide_fences_collective_id =
-        ctx->get_next_collective_index(COLLECTIVE_LOC_93);
     }
 
     //--------------------------------------------------------------------------
@@ -9261,7 +9251,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCaptureOp::elide_fences_pre_sync(void)
+    void ReplTraceCaptureOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9270,22 +9260,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      SlowBarrier pre_sync_barrier(repl_ctx, pre_elide_fences_collective_id);
-      pre_sync_barrier.perform_collective_sync();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCaptureOp::elide_fences_post_sync(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      SlowBarrier post_sync_barrier(repl_ctx, post_elide_fences_collective_id);
-      post_sync_barrier.perform_collective_sync();
+      SlowBarrier pre_sync_barrier(repl_ctx,
+          sync_compute_frontiers_collective_id);
+      pre_sync_barrier.perform_collective_sync(precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9346,10 +9323,8 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_86);
       replay_sync_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_91);
-      pre_elide_fences_collective_id =
+      sync_compute_frontiers_collective_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_92);
-      post_elide_fences_collective_id =
-        ctx->get_next_collective_index(COLLECTIVE_LOC_93);
     }
 
     //--------------------------------------------------------------------------
@@ -9588,7 +9563,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::elide_fences_pre_sync(void)
+    void ReplTraceCompleteOp::sync_compute_frontiers(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9597,22 +9572,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      SlowBarrier pre_sync_barrier(repl_ctx, pre_elide_fences_collective_id);
-      pre_sync_barrier.perform_collective_sync();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceCompleteOp::elide_fences_post_sync(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      SlowBarrier post_sync_barrier(repl_ctx, post_elide_fences_collective_id);
-      post_sync_barrier.perform_collective_sync();
+      SlowBarrier pre_sync_barrier(repl_ctx,
+          sync_compute_frontiers_collective_id);
+      pre_sync_barrier.perform_collective_sync(precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11737,6 +11699,146 @@ namespace Legion {
       derez.deserialize(done_event);
 
       physical_template->record_trace_shard_event(event, result);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_trace_frontier_request(
+        ShardedPhysicalTemplate *physical_template, ShardID shard_source, 
+        AddressSpaceID template_source, size_t template_index, ApEvent event,
+        AddressSpaceID event_space, unsigned frontier, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // See whether we are on the right node to handle this request, if not
+      // then forward the request onto the proper node
+      if (event_space != runtime->address_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(template_source == runtime->address_space);
+#endif
+        // Check to see if we have a shard on that address space, if not
+        // then we know that this event can't have come from there
+        bool found = false;
+        for (unsigned idx = 0; idx < address_spaces->size(); idx++)
+        {
+          if ((*address_spaces)[idx] != event_space)
+            continue;
+          found = true;
+          break;
+        }
+        if (found)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(repl_id);
+            rez.serialize(physical_template);
+            rez.serialize(template_index);
+            rez.serialize(shard_source);
+            rez.serialize(event);
+            rez.serialize(frontier);
+            rez.serialize(done_event);
+          }
+          runtime->send_control_replicate_trace_frontier_request(event_space,
+                                                                 rez);
+        }
+        else
+          send_trace_frontier_response(physical_template, template_source,
+                          frontier, ApBarrier::NO_AP_BARRIER, done_event);
+      }
+      else
+      {
+        // Ask each of our local shards to check for the event in the template
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          const ApBarrier result =
+            (*it)->handle_find_trace_shard_frontier(template_index, 
+                                                    event, shard_source);
+          // If we found it then we are done
+          if (result.exists())
+          {
+            send_trace_frontier_response(physical_template, template_source,
+                                         frontier, result, done_event);
+            return;
+          }
+        }
+        // If we couldn't find it then send back a NO_BARRIER
+        send_trace_frontier_response(physical_template, template_source,
+                        frontier, ApBarrier::NO_AP_BARRIER, done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_frontier_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      size_t template_index;
+      derez.deserialize(template_index);
+      ShardID shard_source;
+      derez.deserialize(shard_source);
+      ApEvent event;
+      derez.deserialize(event);
+      unsigned frontier;
+      derez.deserialize(frontier);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->send_trace_frontier_request(physical_template, shard_source,
+          source, template_index, event, runtime->address_space, frontier,
+          done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_trace_frontier_response(
+        ShardedPhysicalTemplate *physical_template, AddressSpaceID temp_source,
+        unsigned frontier, ApBarrier result, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      if (temp_source != runtime->address_space)
+      {
+        // Not local so send the response message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(physical_template);
+          rez.serialize(frontier);
+          rez.serialize(result);
+          rez.serialize(done_event);
+        }
+        runtime->send_control_replicate_trace_frontier_response(temp_source,
+                                                                rez);
+      }
+      else // This is local so handle it here
+      {
+        physical_template->record_trace_shard_frontier(frontier, result);
+        Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_frontier_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      unsigned frontier;
+      derez.deserialize(frontier);
+      ApBarrier result;
+      derez.deserialize(result);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      physical_template->record_trace_shard_frontier(frontier, result);
       Runtime::trigger_event(done_event);
     }
 

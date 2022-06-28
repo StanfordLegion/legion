@@ -1096,6 +1096,8 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
+      ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
+                                                 ShardID remote_shard);
       ReplicateContext* get_shard_execution_context(void) const;
     public:
       void initialize_implicit_task(InnerContext *context, TaskID tid,

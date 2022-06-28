@@ -123,6 +123,7 @@ namespace Legion {
     public:
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner); }
+      AddressSpaceID get_analysis_space(const DomainPoint &point) const;
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -165,6 +166,12 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source) = 0;
+      virtual void find_last_users(std::set<ApEvent> &events,
+                                   const DomainPoint &collective_point,
+                                   const RegionUsage &usage,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *user_expr,
+                                   std::vector<RtEvent> &applied) const = 0;
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -209,6 +216,9 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_add_copy_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
+      static void handle_view_find_last_users_request(Deserializer &derz,
+                        Runtime *runtime, AddressSpaceID source);
+      static void handle_view_find_last_users_response(Deserializer &derez);
 #ifdef ENABLE_VIEW_REPLICATION
       static void handle_view_replication_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -292,6 +302,11 @@ namespace Legion {
                                    UniqueID op_id, unsigned index,
                                    std::set<ApEvent> &preconditions,
                                    const bool trace_recording);
+      void find_last_users(const RegionUsage &usage,
+                                   IndexSpaceExpression *expr,
+                                   const bool expr_dominates,
+                                   const FieldMask &mask,
+                                   std::set<ApEvent> &last_events) const;
       // Check to see if there is any view with the same shape already
       // in the ExprView tree, if so return it
       ExprView* find_congruent_view(IndexSpaceExpression *expr);
@@ -376,6 +391,20 @@ namespace Legion {
                                       std::set<ApEvent> &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const bool trace_recording);
+      // Overloads for find_last_users
+      void find_current_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *expr,
+                                      const bool expr_covers,
+                                      std::set<ApEvent> &last_events,
+                                      FieldMask &observed, 
+                                      FieldMask &non_dominated) const;
+      void find_previous_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *expr,
+                                      const bool expr_covers,
+                                      std::set<ApEvent> &last_events) const;
+
       template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
@@ -383,14 +412,14 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                                       const bool user_covers,
-                                      bool &dominates);
+                                      bool &dominates) const;
       template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
-                                      const bool user_covers);
+                                      const bool user_covers) const;
     public:
       size_t get_view_volume(void);
     protected:
@@ -587,6 +616,12 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source); 
+      virtual void find_last_users(std::set<ApEvent> &events,
+                                   const DomainPoint &collective_point,
+                                   const RegionUsage &usage,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *user_expr,
+                                   std::vector<RtEvent> &ready_events) const;
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -759,6 +794,12 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source);
+      virtual void find_last_users(std::set<ApEvent> &events,
+                                   const DomainPoint &collective_point,
+                                   const RegionUsage &usage,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *user_expr,
+                                   std::vector<RtEvent> &ready_events) const;
     protected: 
       void find_reducing_preconditions(const RegionUsage &usage,
                                        const FieldMask &user_mask,
@@ -770,6 +811,9 @@ namespace Legion {
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
                                       std::set<ApEvent> &preconditions) const;
+      void find_initializing_last_users(const FieldMask &user_mask,
+                                        IndexSpaceExpression *user_expr,
+                                        std::set<ApEvent> &preconditions) const;
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,
@@ -1209,7 +1253,7 @@ namespace Legion {
                                                  const UniqueID op_id,
                                                  const unsigned index,
                                                  const bool next_covers,
-                                                 bool &dominates)
+                                                 bool &dominates) const
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost
@@ -1262,7 +1306,7 @@ namespace Legion {
                                                  IndexSpaceExpression *expr,
                                                  const UniqueID op_id,
                                                  const unsigned index,
-                                                 const bool next_covers)
+                                                 const bool next_covers) const
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost

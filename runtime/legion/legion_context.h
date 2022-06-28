@@ -2378,6 +2378,8 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
+      ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
+                                              ShardID remote_shard);
       void record_intra_space_dependence(size_t context_index, 
           const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
       void handle_intra_space_dependence(Deserializer &derez);

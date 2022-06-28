@@ -19269,6 +19269,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::handle_find_trace_shard_frontier(
+                     size_t template_index, ApEvent event, ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+      ShardedPhysicalTemplate *physical_template = NULL;
+      {
+        AutoLock r_lock(replication_lock);
+        std::map<size_t,ShardedPhysicalTemplate*>::const_iterator finder = 
+          physical_templates.find(template_index);
+        // If we can't find the template index that means it hasn't been
+        // started here so it can't have produced the event we're looking for
+        // Note it also can't have been reclaimed yet as all the shard
+        // templates need to come to the same decision on whether they 
+        // are replayable before any of them can be deleted and so if one
+        // is still tracing then they all are
+        if (finder == physical_templates.end())
+          return ApBarrier::NO_AP_BARRIER;
+        physical_template = finder->second;
+      }
+      return physical_template->find_trace_shard_frontier(event, remote_shard);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::record_intra_space_dependence(size_t context_index,
         const DomainPoint &point, RtEvent point_mapped, ShardID next_shard)
     //--------------------------------------------------------------------------

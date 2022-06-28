@@ -1043,9 +1043,9 @@ namespace Legion {
                                 const FieldMask &copy_mask,
                                 const FieldMask &dst_mask,
                                 const Memory location,
+                                const DistributedID dst_view_did,
                                 const DomainPoint &dst_point,
                                 const DomainPoint &src_point,
-                                const DistributedID dst_inst_did,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);
@@ -1077,7 +1077,7 @@ namespace Legion {
                                 const FieldMask &copy_mask,
                                 const FieldMask &dst_mask,
                                 const DomainPoint &src_point,
-                                const DistributedID dst_inst_did,
+                                const UniqueInst &dst_inst,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1090,7 +1090,7 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
-                                const DistributedID src_inst_did,
+                                const UniqueInst &src_inst,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1107,6 +1107,7 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
+                                const UniqueInst &src_inst,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1149,13 +1150,14 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const FieldMask &dst_mask,
-                                const DistributedID dst_inst_did,
+                                const UniqueInst &dst_inst,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 AddressSpaceID origin);
     protected:
       void perform_single_allreduce(FillView *fill_view,
+                                const DistributedID reduce_view_did,
                                 const uint64_t allreduce_tag,
                                 Operation *op, PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
@@ -1168,6 +1170,7 @@ namespace Legion {
                                 std::vector<ApEvent> &local_init_events,
                                 std::vector<ApEvent> &local_final_events);
       unsigned perform_multi_allreduce(FillView *fill_view,
+                                const DistributedID reduce_view_did,
                                 const uint64_t allreduce_tag,
                                 Operation *op, PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
@@ -1186,9 +1189,11 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const PhysicalTraceInfo &trace_info,
                                 const std::vector<CopySrcDstField> &src_fields,
+                                const DomainPoint &src_point,
                                 const AddressSpaceID *targets, size_t total,
                                 std::vector<ApEvent> &src_events);
-      void receive_allreduce_stage(const uint64_t allreduce_tag,
+      void receive_allreduce_stage(const UniqueInst dst_inst,
+                                const uint64_t allreduce_tag,
                                 const int stage, Operation *op,
                                 ApEvent dst_precondition,
                                 PredEvent predicate_guard,
@@ -1205,7 +1210,8 @@ namespace Legion {
                                 std::vector<CopySrcDstField> &src_fields,
                                 const ApEvent src_precondition,
                                 ApUserEvent src_postcondition,
-                                ApBarrier src_barrier, ShardID bar_shard);
+                                ApBarrier src_barrier, ShardID bar_shard,
+                                const DomainPoint &src_point);
       void process_register_user_request(const DistributedID view_did,
                                 const size_t op_ctx_index, const unsigned index,
                                 const RtEvent registered);
@@ -1380,9 +1386,11 @@ namespace Legion {
         ApUserEvent src_postcondition;
         ApBarrier barrier_postcondition;
         ShardID barrier_shard;
+        DomainPoint src_point;
       };
       std::map<CopyKey,AllReduceCopy> all_reduce_copies;
       struct AllReduceStage {
+        UniqueInst dst_inst;
         Operation *op;
         IndexSpaceExpression *copy_expression;
         FieldMask copy_mask;

@@ -2321,11 +2321,10 @@ namespace Legion {
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
-              PhysicalManager *manager = ref.get_physical_manager();
-              PhysicalInstance inst =
-                manager->get_instance(analysis->collective_point);
-              trace_info.record_op_inst(analysis->usage, inst_mask, inst,
-                        manager->did, analysis->node, map_applied_events);
+              const UniqueInst unique_inst(analysis->target_views[idx],
+                                           analysis->collective_point);
+              trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
+                                        analysis->node, map_applied_events);
             }
           }
           if (!user_applied.empty())
@@ -2352,11 +2351,10 @@ namespace Legion {
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
-              PhysicalManager *manager = ref.get_physical_manager();
-              PhysicalInstance inst =
-                manager->get_instance(analysis->collective_point);
-              trace_info.record_op_inst(analysis->usage, inst_mask, inst,
-                        manager->did, analysis->node, map_applied_events);
+              const UniqueInst unique_inst(analysis->target_views[idx],
+                                           analysis->collective_point);
+              trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
+                                        analysis->node, map_applied_events);
             }
           }
         }
@@ -2748,23 +2746,18 @@ namespace Legion {
           // Record this with the trace
           trace_info.record_issue_across(result, precondition, precondition,
                         ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
-          LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
-            tracing_srcs, tracing_dsts;
+          LegionMap<UniqueInst,FieldMask> tracing_srcs, tracing_dsts;
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            PhysicalManager *manager = ref.get_physical_manager();
-            std::pair<PhysicalInstance,DistributedID> inst(
-                manager->get_instance(op->index_point), manager->did);
-            tracing_srcs[inst] = ref.get_valid_fields();
+            const UniqueInst unique_inst(source_views[idx], op->index_point);
+            tracing_srcs[unique_inst] = ref.get_valid_fields();
           }
           for (unsigned idx = 0; idx < dst_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            PhysicalManager *manager = ref.get_physical_manager();
-            std::pair<PhysicalInstance,DistributedID> inst(
-                manager->get_instance(op->index_point), manager->did);
-            tracing_dsts[inst] = ref.get_valid_fields();
+            const UniqueInst unique_inst(target_views[idx], op->index_point);
+            tracing_dsts[unique_inst] = ref.get_valid_fields();
           }
           trace_info.record_across_insts(result, src_index, dst_index,
                                          LEGION_READ_PRIV, LEGION_WRITE_PRIV,
@@ -2950,32 +2943,31 @@ namespace Legion {
         trace_info.record_issue_across(copy_post, local_precondition,
            copy_precondition, src_indirect_ready, ApEvent::NO_AP_EVENT, across);
         // If we're tracing record the insts for this copy
-        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
-          src_insts, idx_insts, dst_insts;
+        LegionMap<UniqueInst,FieldMask> src_insts, idx_insts, dst_insts;
         // Get the src_insts
+        InnerContext *src_context = op->find_physical_context(src_index);
+        std::vector<InstanceView*> source_views;
+        src_context->convert_target_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          src_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
         {
-          PhysicalManager *manager = idx_target.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          idx_insts[inst] = idx_target.get_valid_fields();
+          InnerContext *idx_context = op->find_physical_context(idx_index); 
+          std::vector<InstanceView*> indirect_views;
+          idx_context->convert_target_views(idx_targets, indirect_views);
+          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          dst_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          dst_insts[unique_inst] = ref.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
         trace_info.record_indirect_insts(copy_post, collective_post,
@@ -3103,32 +3095,31 @@ namespace Legion {
         trace_info.record_issue_across(copy_post, local_precondition,
            copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the insts for this copy
-        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
-          src_insts, idx_insts, dst_insts;
+        LegionMap<UniqueInst,FieldMask> src_insts, idx_insts, dst_insts;
         // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          src_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
         {
-          PhysicalManager *manager = idx_target.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          idx_insts[inst] = idx_target.get_valid_fields();
+          std::vector<InstanceView*> indirect_views;
+          InnerContext *idx_context = op->find_physical_context(idx_index);
+          idx_context->convert_target_views(idx_targets, indirect_views);
+          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
+        std::vector<InstanceView*> target_views;
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        dst_context->convert_target_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          dst_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          dst_insts[unique_inst] = ref.get_valid_fields();
         }
         trace_info.record_across_insts(copy_post, src_index, idx_index,
             LEGION_READ_PRIV, LEGION_READ_PRIV, copy_expr, src_insts,
@@ -3278,39 +3269,49 @@ namespace Legion {
         trace_info.record_issue_across(copy_post, local_precondition,
             copy_precondition, src_indirect_ready, dst_indirect_ready, across);
         // If we're tracing record the insts for this copy
-        LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask>
-          src_insts, src_idx_insts, dst_insts, dst_idx_insts;
+        LegionMap<UniqueInst,FieldMask> src_insts, src_idx_insts, 
+                                        dst_insts, dst_idx_insts;
         // Get the src_insts
+        std::vector<InstanceView*> source_views;
+        InnerContext *src_context = op->find_physical_context(src_index);
+        src_context->convert_target_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          src_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the src_idx_insts
         {
-          PhysicalManager *manager = src_idx_target.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          src_idx_insts[inst] = src_idx_target.get_valid_fields();
+          InnerContext *src_idx_context =
+            op->find_physical_context(src_idx_index);
+          std::vector<InstanceView*> src_indirect_views;
+          src_idx_context->convert_target_views(src_idx_targets,
+                                                src_indirect_views);
+          const UniqueInst unique_inst(src_indirect_views.back(), 
+                                       op->index_point);
+          src_idx_insts[unique_inst] = src_idx_target.get_valid_fields();
         }
         // Get the dst_insts
+        std::vector<InstanceView*> target_views;
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        dst_context->convert_target_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          PhysicalManager *manager = ref.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          dst_insts[inst] = ref.get_valid_fields();
+          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          dst_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the dst_idx_insts
         {
-          PhysicalManager *manager = dst_idx_target.get_physical_manager();
-          std::pair<PhysicalInstance,DistributedID> inst(
-              manager->get_instance(op->index_point), manager->did);
-          dst_idx_insts[inst] = dst_idx_target.get_valid_fields();
+          InnerContext *dst_idx_context =
+            op->find_physical_context(dst_idx_index);
+          std::vector<InstanceView*> dst_indirect_views;
+          dst_idx_context->convert_target_views(dst_idx_targets,
+                                                dst_indirect_views);
+          const UniqueInst unique_inst(dst_indirect_views.back(),
+                                       op->index_point);
+          dst_idx_insts[unique_inst] = dst_idx_target.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
         trace_info.record_indirect_insts(copy_post, collective_post,

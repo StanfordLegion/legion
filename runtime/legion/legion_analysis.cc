@@ -281,6 +281,55 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Unique Instance
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    UniqueInst::UniqueInst(InstanceView *view, const DomainPoint &point)
+      : view_did(view->did), collective_point(point)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueInst::UniqueInst(DistributedID did, const DomainPoint &point)
+      : view_did(did), collective_point(point)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void UniqueInst::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(view_did != 0);
+#endif
+      rez.serialize(view_did);
+      rez.serialize(collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    void UniqueInst::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(view_did);
+      derez.deserialize(collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID UniqueInst::get_analysis_space(Runtime *runtime) const
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready;
+      InstanceView *view = static_cast<InstanceView*>(
+          runtime->find_or_request_logical_view(view_did, ready));
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      return view->get_analysis_space(collective_point);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Remote Trace Recorder
     /////////////////////////////////////////////////////////////
 
@@ -688,10 +737,8 @@ namespace Legion {
                                               const TraceLocalID &tlid,
                                               unsigned src_idx,unsigned dst_idx,
                                               IndexSpaceExpression *expr,
-                                              PhysicalInstance src_inst,
-                                              PhysicalInstance dst_inst,
-                                              DistributedID src_did,
-                                              DistributedID dst_did,
+                                              const UniqueInst &src_inst,
+                                              const UniqueInst &dst_inst,
                                               const FieldMask &src_mask,
                                               const FieldMask &dst_mask,
                                               PrivilegeMode src_mode,
@@ -716,10 +763,8 @@ namespace Legion {
           rez.serialize(src_mode);
           rez.serialize(dst_mode);
           expr->pack_expression(rez, origin_space);
-          rez.serialize(src_inst);
-          rez.serialize(dst_inst);
-          rez.serialize(src_did);
-          rez.serialize(dst_did);
+          src_inst.serialize(rez);
+          dst_inst.serialize(rez);
           rez.serialize(src_mask);
           rez.serialize(dst_mask);
           rez.serialize(redop);
@@ -729,8 +774,8 @@ namespace Legion {
       }
       else
         remote_tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr,
-                src_inst, dst_inst, src_did, dst_did, src_mask, dst_mask,
-                src_mode, dst_mode, redop, applied);
+                                 src_inst, dst_inst, src_mask, dst_mask,
+                                 src_mode, dst_mode, redop, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -833,8 +878,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_fill_inst(ApEvent lhs,
                                  IndexSpaceExpression *expr, 
-                                 PhysicalInstance inst,
-                                 DistributedID inst_did,
+                                 const UniqueInst &inst,
                                  const FieldMask &inst_mask,
                                  std::set<RtEvent> &applied_events,
                                  const bool reduction_initialization)
@@ -851,8 +895,7 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
-          rez.serialize(inst);
-          rez.serialize(inst_did);
+          inst.serialize(rez);
           rez.serialize(inst_mask);
           rez.serialize<bool>(reduction_initialization);
         }
@@ -860,15 +903,14 @@ namespace Legion {
         applied_events.insert(done);
       }
       else
-        remote_tpl->record_fill_inst(lhs, expr, inst, inst_did, inst_mask,
+        remote_tpl->record_fill_inst(lhs, expr, inst, inst_mask,
                                      applied_events, reduction_initialization);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_inst(const TraceLocalID &tlid,
                                              unsigned idx,
-                                             PhysicalInstance inst,
-                                             DistributedID inst_did,
+                                             const UniqueInst &inst,
                                              RegionNode *node,
                                              const RegionUsage &usage,
                                              const FieldMask &user_mask,
@@ -887,8 +929,7 @@ namespace Legion {
           rez.serialize(applied);
           tlid.serialize(rez);
           rez.serialize(idx);
-          rez.serialize(inst);
-          rez.serialize(inst_did);
+          inst.serialize(rez);
           rez.serialize(node->handle);
           rez.serialize(usage);
           rez.serialize(user_mask);
@@ -899,7 +940,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_op_inst(tlid, idx, inst, inst_did, node, usage,
+        remote_tpl->record_op_inst(tlid, idx, inst, node, usage,
                                    user_mask, update_validity, effects);
     }
 
@@ -1307,21 +1348,18 @@ namespace Legion {
             IndexSpaceExpression *expr =
               IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
-            PhysicalInstance src_inst, dst_inst;
-            derez.deserialize(src_inst);
-            derez.deserialize(dst_inst);
-            DistributedID src_did, dst_did;
-            derez.deserialize(src_did);
-            derez.deserialize(dst_did);
+            UniqueInst src_inst, dst_inst;
+            src_inst.deserialize(derez);
+            dst_inst.deserialize(derez);
             FieldMask src_mask, dst_mask;
             derez.deserialize(src_mask);
             derez.deserialize(dst_mask);
             ReductionOpID redop;
             derez.deserialize(redop);
             std::set<RtEvent> ready_events;
-            tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr, src_inst,
-                dst_inst, src_did, dst_did, src_mask, dst_mask, src_mode,
-                dst_mode, redop, ready_events);
+            tpl->record_copy_insts(lhs, tlid, src_idx, dst_idx, expr,
+                                   src_inst, dst_inst, src_mask, dst_mask,
+                                   src_mode, dst_mode, redop, ready_events);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
@@ -1396,16 +1434,14 @@ namespace Legion {
             RegionTreeForest *forest = runtime->forest;
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
-            PhysicalInstance inst;
-            derez.deserialize(inst);
-            DistributedID inst_did;
-            derez.deserialize(inst_did);
+            UniqueInst inst;
+            inst.deserialize(derez);
             FieldMask inst_mask;
             derez.deserialize(inst_mask);
             bool reduction_initialization;
             derez.deserialize<bool>(reduction_initialization);
             std::set<RtEvent> ready_events;
-            tpl->record_fill_inst(lhs, expr, inst, inst_did, inst_mask,
+            tpl->record_fill_inst(lhs, expr, inst, inst_mask,
                                   ready_events, reduction_initialization);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
@@ -1421,10 +1457,8 @@ namespace Legion {
             tlid.deserialize(derez);
             unsigned index;
             derez.deserialize(index);
-            PhysicalInstance inst;
-            derez.deserialize(inst);
-            DistributedID inst_did;
-            derez.deserialize(inst_did);
+            UniqueInst inst;
+            inst.deserialize(derez);
             LogicalRegion handle;
             derez.deserialize(handle);
             RegionUsage usage;
@@ -1435,7 +1469,7 @@ namespace Legion {
             derez.deserialize<bool>(update_validity);
             RegionNode *node = runtime->forest->get_node(handle);
             std::set<RtEvent> effects;
-            tpl->record_op_inst(tlid, index, inst, inst_did, node, usage,
+            tpl->record_op_inst(tlid, index, inst, node, usage,
                                 user_mask, update_validity, effects);
             if (!effects.empty())
               Runtime::trigger_event(applied, Runtime::merge_events(effects));

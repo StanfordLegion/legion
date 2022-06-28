@@ -2516,8 +2516,7 @@ namespace Legion {
       virtual void execute_dependence_analysis(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       LegionTrace *local_trace;
     };
@@ -2548,15 +2547,13 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
-      CollectiveID pre_elide_fences_collective_id;
-      CollectiveID post_elide_fences_collective_id;
+      CollectiveID sync_compute_frontiers_collective_id;
       bool has_blocking_call;
       bool remove_trace_reference;
       bool is_recording;
@@ -2587,16 +2584,14 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-      virtual void elide_fences_pre_sync(void);
-      virtual void elide_fences_post_sync(void);
+      virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
       RtBarrier recording_fence;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
-      CollectiveID pre_elide_fences_collective_id;
-      CollectiveID post_elide_fences_collective_id;
+      CollectiveID sync_compute_frontiers_collective_id;
       bool replayed;
       bool has_blocking_call;
       bool is_recording;
@@ -2919,6 +2914,14 @@ namespace Legion {
       void send_trace_event_response(ShardedPhysicalTemplate *physical_template,
                           AddressSpaceID template_source, ApEvent event,
                           ApBarrier result, RtUserEvent done_event);
+      void send_trace_frontier_request(ShardedPhysicalTemplate *physical_template,
+                          ShardID shard_source, AddressSpaceID template_source, 
+                          size_t template_index, ApEvent event, 
+                          AddressSpaceID event_space, unsigned frontier,
+                          RtUserEvent done_event);
+      void send_trace_frontier_response(ShardedPhysicalTemplate *physical_template,
+                          AddressSpaceID template_source, unsigned frontier,
+                          ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
     public:
@@ -2942,6 +2945,9 @@ namespace Legion {
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);
+      static void handle_trace_frontier_request(Deserializer &derez,Runtime *rt,
+                                                AddressSpaceID request_source);
+      static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
       static void handle_collective_instance_message(Deserializer &derez,

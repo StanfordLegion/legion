@@ -777,18 +777,6 @@ namespace Legion {
       public:
         PhysicalTemplate *const tpl;
       };
-    protected:
-      struct InstUser {
-        InstUser(const RegionUsage &r, unsigned u, 
-                 IndexSpaceExpression *e, ShardID s);
-        InstUser(const InstUser &rhs) = delete;
-        ~InstUser(void);
-        InstUser& operator=(const InstUser &rhs) = delete;
-        const RegionUsage usage;
-        const unsigned user;
-        IndexSpaceExpression *const expr;
-        const ShardID shard;
-      };
     private:
       struct CachedPremapping
       {
@@ -807,23 +795,49 @@ namespace Legion {
       };
       typedef LegionMap<TraceLocalID,CachedMapping>             CachedMappings;
     protected:
-      // You might think it is safe to just index these data structures
-      // based on the PhysicalInstance, but Realm is allowed to recycle
-      // the names of physical instances so we could get duplicates if 
-      // we ever allow allocs/frees of instances inside the trace. Therefore
-      // we also key off the distributed ID of the manager for the instance
-      // since we know distributed IDs are monotonically increasing. Note that
-      // we also can't just use the distributed ID because of collective 
-      // instances where we might have multiple instances with the same DID 
-      typedef LegionMap<UniqueInst,
-                        FieldMaskSet<IndexSpaceExpression> >         InstExprs;
-      typedef LegionMap<UniqueInst,
-                        FieldMaskSet<InstUser> >                     InstUsers;
+      struct InstanceUser {
+      public:
+        InstanceUser(void) : expr(NULL) { }
+        InstanceUser(const UniqueInst &i, const RegionUsage &r,
+                     IndexSpaceExpression *e, const FieldMask &m)
+          : instance(i), usage(r), expr(e), mask(m) { }
+      public:
+        inline bool matches(const UniqueInst &inst, const RegionUsage &use,
+                            IndexSpaceExpression *expression) const
+        {
+          if (inst != instance) return false;
+          if (use != usage) return false;
+          return (expr == expression);
+        }
+        inline bool matches(const InstanceUser &user) const
+        {
+          if (instance != user.instance) return false;
+          if (usage != user.usage) return false;
+          if (expr != user.expr) return false;
+          return (mask == user.mask);
+        }
+      public:
+        UniqueInst instance;
+        RegionUsage usage;
+        IndexSpaceExpression *expr;
+        FieldMask mask;
+      };
+      typedef LegionVector<InstanceUser> InstUsers;
+      struct LastUserResult {
+      public:
+        LastUserResult(const InstanceUser &u) : user(u) { }
+      public:
+        const InstanceUser &user;
+        std::set<ApEvent> events;
+        std::vector<unsigned> frontiers;
+      };
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                        TaskTreeCoordinates &&cordinates);
-      PhysicalTemplate(const PhysicalTemplate &rhs);
+      PhysicalTemplate(const PhysicalTemplate &rhs) = delete;
       virtual ~PhysicalTemplate(void);
+    public:
+      PhysicalTemplate& operator=(const PhysicalTemplate &rhs) = delete;
     public:
       virtual size_t get_sharded_template_index(void) const { return 0; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
@@ -859,9 +873,16 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op, 
           InnerContext *context, UniqueID opid, bool has_blocking_call);
     public:
-      void optimize(ReplTraceOp *op, bool do_transitive_reduction);
+      void optimize(ReplTraceOp *op,
+                    bool do_transitive_reduction);
     private:
-      void elide_fences(std::vector<unsigned> &gen, ReplTraceOp *op);
+      void find_all_last_instance_user_events(
+                             std::vector<RtEvent> &frontier_events);
+      void find_last_instance_events(const InstUsers &users,
+                             std::vector<RtEvent> &frontier_events);
+      void compute_frontiers(std::vector<RtEvent> &frontier_events);
+      void elide_fences(std::vector<unsigned> &gen,
+                        std::vector<RtEvent> &ready_events);
       void propagate_merges(std::vector<unsigned> &gen);
       void transitive_reduction(bool deferred);
       void finalize_transitive_reduction(
@@ -872,6 +893,8 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     protected:
+      virtual void sync_compute_frontiers(ReplTraceOp *op,
+                          const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
       virtual void initialize_eliminate_dead_code_frontiers(
                           const std::vector<unsigned> &gen,
@@ -987,8 +1010,8 @@ namespace Legion {
       virtual void record_copy_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                           DistributedID src_did, DistributedID dst_did,
+                           const UniqueInst &src_inst,
+                           const UniqueInst &dst_inst,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            ReductionOpID redop, std::set<RtEvent> &applied);
@@ -1017,36 +1040,28 @@ namespace Legion {
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                                   unsigned idx,
-                                  PhysicalInstance inst,
-                                  DistributedID inst_did,
+                                  const UniqueInst &inst,
                                   RegionNode *node,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   bool update_validity,
                                   std::set<RtEvent> &applied);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr, 
-                           PhysicalInstance inst, DistributedID inst_did,
+                           const UniqueInst &inst,
                            const FieldMask &fill_mask,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization);
     protected:
-      void record_inst(unsigned entry,
-                       IndexSpaceExpression *expr,
-                       const RegionUsage &usage,
-                       PhysicalInstance inst, DistributedID inst_did,
-                       const FieldMask &inst_mask,
-                       std::set<RtEvent> &applied);
-      virtual void add_inst_user(const UniqueInst &inst,
-                         const RegionUsage &usage,
-                         unsigned user, IndexSpaceExpression *user_expr,
-                         const FieldMask &user_mask,
-                         std::set<RtEvent> &applied,
-                         int owner_shard = -1);
-      static void record_expression_inst(InstExprs &cviews,
-                             IndexSpaceExpression *expr,
-                             PhysicalInstance inst, 
-                             DistributedID inst_did,
-                             const FieldMask &inst_mask);
+      void record_instance_user(InstUsers &users,
+                                const UniqueInst &instance,
+                                const RegionUsage &usage,
+                                IndexSpaceExpression *expr,
+                                const FieldMask &mask,
+                                std::set<RtEvent> &applied_events);
+      virtual void record_mutated_instance(const UniqueInst &inst,
+                                           IndexSpaceExpression *expr,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &applied_events);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs,
                                             const TraceLocalID &tlid);
@@ -1093,28 +1108,17 @@ namespace Legion {
     protected:
       // Returns the set of last users for all <view,field mask,index expr>
       // tuples in the inst_exprs, not that this is the 
-      void find_all_last_users(InstExprs &inst_exprs,
-                               std::set<unsigned> &users,
-                               std::set<RtEvent> &ready_events);
-      // Synchronization methods for elide fences that do nothing in 
-      // the base case but can synchronize for multiple shards
-      virtual void elide_fences_pre_sync(ReplTraceOp *op) { }
-      virtual void elide_fences_post_sync(ReplTraceOp *op) { }
-      // Returns the set of last users for a given <view,field mask,index expr>
-      // tuple, this is virtual so it can be overridden in the sharded case
-      virtual void find_last_users(const UniqueInst &inst,
-                                   IndexSpaceExpression *expr,
-                                   const FieldMask &mask,
-                                   std::set<unsigned> &users,
-                                   std::set<RtEvent> &ready_events);
+      void find_all_last_users(const InstUsers &inst_users,
+                               std::set<unsigned> &last_users) const;
+      virtual unsigned find_frontier_event(ApEvent event, 
+                               std::vector<RtEvent> &ready_events);
       // Check to see if any users are mutating these fields and expressions
-      virtual bool are_read_only_users(InstExprs &inst_exprs);
+      virtual bool are_read_only_users(InstUsers &inst_users);
       void rewrite_preconditions(unsigned &precondition,
                            std::set<unsigned> &users,
                            const std::vector<Instruction*> &instructions,
                            std::vector<Instruction*> &new_instructions,
                            std::vector<unsigned> &gen,
-                           std::set<RtEvent> &ready_events,
                            unsigned &merge_starts);
       void parallelize_replay_event(unsigned &event_to_check,
                            unsigned slice_index,
@@ -1166,7 +1170,7 @@ namespace Legion {
       std::map<ApEvent,unsigned> event_map;
       std::map<ApEvent,BarrierAdvance*> managed_barriers;
       std::map<ApEvent,std::vector<BarrierArrival*> > managed_arrivals;
-    private:
+    protected:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
@@ -1174,14 +1178,14 @@ namespace Legion {
       std::map<unsigned/*event*/,unsigned/*consumers*/> crossing_events;
       // Frontiers of a template are a set of users whose events must
       // be carried over to the next replay for eliding the fence at the
-      // beginning. For each user i in frontiers, frontiers[i] points to the
-      // user i's event carried over from the previous replay. This data
-      // structure is constructed by de-duplicating the last users of all
-      // views used in the template, which are stored in inst_users.
-      // - frontiers[idx] == (event idx from the previous trace)
-      // - after each replay, we do assignment 
-      //    events[frontiers[idx]] = events[idx]
+      // beginning. We compute this data structure from the last users of
+      // each physical instance named in the trace and then looking for
+      // the locations of those events inside the trace.
+      // After each replay, we do the assignment
+      // events[frontiers[idx]] = events[idx]
       std::map<unsigned,unsigned> frontiers;
+      // A cache of the specific last user results for individual instances
+      std::map<UniqueInst,std::deque<LastUserResult> > instance_last_users;
     protected:
       RtUserEvent recording_done;
       RtEvent transitive_reduction_done;
@@ -1189,20 +1193,18 @@ namespace Legion {
       std::atomic<
         std::vector<std::vector<unsigned> >*> pending_transitive_reduction;
     private:
-      std::map<TraceLocalID,InstExprs> op_insts;
-      std::map<unsigned,InstExprs>     copy_insts;
-      std::map<unsigned,InstExprs>     src_indirect_insts;
-      std::map<unsigned,InstExprs>     dst_indirect_insts;
+      std::map<TraceLocalID,InstUsers> op_insts;
+      std::map<unsigned,InstUsers>     copy_insts;
+      std::map<unsigned,InstUsers>     src_indirect_insts;
+      std::map<unsigned,InstUsers>     dst_indirect_insts;
       std::vector<IssueAcross*>        across_copies;
+      std::map<DistributedID,InstanceView*> recorded_views;
+      std::set<IndexSpaceExpression*>  recorded_expressions;
     protected:
-      // This data structure holds a set of last users for each view.
-      // Each user (which is an index in the event table) is associated with
-      // a field mask, an index expression representing the working set within
-      // the view, and privilege. For any given pair of view and index
-      // expression, there can be either multiple readers/reducers or a single
-      // writer. THIS IS SHARDED FOR CONTROL REPLICATION!!!
-      InstUsers           inst_users;
-      std::set<InstUser*> all_users;
+      // Capture the names of all the instances that are mutated by this trace
+      // and the index space expressions and fields that were mutated
+      // THIS IS SHARDED FOR CONTROL REPLICATION!!!
+      LegionMap<UniqueInst,FieldMaskSet<IndexSpaceExpression> > mutated_insts;
     protected:
       // Capture the set of regions that we saw operations for, we'll use this
       // at the end of the trace capture to compute the equivalence sets for
@@ -1246,12 +1248,7 @@ namespace Legion {
     class ShardedPhysicalTemplate : public PhysicalTemplate {
     public:
       enum UpdateKind {
-        UPDATE_INST_USER,
-        UPDATE_LAST_USER,
-        FIND_LAST_USERS_REQUEST,
-        FIND_LAST_USERS_RESPONSE,
-        FIND_FRONTIER_REQUEST,
-        FIND_FRONTIER_RESPONSE,
+        UPDATE_MUTATED_INST,
         READ_ONLY_USERS_REQUEST,
         READ_ONLY_USERS_RESPONSE,
         TEMPLATE_BARRIER_REFRESH,
@@ -1384,16 +1381,15 @@ namespace Legion {
     public:
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
+      ApBarrier find_trace_shard_frontier(ApEvent event, ShardID remote_shard);
+      void record_trace_shard_frontier(unsigned frontier, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_trace_update(const void *args, Runtime *rt);
     protected:
-      bool handle_update_inst_user(const UniqueInst &inst, 
+      bool handle_update_mutated_inst(const UniqueInst &inst, 
                             IndexSpaceExpression *ex, Deserializer &derez, 
                             std::set<RtEvent> &applied, RtUserEvent done, 
                             const DeferTraceUpdateArgs *dargs = NULL);
-      void handle_find_last_users(const UniqueInst &inst, 
-                            IndexSpaceExpression *ex, Deserializer &derez,
-                            std::set<RtEvent> &applied);
     protected:
 #ifdef DEBUG_LEGION
       virtual unsigned convert_event(const ApEvent &event, bool check = true);
@@ -1403,29 +1399,23 @@ namespace Legion {
       static AddressSpaceID find_event_space(ApEvent event);
       virtual Replayable check_replayable(ReplTraceOp *op, 
           InnerContext *context, UniqueID opid, bool has_blocking_call);
-      virtual void add_inst_user(const UniqueInst &inst,
-                         const RegionUsage &usage,
-                         unsigned user, IndexSpaceExpression *user_expr,
-                         const FieldMask &user_mask,
-                         std::set<RtEvent> &applied,
-                         int owner_shard = -1);
     protected:
       ShardID find_inst_owner(const UniqueInst &inst);
       void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
-      void find_last_users_sharded(const UniqueInst &inst,
-                                   IndexSpaceExpression *expr,
-                                   const FieldMask &mask,
-                       std::set<std::pair<unsigned,ShardID> > &sharded_users);
     protected:
-      virtual void elide_fences_pre_sync(ReplTraceOp *op);
-      virtual void elide_fences_post_sync(ReplTraceOp *op); 
-      virtual void find_last_users(const UniqueInst &inst,
-                                   IndexSpaceExpression *expr,
-                                   const FieldMask &mask,
-                                   std::set<unsigned> &users,
-                                   std::set<RtEvent> &ready_events);
-      virtual bool are_read_only_users(InstExprs &inst_exprs);
+      virtual unsigned find_frontier_event(ApEvent event,
+                        std::vector<RtEvent> &ready_events);
+      virtual void record_mutated_instance(const UniqueInst &inst,
+                                           IndexSpaceExpression *expr,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &applied_events);
+      virtual bool are_read_only_users(InstUsers &inst_users);
+      virtual void sync_compute_frontiers(ReplTraceOp *op,
+                          const std::vector<RtEvent> &frontier_events);
       virtual void initialize_generators(std::vector<unsigned> &new_gen);
+      virtual void initialize_eliminate_dead_code_frontiers(
+                          const std::vector<unsigned> &gen,
+                                std::vector<bool> &used);
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
                           std::vector<unsigned> &inv_topo_order);
@@ -1472,10 +1462,6 @@ namespace Legion {
       size_t updated_frontiers;
       // An event to signal when our frontiers are ready
       RtUserEvent update_frontiers_ready;
-    protected:
-      // This is a data structure that tracks last users whose events we
-      // own eventhough their instance is on a remote node
-      std::set<unsigned> local_last_users;
     protected:
       // Data structures for fence elision
       // Local frontiers records barriers that should be arrived on 
@@ -1638,6 +1624,7 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
+      friend class ShardedPhysicalTemplate;
       unsigned lhs;
       std::set<unsigned> rhs;
     };

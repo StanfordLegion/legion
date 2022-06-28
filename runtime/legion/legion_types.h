@@ -830,6 +830,8 @@ namespace Legion {
       SEND_VIEW_REGISTER_USER,
       SEND_VIEW_FIND_COPY_PRE_REQUEST,
       SEND_VIEW_ADD_COPY_USER,
+      SEND_VIEW_FIND_LAST_USERS_REQUEST,
+      SEND_VIEW_FIND_LAST_USERS_RESPONSE,
       SEND_VIEW_REPLICATION_REQUEST,
       SEND_VIEW_REPLICATION_RESPONSE,
       SEND_VIEW_REPLICATION_REMOVAL,
@@ -851,6 +853,8 @@ namespace Legion {
       SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
+      SEND_REPL_TRACE_FRONTIER_REQUEST,
+      SEND_REPL_TRACE_FRONTIER_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
@@ -1073,6 +1077,8 @@ namespace Legion {
         "Send View Register User",                                    \
         "Send View Find Copy Preconditions Request",                  \
         "Send View Add Copy User",                                    \
+        "Send View Find Last Users Request",                          \
+        "Send View Find Last Users Response",                         \
         "Send View Replication Request",                              \
         "Send View Replication Response",                             \
         "Send View Replication Removal",                              \
@@ -1094,6 +1100,8 @@ namespace Legion {
         "Send Replicate Broadcast Update",                            \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
+        "Send Replicate Trace Frontier Request",                      \
+        "Send Replicate Trace Frontier Response",                     \
         "Send Replicate Trace Update",                                \
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
@@ -1627,7 +1635,7 @@ namespace Legion {
       COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
-      COLLECTIVE_LOC_93 = 93,
+      //COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,

@@ -99,6 +99,16 @@ namespace Legion {
         delete manager;
     }
 
+    //--------------------------------------------------------------------------
+    AddressSpaceID InstanceView::get_analysis_space(const DomainPoint &p) const
+    //--------------------------------------------------------------------------
+    {
+      if (manager->is_collective_manager())
+        return manager->get_instance(p).address_space();
+      else
+        return logical_owner;
+    }
+
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void InstanceView::process_replication_request(AddressSpaceID source,
@@ -326,6 +336,89 @@ namespace Legion {
         if (inst_view->is_logical_owner())
           inst_view->send_remote_valid_decrement(source);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::handle_view_find_last_users_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      std::vector<ApEvent> *target;
+      derez.deserialize(target);
+      DomainPoint collective_point;
+      derez.deserialize(collective_point);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask mask;
+      derez.deserialize(mask);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::set<ApEvent> result;
+      std::vector<RtEvent> applied;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
+      inst_view->find_last_users(result, collective_point,
+                                 usage, mask, expr, applied);
+      if (!result.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(result.size());
+          for (std::set<ApEvent>::const_iterator it =
+                result.begin(); it != result.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(done);
+          if (!applied.empty())
+            rez.serialize(Runtime::merge_events(applied));
+          else
+            rez.serialize(RtEvent::NO_RT_EVENT);
+        }
+        runtime->send_view_find_last_users_response(source, rez);
+      }
+      else
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::handle_view_find_last_users_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::set<ApEvent> *target;
+      derez.deserialize(target);
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        ApEvent event;
+        derez.deserialize(event);
+        target->insert(event);
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
+      RtEvent pre;
+      derez.deserialize(pre);
+      Runtime::trigger_event(done, pre);
     }
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -870,6 +963,71 @@ namespace Legion {
                               index, preconditions, trace_recording);
           }
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_last_users(const RegionUsage &usage,
+                                   IndexSpaceExpression *expr,
+                                   const bool expr_dominates,
+                                   const FieldMask &mask,
+                                   std::set<ApEvent> &last_events) const
+    //--------------------------------------------------------------------------
+    {
+      // See if there are any users below that we need to traverse
+      if (!subviews.empty() && !(subviews.get_valid_mask() * mask))
+      {
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          // If the expr dominates then we don't even have
+          // to do the intersection test
+          if (expr_dominates)
+          {
+            it->first->find_last_users(usage, it->first->view_expr,
+                            true/*dominate*/, overlap, last_events);
+            continue;
+          }
+          if (it->first->view_expr == expr)
+          {
+            it->first->find_last_users(usage, expr,
+                true/*dominate*/, overlap, last_events);
+            continue;
+          }
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(it->first->view_expr, expr);
+          if (!expr_overlap->is_empty())
+          {
+            const bool dominates = 
+              (expr_overlap->expr_id == it->first->view_expr->expr_id) ||
+              (expr_overlap->get_volume() == it->first->get_view_volume());
+            it->first->find_last_users(usage, expr_overlap,
+                          dominates, overlap, last_events); 
+          }
+        }
+      }
+      FieldMask dominated;
+      // Now we can traverse at this level
+      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      // We dominate in this case so we can do filtering
+      if (!current_epoch_users.empty())
+      {
+        FieldMask observed, non_dominated;
+        find_current_preconditions(usage, mask, expr, 
+                                   expr_dominates, last_events,
+                                   observed, non_dominated);
+        if (!!observed)
+          dominated = observed - non_dominated;
+      }
+      if (!previous_epoch_users.empty())
+      {
+        const FieldMask previous_mask = mask - dominated;
+        if (!!previous_mask)
+          find_previous_preconditions(usage, previous_mask,
+                                      expr, expr_dominates, last_events);
       }
     }
 
@@ -2063,6 +2221,83 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ExprView::find_current_preconditions(const RegionUsage &usage,
+                                              const FieldMask &mask,
+                                              IndexSpaceExpression *expr,
+                                              const bool expr_covers,
+                                              std::set<ApEvent> &last_events,
+                                              FieldMask &observed,
+                                              FieldMask &non_dominated) const
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
+      {
+        const EventUsers &event_users = cit->second;
+        FieldMask overlap = event_users.get_valid_mask() & mask;
+        if (!overlap)
+          continue;
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = mask & it->second;
+          if (!user_overlap)
+            continue;
+          bool dominated = true;
+          // We're just reading these and we want to see all prior
+          // dependences so just give dummy opid and index
+          if (has_local_precondition<true>(it->first, usage, expr,
+                   0/*opid*/, 0/*index*/, expr_covers, dominated)) 
+          {
+            last_events.insert(cit->first);
+            if (dominated)
+              observed |= user_overlap;
+            else
+              non_dominated |= user_overlap;
+          }
+          else
+            non_dominated |= user_overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_previous_preconditions(const RegionUsage &usage,
+                                            const FieldMask &mask,
+                                            IndexSpaceExpression *expr,
+                                            const bool expr_covers,
+                                            std::set<ApEvent> &last_users) const
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (LegionMap<ApEvent,EventUsers>::const_iterator pit = 
+            previous_epoch_users.begin(); pit != 
+            previous_epoch_users.end(); pit++)
+      {
+        const EventUsers &event_users = pit->second;
+        FieldMask overlap = mask & event_users.get_valid_mask();
+        if (!overlap)
+          continue;
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = overlap & it->second;
+          if (!user_overlap)
+            continue;
+          // We're just reading these and we want to see all prior
+          // dependences so just give dummy opid and index
+          if (has_local_precondition<true>(it->first, usage, expr, 
+                               0/*opid*/, 0/*index*/, expr_covers))
+          {
+            last_users.insert(pit->first);
+            break;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ExprView::find_previous_filter_users(const FieldMask &dom_mask,
                                             EventFieldUsers &filter_users)
     //--------------------------------------------------------------------------
@@ -2894,6 +3129,48 @@ namespace Legion {
             LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
                                collect_event, op_id, index, trace_recording);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_last_users(std::set<ApEvent> &events,
+                                      const DomainPoint &collective_point,
+                                      const RegionUsage &usage,
+                                      const FieldMask &mask,
+                                      IndexSpaceExpression *expr,
+                                      std::vector<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we're on the right node to perform this analysis
+      const AddressSpaceID target_space = get_analysis_space(collective_point);
+      if (target_space != local_space)
+      {
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&events);
+          rez.serialize(collective_point);
+          rez.serialize(usage);
+          rez.serialize(mask);
+          expr->pack_expression(rez, target_space);
+          rez.serialize(ready);
+        }
+        runtime->send_view_find_last_users_request(target_space, rez);
+        ready_events.push_back(ready);
+      }
+      else
+      {
+        const bool expr_dominates = 
+          (expr->expr_id == current_users->view_expr->expr_id) ||
+          (expr->get_volume() == current_users->get_view_volume());
+        {
+          // Need a read-only copy of the expr_lock to traverse the tree
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          current_users->find_last_users(usage, expr, expr_dominates,
+                                         mask, events);
+        }
       }
     }
 
@@ -4330,8 +4607,7 @@ namespace Legion {
           // With bulk reduction copies we're always doing atomic reductions
           const RegionUsage usage(LEGION_REDUCE, LEGION_ATOMIC, redop);
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(usage, copy_mask,
-                                      copy_expr, preconditions);
+          find_reducing_preconditions(usage,copy_mask,copy_expr,preconditions);
         }
         else
         {
@@ -4402,6 +4678,58 @@ namespace Legion {
         {
           WrapperReferenceMutator mutator(applied_events);
           defer_collect_user(get_manager(), term_event, collect_event,&mutator);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_last_users(std::set<ApEvent> &events,
+                                        const DomainPoint &collective_point,
+                                        const RegionUsage &usage,
+                                        const FieldMask &mask,
+                                        IndexSpaceExpression *expr,
+                                        std::vector<RtEvent> &ready_events)const
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we're on the right node to perform this analysis
+      const AddressSpaceID target_space = get_analysis_space(collective_point);
+      if (target_space != local_space)
+      {
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(&events);
+          rez.serialize(collective_point);
+          rez.serialize(usage);
+          rez.serialize(mask);
+          expr->pack_expression(rez, target_space);
+          rez.serialize(ready);
+        }
+        runtime->send_view_find_last_users_request(target_space, rez);
+        ready_events.push_back(ready);
+      }
+      else
+      {
+        if (IS_READ_ONLY(usage))
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reading_preconditions(mask, expr, events);
+        }
+        else if (usage.redop > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(usage.redop == manager->redop);
+#endif
+          // With bulk reduction copies we're always doing atomic reductions
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reducing_preconditions(usage, mask, expr, events);
+        }
+        else
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_initializing_last_users(mask, expr, events);
         }
       }
     }
@@ -4562,13 +4890,76 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               std::set<ApEvent> &wait_on) const
+                                         IndexSpaceExpression *user_expr,
+                                         std::set<ApEvent> &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      find_dependences(writing_users, user_expr, user_mask, wait_on);
-      find_dependences(reduction_users, user_expr, user_mask, wait_on);
+      find_dependences(writing_users, user_expr, user_mask, preconditions);
+      find_dependences(reduction_users, user_expr, user_mask, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_initializing_last_users(
+                                         const FieldMask &user_mask,
+                                         IndexSpaceExpression *user_expr,
+                                         std::set<ApEvent> &preconditions) const
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      // we know that reduces dominate earlier fills so we don't need to check
+      // those, but we do need to check both reducers and readers since it is
+      // possible there were no readers of reduction instance
+      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
+            uit != reduction_users.end(); uit++)
+      {
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+          continue;
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          preconditions.insert(uit->first);
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
+        }
+      }
+      for (EventFieldUsers::const_iterator uit = reading_users.begin();
+            uit != reading_users.end(); uit++)
+      {
+        FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+          continue;
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          preconditions.insert(uit->first);
+          // If we've captured a dependence on this event for every
+          // field then we can exit out early
+          event_mask -= overlap;
+          if (!event_mask)
+            break;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

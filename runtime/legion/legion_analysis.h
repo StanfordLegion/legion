@@ -161,6 +161,41 @@ namespace Legion {
     };
 
     /**
+     * \struct UniqueInst
+     * A small helper class for uniquely naming a physical
+     * instance for the purposes of physical trace recording
+     */
+    struct UniqueInst {
+    public:
+      UniqueInst(void) : view_did(0) { }
+      UniqueInst(InstanceView *v, const DomainPoint &point);
+      UniqueInst(DistributedID did, const DomainPoint &point);
+    public:
+      inline bool operator<(const UniqueInst &rhs) const
+      {
+        if (view_did < rhs.view_did) return true;
+        if (view_did > rhs.view_did) return false;
+        return (collective_point < rhs.collective_point);
+      }
+      inline bool operator==(const UniqueInst &rhs) const
+      {
+        if (view_did != rhs.view_did) return false;
+        return (collective_point == rhs.collective_point);
+      }
+      inline bool operator!=(const UniqueInst &rhs) const
+        { return !this->operator==(rhs); }
+    public:
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+      AddressSpaceID get_analysis_space(Runtime *runtime) const;
+    public:
+      // Distributed ID for the view to the instance
+      DistributedID view_did;
+      // Point for the case of collective instances
+      DomainPoint collective_point;
+    };
+
+    /**
      * \interface PhysicalTraceRecorder
      * This interface describes all the methods that need to be 
      * implemented for an object to act as the recorder of a 
@@ -228,12 +263,11 @@ namespace Legion {
       virtual void record_copy_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                           DistributedID src_did, DistributedID dst_did,
+                           const UniqueInst &src_inst, 
+                           const UniqueInst &dst_inst,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            ReductionOpID redop, std::set<RtEvent> &applied) = 0;
-      typedef std::pair<PhysicalInstance,DistributedID> UniqueInst;
       typedef LegionMap<UniqueInst,FieldMask> AcrossInsts;
       virtual void record_across_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
@@ -258,15 +292,14 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
-                           PhysicalInstance inst, DistributedID inst_did,
+                           const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization) = 0;
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                           unsigned idx,
-                          PhysicalInstance inst,
-                          DistributedID did,
+                          const UniqueInst &inst,
                           RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
@@ -378,8 +411,8 @@ namespace Legion {
       virtual void record_copy_insts(ApEvent lhs, const TraceLocalID &tlid,
                            unsigned src_idx, unsigned dst_idx,
                            IndexSpaceExpression *expr,
-                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                           DistributedID src_did, DistributedID dst_did,
+                           const UniqueInst &src_inst,
+                           const UniqueInst &dst_inst,
                            const FieldMask &src_mask, const FieldMask &dst_mask,
                            PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            ReductionOpID redop, std::set<RtEvent> &applied);
@@ -406,15 +439,14 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
-                           PhysicalInstance inst, DistributedID inst_did,
+                           const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization);
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                           unsigned idx,
-                          PhysicalInstance inst,
-                          DistributedID inst_did,
+                          const UniqueInst &inst,
                           RegionNode *node,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
@@ -593,7 +625,7 @@ namespace Legion {
     struct PhysicalTraceInfo : public TraceInfo {
     public:
       PhysicalTraceInfo(Operation *op, unsigned index, bool init);
-      PhysicalTraceInfo(const TraceInfo &info, unsigned index, 
+      PhysicalTraceInfo(const TraceInfo &info, unsigned index,
                         bool update_validity = true);
       // Weird argument order to help the compiler avoid ambiguity
       PhysicalTraceInfo(unsigned src_idx, const TraceInfo &info, 
@@ -655,22 +687,19 @@ namespace Legion {
         }
       inline void record_fill_inst(ApEvent lhs,
                                    IndexSpaceExpression *expr,
-                                   PhysicalInstance inst,
-                                   DistributedID inst_did,
+                                   const UniqueInst &inst,
                                    const FieldMask &fill_mask,
                                    std::set<RtEvent> &applied,
                                    const bool reduction_initialization) const
         {
           sanity_check();
-          rec->record_fill_inst(lhs, expr, inst, inst_did, fill_mask,
+          rec->record_fill_inst(lhs, expr, inst, fill_mask,
                                 applied, reduction_initialization);
         }
       inline void record_copy_insts(ApEvent lhs,
                                     IndexSpaceExpression *expr,
-                                    PhysicalInstance src_inst,
-                                    PhysicalInstance dst_inst,
-                                    DistributedID src_did,
-                                    DistributedID dst_did,
+                                    const UniqueInst &src_inst,
+                                    const UniqueInst &dst_inst,
                                     const FieldMask &src_mask,
                                     const FieldMask &dst_mask,
                                     ReductionOpID redop,
@@ -678,13 +707,12 @@ namespace Legion {
         {
           sanity_check();
           rec->record_copy_insts(lhs, tlid, index, dst_index, expr,
-                                 src_inst, dst_inst, src_did, dst_did,
-                                 src_mask, dst_mask, LEGION_READ_PRIV, 
-                                 redop > 0 ? LEGION_REDUCE_PRIV : 
-                                  LEGION_WRITE_PRIV, redop, applied);
+                                 src_inst, dst_inst, src_mask, dst_mask, 
+                                 LEGION_READ_PRIV, (redop > 0) ?
+                                  LEGION_REDUCE_PRIV : LEGION_WRITE_PRIV,
+                                 redop, applied);
         }
-      typedef LegionMap<std::pair<PhysicalInstance,DistributedID>,FieldMask> 
-        AcrossInsts;
+      typedef LegionMap<UniqueInst,FieldMask> AcrossInsts;
       inline void record_across_insts(ApEvent lhs, unsigned idx1, unsigned idx2,
                                       PrivilegeMode mode1, PrivilegeMode mode2,
                                       IndexSpaceExpression *expr,
@@ -710,12 +738,12 @@ namespace Legion {
         }
       inline void record_op_inst(const RegionUsage &usage,
                                  const FieldMask &user_mask,
-                                 PhysicalInstance inst, DistributedID inst_did,
+                                 const UniqueInst &inst,
                                  RegionNode *node,
                                  std::set<RtEvent> &applied) const
         {
           sanity_check();
-          rec->record_op_inst(tlid, index, inst, inst_did, node, usage, 
+          rec->record_op_inst(tlid, index, inst, node, usage, 
                               user_mask, update_validity, applied);
         }
     public:
