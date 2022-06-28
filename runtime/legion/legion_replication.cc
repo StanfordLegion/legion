@@ -4535,13 +4535,6 @@ namespace Legion {
         Runtime::phase_barrier_arrive(ready_barrier, 1/*count*/);
       if (kind == FIELD_DELETION)
       {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
         // Field deletions need to compute their version infos
         if (is_first_local_shard)
         {
