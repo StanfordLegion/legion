@@ -2444,7 +2444,6 @@ Event RandomAffineTest<N1, T1, N2, T2, FT,TRANSFORM>::perform_partitioning(void)
 
   for(int i = 0; i < num_pieces; i++) {
     log_app.debug() << "preimage[" << i << "] = " << ss_preimages[i];
-    // TODO(apryakhin@): Fix
     dump_sparse_index_space("", ss_preimages[i]);
   }
 
