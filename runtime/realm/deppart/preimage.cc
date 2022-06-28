@@ -639,12 +639,12 @@ namespace Realm {
   template <typename BM>
   void StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
       std::map<int, BM *> &bitmasks) {
-    for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid;
-         it2.step()) {
+    for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid; it2.step()) {
       // now iterate over each point
       for (PointInRectIterator<N, T> pir(it2.rect); pir.valid; pir.step()) {
         // fetch the pointer and test it against every possible target (ugh)
         Point<N2, T2> ptr = transform[pir.p];
+
         for (size_t i = 0; i < targets.size(); i++)
           if (targets[i].contains(ptr)) {
             BM *&bmp = bitmasks[i];

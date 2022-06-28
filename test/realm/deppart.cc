@@ -2282,8 +2282,8 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
   }
 
   colors.resize(num_colors);
-  for(int i = 0; i < num_colors; i++)
-    colors[i] = randval<FT>(rs);
+
+  for (int i = 0; i < num_colors; i++) colors[i] = randval<FT>(rs);
 
   dense_images.resize(transforms.size());
   sparse_images.resize(transforms.size());
@@ -2463,8 +2463,7 @@ int RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::perform_dynamic_checks(void)
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
-    const IndexSpace<N2, T2> &root,
-    const TRANSFORM& transform,
+    const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
     const std::vector<IndexSpace<N2, T1>> &images) {
   int image_points = 0;
   for (const auto &image : images) {
