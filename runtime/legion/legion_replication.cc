@@ -8329,7 +8329,7 @@ namespace Legion {
       : radix(r)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < total_spaces; idx++)
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
         unique_sorted_spaces.add(mapping[idx]);
       total_spaces = unique_sorted_spaces.size();
     }
