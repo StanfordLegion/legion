@@ -4582,8 +4582,6 @@ local function attach_name_and_type(cx, fs, field_id, field_name, field_type)
     actions:insert(
       quote
         var type_id : uint32 = [std.get_type_id(field_type)]
-        c.printf("attaching type tag %d to semantic id %d for field id %d\n",
-                 type_id, [std.get_type_semantic_tag()], field_id)
         c.legion_field_id_attach_semantic_information(
           [cx.runtime], [fs], field_id, [std.get_type_semantic_tag()], &type_id, terralib.sizeof(uint32), false)
     end)
