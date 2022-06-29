@@ -3799,6 +3799,7 @@ namespace Legion {
                                                        IndexPartition pid,
                                                        LogicalRegion handle, 
                                                        LogicalRegion parent,
+                                                       IndexSpace color_space,
                                                        FieldID fid,
                                                        MapperID id, 
                                                        MappingTagID t,
@@ -3834,7 +3835,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_field(pid, handle, parent, fid);
+        check_by_field(pid, color_space, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -3844,6 +3845,7 @@ namespace Legion {
 #endif
                                                        ApEvent ready_event,
                                                        IndexPartition pid,
+                                                       IndexSpace handle,
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
                                                    MapperID id, MappingTagID t,
@@ -3889,7 +3891,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image(pid, projection, parent, fid);
+        check_by_image(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -3900,6 +3902,7 @@ namespace Legion {
 #endif
                                                          ApEvent ready_event,
                                                          IndexPartition pid,
+                                                         IndexSpace handle,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
@@ -3948,7 +3951,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image_range(pid, projection, parent, fid);
+        check_by_image_range(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------

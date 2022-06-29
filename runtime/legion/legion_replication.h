@@ -1796,7 +1796,8 @@ namespace Legion {
       void initialize_by_field(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag,
+                               IndexSpace color_space, FieldID fid, 
+                               MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_image(ReplicateContext *ctx,
@@ -1804,7 +1805,7 @@ namespace Legion {
                                ShardID target,
 #endif
                                ApEvent ready_event, IndexPartition pid,
-                               LogicalPartition projection,
+                               IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
@@ -1815,7 +1816,7 @@ namespace Legion {
                                ShardID target,
 #endif
                                ApEvent ready_event, IndexPartition pid,
-                               LogicalPartition projection,
+                               IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,

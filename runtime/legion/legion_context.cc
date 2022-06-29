@@ -4859,7 +4859,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
-                                   fid, id, tag, marg);
+                                   color_space, fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4926,7 +4926,8 @@ namespace Legion {
             handle, color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image(this,pid,projection,parent,fid,id,tag,marg);
+      part_op->initialize_by_image(this, pid, handle, projection, parent,
+                                   fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4993,7 +4994,7 @@ namespace Legion {
             handle, color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image_range(this, pid, projection, parent, 
+      part_op->initialize_by_image_range(this, pid, handle, projection, parent,
                                          fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -14111,8 +14112,8 @@ namespace Legion {
       const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_by_field(this, index_partition_allocator_shard,
                                    pending_partition_barrier, pid, handle, 
-                                   parent_priv, fid, id, tag, marg,
-                                   dependent_partition_barrier);
+                                   parent_priv, color_space, fid, id, tag,
+                                   marg, dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -14206,8 +14207,8 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
 #endif
-                                   pending_partition_barrier, 
-                                   pid, projection, parent, fid, id, tag, marg,
+                                   pending_partition_barrier, pid, handle, 
+                                   projection, parent, fid, id, tag, marg,
                                    owner_shard->shard_id, total_shards,
                                    dependent_partition_barrier);
 #ifdef DEBUG_LEGION
@@ -14303,7 +14304,7 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
 #endif
-                                         pending_partition_barrier, pid,
+                                         pending_partition_barrier, pid, handle,
                                          projection, parent, fid, id, tag, marg,
                                          owner_shard->shard_id, total_shards,
                                          dependent_partition_barrier);
