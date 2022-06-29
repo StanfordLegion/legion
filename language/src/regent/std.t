@@ -2903,6 +2903,10 @@ function std.cross_product(...)
     return self:partitions()[i or 1]
   end
 
+  function st:colors()
+    return self:partition():colors()
+  end
+
   function st:fspace()
     return self:partition():fspace()
   end
