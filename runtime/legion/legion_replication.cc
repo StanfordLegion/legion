@@ -8326,14 +8326,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
-      : total_spaces(mapping.size()), radix(r)
+      : radix(r)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < total_spaces; idx++)
         unique_sorted_spaces.add(mapping[idx]);
-#ifdef DEBUG_LEGION
-      assert(unique_sorted_spaces.size() == total_spaces);
-#endif
+      total_spaces = unique_sorted_spaces.size();
     }
 
     //--------------------------------------------------------------------------
@@ -10639,7 +10637,7 @@ namespace Legion {
       // Send our messages
       send_messages();
       // Then trigger our event to indicate that we are ready
-      Runtime::trigger_event(done_event);
+      Runtime::trigger_event(done_event, post_broadcast());
     }
 
     //--------------------------------------------------------------------------
@@ -10721,8 +10719,9 @@ namespace Legion {
       {
         if (local_shard != target)
           send_message();
+        RtEvent postcondition = post_gather();
         if (done_event.exists())
-          Runtime::trigger_event(done_event);
+          Runtime::trigger_event(done_event, postcondition);
       }
     }
 
@@ -10759,8 +10758,9 @@ namespace Legion {
       {
         if (local_shard != target)
           send_message();
+        RtEvent postcondition = post_gather();
         if (done_event.exists())
-          Runtime::trigger_event(done_event);
+          Runtime::trigger_event(done_event, postcondition);
       }
     }
 
@@ -11981,58 +11981,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardSyncTree::ShardSyncTree(ReplicateContext *ctx, ShardID origin,
                                  CollectiveIndexLocation loc)
-      : BroadcastCollective(loc, ctx, origin), 
-        is_origin(origin == ctx->owner_shard->shard_id)
+      : GatherCollective(loc, ctx, origin) 
     //--------------------------------------------------------------------------
     {
-      if (is_origin)
-      {
-        // All we need to do is the broadcast and then wait for 
-        // everything to be done
-        perform_collective_async();
-        // Now wait for the result to be ready
-        if (!done_preconditions.empty())
-        {
-          RtEvent ready = Runtime::merge_events(done_preconditions);
-          ready.wait();
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
     ShardSyncTree::~ShardSyncTree(void)
     //--------------------------------------------------------------------------
     {
-      if (!is_origin)
-      {
-        // Perform the collective wait
-        perform_collective_wait();
-        // Trigger our done event when all the preconditions are ready
-#ifdef DEBUG_LEGION
-        assert(done_event.exists());
-#endif
-        if (!done_preconditions.empty())
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(done_preconditions));
-        else
-          Runtime::trigger_event(done_event);
-      }
     }
 
     //--------------------------------------------------------------------------
     void ShardSyncTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      RtUserEvent next = Runtime::create_rt_user_event();
-      rez.serialize(next);
-      done_preconditions.insert(next);
+      RtEvent precondition = get_done_event();
+      rez.serialize(precondition);
     }
 
     //--------------------------------------------------------------------------
     void ShardSyncTree::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      derez.deserialize(done_event);
+      RtEvent postcondition;
+      derez.deserialize(postcondition);
+      postconditions.push_back(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardSyncTree::post_gather(void)
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::merge_events(postconditions);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12042,34 +12023,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardEventTree::ShardEventTree(ReplicateContext *ctx, ShardID origin,
                                    CollectiveID id)
-      : BroadcastCollective(ctx, id, origin),
-        is_origin(origin == ctx->owner_shard->shard_id)
+      : BroadcastCollective(ctx, id, origin)
     //--------------------------------------------------------------------------
     {
-      if (!is_origin)
-      {
-        local_event = Runtime::create_rt_user_event();
-        trigger_event = local_event;
-      }
+      if (!is_origin())
+        precondition = get_done_event();
     }
 
     //--------------------------------------------------------------------------
     ShardEventTree::~ShardEventTree(void)
     //--------------------------------------------------------------------------
     {
-      if (finished_event.exists() && !finished_event.has_triggered())
-        finished_event.wait();
     }
 
     //--------------------------------------------------------------------------
-    void ShardEventTree::signal_tree(RtEvent precondition)
+    void ShardEventTree::signal_tree(RtEvent pre)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_origin);
-      assert(!trigger_event.exists());
+      assert(is_origin());
+      assert(!precondition.exists());
 #endif
-      trigger_event = precondition;
+      precondition = pre;
       perform_collective_async();
     }
 
@@ -12077,27 +12052,21 @@ namespace Legion {
     RtEvent ShardEventTree::get_local_event(void)
     //--------------------------------------------------------------------------
     {
-      finished_event = perform_collective_wait(false/*block*/); 
-      return local_event;
+      return perform_collective_wait(false/*block*/); 
     }
 
     //--------------------------------------------------------------------------
     void ShardEventTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize(trigger_event);
+      rez.serialize(precondition);
     }
 
     //--------------------------------------------------------------------------
     void ShardEventTree::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(local_event.exists());
-#endif
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      Runtime::trigger_event(local_event, precondition);
+      derez.deserialize(postcondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12139,7 +12108,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(future_size);
-      rez.serialize(has_future_size);
+      rez.serialize<bool>(has_future_size);
       ShardEventTree::pack_collective(rez);
     }
 
@@ -12148,11 +12117,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(future_size);
-      derez.deserialize(has_future_size);
+      derez.deserialize<bool>(has_future_size);
+      ShardEventTree::unpack_collective(derez);
       if ((future != NULL) && has_future_size)
         future->set_future_result_size(future_size, 
                   context->runtime->address_space);
-      ShardEventTree::unpack_collective(derez);
     }
 
     /////////////////////////////////////////////////////////////

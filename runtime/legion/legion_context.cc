@@ -18419,6 +18419,7 @@ namespace Legion {
       // Shard 0 has to wait for all the other shards to get here
       // too before it can do the deletion
       ShardSyncTree sync_point(this, 0/*origin*/, COLLECTIVE_LOC_72);
+      sync_point.perform_collective_sync();
       if (owner_shard->shard_id == 0)
         InnerContext::destroy_phase_barrier(pb);
     }

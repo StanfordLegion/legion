@@ -145,6 +145,7 @@ namespace Legion {
       virtual void perform_collective_async(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
+      virtual RtEvent post_broadcast(void) { return RtEvent::NO_RT_EVENT; }
     public:
       RtEvent get_done_event(void) const;
       inline bool is_origin(void) const
@@ -178,7 +179,9 @@ namespace Legion {
       // Make sure to call this in the destructor of anything not the target
       virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
+      virtual RtEvent post_gather(void) { return RtEvent::NO_RT_EVENT; }
       inline bool is_target(void) const { return (target == local_shard); }
+      inline RtEvent get_done_event(void) const { return done_event; }
       // Use this method in case we don't actually end up using the collective
       void elide_collective(void);
     protected:
@@ -470,24 +473,20 @@ namespace Legion {
      * all the other shards have reached a certain point in the 
      * execution of the program.
      */
-    class ShardSyncTree : public BroadcastCollective {
+    class ShardSyncTree : public GatherCollective {
     public:
       ShardSyncTree(ReplicateContext *ctx, ShardID origin, 
                     CollectiveIndexLocation loc);
-      ShardSyncTree(const ShardSyncTree &rhs) 
-        : BroadcastCollective(rhs), is_origin(false) 
-        { assert(false); }
+      ShardSyncTree(const ShardSyncTree &rhs) = delete;
       virtual ~ShardSyncTree(void);
     public:
-      ShardSyncTree& operator=(const ShardSyncTree &rhs) 
-        { assert(false); return *this; }
+      ShardSyncTree& operator=(const ShardSyncTree &rhs) = delete; 
     public:
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
     protected:
-      RtUserEvent done_event;
-      mutable std::set<RtEvent> done_preconditions;
-      const bool is_origin;
+      std::vector<RtEvent> postconditions;
     };
 
     /**
@@ -500,23 +499,19 @@ namespace Legion {
     public:
       ShardEventTree(ReplicateContext *ctx, ShardID origin, 
                      CollectiveID id);
-      ShardEventTree(const ShardEventTree &rhs) 
-        : BroadcastCollective(rhs), is_origin(false) { assert(false); }
+      ShardEventTree(const ShardEventTree &rhs) = delete; 
       virtual ~ShardEventTree(void);
     public:
-      ShardEventTree& operator=(const ShardEventTree &rhs) 
-        { assert(false); return *this; }
+      ShardEventTree& operator=(const ShardEventTree &rhs) = delete; 
     public:
       void signal_tree(RtEvent precondition); // origin
       RtEvent get_local_event(void);
     public:
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_broadcast(void) { return postcondition; }
     protected:
-      RtUserEvent local_event;
-      RtEvent trigger_event;
-      RtEvent finished_event;
-      const bool is_origin;
+      RtEvent precondition, postcondition;
     };
 
     /**
@@ -528,12 +523,10 @@ namespace Legion {
     public:
       SingleTaskTree(ReplicateContext *ctx, ShardID origin, 
                      CollectiveID id, FutureImpl *impl);
-      SingleTaskTree(const SingleTaskTree &rhs)
-        : ShardEventTree(rhs), future(NULL) { assert(false); }
+      SingleTaskTree(const SingleTaskTree &rhs) = delete;
       virtual ~SingleTaskTree(void);
     public:
-      SingleTaskTree & operator=(const SingleTaskTree &rhs) 
-        { assert(false); return *this; }
+      SingleTaskTree & operator=(const SingleTaskTree &rhs) = delete;
     public:
       void broadcast_future_size(RtEvent precondition, 
           size_t future_size, bool has_size);
