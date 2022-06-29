@@ -10511,7 +10511,8 @@ namespace Legion {
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
           send_remote_valid_increment(
-            collective_mapping->get_parent(owner_space, local_space), mutator);
+            collective_mapping->get_parent(owner_space, local_space),
+            mutator, initialized);
         else
           send_remote_valid_increment(owner_space, mutator);
       }
@@ -10558,7 +10559,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
@@ -12703,7 +12705,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_increment(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_increment(owner_space, mutator);
       }
@@ -12718,7 +12721,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
@@ -20515,7 +20519,8 @@ namespace Legion {
           if ((collective_mapping != NULL) &&
               collective_mapping->contains(local_space))
             send_remote_valid_increment(
-              collective_mapping->get_parent(owner_space,local_space),mutator);
+              collective_mapping->get_parent(owner_space,local_space),
+              mutator, initialized);
           else
             send_remote_valid_increment(owner_space, mutator);     
         }
@@ -20570,7 +20575,8 @@ namespace Legion {
           if ((collective_mapping != NULL) &&
               collective_mapping->contains(local_space))
             send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space,local_space),mutator);
+              collective_mapping->get_parent(owner_space,local_space),
+              mutator, initialized);
           else
             send_remote_valid_decrement(owner_space, mutator);
         }
