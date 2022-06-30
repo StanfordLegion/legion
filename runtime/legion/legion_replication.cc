@@ -2894,6 +2894,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(pre_indirection_barriers.size() == 
+              post_indirection_barriers.size());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -2996,11 +2998,12 @@ namespace Legion {
       assert(tpl != NULL);
       assert(sharding_collective != NULL);
       sharding_collective->elide_collective();
+      assert(pre_indirection_barriers.size() == 
+              post_indirection_barriers.size());
 #endif
       // No matter what we need to tell the shard template about any
       // collective barriers that it is going to need for its replay
-      if (!pre_indirection_barriers.empty() ||
-          !post_indirection_barriers.empty())
+      if (!pre_indirection_barriers.empty())
       {
 #ifdef DEBUG_LEGION
         ShardedPhysicalTemplate *shard_template =
@@ -3063,6 +3066,141 @@ namespace Legion {
         sharding_collective->elide_collective();
 #endif
       IndexCopyOp::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexCopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        ApEvent &collective_pre, ApEvent &collective_post,
+        const TraceInfo &trace_info, const InstanceSet &insts,
+        const RegionRequirement &req, const DomainPoint &key,
+        std::vector<IndirectRecord> &records, const bool sources)
+    //--------------------------------------------------------------------------
+    {
+      if (sources && !collective_src_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              collective_pre, collective_post, trace_info, 
+                              insts, req, key, records, sources);
+      if (!sources && !collective_dst_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              collective_pre, collective_post, trace_info,
+                              insts, req, key, records, sources);
+#ifdef DEBUG_LEGION
+      assert(local_pre.exists());
+      assert(local_post.exists());
+      assert(index < pre_indirection_barriers.size());
+      assert(index < post_indirection_barriers.size());
+#endif
+      // Take the lock and record our sets and instances
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(index < collective_exchanges.size());
+#endif
+      IndirectionExchange &exchange = collective_exchanges[index];
+      if (sources)
+      {
+        collective_pre = pre_indirection_barriers[index];
+        collective_post = post_indirection_barriers[index];;
+        if (!exchange.src_ready.exists())
+          exchange.src_ready = Runtime::create_rt_user_event();
+        if (exchange.local_preconditions.size() < points.size())
+        {
+          exchange.local_preconditions.insert(local_pre);
+          if (exchange.local_preconditions.size() == points.size())
+          {
+            const ApEvent local_precondition = 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions);
+            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+                                          1/*count*/, local_precondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id, index);
+              trace_info.record_collective_barrier(
+                  pre_indirection_barriers[index], local_precondition, key);
+            }
+          }
+        }
+        if (exchange.local_postconditions.size() < points.size())
+        {
+          exchange.local_postconditions.insert(local_post);
+          if (exchange.local_postconditions.size() == points.size())
+          {
+            const ApEvent local_postcondition =
+              Runtime::merge_events(&trace_info, exchange.local_postconditions);
+            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+                                          1/*count*/, local_postcondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id,
+                  pre_indirection_barriers.size() + index);
+              trace_info.record_collective_barrier(
+                  post_indirection_barriers[index], local_postcondition, key);
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(index < src_indirect_records.size());
+        assert(src_indirect_records[index].size() < points.size());
+#endif
+        src_indirect_records[index].emplace_back(
+            IndirectRecord(runtime->forest, req, insts, key));
+        exchange.src_records.push_back(&records);
+        if (src_indirect_records[index].size() == points.size())
+          return finalize_exchange(index, true/*sources*/);
+        return exchange.src_ready;
+      }
+      else
+      {
+        collective_pre = pre_indirection_barriers[index];
+        collective_post = post_indirection_barriers[index];
+        if (!exchange.dst_ready.exists())
+          exchange.dst_ready = Runtime::create_rt_user_event();
+        if (exchange.local_preconditions.size() < points.size())
+        {
+          exchange.local_preconditions.insert(local_pre);
+          if (exchange.local_preconditions.size() == points.size())
+          {
+            const ApEvent local_precondition = 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions);
+            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+                                          1/*count*/, local_precondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id, index);
+              trace_info.record_collective_barrier(
+                  pre_indirection_barriers[index], local_precondition, key);
+            }
+          }
+        }
+        if (exchange.local_postconditions.size() < points.size())
+        {
+          exchange.local_postconditions.insert(local_post);
+          if (exchange.local_postconditions.size() == points.size())
+          {
+            const ApEvent local_postcondition =
+              Runtime::merge_events(&trace_info, exchange.local_postconditions);
+            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+                                          1/*count*/, local_postcondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id,
+                  pre_indirection_barriers.size() + index);
+              trace_info.record_collective_barrier(
+                  post_indirection_barriers[index], local_postcondition, key);
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(index < dst_indirect_records.size());
+        assert(dst_indirect_records[index].size() < points.size());
+#endif
+        dst_indirect_records[index].emplace_back(
+            IndirectRecord(runtime->forest, req, insts, key));
+        exchange.dst_records.push_back(&records);
+        if (dst_indirect_records[index].size() == points.size())
+          return finalize_exchange(index, false/*sources*/);
+        return exchange.dst_ready;
+      }
     }
 
     //--------------------------------------------------------------------------

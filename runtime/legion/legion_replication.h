@@ -1600,6 +1600,13 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual RtEvent exchange_indirect_records(
+          const unsigned index, const ApEvent local_pre, 
+          const ApEvent local_post, ApEvent &collective_pre,
+          ApEvent &collective_post, const TraceInfo &trace_info,
+          const InstanceSet &instances, const RegionRequirement &req,
+          const DomainPoint &key,
+          std::vector<IndirectRecord> &records, const bool sources);
       virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
