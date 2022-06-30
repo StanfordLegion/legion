@@ -3027,6 +3027,13 @@ namespace Legion {
           key.second++;
         }
       }
+      // Elide unused collectives
+      for (std::vector<IndirectRecordExchange*>::const_iterator it =
+            src_collectives.begin(); it != src_collectives.end(); it++)
+        (*it)->elide_collective();
+      for (std::vector<IndirectRecordExchange*>::const_iterator it =
+            dst_collectives.begin(); it != dst_collectives.end(); it++)
+        (*it)->elide_collective();
       const IndexSpace local_space = tpl->find_local_space(trace_local_id);
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
