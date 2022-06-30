@@ -591,11 +591,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
-      : total_spaces(mapping.size()), radix(r)
+      : radix(r)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < total_spaces; idx++)
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
         unique_sorted_spaces.add(mapping[idx]);
+      total_spaces = unique_sorted_spaces.size();
     }
 
     //--------------------------------------------------------------------------

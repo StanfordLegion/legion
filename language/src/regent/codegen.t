@@ -79,6 +79,19 @@ end
 
 local codegen = {}
 
+-- Utilities to help generate less garbage from empty quotes.
+local empty_quote = quote end
+
+local function as_quote(x)
+  if rawequal(x, empty_quote) or (terralib.islist(x) and #x == 0) then
+    return empty_quote
+  end
+  if terralib.isquote(x) then
+    return x
+  end
+  return quote [x] end
+end
+
 -- load Legion dynamic library
 local c = std.c
 
@@ -504,7 +517,7 @@ function context:get_cleanup_items()
   for i = #self.cleanup_items, 1, -1 do
     items:insert(self.cleanup_items[i])
   end
-  return quote [items] end
+  return as_quote(items)
 end
 
 function context:get_all_cleanup_items_for_break()
@@ -586,7 +599,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
       if fastest_index ~= i then
         return quote var [ strides[i] ] end
       else
-        return quote end
+        return empty_quote
       end
     end)];
     for idx = 0, [num_fields] do
@@ -632,7 +645,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
            if fastest_index ~= i then
              return quote [ strides[i] ] = offsets[i-1].offset end
            else
-             return quote end
+             return empty_quote
            end
          end)]
       [destroy_accessor](accessor)
@@ -744,8 +757,7 @@ local function index_space_bounds(cx, is, is_type, domain, bounds)
         [bounds].hi = [domain].rect_data[1]
       end
     else
-      bounds_actions = quote
-      end
+      bounds_actions = empty_quote
       local idx = 0
       local fields = terralib.newlist { "lo", "hi" }
       fields:map(function(field)
@@ -803,7 +815,7 @@ local function make_cleanup_item(cx, value, value_type)
   -- object, ever. Practically speaking, this means implementing an
   -- escape analysis to determine the object's lifetime.
   else
-    return quote end
+    return empty_quote
   end
 end
 
@@ -1033,11 +1045,11 @@ function value:get_index(cx, node, index, result_type)
   local result
   if std.is_list(value_type) then
     result = expr.just(
-      quote [actions] end,
+      as_quote(actions),
       `([value_type:data(value_expr.value)][ [index.value] ]))
   else
     result = expr.just(
-      quote [actions] end,
+      as_quote(actions),
       `([value_expr.value][ [index.value] ]))
   end
   return values.rawref(node, result, &result_type, data.newtuple())
@@ -1424,7 +1436,7 @@ function ref:write(cx, value, expr_type)
         end
       end)]
   end
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 local reduction_fold = {
@@ -1521,7 +1533,7 @@ function ref:reduce(cx, value, op, expr_type, atomic)
          end
       end)]
   end
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 function ref:get_field(cx, node, field_name, field_type, value_type)
@@ -1554,7 +1566,7 @@ function ref:get_index(cx, node, index, result_type)
       end)
   end
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
-  local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
+  local result = expr.just(as_quote(actions), `([value][ [index.value] ]))
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
@@ -1645,7 +1657,7 @@ function aref:get_index(cx, node, index, result_type)
       end)
   end
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
-  local result = expr.just(quote [actions] end, value)
+  local result = expr.just(as_quote(actions), value)
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
@@ -1685,7 +1697,7 @@ function aref:write(cx, value, expr_type)
     end
   end
 
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 local vref = setmetatable({}, { __index = value })
@@ -1915,7 +1927,7 @@ function vref:write(cx, value, expr_type)
     end
 
   end
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 function vref:reduce(cx, value, op, expr_type)
@@ -2005,7 +2017,7 @@ function vref:reduce(cx, value, op, expr_type)
 
   end
 
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 function vref:get_field(cx, node, field_name, field_type, value_type)
@@ -2076,7 +2088,7 @@ function rawref:write(cx, value)
     [cleanup];
     [ref_expr.value] = [value_expr.value]
   end
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 function rawref:reduce(cx, value, op, expr_type, atomic)
@@ -2110,13 +2122,13 @@ function rawref:reduce(cx, value, op, expr_type, atomic)
     local reduce = ast.typed.expr.Binary {
       op = op,
       lhs = ast.typed.expr.Internal {
-        value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
+        value = values.value(self.node, expr.just(empty_quote, ref_expr.value), ref_type),
         expr_type = ref_type,
         annotations = ast.default_annotations(),
         span = ast.trivial_span(),
       },
       rhs = ast.typed.expr.Internal {
-        value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
+        value = values.value(value.node, expr.just(empty_quote, value_expr.value), value_type),
         expr_type = value_type,
         annotations = ast.default_annotations(),
         span = ast.trivial_span(),
@@ -2135,7 +2147,7 @@ function rawref:reduce(cx, value, op, expr_type, atomic)
       [ref_expr.value] = [reduce_expr.value]
     end
   end
-  return expr.just(actions, quote end)
+  return expr.just(actions, empty_quote)
 end
 
 function rawref:get_field(cx, node, field_name, field_type, value_type)
@@ -2167,15 +2179,15 @@ function rawref:get_index(cx, node, index, result_type)
   local result
   if std.is_list(value_type) then
     result = expr.just(
-      quote [actions] end,
+      as_quote(actions),
       `([value_type:data(ref_expr.value)][ [index.value] ]))
   elseif std.is_regent_array(value_type) then
     result = expr.just(
-      quote [actions] end,
+      as_quote(actions),
       `([ref_expr.value].impl[ [index.value] ]))
   else
     result = expr.just(
-      quote [actions] end,
+      as_quote(actions),
       `([ref_expr.value][ [index.value] ]))
   end
   return values.rawref(node, result, &result_type, data.newtuple())
@@ -2184,8 +2196,8 @@ end
 -- A helper for capturing debug information.
 local function emit_debuginfo(node)
   assert(node.span.source and node.span.start.line)
-  if std.config["no-debuginfo"] or string.len(node.span.source) == 0 then
-    return quote end
+  if not std.config["debuginfo"] or string.len(node.span.source) == 0 then
+    return empty_quote
   end
   return quote
     terralib.debuginfo(node.span.source, node.span.start.line)
@@ -2298,9 +2310,7 @@ function codegen.expr_field_access(cx, node)
        node.value.field_name == "ispace" and
        node.value.value:is(ast.typed.expr.ID)
     then
-      actions = quote
-        [emit_debuginfo(node)]
-      end
+      actions = emit_debuginfo(node)
     -- Otherwise, we fall back to the general case. For example,
     -- if the expression is 'partition_name[color].ispace.bounds',
     -- we must go through the normal generation for the first field access.
@@ -2709,7 +2719,7 @@ local function expr_call_setup_task_args(
                  params_map_value[(uint64([i])-1)/64] + (uint64(1) << ((uint64([i])-1)%64))
              end
            end
-           return quote end
+           return empty_quote
          end,
          arg_types)]
       [fixed_ptr].[params_map_label] = params_map_value
@@ -2951,7 +2961,7 @@ local function wrap_partition_internal(node, parent)
     value = ast.typed.expr.Internal {
       value = values.value(
         node.value,
-        expr.just(quote end, { impl = parent }),
+        expr.just(empty_quote, { impl = parent }),
         node.value.expr_type),
       expr_type = node.value.expr_type,
       annotations = node.annotations,
@@ -3020,9 +3030,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   local value = codegen.expr(cx, index):read(cx)
 
   if requirement and free_vars_setup then
-    free_vars_setup:insert(quote
-      [value.actions];
-    end)
+    free_vars_setup:insert(as_quote(value.actions))
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
     local base_type = std.as_read(util.get_base_indexed_node(expr).expr_type)
@@ -3928,7 +3936,7 @@ function codegen.expr_call(cx, node)
         end
       end
 
-      return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+      return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
     else
       assert(future_value)
       local value = codegen.expr(
@@ -4508,7 +4516,7 @@ function codegen.expr_ispace(cx, node)
   local ispace_type = std.as_read(node.expr_type)
   local actions = quote
     [extent.actions];
-    [start and start.actions or (quote end)];
+    [start and start.actions or (empty_quote)];
     [emit_debuginfo(node)]
   end
 
@@ -4582,8 +4590,6 @@ local function attach_name_and_type(cx, fs, field_id, field_name, field_type)
     actions:insert(
       quote
         var type_id : uint32 = [std.get_type_id(field_type)]
-        c.printf("attaching type tag %d to semantic id %d for field id %d\n",
-                 type_id, [std.get_type_semantic_tag()], field_id)
         c.legion_field_id_attach_semantic_information(
           [cx.runtime], [fs], field_id, [std.get_type_semantic_tag()], &type_id, terralib.sizeof(uint32), false)
     end)
@@ -4804,7 +4810,7 @@ function codegen.expr_partition(cx, node)
   local actions = quote
     [region.actions];
     [coloring.actions];
-    [(colors and colors.actions) or (quote end)];
+    [(colors and colors.actions) or (empty_quote)];
     [emit_debuginfo(node)]
   end
 
@@ -6225,12 +6231,12 @@ end
 
 local function expr_advance_phase_barrier(runtime, context, value, value_type)
   if std.is_phase_barrier(value_type) then
-    return quote end, `(value_type {
+    return empty_quote, `(value_type {
       impl = c.legion_phase_barrier_advance(
         [runtime], [context], [value].impl),
     })
   elseif std.is_dynamic_collective(value_type) then
-    return quote end, `(value_type {
+    return empty_quote, `(value_type {
       impl = c.legion_dynamic_collective_advance(
         [runtime], [context], [value].impl),
     })
@@ -6894,10 +6900,7 @@ function codegen.expr_copy(cx, node)
   actions:insert(dst.actions)
   actions:insertall(
     conditions:map(function(condition) return condition.actions end))
-  actions:insert(
-    quote
-      [emit_debuginfo(node)]
-    end)
+  actions:insert(emit_debuginfo(node))
 
   actions:insert(
     quote
@@ -6913,7 +6916,7 @@ function codegen.expr_copy(cx, node)
          1, node.op, launcher)]
     end)
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 local function expr_fill_setup_region(
@@ -7025,7 +7028,7 @@ function codegen.expr_fill(cx, node)
        value.value, value_type)]
   end
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 local function expr_acquire_issue_phase_barriers(values, condition_kinds, launcher)
@@ -7150,7 +7153,7 @@ function codegen.expr_acquire(cx, node)
        node.conditions:map(function(condition) return condition.conditions end))]
   end
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 local function expr_release_issue_phase_barriers(values, condition_kinds, launcher)
@@ -7275,7 +7278,7 @@ function codegen.expr_release(cx, node)
        node.conditions:map(function(condition) return condition.conditions end))]
   end
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 function codegen.expr_attach_hdf5(cx, node)
@@ -7332,7 +7335,7 @@ function codegen.expr_attach_hdf5(cx, node)
     [region.actions]
     [filename.actions]
     [mode.actions]
-    [field_map and field_map.actions or quote end]
+    [field_map and field_map.actions or empty_quote]
     [emit_debuginfo(node)]
 
     [fm_setup]
@@ -7352,7 +7355,7 @@ function codegen.expr_attach_hdf5(cx, node)
        end)]
   end
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 function codegen.expr_detach_hdf5(cx, node)
@@ -7396,7 +7399,7 @@ function codegen.expr_detach_hdf5(cx, node)
        end)]
   end
 
-  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+  return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
 function codegen.expr_allocate_scratch_fields(cx, node)
@@ -7765,7 +7768,7 @@ function codegen.expr_future(cx, node)
     local size_actions, size_value = std.compute_serialized_size(
       content_type, content_value)
     if not size_actions then
-      size_actions = quote end
+      size_actions = empty_quote
       size_value = 0
     end
     local ser_actions = std.serialize(
@@ -8018,7 +8021,7 @@ function codegen.expr_import_partition(cx, node)
 
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
 
-  local check_actions = quote end
+  local check_actions = empty_quote
   if partition_type:is_disjoint() then
     check_actions = quote
       std.assert_error(
@@ -8063,7 +8066,7 @@ function codegen.expr_import_cross_product(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = quote end
+  local actions = empty_quote
 
   for _, p in ipairs(partitions) do
     actions = quote
@@ -8399,13 +8402,13 @@ function codegen.block(cx, node)
 end
 
 local function cleanup(cx)
-  return quote [cx:get_cleanup_items()] end
+  return as_quote(cx:get_cleanup_items())
 end
 
 local function cleanup_after(cx, block)
-  local result = terralib.newlist({quote [block] end})
+  local result = terralib.newlist({as_quote(block)})
   result:insert(cleanup(cx))
-  return quote [result] end
+  return as_quote(result)
 end
 
 function codegen.stat_internal(cx, node)
@@ -8755,8 +8758,8 @@ function codegen.stat_for_list(cx, node)
       [cleanup_after(cx, codegen.block(cx, block))]
     end
   end
-  local preamble = quote end
-  local postamble = quote end
+  local preamble = empty_quote
+  local postamble = empty_quote
 
   if not (cuda or openmp) then
     -- TODO: Need to codegen these dimension loops in the right order
@@ -8861,9 +8864,9 @@ function codegen.stat_for_list(cx, node)
 
       local need_spiil = gpuhelper.check_arguments_need_spill(args)
 
-      local kernel_param_pack = quote end
-      local kernel_param_unpack = quote end
-      local spill_cleanup = quote end
+      local kernel_param_pack = empty_quote
+      local kernel_param_unpack = empty_quote
+      local spill_cleanup = empty_quote
       if need_spiil then
         local arg = nil
         kernel_param_pack, kernel_param_unpack, spill_cleanup, arg =
@@ -9218,7 +9221,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
         ast.typed.expr.Internal {
           value = values.value(
             node,
-            expr.just(quote end, partition.value),
+            expr.just(empty_quote, partition.value),
             partition_type),
           expr_type = partition_type,
           annotations = node.annotations,
@@ -9252,7 +9255,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
          local arg, arg_partition, invariant = unpack(pair)
 
          -- Here we slice partition actions back in.
-         local arg_actions = quote end
+         local arg_actions = empty_quote
          if arg_partition then
            arg_actions = quote [arg_actions]; [arg_partition.actions] end
          end
@@ -9379,7 +9382,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     end
   end
 
-  local must_epoch_setup = quote end
+  local must_epoch_setup = empty_quote
   if cx.must_epoch then
     -- FIXME: This is totally broken. It is not safe to edit the loop
     -- bounds to avoid collisions with other index launches, and on
@@ -9486,9 +9489,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
         c.legion_domain_point_iterator_destroy(it)
       end
     end
-    task_args_loop_cleanup = quote
-      [cleanup(cx)]
-    end
+    task_args_loop_cleanup = as_quote(cleanup(cx))
   end
 
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
@@ -9551,7 +9552,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
     local rh = terralib.newsymbol(future_type)
     local rhs = ast.typed.expr.Internal {
-      value = values.value(node, expr.just(quote end, rh), future_type),
+      value = values.value(node, expr.just(empty_quote, rh), future_type),
       expr_type = future_type,
       annotations = node.annotations,
       span = node.span,
@@ -9836,7 +9837,7 @@ function codegen.stat_return(cx, node)
     local size_actions, size_value = std.compute_serialized_size(
       result_type, result)
     if not size_actions then
-      size_actions = quote end
+      size_actions = empty_quote
       size_value = 0
     end
     local ser_actions = std.serialize(
@@ -9889,12 +9890,12 @@ function codegen.stat_assignment(cx, node)
   actions:insert(rhs_expr.actions)
   rhs = values.value(
     node.rhs,
-    expr.just(quote end, rhs_expr.value),
+    expr.just(empty_quote, rhs_expr.value),
     std.as_read(node.rhs.expr_type))
 
   actions:insert(lhs:write(cx, rhs, node.lhs.expr_type).actions)
 
-  return quote [actions] end
+  return as_quote(actions)
 end
 
 function codegen.stat_reduce(cx, node)
@@ -9918,7 +9919,7 @@ function codegen.stat_reduce(cx, node)
     local function generator(rhs_terra)
       local rhs = values.value(
         node,
-        expr.just(quote end, rhs_terra),
+        expr.just(empty_quote, rhs_terra),
         std.as_read(node.rhs.expr_type))
       return lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions
     end
@@ -9928,13 +9929,13 @@ function codegen.stat_reduce(cx, node)
   else
     rhs = values.value(
       node,
-      expr.just(quote end, rhs_expr.value),
+      expr.just(empty_quote, rhs_expr.value),
       std.as_read(node.rhs.expr_type))
     lhs_actions = lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions
   end
 
   actions:insert(lhs_actions)
-  return quote [actions] end
+  return as_quote(actions)
 end
 
 function codegen.stat_expr(cx, node)
@@ -9946,7 +9947,7 @@ function codegen.stat_expr(cx, node)
     local cleanup = make_cleanup_item(cx, expr.value, node.expr.expr_type)
     return quote [expr.actions]; [cleanup] end
   else
-    return quote [expr.actions] end
+    return as_quote(expr.actions)
   end
 end
 
@@ -10013,7 +10014,7 @@ function codegen.stat_map_regions(cx, node)
     actions:insert(
       `(c.legion_physical_region_wait_until_valid([pr])))
   end
-  return quote [actions] end
+  return as_quote(actions)
 end
 
 function codegen.stat_unmap_regions(cx, node)
@@ -10026,7 +10027,7 @@ function codegen.stat_unmap_regions(cx, node)
     actions:insert(
       `(c.legion_runtime_unmap_region([cx.runtime], [cx.context], [pr])))
   end
-  return quote [actions] end
+  return as_quote(actions)
 end
 
 function codegen.stat_raw_delete(cx, node)
@@ -10099,12 +10100,12 @@ function codegen.stat_fence(cx, node)
 end
 
 function codegen.stat_parallelize_with(cx, node)
-  return quote [codegen.block(cx, node.block)] end
+  return as_quote(codegen.block(cx, node.block))
 end
 
 local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_region)
   if not cx.bounds_checks then
-    return quote end
+    return empty_quote
   else
     local lhs_r = cx:region(lhs_region)
     local rhs_r = cx:region(rhs_region)
@@ -10113,7 +10114,7 @@ local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_
     local region_types = terralib.newlist({lhs_region, rhs_region})
     local regions = terralib.newlist({lhs_r, rhs_r})
     local ispaces = terralib.newlist({lhs_is, rhs_is})
-    local dense_checks = quote end
+    local dense_checks = empty_quote
     local bounds = data.zip(region_types, regions, ispaces):map(function(tuple)
       local region, r, is = unpack(tuple)
       local bounds_actions, domain, bounds = index_space_bounds(cx, is, region:ispace())
@@ -10596,7 +10597,7 @@ local unpack_param_helper = data.weak_memoize(function(param_type)
       value = ast.typed.expr.Internal {
         value = values.value(
           dummy_node,
-          expr.just(quote end, `([future_type]{ __result = [future] })),
+          expr.just(empty_quote, `([future_type]{ __result = [future] })),
           future_type),
         expr_type = future_type,
         annotations = ast.default_annotations(),
@@ -10947,7 +10948,7 @@ function codegen.top_task(cx, node)
       end
     end
 
-    local actions = quote end
+    local actions = empty_quote
 
     -- Hack: This enables Regent tasks to execute with constant time
     -- launches. The value of the region in the task arguments will be
@@ -11088,13 +11089,13 @@ function codegen.top_task(cx, node)
   if node.region_divergence then
     local region_divergence = terralib.newlist()
     local cases
-    local diagnostic = quote end
+    local diagnostic = empty_quote
     for _, rs in node.region_divergence:values() do
       local r1 = rs[1]
       if cx:has_region(r1) then
         local contained = true
         local rs_cases
-        local rs_diagnostic = quote end
+        local rs_diagnostic = empty_quote
 
         local r1_fields = cx:region(r1).field_paths
         local valid_fields = data.set(r1_fields)
@@ -11151,7 +11152,7 @@ function codegen.top_task(cx, node)
     if cases then
       local div_cx = cx:new_local_scope()
       local body_div = cleanup_after(div_cx, codegen.block(div_cx, node.body))
-      local check_div = quote end
+      local check_div = empty_quote
       if dynamic_branches_assert then
         check_div = quote
           [diagnostic]
@@ -11177,7 +11178,7 @@ function codegen.top_task(cx, node)
     body = cleanup_after(cx, codegen.block(cx, node.body))
   end
 
-  local guard = quote end
+  local guard = empty_quote
   if return_type ~= terralib.types.unit then
     guard = quote
       std.assert_error(false, [get_source_location(node) .. ": missing return statement in task that is expected to return " .. tostring(return_type)])

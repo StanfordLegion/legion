@@ -3527,15 +3527,16 @@ namespace Legion {
     public:
       void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag,
+                               IndexSpace color_space, FieldID fid, 
+                               MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg); 
       void initialize_by_image(InnerContext *ctx, IndexPartition pid,
-                               LogicalPartition projection,
+                               IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg);
       void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
-                               LogicalPartition projection,
+                               IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg);
@@ -3557,12 +3558,12 @@ namespace Legion {
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;
     protected:
-      void check_by_field(IndexPartition pid, LogicalRegion handle,
-                          LogicalRegion parent, FieldID fid) const;
-      void check_by_image(IndexPartition pid, LogicalPartition projection,
-                          LogicalRegion parent, FieldID fid) const;
-      void check_by_image_range(IndexPartition pid, LogicalPartition projection,
-                                LogicalRegion parent, FieldID fid) const;
+      void check_by_field(IndexPartition pid, IndexSpace color_space,
+          LogicalRegion handle, LogicalRegion parent, FieldID fid) const;
+      void check_by_image(IndexPartition pid, IndexSpace pid_parent,
+          LogicalPartition projection, LogicalRegion parent, FieldID fid) const;
+      void check_by_image_range(IndexPartition pid, IndexSpace pid_parent,
+          LogicalPartition projection, LogicalRegion parent, FieldID fid) const;
       void check_by_preimage(IndexPartition pid, IndexPartition proj,
                              LogicalRegion handle, LogicalRegion parent,
                              FieldID fid) const;

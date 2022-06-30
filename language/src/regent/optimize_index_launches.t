@@ -57,7 +57,7 @@ local function get_base_partition_symbol(node)
 end
 
 local function get_partition_dim(expr)
-  return std.as_read(strip_projection(expr).value.expr_type):colors().dim
+  return std.as_read(expr.expr_type):colors().dim
 end
 
 function context:__index (field)
@@ -1376,11 +1376,12 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   for _, args in collected_args:items() do
     local stats = terralib.newlist()
 
-    local dim = get_partition_dim(call_args[args[1]])
+    local first_arg = util.get_base_indexed_node(strip_projection(call_args[args[1]]))
+    local dim = get_partition_dim(first_arg)
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(util.get_base_indexed_node(call_args[args[1]]).value), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(first_arg.value), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(

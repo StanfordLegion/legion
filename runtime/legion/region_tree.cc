@@ -741,8 +741,7 @@ namespace Legion {
         if (disjointness_event.exists())
         {
           // Hold a reference on the node until disjointness is performed
-          WrapperReferenceMutator mutator(applied);
-          part_node->add_base_valid_ref(APPLICATION_REF, &mutator);
+          part_node->add_base_resource_ref(APPLICATION_REF);
           IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
           // We only need to wait for the creation to be ready 
           // if we're not the owner
@@ -10631,7 +10630,8 @@ namespace Legion {
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
           send_remote_valid_increment(
-            collective_mapping->get_parent(owner_space, local_space), mutator);
+            collective_mapping->get_parent(owner_space, local_space),
+            mutator, initialized);
         else
           send_remote_valid_increment(owner_space, mutator);
       }
@@ -10678,7 +10678,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
@@ -11617,9 +11618,17 @@ namespace Legion {
       // We can now delete the collective
       if (dargs->disjointness_collective != NULL)
         delete dargs->disjointness_collective;
-      // Remove the reference on our node as well
-      if (node->remove_base_valid_ref(APPLICATION_REF))
-        delete node;
+      if (dargs->owner)
+      {
+        // Remove the reference on our node as well
+        if (node->remove_base_valid_ref(APPLICATION_REF))
+          delete node;
+      }
+      else
+      {
+        if (node->remove_base_resource_ref(APPLICATION_REF))
+          delete node;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12823,7 +12832,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_increment(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_increment(owner_space, mutator);
       }
@@ -12838,7 +12848,8 @@ namespace Legion {
         if ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space))
           send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
+             collective_mapping->get_parent(owner_space, local_space),
+             mutator, initialized);
         else
           send_remote_valid_decrement(owner_space, mutator);
       }
@@ -20622,7 +20633,8 @@ namespace Legion {
           if ((collective_mapping != NULL) &&
               collective_mapping->contains(local_space))
             send_remote_valid_increment(
-              collective_mapping->get_parent(owner_space,local_space),mutator);
+              collective_mapping->get_parent(owner_space,local_space),
+              mutator, initialized);
           else
             send_remote_valid_increment(owner_space, mutator);     
         }
@@ -20677,7 +20689,8 @@ namespace Legion {
           if ((collective_mapping != NULL) &&
               collective_mapping->contains(local_space))
             send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space,local_space),mutator);
+              collective_mapping->get_parent(owner_space,local_space),
+              mutator, initialized);
           else
             send_remote_valid_decrement(owner_space, mutator);
         }

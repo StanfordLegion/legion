@@ -17644,6 +17644,7 @@ namespace Legion {
                                                    IndexPartition pid,
                                                    LogicalRegion handle, 
                                                    LogicalRegion parent,
+                                                   IndexSpace color_space,
                                                    FieldID fid,
                                                    MapperID id, MappingTagID t,
                                                    const UntypedBuffer &marg)
@@ -17674,18 +17675,17 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_field(pid, handle, parent, fid);
+        check_by_field(pid, color_space, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::check_by_field(IndexPartition pid,
-                  LogicalRegion handle, LogicalRegion parent, FieldID fid) const
+                                   IndexSpace color_space, LogicalRegion handle,
+                                   LogicalRegion parent, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       const size_t field_size = 
         runtime->forest->get_field_size(handle.get_field_space(), fid);
-      IndexSpace color_space = 
-        runtime->forest->get_index_partition_color_space(pid);
       const size_t coord_size = 
         runtime->forest->get_coordinate_size(color_space, false/*range*/);
       if (field_size != coord_size)
@@ -17713,6 +17713,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_image(InnerContext *ctx, 
                                                    IndexPartition pid,
+                                                   IndexSpace handle,
                                           LogicalPartition projection,
                                           LogicalRegion parent, FieldID fid,
                                           MapperID id, MappingTagID t,
@@ -17746,19 +17747,18 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image(pid, projection, parent, fid);
+        check_by_image(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::check_by_image(IndexPartition pid,
+                                        IndexSpace pid_parent,
                                         LogicalPartition projection,
                                         LogicalRegion parent, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       const size_t field_size = 
         runtime->forest->get_field_size(projection.get_field_space(), fid);
-      const IndexSpace pid_parent = 
-        runtime->forest->get_parent_index_space(pid);
       const size_t coord_size = runtime->forest->get_coordinate_size(
                                           pid_parent, false/*range*/);
       if (field_size != coord_size)
@@ -17786,6 +17786,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_image_range(InnerContext *ctx, 
                                                          IndexPartition pid,
+                                                         IndexSpace handle,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
@@ -17820,18 +17821,17 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image_range(pid, projection, parent, fid);
+        check_by_image_range(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::check_by_image_range(IndexPartition pid,
-           LogicalPartition projection, LogicalRegion parent, FieldID fid) const
+                             IndexSpace pid_parent, LogicalPartition projection,
+                             LogicalRegion parent, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       const size_t field_size = 
         runtime->forest->get_field_size(projection.get_field_space(), fid);
-      const IndexSpace pid_parent =
-        runtime->forest->get_parent_index_space(pid);
       const size_t coord_size = runtime->forest->get_coordinate_size(
                                             pid_parent, true/*range*/);
       if (field_size != coord_size)
@@ -17900,10 +17900,9 @@ namespace Legion {
     {
       const size_t field_size = 
         runtime->forest->get_field_size(handle.get_field_space(), fid);
-      const IndexSpace proj_parent = 
-        runtime->forest->get_parent_index_space(proj);
-      const size_t coord_size =
-        runtime->forest->get_coordinate_size(proj_parent, false/*range*/);
+      IndexSpace proj_parent = runtime->forest->get_parent_index_space(proj);
+      const size_t coord_size = runtime->forest->get_coordinate_size(
+                                                 proj_parent, false/*range*/);
       if (field_size != coord_size)
         REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
             "The field size for partition-by-preimage operation does not "
@@ -17970,10 +17969,9 @@ namespace Legion {
     {
       const size_t field_size = 
         runtime->forest->get_field_size(handle.get_field_space(), fid);
-      const IndexSpace proj_parent = 
-        runtime->forest->get_parent_index_space(proj);
-      const size_t coord_size = 
-        runtime->forest->get_coordinate_size(proj_parent, true/*range*/);
+      IndexSpace proj_parent = runtime->forest->get_parent_index_space(proj);
+      const size_t coord_size = runtime->forest->get_coordinate_size(
+                                                 proj_parent, true/*range*/);
       if (field_size != coord_size)
         REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
             "The field size for partition-by-preimage-range operation does "

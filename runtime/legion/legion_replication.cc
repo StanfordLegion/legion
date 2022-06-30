@@ -4080,6 +4080,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(pre_indirection_barriers.size() == 
+              post_indirection_barriers.size());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -4180,11 +4182,12 @@ namespace Legion {
       assert(tpl != NULL);
       assert(sharding_collective != NULL);
       sharding_collective->elide_collective();
+      assert(pre_indirection_barriers.size() == 
+              post_indirection_barriers.size());
 #endif
       // No matter what we need to tell the shard template about any
       // collective barriers that it is going to need for its replay
-      if (!pre_indirection_barriers.empty() ||
-          !post_indirection_barriers.empty())
+      if (!pre_indirection_barriers.empty())
       {
 #ifdef DEBUG_LEGION
         ShardedPhysicalTemplate *shard_template =
@@ -4245,6 +4248,141 @@ namespace Legion {
         sharding_collective->elide_collective();
 #endif
       IndexCopyOp::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexCopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        ApEvent &collective_pre, ApEvent &collective_post,
+        const TraceInfo &trace_info, const InstanceSet &insts,
+        const RegionRequirement &req, const DomainPoint &key,
+        std::vector<IndirectRecord> &records, const bool sources)
+    //--------------------------------------------------------------------------
+    {
+      if (sources && !collective_src_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              collective_pre, collective_post, trace_info, 
+                              insts, req, key, records, sources);
+      if (!sources && !collective_dst_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              collective_pre, collective_post, trace_info,
+                              insts, req, key, records, sources);
+#ifdef DEBUG_LEGION
+      assert(local_pre.exists());
+      assert(local_post.exists());
+      assert(index < pre_indirection_barriers.size());
+      assert(index < post_indirection_barriers.size());
+#endif
+      // Take the lock and record our sets and instances
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(index < collective_exchanges.size());
+#endif
+      IndirectionExchange &exchange = collective_exchanges[index];
+      if (sources)
+      {
+        collective_pre = pre_indirection_barriers[index];
+        collective_post = post_indirection_barriers[index];;
+        if (!exchange.src_ready.exists())
+          exchange.src_ready = Runtime::create_rt_user_event();
+        if (exchange.local_preconditions.size() < points.size())
+        {
+          exchange.local_preconditions.insert(local_pre);
+          if (exchange.local_preconditions.size() == points.size())
+          {
+            const ApEvent local_precondition = 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions);
+            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+                                          1/*count*/, local_precondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id, index);
+              trace_info.record_collective_barrier(
+                  pre_indirection_barriers[index], local_precondition, key);
+            }
+          }
+        }
+        if (exchange.local_postconditions.size() < points.size())
+        {
+          exchange.local_postconditions.insert(local_post);
+          if (exchange.local_postconditions.size() == points.size())
+          {
+            const ApEvent local_postcondition =
+              Runtime::merge_events(&trace_info, exchange.local_postconditions);
+            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+                                          1/*count*/, local_postcondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id,
+                  pre_indirection_barriers.size() + index);
+              trace_info.record_collective_barrier(
+                  post_indirection_barriers[index], local_postcondition, key);
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(index < src_indirect_records.size());
+        assert(src_indirect_records[index].size() < points.size());
+#endif
+        src_indirect_records[index].emplace_back(
+            IndirectRecord(runtime->forest, req, insts, key));
+        exchange.src_records.push_back(&records);
+        if (src_indirect_records[index].size() == points.size())
+          return finalize_exchange(index, true/*sources*/);
+        return exchange.src_ready;
+      }
+      else
+      {
+        collective_pre = pre_indirection_barriers[index];
+        collective_post = post_indirection_barriers[index];
+        if (!exchange.dst_ready.exists())
+          exchange.dst_ready = Runtime::create_rt_user_event();
+        if (exchange.local_preconditions.size() < points.size())
+        {
+          exchange.local_preconditions.insert(local_pre);
+          if (exchange.local_preconditions.size() == points.size())
+          {
+            const ApEvent local_precondition = 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions);
+            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+                                          1/*count*/, local_precondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id, index);
+              trace_info.record_collective_barrier(
+                  pre_indirection_barriers[index], local_precondition, key);
+            }
+          }
+        }
+        if (exchange.local_postconditions.size() < points.size())
+        {
+          exchange.local_postconditions.insert(local_post);
+          if (exchange.local_postconditions.size() == points.size())
+          {
+            const ApEvent local_postcondition =
+              Runtime::merge_events(&trace_info, exchange.local_postconditions);
+            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+                                          1/*count*/, local_postcondition);
+            if (trace_info.recording)
+            {
+              std::pair<size_t,size_t> key(trace_local_id,
+                  pre_indirection_barriers.size() + index);
+              trace_info.record_collective_barrier(
+                  post_indirection_barriers[index], local_postcondition, key);
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(index < dst_indirect_records.size());
+        assert(dst_indirect_records[index].size() < points.size());
+#endif
+        dst_indirect_records[index].emplace_back(
+            IndirectRecord(runtime->forest, req, insts, key));
+        exchange.dst_records.push_back(&records);
+        if (dst_indirect_records[index].size() == points.size())
+          return finalize_exchange(index, false/*sources*/);
+        return exchange.dst_ready;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4987,6 +5125,7 @@ namespace Legion {
                                                        IndexPartition pid,
                                                        LogicalRegion handle, 
                                                        LogicalRegion parent,
+                                                       IndexSpace color_space,
                                                        FieldID fid,
                                                        MapperID id, 
                                                        MappingTagID t,
@@ -5022,7 +5161,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_field(pid, handle, parent, fid);
+        check_by_field(pid, color_space, handle, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5032,6 +5171,7 @@ namespace Legion {
 #endif
                                                        ApEvent ready_event,
                                                        IndexPartition pid,
+                                                       IndexSpace handle,
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
                                                    MapperID id, MappingTagID t,
@@ -5077,7 +5217,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image(pid, projection, parent, fid);
+        check_by_image(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -5088,6 +5228,7 @@ namespace Legion {
 #endif
                                                          ApEvent ready_event,
                                                          IndexPartition pid,
+                                                         IndexSpace handle,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
@@ -5136,7 +5277,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
-        check_by_image_range(pid, projection, parent, fid);
+        check_by_image_range(pid, handle, projection, parent, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -12367,7 +12508,7 @@ namespace Legion {
       // Send our messages
       send_messages();
       // Then trigger our event to indicate that we are ready
-      Runtime::trigger_event(done_event);
+      Runtime::trigger_event(done_event, post_broadcast());
     }
 
     //--------------------------------------------------------------------------
@@ -12449,8 +12590,9 @@ namespace Legion {
       {
         if (local_shard != target)
           send_message();
+        RtEvent postcondition = post_gather();
         if (done_event.exists())
-          Runtime::trigger_event(done_event);
+          Runtime::trigger_event(done_event, postcondition);
       }
     }
 
@@ -12487,8 +12629,9 @@ namespace Legion {
       {
         if (local_shard != target)
           send_message();
+        RtEvent postcondition = post_gather();
         if (done_event.exists())
-          Runtime::trigger_event(done_event);
+          Runtime::trigger_event(done_event, postcondition);
       }
     }
 
@@ -13709,58 +13852,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardSyncTree::ShardSyncTree(ReplicateContext *ctx, ShardID origin,
                                  CollectiveIndexLocation loc)
-      : BroadcastCollective(loc, ctx, origin), 
-        is_origin(origin == ctx->owner_shard->shard_id)
+      : GatherCollective(loc, ctx, origin) 
     //--------------------------------------------------------------------------
     {
-      if (is_origin)
-      {
-        // All we need to do is the broadcast and then wait for 
-        // everything to be done
-        perform_collective_async();
-        // Now wait for the result to be ready
-        if (!done_preconditions.empty())
-        {
-          RtEvent ready = Runtime::merge_events(done_preconditions);
-          ready.wait();
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
     ShardSyncTree::~ShardSyncTree(void)
     //--------------------------------------------------------------------------
     {
-      if (!is_origin)
-      {
-        // Perform the collective wait
-        perform_collective_wait();
-        // Trigger our done event when all the preconditions are ready
-#ifdef DEBUG_LEGION
-        assert(done_event.exists());
-#endif
-        if (!done_preconditions.empty())
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(done_preconditions));
-        else
-          Runtime::trigger_event(done_event);
-      }
     }
 
     //--------------------------------------------------------------------------
     void ShardSyncTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      RtUserEvent next = Runtime::create_rt_user_event();
-      rez.serialize(next);
-      done_preconditions.insert(next);
+      RtEvent precondition = get_done_event();
+      rez.serialize(precondition);
     }
 
     //--------------------------------------------------------------------------
     void ShardSyncTree::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      derez.deserialize(done_event);
+      RtEvent postcondition;
+      derez.deserialize(postcondition);
+      postconditions.push_back(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardSyncTree::post_gather(void)
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::merge_events(postconditions);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13770,34 +13894,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardEventTree::ShardEventTree(ReplicateContext *ctx, ShardID origin,
                                    CollectiveID id)
-      : BroadcastCollective(ctx, id, origin),
-        is_origin(origin == ctx->owner_shard->shard_id)
+      : BroadcastCollective(ctx, id, origin)
     //--------------------------------------------------------------------------
     {
-      if (!is_origin)
-      {
-        local_event = Runtime::create_rt_user_event();
-        trigger_event = local_event;
-      }
+      if (!is_origin())
+        precondition = get_done_event();
     }
 
     //--------------------------------------------------------------------------
     ShardEventTree::~ShardEventTree(void)
     //--------------------------------------------------------------------------
     {
-      if (finished_event.exists() && !finished_event.has_triggered())
-        finished_event.wait();
     }
 
     //--------------------------------------------------------------------------
-    void ShardEventTree::signal_tree(RtEvent precondition)
+    void ShardEventTree::signal_tree(RtEvent pre)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_origin);
-      assert(!trigger_event.exists());
+      assert(is_origin());
+      assert(!precondition.exists());
 #endif
-      trigger_event = precondition;
+      precondition = pre;
       perform_collective_async();
     }
 
@@ -13805,27 +13923,21 @@ namespace Legion {
     RtEvent ShardEventTree::get_local_event(void)
     //--------------------------------------------------------------------------
     {
-      finished_event = perform_collective_wait(false/*block*/); 
-      return local_event;
+      return perform_collective_wait(false/*block*/); 
     }
 
     //--------------------------------------------------------------------------
     void ShardEventTree::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize(trigger_event);
+      rez.serialize(precondition);
     }
 
     //--------------------------------------------------------------------------
     void ShardEventTree::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(local_event.exists());
-#endif
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      Runtime::trigger_event(local_event, precondition);
+      derez.deserialize(postcondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13867,7 +13979,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(future_size);
-      rez.serialize(has_future_size);
+      rez.serialize<bool>(has_future_size);
       ShardEventTree::pack_collective(rez);
     }
 
@@ -13876,11 +13988,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(future_size);
-      derez.deserialize(has_future_size);
+      derez.deserialize<bool>(has_future_size);
+      ShardEventTree::unpack_collective(derez);
       if ((future != NULL) && has_future_size)
         future->set_future_result_size(future_size, 
                   context->runtime->address_space);
-      ShardEventTree::unpack_collective(derez);
     }
 
     /////////////////////////////////////////////////////////////

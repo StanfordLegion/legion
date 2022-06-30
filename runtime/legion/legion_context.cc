@@ -4861,7 +4861,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
-                                   fid, id, tag, marg);
+                                   color_space, fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4928,7 +4928,8 @@ namespace Legion {
             handle, color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image(this,pid,projection,parent,fid,id,tag,marg);
+      part_op->initialize_by_image(this, pid, handle, projection, parent,
+                                   fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4995,7 +4996,7 @@ namespace Legion {
             handle, color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image_range(this, pid, projection, parent, 
+      part_op->initialize_by_image_range(this, pid, handle, projection, parent,
                                          fid, id, tag, marg);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -5045,7 +5046,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
+                         handle.get_type_tag());
       DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
@@ -5131,7 +5132,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
+                         handle.get_type_tag());
       DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage range in task %s "
@@ -14217,8 +14218,8 @@ namespace Legion {
       const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_by_field(this, index_partition_allocator_shard,
                                    pending_partition_barrier, pid, handle, 
-                                   parent_priv, fid, id, tag, marg,
-                                   dependent_partition_barrier);
+                                   parent_priv, color_space, fid, id, tag,
+                                   marg, dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -14312,8 +14313,8 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
 #endif
-                                   pending_partition_barrier, 
-                                   pid, projection, parent, fid, id, tag, marg,
+                                   pending_partition_barrier, pid, handle, 
+                                   projection, parent, fid, id, tag, marg,
                                    owner_shard->shard_id, total_shards,
                                    dependent_partition_barrier);
 #ifdef DEBUG_LEGION
@@ -14409,7 +14410,7 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
 #endif
-                                         pending_partition_barrier, pid,
+                                         pending_partition_barrier, pid, handle,
                                          projection, parent, fid, id, tag, marg,
                                          owner_shard->shard_id, total_shards,
                                          dependent_partition_barrier);
@@ -14510,7 +14511,7 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,
-          handle.get_index_space().get_tree_id(), parent.get_type_tag());
+          handle.get_index_space().get_tree_id(), handle.get_type_tag());
       if (create_shard_partition(pid, handle.get_index_space(), color_space, 
                     part_kind, part_color, color_generated, disjoint_result))
         log_index.debug("Creating partition by preimage in task %s (ID %lld)",
@@ -14604,7 +14605,7 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,
-          handle.get_index_space().get_tree_id(), parent.get_type_tag());
+          handle.get_index_space().get_tree_id(), handle.get_type_tag());
       if (create_shard_partition(pid, handle.get_index_space(), color_space, 
                     part_kind, part_color, color_generated, disjoint_result))
         log_index.debug("Creating partition by preimage range in task %s "
@@ -18639,6 +18640,7 @@ namespace Legion {
       // Shard 0 has to wait for all the other shards to get here
       // too before it can do the deletion
       ShardSyncTree sync_point(this, 0/*origin*/, COLLECTIVE_LOC_72);
+      sync_point.perform_collective_sync();
       if (owner_shard->shard_id == 0)
         InnerContext::destroy_phase_barrier(pb);
     }
