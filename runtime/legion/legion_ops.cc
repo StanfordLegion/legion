@@ -16218,8 +16218,9 @@ namespace Legion {
     {
       const size_t field_size = 
         runtime->forest->get_field_size(handle.get_field_space(), fid);
+      IndexSpace proj_parent = runtime->forest->get_parent_index_space(proj);
       const size_t coord_size = runtime->forest->get_coordinate_size(
-                              parent.get_index_space(), false/*range*/);
+                                                 proj_parent, false/*range*/);
       if (field_size != coord_size)
         REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
             "The field size for partition-by-preimage operation does not "
@@ -16286,8 +16287,9 @@ namespace Legion {
     {
       const size_t field_size = 
         runtime->forest->get_field_size(handle.get_field_space(), fid);
+      IndexSpace proj_parent = runtime->forest->get_parent_index_space(proj);
       const size_t coord_size = runtime->forest->get_coordinate_size(
-                              parent.get_index_space(), true/*range*/);
+                                                 proj_parent, true/*range*/);
       if (field_size != coord_size)
         REPORT_LEGION_ERROR(ERROR_TYPE_FIELD_MISMATCH,
             "The field size for partition-by-preimage-range operation does "

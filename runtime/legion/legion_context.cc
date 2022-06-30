@@ -5044,7 +5044,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
+                         handle.get_type_tag());
       DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
@@ -5130,7 +5130,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
+                         handle.get_type_tag());
       DistributedID did = runtime->get_available_distributed_id();
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage range in task %s "
@@ -14405,7 +14405,7 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,
-          handle.get_index_space().get_tree_id(), parent.get_type_tag());
+          handle.get_index_space().get_tree_id(), handle.get_type_tag());
       if (create_shard_partition(pid, handle.get_index_space(), color_space, 
                     part_kind, part_color, color_generated, disjoint_result))
         log_index.debug("Creating partition by preimage in task %s (ID %lld)",
@@ -14499,7 +14499,7 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,
-          handle.get_index_space().get_tree_id(), parent.get_type_tag());
+          handle.get_index_space().get_tree_id(), handle.get_type_tag());
       if (create_shard_partition(pid, handle.get_index_space(), color_space, 
                     part_kind, part_color, color_generated, disjoint_result))
         log_index.debug("Creating partition by preimage range in task %s "
