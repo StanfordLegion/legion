@@ -640,7 +640,7 @@ namespace Realm {
     for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid; it2.step()) {
       for (PointInRectIterator<N, T> pir(it2.rect); pir.valid; pir.step()) {
         Point<N2, T2> target_point = transform[pir.p];
-        // TODO(apryakhin@): Consider finding an inverse of a tranform
+        // TODO(apryakhin@): Consider finding an inverse of a transform
         // to avoid point-wise iteration.
         for (size_t i = 0; i < targets.size(); i++)
           if (targets[i].contains(target_point)) {
