@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 22.06.0 (June ??, 2022)
+Version 22.06.0 (June 29, 2022)
   * Regent
      - Support for cross-products in index launches, as well as
         multi-level projection functors.
