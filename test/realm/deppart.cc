@@ -2473,16 +2473,9 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
       for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
            point.step()) {
         auto target_point = transform[point.p];
-        if (root.contains(target_point)) {
-          bool found = false;
-          for (const auto image : images) {
-            if (image.contains(target_point)) {
-              image_points--;
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
+        if (root2.contains(target_point)) {
+          if (!ss_images[i].contains(target_point) ||
+              !ss_preimages[i].contains(point.p)) {
             return 1;
           }
         }
