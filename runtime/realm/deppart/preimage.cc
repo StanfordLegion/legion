@@ -659,7 +659,6 @@ namespace Realm {
     std::map<int, DenseRectangleList<N,T> *> rect_map;
 
     populate_bitmasks(rect_map);
-
 #ifdef DEBUG_PARTITIONING
     std::cout << rect_map.size() << " non-empty preimages present in instance "
               << inst << std::endl;
@@ -669,10 +668,8 @@ namespace Realm {
       std::cout << "  " << targets[it->first] << " = "
                 << it->second->rects.size() << " rectangles" << std::endl;
 #endif
-
-    // iterate over sparsity outputs and contribute to all (even if we didn't
-    // have any
-    //  points found for it)
+    // iterate over sparsity outputs and contribute to all (even if we
+    // didn't have any points found for it)
     int empty_count = 0;
     for (size_t i = 0; i < sparsity_outputs.size(); i++) {
       SparsityMapImpl<N, T> *impl =
@@ -701,8 +698,7 @@ namespace Realm {
     for (size_t i = 0; i < targets.size(); i++) {
       if (!targets[i].dense()) {
         // it's safe to add the count after the registration only because we
-        // initialized
-        //  the count to 2 instead of 1
+        // initialized the count to 2 instead of 1
         bool registered = SparsityMapImpl<N2, T2>::lookup(targets[i].sparsity)
                               ->add_waiter(this, true /*precise*/);
         if (registered) wait_count.fetch_add(1);
@@ -712,8 +708,7 @@ namespace Realm {
     // need valid data for the parent space too
     if (!parent_space.dense()) {
       // it's safe to add the count after the registration only because we
-      // initialized
-      //  the count to 2 instead of 1
+      // initialized the count to 2 instead of 1
       bool registered = SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
                             ->add_waiter(this, true /*precise*/);
       if (registered) wait_count.fetch_add(1);
