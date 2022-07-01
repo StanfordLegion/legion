@@ -17142,6 +17142,8 @@ namespace Legion {
       
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
+      // Add a reference to make sure we don't race with sending the response
+      set->add_base_resource_ref(RUNTIME_REF);
       if (target_space == runtime->address_space)
       {
         // We've been sent back to the owner node
@@ -17164,6 +17166,8 @@ namespace Legion {
         set->clone_to_remote(target, target_space, node, mask, done_event, 
                              invalidate_overlap, forward_to_owner);
       }
+      if (set->remove_base_resource_ref(RUNTIME_REF))
+        delete set;
     }
 
     //--------------------------------------------------------------------------
