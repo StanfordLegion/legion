@@ -2253,6 +2253,7 @@ class RandomAffineTest : public TestInterface {
   std::vector<FieldDataDescriptor<IndexSpace<N1, T1>, FT>> fd_vals1;
 };
 
+
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
@@ -2463,13 +2464,10 @@ template <int N1, typename T1, int N2, typename T2, typename FT,
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
     const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
     const std::vector<IndexSpace<N2, T1>> &images) {
-  int image_points = 0;
-  for (const auto &image : images) {
-    image_points += image.volume();
-  }
-  // Verify the result of an image operation.
-  for (const auto &source : ss_by_color) {
-    for (IndexSpaceIterator<N1, T1> it(source); it.valid; it.step()) {
+  assert(ss_by_color.size() == ss_images.size() &&
+         ss_images.size() == ss_preimages.size());
+  for (size_t i = 0; i < ss_by_color.size(); i++) {
+    for (IndexSpaceIterator<N1, T1> it(ss_by_color[i]); it.valid; it.step()) {
       for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
            point.step()) {
         auto target_point = transform[point.p];
@@ -2482,7 +2480,7 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
       }
     }
   }
-  return !(image_points == 0);
+  return 0;
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT,

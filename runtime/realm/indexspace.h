@@ -467,6 +467,13 @@ namespace Realm {
 				   Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspace_by_image(const TRANSFORM& transform,
+				   const IndexSpace<N2,T2>& source,
+				   IndexSpace<N,T>& image,
+				   const ProfilingRequestSet &reqs,
+				   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2, typename TRANSFORM>
     Event create_subspaces_by_image(
         const TRANSFORM& transform,
         const std::vector<IndexSpace<N2, T2> >& sources,
