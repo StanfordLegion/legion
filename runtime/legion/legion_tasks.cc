@@ -5851,10 +5851,8 @@ namespace Legion {
         finalize_single_task_profiling();
       if (must_epoch != NULL)
       {
-        if (profiling_reported.exists() && !profiling_reported.has_triggered())
-          profiling_reported.wait();
-        must_epoch->notify_subop_commit(this);
-        commit_operation(true/*deactivate*/);
+        must_epoch->notify_subop_commit(this, profiling_reported);
+        commit_operation(true/*deactivate*/, profiling_reported);
       }
       else
         commit_operation(true/*deactivate*/, profiling_reported);
@@ -8054,14 +8052,11 @@ namespace Legion {
       }
       if (must_epoch != NULL)
       {
+        RtEvent commit_precondition;
         if (!commit_preconditions.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(commit_preconditions);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
-        must_epoch->notify_subop_commit(this);
-        commit_operation(true/*deactivate*/);
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        must_epoch->notify_subop_commit(this, commit_precondition);
+        commit_operation(true/*deactivate*/, commit_precondition);
       }
       else
       {

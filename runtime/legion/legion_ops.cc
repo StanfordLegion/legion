@@ -12713,6 +12713,7 @@ namespace Legion {
       output.constraint_mappings.clear();
       slice_version_events.clear();
       completion_preconditions.clear();
+      commit_preconditions.clear();
       completion_effects.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
@@ -13225,7 +13226,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::notify_subop_commit(Operation *op)
+    void MustEpochOp::notify_subop_commit(Operation *op, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       bool need_commit;
@@ -13234,11 +13235,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
+        if (precondition.exists())
+          commit_preconditions.insert(precondition);
         remaining_subop_commits--;
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation(true/*deactivate*/);
+      {
+        RtEvent commit_precondition;
+        if (!commit_preconditions.empty())
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        commit_operation(true/*deactivate*/, commit_precondition);
+      }
     }
 
     //--------------------------------------------------------------------------

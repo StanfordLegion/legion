@@ -2353,7 +2353,7 @@ namespace Legion {
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
       void notify_subop_complete(Operation *op, RtEvent precondition);
-      void notify_subop_commit(Operation *op);
+      void notify_subop_commit(Operation *op, RtEvent precondition);
     public:
       RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
     protected:
@@ -2397,7 +2397,7 @@ namespace Legion {
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:
-      std::set<RtEvent> completion_preconditions;
+      std::set<RtEvent> completion_preconditions, commit_preconditions;
       std::set<ApEvent> completion_effects;
     };
 
