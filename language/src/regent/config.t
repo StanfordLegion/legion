@@ -90,6 +90,7 @@ local default_options = {
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,
   ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
+  ["flow-old-iteration-order"] = 0,
 
   -- Experimental auto-parallelization flags:
   ["parallelize"] = true,
@@ -119,7 +120,7 @@ local default_options = {
   ["override-demand-cuda"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
-  ["no-debuginfo"] = false,
+  ["debuginfo"] = false,
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,

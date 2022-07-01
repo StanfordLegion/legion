@@ -1020,7 +1020,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_index_space_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_index_space_t handle,
@@ -1593,7 +1593,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_index_partition_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_index_partition_t handle,
@@ -1711,7 +1711,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_field_space_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_field_space_t handle,
@@ -1720,6 +1720,17 @@ extern "C" {
                                            size_t *size,
                                            bool can_fail /* = false */,
                                            bool wait_until_ready /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::get_field_space_fields()
+   */
+  legion_field_id_t *
+  legion_field_space_get_fields(legion_runtime_t runtime,
+                                legion_context_t ctx,
+                                legion_field_space_t handle,
+                                size_t *size);
 
   /**
    * @param handle Caller must have ownership of parameter `fields`.
@@ -1748,7 +1759,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_field_id_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_field_space_t handle,
@@ -1896,7 +1907,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_logical_region_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_logical_region_t handle,
@@ -2053,7 +2064,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_logical_partition_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_logical_partition_t handle,
@@ -5009,7 +5020,7 @@ extern "C" {
   /**
    * @see Legion::Runtime::retrieve_semantic_information()
    */
-  void
+  bool
   legion_task_id_retrieve_semantic_information(
                                            legion_runtime_t runtime,
                                            legion_task_id_t task_id,

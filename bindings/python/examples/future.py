@@ -74,6 +74,7 @@ def main():
 
     j = return_void()
     print("value of j.get() is %s" % j.get())
+    assert j.is_ready()
 
     show(f)
     show(g)

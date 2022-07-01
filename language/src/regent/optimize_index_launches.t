@@ -57,7 +57,7 @@ local function get_base_partition_symbol(node)
 end
 
 local function get_partition_dim(expr)
-  return std.as_read(strip_projection(expr).value.expr_type):colors().dim
+  return std.as_read(expr.expr_type):colors().dim
 end
 
 function context:__index (field)
@@ -76,8 +76,8 @@ function context:new_local_scope()
   local cx = {
     constraints = self.constraints,
     loop_index = false,
-    loop_variables = {},
-    free_variables = terralib.newlist(),
+    loop_variables = data.newmap(),
+    free_variables = data.newmap(),
   }
   return setmetatable(cx, context)
 end
@@ -106,17 +106,12 @@ end
 
 function context:add_free_variable(symbol)
   assert(self.free_variables)
-  self.free_variables:insert(symbol)
+  self.free_variables[symbol] = true
 end
 
 function context:is_free_variable(variable)
   assert(self.free_variables)
-  for _, elem in ipairs(self.free_variables) do
-    if elem == variable then
-      return true
-    end
-  end
-  return false
+  return self.free_variables[variable]
 end
 
 function context:is_loop_variable(variable)
@@ -137,7 +132,7 @@ result.node:leaf("Constant", {"value"}):set_memoize()
 result.node:leaf("Invariant", {}):set_memoize()
 
 data.matrix = {}
-setmetatable(data.matrix, {__index = data.tuple })
+setmetatable(data.matrix, {__index = data.vector })
 data.matrix.__index = data.matrix
 
 function data.is_matrix(x)
@@ -193,15 +188,15 @@ end
 local function get_privileges_before_projection(expr, privileges, coherence_modes)
   if expr:is(ast.typed.expr.Projection) then
     local function map_domain(map, tbl)
-      local result = {}
-      for k, v in pairs(tbl) do
+      local result = data.newmap()
+      for k, v in tbl:items() do
         assert(map[k] ~= nil)
         result[map[k]] = v
       end
       return result
     end
     local inv_field_mapping = data.dict(expr.field_mapping:map(
-      function(pair) return { pair[2]:hash(), pair[1]:hash() } end))
+      function(pair) return { pair[2], pair[1] } end))
     privileges = map_domain(inv_field_mapping, privileges)
     coherence_modes = map_domain(inv_field_mapping, coherence_modes)
   end
@@ -225,7 +220,7 @@ local function check_privilege_noninterference(cx, task, arg,
       std.group_task_privileges_by_field_path(
         std.find_task_privileges(other_param_region_type, task)))
 
-  for field_path, privilege in pairs(privileges_by_field_path) do
+  for field_path, privilege in privileges_by_field_path:items() do
     local other_privilege = other_privileges_by_field_path[field_path]
 
     if not (
@@ -256,7 +251,7 @@ local function analyze_noninterference_previous(
     region_type = region_type:get_projection_source()
   end
   local args_interfering = terralib.newlist()
-  for i, other_arg in pairs(regions_previously_used) do
+  for i, other_arg in ipairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
       other_region_type = other_region_type:get_projection_source()
@@ -1058,7 +1053,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
 
   local free_vars = terralib.newlist()
-  local args_need_dynamic_check = {}
+  local args_need_dynamic_check = terralib.newlist()
 
   -- Perform a simpler analysis if the expression is not a task launch
   if not call:is(ast.typed.expr.Call) then
@@ -1107,14 +1102,14 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local param_types = task:get_type().parameters
     local args = call.args
     local regions_previously_used = terralib.newlist()
-    local mapping = {}
+    local mapping = data.newmap()
     -- free variables referenced in loop variables (defined in loop preamble)
     -- must be defined for each arg since loop variables defined for each arg
     for _, var_stat in ipairs(loop_vars) do
        collect_free_variables(loop_cx, var_stat)
     end
 
-    local free_vars_base = terralib.newlist()
+    local free_vars_base = data.newmap()
     free_vars_base:insertall(loop_cx.free_variables)
     for i, arg in ipairs(args) do
       if not analyze_is_side_effect_free(loop_cx, arg) then
@@ -1124,8 +1119,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
 
-      free_vars[i] = terralib.newlist()
-      loop_cx.free_variables = terralib.newlist()
+      free_vars[i] = data.newmap()
+      loop_cx.free_variables = data.newmap()
       loop_cx.free_variables:insertall(free_vars_base)
       collect_free_variables(loop_cx, arg)
       free_vars[i]:insertall(loop_cx.free_variables)
@@ -1157,7 +1152,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       if std.is_phase_barrier(arg_type) then
         -- Phase barriers must be invariant, or must not be used as an arrival/wait.
         if not arg_invariant then
-          for _, variables in pairs(task:get_conditions()) do
+          for _, variables in task:get_conditions():values() do
             if variables[i] then
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                   " is not provably invariant")
@@ -1182,7 +1177,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
             loop_cx, task, arg, regions_previously_used, mapping)
           if not passed then
             if emit_dynamic_check then
-              for _, failure in pairs(failures_i) do
+              for _, failure in ipairs(failures_i) do
                 if not (arg:is(ast.typed.expr.IndexAccess) and
                         args[failure]:is(ast.typed.expr.IndexAccess) and
                         get_base_partition_symbol(arg) == get_base_partition_symbol(args[failure]))
@@ -1191,7 +1186,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
                        " interferes with argument " .. tostring(failure))
                   return
                 end
-                table.insert(args_need_dynamic_check, { i, failure })
+                args_need_dynamic_check:insert({i, failure })
               end
             else
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
@@ -1210,7 +1205,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
                 " interferes with itself")
               return
             else
-              table.insert(args_need_dynamic_check, i)
+              args_need_dynamic_check:insert(i)
             end
           end
         end
@@ -1302,30 +1297,28 @@ end
 
 local function collect_and_sort_args(args, call_args, task, param_region_types)
   -- Collect all args of the same partition or cross product together
-  local collected = {}
-  for _, arg in pairs(args) do
+  local collected = data.new_recursive_map(1)
+  for _, arg in ipairs(args) do
     if type(arg) == "number" then
       local psym = get_base_partition_symbol(call_args[arg])
-      collected[psym] = collected[psym] or {}
       collected[psym][arg] = true
     else
       -- Cross-check args are pairs
       local psym = get_base_partition_symbol(call_args[arg[1]])
-      collected[psym] = collected[psym] or {}
       collected[psym][arg[1]] = true
       collected[psym][arg[2]] = true
     end
   end
 
-  local array = {}
-  for psym, args in pairs(collected) do
+  local array = data.newmap()
+  for psym, args in collected:items() do
     array[psym] = terralib.newlist()
-    for arg, v in pairs(args) do
+    for arg, v in args:items() do
       if v then array[psym]:insert(arg) end
     end
   end
 
-  for _, args in pairs(array) do
+  for _, args in array:items() do
     table.sort(args, function(p, q)
       local p_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[p], task)
       local q_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[q], task)
@@ -1380,14 +1373,15 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   local collected_args = collect_and_sort_args(
     args_need_dynamic_check, call_args, task, param_region_types)
 
-  for _, args in pairs(collected_args) do
+  for _, args in collected_args:items() do
     local stats = terralib.newlist()
 
-    local dim = get_partition_dim(call_args[args[1]])
+    local first_arg = util.get_base_indexed_node(strip_projection(call_args[args[1]]))
+    local dim = get_partition_dim(first_arg)
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(util.get_base_indexed_node(call_args[args[1]]).value), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(first_arg.value), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(

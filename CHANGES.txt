@@ -1,8 +1,10 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (????? ??, ????)
+Version 22.06.0 (June 29, 2022)
   * Regent
+     - Support for cross-products in index launches, as well as
+        multi-level projection functors.
      - Support for HIP on AMD GPUs has been added. All tasks marked with
         `__demand(__cuda)` are automatically eligible. Note that the name of
         the annotation may change in the future to something more general, but
@@ -20,6 +22,21 @@ Version ??.??.? (????? ??, ????)
         applications, additional performance can sometimes be unlocked
         by enabling the full suite of optimizations with `-ffast-math 1`,
         at the cost of numerical accuracy.
+     - Performance improvements for CUDA allow recent LLVM versions
+        (e.g., 13) to match or exceed the performance of LLVM
+        3.8. Previously, performance regressions made LLVM 3.8 the
+        most performant version for use with CUDA. The recommended
+        LLVM version moving forward is 13, and `setup_env.py` has been
+        updated to set this on all platforms.
+     - The versions of GASNet and Terra are now pinned by default in
+        `setup_env.py`. You can choose versions explicitly with
+        `GASNET_VERSION` (as before, though the previous default was
+        unpinned) and `--terra-branch`, respectively.
+  * Realm
+     - Allow use of system OpenMP runtime (instead of Realm-provided one) with
+        `-DLegion_OpenMP_SYSTEM_RUNTIME=ON`.  This allows inter-operation with
+        libraries that have already been linked to the system runtime, but
+        limits each process to a single OMP processor.
 
 Version 22.03.0 (March 27, 2022)
   * Build

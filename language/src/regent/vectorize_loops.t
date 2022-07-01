@@ -151,8 +151,8 @@ function context:new_global_scope(loop_symbol)
     subst = symbol_table:new_global_scope(),
     expr_type = {},
     demanded = false,
-    read_set = {},
-    write_set = {},
+    read_set = data.new_recursive_map(1),
+    write_set = data.new_recursive_map(1),
     loop_symbol = loop_symbol,
   }
   return setmetatable(cx, context)
@@ -260,7 +260,7 @@ end
 
 function flip_types.expr(cx, simd_width, symbol, node)
   if cx:lookup_expr_type(node) == C then return node end
-  local new_node = node:get_fields()
+  local new_node = {}
   if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
@@ -271,8 +271,8 @@ function flip_types.expr(cx, simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.expr.Binary) then
-    new_node.lhs = flip_types.expr(cx, simd_width, symbol, new_node.lhs)
-    new_node.rhs = flip_types.expr(cx, simd_width, symbol, new_node.rhs)
+    new_node.lhs = flip_types.expr(cx, simd_width, symbol, node.lhs)
+    new_node.rhs = flip_types.expr(cx, simd_width, symbol, node.rhs)
 
     local expr_type
     if std.as_read(new_node.lhs.expr_type):isvector() then
@@ -316,14 +316,14 @@ function flip_types.expr(cx, simd_width, symbol, node)
         span = node.span,
       }
     else
-      new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
-      return node:type()(new_node)
+      new_node.expr_type = flip_types.type(simd_width, node.expr_type)
+      return node(new_node)
     end
 
   elseif node:is(ast.typed.expr.Unary) then
-    new_node.rhs = flip_types.expr(cx, simd_width, symbol, new_node.rhs)
-    new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
-    return node:type()(new_node)
+    new_node.rhs = flip_types.expr(cx, simd_width, symbol, node.rhs)
+    new_node.expr_type = flip_types.type(simd_width, node.expr_type)
+    return node(new_node)
 
   elseif node:is(ast.typed.expr.Ctor) then
     new_node.fields = node.fields:map(
@@ -389,9 +389,9 @@ function flip_types.expr(cx, simd_width, symbol, node)
 
   end
   if cx:lookup_expr_type(node) == V then
-    new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
+    new_node.expr_type = flip_types.type(simd_width, new_node.expr_type or node.expr_type)
   end
-  return node:type()(new_node)
+  return node(new_node)
 end
 
 -- Return a vector intrinsic equivalent to the C math function
@@ -688,11 +688,10 @@ function check_vectorizability.has_aliasing(cx, write_set)
       write_set[r] = nil
     end)
   end
-  for ty, fields in pairs(write_set) do
+  for ty, fields in write_set:items() do
     if cx.read_set[ty] then
-      for field_hash, pair in pairs(fields) do
-        if cx.read_set[ty][field_hash] then
-          local field, node = unpack(pair)
+      for field, node in fields:items() do
+        if cx.read_set[ty][field] then
           local path = ""
           if #field > 0 then
             path = "." .. field[1]
@@ -762,10 +761,8 @@ function check_vectorizability.stat(cx, node)
       end
       collect_bounds(node.value):map(function(pair)
         local ty, field = unpack(pair)
-        local field_hash = field:hash()
-        if not cx.read_set[ty] then cx.read_set[ty] = {} end
-        if not cx.read_set[ty][field_hash] then
-          cx.read_set[ty][field_hash] = data.newtuple(field, node)
+        if not cx.read_set[ty][field] then
+          cx.read_set[ty][field] = node
         end
       end)
     end
@@ -810,19 +807,15 @@ function check_vectorizability.stat(cx, node)
     -- bookkeeping for alias analysis
     collect_bounds(rh):map(function(pair)
       local ty, field = unpack(pair)
-      local field_hash = field:hash()
-      if not cx.read_set[ty] then cx.read_set[ty] = {} end
-      if not cx.read_set[ty][field_hash] then
-        cx.read_set[ty][field_hash] = data.newtuple(field, node)
+      if not cx.read_set[ty][field] then
+        cx.read_set[ty][field] = node
       end
     end)
-    local write_set = {}
+    local write_set = data.new_recursive_map(1)
     get_bounds(lh.expr_type):map(function(pair)
       local ty, field = unpack(pair)
-      local field_hash = field:hash()
-      if not write_set[ty] then write_set[ty] = {} end
-      if not write_set[ty][field_hash] then
-        write_set[ty][field_hash] = data.newtuple(field, node)
+      if not write_set[ty][field] then
+        write_set[ty][field] = node
       end
     end)
     if check_vectorizability.has_aliasing(cx, write_set) then

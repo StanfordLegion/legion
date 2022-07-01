@@ -33,17 +33,6 @@ end
 base.opt_profile = {fastmath = cpu_fast}
 base.gpu_opt_profile = {fastmath = gpu_fast}
 
--- Hack: Terra symbols don't support the hash() method so monkey patch
--- it in here. This allows deterministic hashing of Terra symbols,
--- which is currently required by OpenMP codegen.
-do
-  local terralib_symbol = getmetatable(terralib.newsymbol(int))
-  function terralib_symbol:hash()
-    local hash_value = "__terralib_symbol_#" .. tostring(self.id)
-    return hash_value
-  end
-end
-
 -- Helpers for zero/min/max values of various types.
 
 local function zero(value_type) return terralib.cast(value_type, 0) end
@@ -458,6 +447,25 @@ function base.get_reduction_op(privilege)
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
+-- Assign the basic types IDs for interop with Pygion.
+do
+  local primitive_types =
+    terralib.newlist({ int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, double })
+  local base_id = 101
+  local type_ids = data.newmap()
+  for _, t in ipairs(primitive_types) do
+    local type_id = base_id
+    base_id = base_id + 1
+    type_ids[t] = type_id
+  end
+  function base.get_type_semantic_tag()
+    return 54321 -- Hack: pick a value that seems unlikely to conflict
+  end
+  function base.get_type_id(t)
+    return type_ids[t]
+  end
+end
+
 function base.meet_privilege(a, b)
   if a == b then
     return a
@@ -679,17 +687,17 @@ function base.group_task_privileges_by_field_path(privileges, privilege_field_pa
                                                   privilege_field_types,
                                                   privilege_coherence_modes,
                                                   privilege_flags)
-  local privileges_by_field_path = {}
+  local privileges_by_field_path = data.newmap()
   local coherence_modes_by_field_path
   if privilege_coherence_modes ~= nil then
-    coherence_modes_by_field_path = {}
+    coherence_modes_by_field_path = data.newmap()
   end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
-      privileges_by_field_path[field_path:hash()] = privilege
+      privileges_by_field_path[field_path] = privilege
       if coherence_modes_by_field_path ~= nil then
-        coherence_modes_by_field_path[field_path:hash()] =
+        coherence_modes_by_field_path[field_path] =
           privilege_coherence_modes[i]
       end
     end
@@ -983,11 +991,6 @@ function symbol:getlabel()
     self.symbol_label = terralib.newlabel(self.symbol_name)
   end
   return self.symbol_label
-end
-
-function symbol:hash()
-  local hash_value = "__symbol_#" .. tostring(self.symbol_id)
-  return hash_value
 end
 
 function symbol:__tostring()

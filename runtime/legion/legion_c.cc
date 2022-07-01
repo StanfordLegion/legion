@@ -805,7 +805,7 @@ legion_index_space_attach_semantic_information(legion_runtime_t runtime_,
   runtime->attach_semantic_information(handle, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_index_space_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_index_space_t handle_,
@@ -818,7 +818,7 @@ legion_index_space_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
 }
 
@@ -1826,7 +1826,7 @@ legion_index_partition_attach_semantic_information(
   runtime->attach_semantic_information(handle, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_index_partition_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_index_partition_t handle_,
@@ -1839,7 +1839,7 @@ legion_index_partition_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
 }
 
@@ -1983,7 +1983,7 @@ legion_field_space_attach_semantic_information(
   runtime->attach_semantic_information(handle, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_field_space_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_field_space_t handle_,
@@ -1996,8 +1996,26 @@ legion_field_space_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
+}
+
+legion_field_id_t *
+legion_field_space_get_fields(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              legion_field_space_t handle_,
+                              size_t *size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  std::vector<FieldID> fields;
+  runtime->get_field_space_fields(ctx, handle, fields);
+  legion_field_id_t *result = (legion_field_id_t *)malloc(sizeof(legion_field_id_t) * fields.size());
+  std::copy(fields.begin(), fields.end(), result);
+  *size = fields.size();
+  return result;
 }
 
 bool
@@ -2034,7 +2052,7 @@ legion_field_id_attach_semantic_information(legion_runtime_t runtime_,
                                      handle, id, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_field_id_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_field_space_t handle_,
@@ -2048,7 +2066,7 @@ legion_field_id_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                    handle, id, tag, *result, *size, can_fail, wait_until_ready);
 }
 
@@ -2225,7 +2243,7 @@ legion_logical_region_attach_semantic_information(
   runtime->attach_semantic_information(handle, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_logical_region_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_logical_region_t handle_,
@@ -2238,7 +2256,7 @@ legion_logical_region_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
 }
 
@@ -2416,7 +2434,7 @@ legion_logical_partition_attach_semantic_information(
   runtime->attach_semantic_information(handle, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_logical_partition_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_logical_partition_t handle_,
@@ -2429,7 +2447,7 @@ legion_logical_partition_retrieve_semantic_information(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
 }
 
@@ -6645,7 +6663,7 @@ legion_task_id_attach_semantic_information(legion_runtime_t runtime_,
   runtime->attach_semantic_information(task_id, tag, buffer, size, is_mutable);
 }
 
-void
+bool
 legion_task_id_retrieve_semantic_information(
                                          legion_runtime_t runtime_,
                                          legion_task_id_t task_id,
@@ -6657,7 +6675,7 @@ legion_task_id_retrieve_semantic_information(
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
-  runtime->retrieve_semantic_information(
+  return runtime->retrieve_semantic_information(
                       task_id, tag, *result, *size, can_fail, wait_until_ready);
 }
 

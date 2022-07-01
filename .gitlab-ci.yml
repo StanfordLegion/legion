@@ -231,6 +231,7 @@ variables:
   TEST_LEGION_CXX: "0"
   TEST_REALM: "0"
   TEST_FUZZER: "0"
+  REGENT_SAFE_COMPILER: "1"
 .parallel: &parallel
   REGENT_JOBS: "2"
 .incremental: &incremental

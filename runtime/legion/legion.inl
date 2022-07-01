@@ -16681,6 +16681,16 @@ namespace Legion {
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
     public: // Explicit ordering
+      inline DeferredBuffer(Memory::Kind kind,
+                            const Domain &bounds,
+                            std::array<DimensionKind,N> ordering,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16);
+      inline DeferredBuffer(const Rect<N,T> &bounds,
+                            Memory::Kind kind,
+                            std::array<DimensionKind,N> ordering,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16);
       inline DeferredBuffer(Memory memory,
                             const Domain &bounds,
                             std::array<DimensionKind,N> ordering,
@@ -16835,6 +16845,57 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value/* = NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize(memory, space, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value /*= NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      const Realm::Memory memory = get_memory_from_kind(kind);
       initialize(memory, rect, initial_value);
     }
 
@@ -17245,6 +17306,57 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value/* = NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize(memory, space, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value /*= NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      const Realm::Memory memory = get_memory_from_kind(kind);
       initialize(memory, rect, initial_value);
     }
 
