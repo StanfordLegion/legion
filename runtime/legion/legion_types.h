@@ -76,6 +76,10 @@ template<unsigned int MAX> class AVXTLBitMask;
 template<unsigned int MAX> class PPCBitMask;
 template<unsigned int MAX> class PPCTLBitMask;
 #endif
+#ifdef __ARM_NEON
+template<unsigned int MAX> class NeonBitMask;
+template<unsigned int MAX> class NeonTLBitMask;
+#endif
 template<typename DT, unsigned BLOAT, bool BIDIR> class CompoundBitMask;
 
 namespace BindingLib { class Utility; } // BindingLib namespace
@@ -1935,6 +1939,16 @@ namespace Legion {
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
+#elif defined(__ARM_NEON)
+#if (LEGION_MAX_FIELDS > 128)
+    typedef NeonTLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef NeonBitMask<LEGION_MAX_FIELDS> FieldMask;
+#else
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
+                    LEGION_FIELD_MASK_FIELD_SHIFT,
+                    LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
+#endif
 #else
 #if (LEGION_MAX_FIELDS > 64)
     typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
@@ -1992,6 +2006,16 @@ namespace Legion {
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
+#elif defined(__ARM_NEON)
+#if (LEGION_MAX_NUM_NODES > 128)
+    typedef NeonTLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef NeonBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#else
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
+                    LEGION_NODE_MASK_NODE_SHIFT,
+                    LEGION_NODE_MASK_NODE_MASK> NodeMask;
+#endif
 #else
 #if (LEGION_MAX_NUM_NODES > 64)
     typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
@@ -2042,6 +2066,16 @@ namespace Legion {
     typedef PPCTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #elif (LEGION_MAX_NUM_PROCS > 64)
     typedef PPCBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#else
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
+                    LEGION_PROC_MASK_PROC_SHIFT,
+                    LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
+#endif
+#elif defined(__ARM_NEON)
+#if (LEGION_MAX_NUM_PROCS > 128)
+    typedef NeonTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef NeonBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
     typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
