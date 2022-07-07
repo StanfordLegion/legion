@@ -41,8 +41,6 @@
 #include <string.h>
 #include <dlfcn.h>
 
-//#define HIP_DLOPEN
-
 #define IS_DEFAULT_STREAM(stream)   \
   ((stream) == 0)
 
@@ -54,46 +52,7 @@ namespace Realm {
     Logger log_cudart("cudart");
     Logger log_hipipc("hipipc");
 
-    Logger log_stream("hipstream");
-
-#ifdef HIP_DLOPEN
-   class HipRTAPI {
-    public:
-      HipRTAPI(void *handle);
-
-    protected:
-      template<typename T>
-      void get_symbol(T &fn, const char *symbol, bool missing_ok = false);
-
-    protected:
-      void *handle;
-
-    public:
-      hipError_t (*hipMemcpyAsync)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                                   hipStream_t stream);
-    };
-
-    HipRTAPI::HipRTAPI(void *_handle)
-      : handle(_handle)
-    {
-      get_symbol(this->hipMemcpyAsync, "hipMemcpyAsync");
-    }
-
-    template<typename T>
-    void HipRTAPI::get_symbol(T &fn, const char *symbol,
-                               bool missing_ok /*= false*/)
-    {
-      fn = reinterpret_cast<T>(dlsym(handle, symbol));
-      if(!fn && !missing_ok) {
-        const char *error = dlerror();
-        log_gpu.fatal() << "failed to find symbol '" << symbol << "': " << error;
-        assert(false);
-      }
-    }
-
-    HipRTAPI *hip_api = NULL;
-    void *hiplib_handle = NULL;
-#endif  
+    Logger log_stream("hipstream");  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -486,17 +445,10 @@ namespace Realm {
         default:
           assert(false);
       }
-#ifdef HIP_DLOPEN
-      CHECK_HIP( hip_api->hipMemcpyAsync((void *)(((char*)dst)+span_start),
-                                        (const void*)(((char*)src)+span_start),
-                                        span_bytes, copy_type,
-                                        raw_stream) );
-#else
       CHECK_HIP( hipMemcpyAsync((void *)(((char*)dst)+span_start),
                                (const void*)(((char*)src)+span_start),
                                span_bytes, copy_type,
                                raw_stream) );
-#endif
 #endif
     }
 
@@ -3367,14 +3319,6 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(hip_module_singleton == this);
       hip_module_singleton = 0;
-#ifdef HIP_DLOPEN
-      delete hip_api;
-      if (dlclose(hiplib_handle)) {
-        const char *error = dlerror();
-        log_gpu.fatal() << "libpython dlclose error: " << error;
-        assert(false);
-      }
-#endif
     }
 
     /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime,
@@ -3420,17 +3364,6 @@ namespace Realm {
       	  exit(1);
       	}
       }
-      
-#ifdef HIP_DLOPEN
-      hiplib_handle = dlopen("/opt/rocm-3.7.0/lib/libamdhip64.so", RTLD_GLOBAL | RTLD_LAZY);
-      if (!hiplib_handle) {
-        const char *error = dlerror();
-        log_gpu.fatal() << error;
-        assert(false);
-      }
-
-      hip_api = new HipRTAPI(hiplib_handle);
-#endif
 
       // before we do anything, make sure there's a HIP driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
