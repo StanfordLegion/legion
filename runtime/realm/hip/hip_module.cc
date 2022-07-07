@@ -487,7 +487,6 @@ namespace Realm {
           assert(false);
       }
 #ifdef HIP_DLOPEN
-      printf("use dlopen for memcpy\n");
       CHECK_HIP( hip_api->hipMemcpyAsync((void *)(((char*)dst)+span_start),
                                         (const void*)(((char*)src)+span_start),
                                         span_bytes, copy_type,
@@ -1640,7 +1639,6 @@ namespace Realm {
     template <typename T>
     void GPUTaskScheduler<T>::execute_internal_task(InternalTask *task)
     {
-      printf("execute internal gpu task\n");
       // use TLS to make sure that the task can find the current GPU processor when it makes
       //  HIP RT calls
       // TODO: either eliminate these asserts or do TLS swapping when using user threads
@@ -3029,7 +3027,6 @@ namespace Realm {
       	if(info != (*it)->info) {
       	  AutoGPUContext agc(this);
 
-          printf("id %d\n", (*it)->device_id);
           CHECK_HIP( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
@@ -3087,7 +3084,6 @@ namespace Realm {
       	AutoGPUContext agc(this);
 
       	hipError_t ret = hipMalloc((void **)&fbmem_base, size);
-        printf("hipmalloc %p, size %ld\n", (void *)fbmem_base, size);
         assert(ret == hipSuccess);
 	      if(ret != hipSuccess) {
 	        if(ret == hipErrorMemoryAllocation) {
@@ -3118,7 +3114,6 @@ namespace Realm {
           AutoGPUContext agc(this);
 
           hipError_t ret = hipMalloc((void **)&fb_ibmem_base, ib_size);
-          printf("ib hipmalloc %p, size %ld\n", (void *)fb_ibmem_base, ib_size);
           if(ret != hipSuccess) {
             if(ret == hipErrorMemoryAllocation) {
               size_t free_bytes, total_bytes;
@@ -3427,7 +3422,6 @@ namespace Realm {
       }
       
 #ifdef HIP_DLOPEN
-      printf("enable hip dlopen!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
       hiplib_handle = dlopen("/opt/rocm-3.7.0/lib/libamdhip64.so", RTLD_GLOBAL | RTLD_LAZY);
       if (!hiplib_handle) {
         const char *error = dlerror();
@@ -3652,8 +3646,7 @@ namespace Realm {
         //         hipError_t res = hipDevicePrimaryCtxRetain(&context,
         //                                                    gpu_info[i]->device);
         hipError_t res = hipSetDevice(gpu_info[idx]->device);
-        CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );  
-        printf("set device %d\n", gpu_info[idx]->device);	    	
+        CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );    	
         // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
       	if((res == hipErrorInvalidDevice) ||
       	   (res == hipErrorOutOfMemory)) {
