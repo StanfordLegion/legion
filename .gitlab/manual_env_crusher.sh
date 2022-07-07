@@ -3,7 +3,7 @@ export CI_JOB_ID=test
 export CI_PROJECT_DIR=$PWD
 
 export USE_HIP="1"
-export ROCM_VERSION="5.2.0"
+export ROCM_VERSION="4.5.0"
 export HIP_ARCH="gfx90a" # for runtime.mk
 export GPU_ARCH="gfx90a" # for Regent
 

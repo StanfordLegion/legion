@@ -1,6 +1,6 @@
 variables:
   USE_HIP: "1"
-  ROCM_VERSION: "5.2.0"
+  ROCM_VERSION: "4.5.0"
   HIP_ARCH: "gfx90a" # for runtime.mk
   GPU_ARCH: "gfx90a" # for Regent
 
