@@ -245,11 +245,9 @@ legion_terra_index_cross_product_create_multi(
 
 legion_terra_index_cross_product_t
 legion_terra_index_cross_product_import(
-  legion_runtime_t runtime_,
   legion_index_partition_t first_partition_,
   legion_color_t second_color)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexPartition first_partition = CObjectWrapper::unwrap(first_partition_);
 
   legion_terra_index_cross_product_t result;
