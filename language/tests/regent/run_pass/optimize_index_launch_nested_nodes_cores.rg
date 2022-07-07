@@ -37,7 +37,7 @@ local import_cross_product = regentlib.macro(function(...)
     __import_cross_product(
         partitions, colors,
         regentlib.c.legion_terra_index_cross_product_import(
-          __runtime(), __raw([ partitions[1] ]).index_partition))
+          __runtime(), __raw([ partitions[1] ]).index_partition, colors[1]))
   end
 end)
 
