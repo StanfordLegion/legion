@@ -950,7 +950,6 @@ namespace Realm {
                 } else {
                   size_t lines = out_alc.remaining(1);
                   size_t lstride = out_alc.get_stride(1);
-                  printf("memset memcpy2d\n");
 
                   void *srcDevice = (void*)(out_base + out_offset);
 
@@ -973,7 +972,6 @@ namespace Realm {
                     // logarithmic version requires that pstride be a multiple of
                     //  lstride
                     if((pstride % lstride) == 0) {
-                      printf("memset memcpy3d\n");
                       hipMemcpy3DParms copy3d = {0};
                       void *srcDevice = (void*)(out_base + out_offset);
                       copy3d.srcPtr = make_hipPitchedPtr((void*)srcDevice, lstride, bytes, pstride/lstride);
@@ -1317,7 +1315,6 @@ namespace Realm {
                                            0 /*sharedmem*/,
                                            stream->get_stream()) );
                   CHECK_HIP( hipSetDevice(orig_device) );
-                  printf("origin %d new %d\n", orig_device, channel->gpu->info->index);
 #endif            
 
                   // insert fence to track completion of reduction kernel
