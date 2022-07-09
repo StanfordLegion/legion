@@ -16733,6 +16733,8 @@ namespace Legion {
       std::set<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
+      // Add a reference to make sure we don't race with sending the response
+      set->add_base_resource_ref(RUNTIME_REF);
       if (target_space == runtime->address_space)
       {
         // We've been sent back to the owner node
@@ -16754,6 +16756,8 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
+      if (set->remove_base_resource_ref(RUNTIME_REF))
+        delete set;
     }
 
     //--------------------------------------------------------------------------
