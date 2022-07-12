@@ -489,16 +489,17 @@ namespace Legion {
     {
       // Mark that we finished mapping
       complete_mapping();
-      // If we have nothing to do also mark that we have completed execution
-      complete_execution();
+      // The execution stage only gets invoked if you call it explicitly
+      // We do so here to ensure that we call the complete execution method
+      trigger_execution();
     }
 
     //--------------------------------------------------------------------------
     void Operation::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      // should only be called if overridden
-      assert(false);
+      // Mark that we finished execution
+      complete_execution();
     }
     
     //--------------------------------------------------------------------------
