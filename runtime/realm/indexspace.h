@@ -25,10 +25,10 @@
 #include "realm/instance.h"
 #undef REALM_SKIP_INLINES
 
+#include "realm/dynamic_templates.h"
 #include "realm/realm_c.h"
 #include "realm/realm_config.h"
 #include "realm/sparsity.h"
-#include "realm/dynamic_templates.h"
 
 #include "realm/custom_serdez.h"
 
@@ -57,14 +57,15 @@ namespace Realm {
   struct CopySrcDstField {
   public:
     CopySrcDstField(void);
-    CopySrcDstField(const CopySrcDstField& copy_from);
-    CopySrcDstField& operator=(const CopySrcDstField& copy_from);
+    CopySrcDstField(const CopySrcDstField &copy_from);
+    CopySrcDstField &operator=(const CopySrcDstField &copy_from);
     ~CopySrcDstField(void);
-    CopySrcDstField &set_field(RegionInstance _inst, FieldID _field_id,
-			       size_t _size, size_t _subfield_offset = 0);
-    CopySrcDstField &set_indirect(int _indirect_index, FieldID _field_id,
-				  size_t _size, size_t _subfield_offset = 0);
-    CopySrcDstField &set_redop(ReductionOpID _redop_id, bool _is_fold, bool exclusive = false);
+    CopySrcDstField &set_field(RegionInstance _inst, FieldID _field_id, size_t _size,
+                               size_t _subfield_offset = 0);
+    CopySrcDstField &set_indirect(int _indirect_index, FieldID _field_id, size_t _size,
+                                  size_t _subfield_offset = 0);
+    CopySrcDstField &set_redop(ReductionOpID _redop_id, bool _is_fold,
+                               bool exclusive = false);
     CopySrcDstField &set_serdez(CustomSerdezID _serdez_id);
     CopySrcDstField &set_fill(const void *_data, size_t _size);
     template <typename T>
@@ -87,10 +88,12 @@ namespace Realm {
     } fill_data;
   };
 
-  std::ostream& operator<<(std::ostream& os, const CopySrcDstField& sd);
+  std::ostream &operator<<(std::ostream &os, const CopySrcDstField &sd);
 
-  template <int N, typename T = int> struct IndexSpaceIterator;
-  template <int N, typename T = int> class SparsityMap;
+  template <int N, typename T = int>
+  struct IndexSpaceIterator;
+  template <int N, typename T = int>
+  class SparsityMap;
 
   /**
    * \class FieldDataDescriptor
@@ -248,48 +251,49 @@ namespace Realm {
     public:
       virtual ~Base(void) {}
       REALM_INTERNAL_API_EXTERNAL_LINKAGE
-      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const = 0;
+      virtual IndirectionInfo *create_info(const IndexSpace<N, T> &is) const = 0;
     };
 
     template <int N2, typename T2 = int>
-    class Affine : public CopyIndirection<N,T>::Base {
+    class Affine : public CopyIndirection<N, T>::Base {
     public:
       virtual ~Affine(void) {}
 
       // Defines the next indirection to avoid a 3-way templating.
-      typename CopyIndirection<N2, T2>::Base* next_indirection;
+      typename CopyIndirection<N2, T2>::Base *next_indirection;
 
-      Matrix<N,N2,T2> transform;
-      Point<N2,T2> offset_lo, offset_hi;
-      Point<N2,T2> divisor;
-      Rect<N2,T2> wrap;
-      std::vector<IndexSpace<N2,T2> > spaces;
+      Matrix<N, N2, T2> transform;
+      Point<N2, T2> offset_lo, offset_hi;
+      Point<N2, T2> divisor;
+      Rect<N2, T2> wrap;
+      std::vector<IndexSpace<N2, T2>> spaces;
       std::vector<RegionInstance> insts;
 
       REALM_INTERNAL_API_EXTERNAL_LINKAGE
-      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
+      virtual IndirectionInfo *create_info(const IndexSpace<N, T> &is) const;
     };
 
     template <int N2, typename T2 = int>
-    class Unstructured : public CopyIndirection<N,T>::Base {
+    class Unstructured : public CopyIndirection<N, T>::Base {
     public:
       virtual ~Unstructured(void) {}
 
-      typename CopyIndirection<N2, T2>::Base* next_indirection;
+      typename CopyIndirection<N2, T2>::Base *next_indirection;
 
       FieldID field_id;
       RegionInstance inst;
       bool is_ranges;
-      bool oor_possible;  // can any pointers fall outside all the target spaces?
-      bool aliasing_possible;  // can multiple pointers go to the same element?
+      bool oor_possible;      // can any pointers fall outside all the target spaces?
+      bool aliasing_possible; // can multiple pointers go to the same element?
       size_t subfield_offset;
-      std::vector<IndexSpace<N2,T2> > spaces;
+      std::vector<IndexSpace<N2, T2>> spaces;
       std::vector<RegionInstance> insts;
 
       REALM_INTERNAL_API_EXTERNAL_LINKAGE
-      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
+      virtual IndirectionInfo *create_info(const IndexSpace<N, T> &is) const;
     };
   };
+
 
   /**
    * \class IndexSpace
@@ -301,12 +305,12 @@ namespace Realm {
    */
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpace {
-    Rect<N,T> bounds;
-    SparsityMap<N,T> sparsity;
+    Rect<N, T> bounds;
+    SparsityMap<N, T> sparsity;
 
-    IndexSpace(void);  // results in an empty index space
-    IndexSpace(const Rect<N,T>& _bounds);
-    IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
+    IndexSpace(void); // results in an empty index space
+    IndexSpace(const Rect<N, T> &_bounds);
+    IndexSpace(const Rect<N, T> &_bounds, SparsityMap<N, T> _sparsity);
 
     ///@{
     /**
@@ -337,6 +341,7 @@ namespace Realm {
      * It will clear the sparsity map of this index space if it exists.
      * \param wait_on event to wait on before destroying the index space.
      */
+
     void destroy(Event wait_on = Event::NO_EVENT);
     ///@}
 
@@ -347,6 +352,7 @@ namespace Realm {
      * \return true if the index space is empty.
      */
     bool empty(void) const;
+
     ///@}
 
     ///@{
@@ -399,7 +405,7 @@ namespace Realm {
     bool contains_any(const Rect<N,T>& r) const;
     ///@}
 
-    bool overlaps(const IndexSpace<N,T>& other) const;
+    bool overlaps(const IndexSpace<N, T> &other) const;
 
     ///@{
     /**
@@ -408,6 +414,7 @@ namespace Realm {
      * \return the number of points in the index space.
      */
     size_t volume(void) const;
+
     ///@}
 
     ///@{
@@ -426,7 +433,7 @@ namespace Realm {
     bool contains_any_approx(const Rect<N,T>& r) const;
     ///@}
 
-    bool overlaps_approx(const IndexSpace<N,T>& other) const;
+    bool overlaps_approx(const IndexSpace<N, T> &other) const;
 
     ///@{
     /**
@@ -434,6 +441,7 @@ namespace Realm {
      * volume of bounding box, but larger than actual volume).
      * \return the approximate number of points in the index space.
      */
+
     size_t volume_approx(void) const;
     ///@}
 
@@ -621,10 +629,10 @@ namespace Realm {
      * \return Event representing the partitioning operation.
      * */
     Event create_weighted_subspaces(size_t count, size_t granularity,
-				    const std::vector<int>& weights,
-				    std::vector<IndexSpace<N,T> >& subspaces,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+                                    const std::vector<int> &weights,
+                                    std::vector<IndexSpace<N, T>> &subspaces,
+                                    const ProfilingRequestSet &reqs,
+                                    Event wait_on = Event::NO_EVENT) const;
 
     Event create_weighted_subspaces(size_t count, size_t granularity,
 				    const std::vector<size_t>& weights,
@@ -636,18 +644,16 @@ namespace Realm {
     // Field-based partitioning operations
 
     template <typename FT>
-    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				   FT color,
-				   IndexSpace<N,T>& subspace,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    Event create_subspace_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        FT color, IndexSpace<N, T> &subspace, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
     template <typename FT>
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
-				    const std::vector<FT>& colors,
-				    std::vector<IndexSpace<N,T> >& subspaces,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    Event create_subspaces_by_field(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, FT>> &field_data,
+        const std::vector<FT> &colors, std::vector<IndexSpace<N, T>> &subspaces,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     ///@{
     /**
@@ -737,11 +743,11 @@ namespace Realm {
      *  \return an event that will trigger when the operation is
      */
     template <int N2, typename T2>
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
-				   const IndexSpace<N2,T2>& source,
-				   IndexSpace<N,T>& image,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    Event create_subspace_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
+            &field_data,
+        const IndexSpace<N2, T2> &source, IndexSpace<N, T> &image,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_image(
@@ -753,11 +759,11 @@ namespace Realm {
 
     // range versions
     template <int N2, typename T2>
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
-				   const IndexSpace<N2,T2>& source,
-				   IndexSpace<N,T>& image,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
+    Event create_subspace_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
+            &field_data,
+        const IndexSpace<N2, T2> &source, IndexSpace<N, T> &image,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
@@ -854,28 +860,26 @@ namespace Realm {
      * \return an event that will trigger when the operation is
      */
     template <int N2, typename T2>
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                        Point<N2,T2> > >& field_data,
-				      const IndexSpace<N2,T2>& target,
-				      IndexSpace<N,T>& preimage,
-				      const ProfilingRequestSet &reqs,
-				      Event wait_on = Event::NO_EVENT) const;
+    Event create_subspace_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>
+            &field_data,
+        const IndexSpace<N2, T2> &target, IndexSpace<N, T> &preimage,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                         Point<N2,T2> > >& field_data,
-				       const std::vector<IndexSpace<N2,T2> >& targets,
-				       std::vector<IndexSpace<N,T> >& preimages,
-				       const ProfilingRequestSet &reqs,
-				       Event wait_on = Event::NO_EVENT) const;
+    Event create_subspaces_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>
+            &field_data,
+        const std::vector<IndexSpace<N2, T2>> &targets,
+        std::vector<IndexSpace<N, T>> &preimages, const ProfilingRequestSet &reqs,
+        Event wait_on = Event::NO_EVENT) const;
     // range versions
     template <int N2, typename T2>
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
-				                        Rect<N2,T2> > >& field_data,
-				      const IndexSpace<N2,T2>& target,
-				      IndexSpace<N,T>& preimage,
-				      const ProfilingRequestSet &reqs,
-				      Event wait_on = Event::NO_EVENT) const;
+    Event create_subspace_by_preimage(
+        const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Rect<N2, T2>>>
+            &field_data,
+        const IndexSpace<N2, T2> &target, IndexSpace<N, T> &preimage,
+        const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
@@ -903,7 +907,6 @@ namespace Realm {
                              const ProfilingRequestSet &reqs,
                              Event wait_on = Event::NO_EVENT) const;
     ///@}
-
     // set operations
 
     // three basic operations (union, intersection, difference) are provided in 4 forms:
@@ -1020,20 +1023,18 @@ namespace Realm {
 
     // set reduction operations (union and intersection)
 
-    static Event compute_union(const std::vector<IndexSpace<N,T> >& subspaces,
-			       IndexSpace<N,T>& result,
-			       const ProfilingRequestSet &reqs,
-			       Event wait_on = Event::NO_EVENT);
-				     
-    static Event compute_intersection(const std::vector<IndexSpace<N,T> >& subspaces,
-				      IndexSpace<N,T>& result,
-				      const ProfilingRequestSet &reqs,
-				      Event wait_on = Event::NO_EVENT);
+    static Event compute_union(const std::vector<IndexSpace<N, T>> &subspaces,
+                               IndexSpace<N, T> &result, const ProfilingRequestSet &reqs,
+                               Event wait_on = Event::NO_EVENT);
+
+    static Event compute_intersection(const std::vector<IndexSpace<N, T>> &subspaces,
+                                      IndexSpace<N, T> &result,
+                                      const ProfilingRequestSet &reqs,
+                                      Event wait_on = Event::NO_EVENT);
   };
 
   template <int N, typename T>
-  REALM_PUBLIC_API
-  std::ostream& operator<<(std::ostream& os, const IndexSpace<N,T>& p);
+  REALM_PUBLIC_API std::ostream &operator<<(std::ostream &os, const IndexSpace<N, T> &p);
 
   class IndexSpaceGenericImpl;
 
@@ -1046,7 +1047,7 @@ namespace Realm {
   class REALM_PUBLIC_API IndexSpaceGeneric {
   public:
     IndexSpaceGeneric();
-    IndexSpaceGeneric(const IndexSpaceGeneric& copy_from);
+    IndexSpaceGeneric(const IndexSpaceGeneric &copy_from);
 
     template <int N, typename T>
     IndexSpaceGeneric(const IndexSpace<N,T>& copy_from);
@@ -1055,7 +1056,7 @@ namespace Realm {
 
     ~IndexSpaceGeneric();
 
-    IndexSpaceGeneric& operator=(const IndexSpaceGeneric& copy_from);
+    IndexSpaceGeneric &operator=(const IndexSpaceGeneric &copy_from);
 
     template <int N, typename T>
     IndexSpaceGeneric& operator=(const IndexSpace<N,T>& copy_from);
@@ -1063,7 +1064,7 @@ namespace Realm {
     IndexSpaceGeneric& operator=(const Rect<N,T>& copy_from);
 
     template <int N, typename T>
-    const IndexSpace<N,T>& as_index_space() const;
+    const IndexSpace<N, T> &as_index_space() const;
 
     // only IndexSpace method exposed directly is copy
     Event copy(const std::vector<CopySrcDstField> &srcs,
@@ -1089,10 +1090,10 @@ namespace Realm {
     //  include of indexspace.inl below...
     static constexpr size_t MAX_TYPE_SIZE = DIMTYPES::MaxSize::value;
     static constexpr size_t STORAGE_BYTES = (2*REALM_MAX_DIM + 2) * MAX_TYPE_SIZE;
+
     typedef char Storage_unaligned[STORAGE_BYTES];
     REALM_ALIGNED_TYPE_SAMEAS(Storage_aligned, Storage_unaligned, DIMTYPES::MaxSizeType<MAX_TYPE_SIZE>::TYPE);
     Storage_aligned raw_storage;
-
   };
 
   template <int N, typename T> class LinearizedIndexSpace;
@@ -1120,9 +1121,12 @@ namespace Realm {
     virtual size_t size(void) const = 0;
 
     // check and conversion routines to get a dimension-aware intermediate
-    template <int N, typename T> bool check_dim(void) const;
-    template <int N, typename T> LinearizedIndexSpace<N,T>& as_dim(void);
-    template <int N, typename T> const LinearizedIndexSpace<N,T>& as_dim(void) const;
+    template <int N, typename T>
+    bool check_dim(void) const;
+    template <int N, typename T>
+    LinearizedIndexSpace<N, T> &as_dim(void);
+    template <int N, typename T>
+    const LinearizedIndexSpace<N, T> &as_dim(void) const;
 
     int dim, idxtype;
   };
@@ -1131,13 +1135,13 @@ namespace Realm {
   class LinearizedIndexSpace : public LinearizedIndexSpaceIntfc {
   protected:
     // still can't be created directly
-    LinearizedIndexSpace(const IndexSpace<N,T>& _indexspace);
+    LinearizedIndexSpace(const IndexSpace<N, T> &_indexspace);
 
   public:
     // generic way to linearize a point
-    virtual size_t linearize(const Point<N,T>& p) const = 0;
+    virtual size_t linearize(const Point<N, T> &p) const = 0;
 
-    IndexSpace<N,T> indexspace;
+    IndexSpace<N, T> indexspace;
   };
 
   /**
@@ -1147,20 +1151,21 @@ namespace Realm {
    * range [0, volume)
    */
   template <int N, typename T>
-  class AffineLinearizedIndexSpace : public LinearizedIndexSpace<N,T> {
+  class AffineLinearizedIndexSpace : public LinearizedIndexSpace<N, T> {
   public:
     // "fortran order" has the smallest stride in the first dimension
-    explicit AffineLinearizedIndexSpace(const IndexSpace<N,T>& _indexspace, bool fortran_order = true);
+    explicit AffineLinearizedIndexSpace(const IndexSpace<N, T> &_indexspace,
+                                        bool fortran_order = true);
 
     virtual LinearizedIndexSpaceIntfc *clone(void) const;
-    
+
     virtual size_t size(void) const;
 
-    virtual size_t linearize(const Point<N,T>& p) const;
+    virtual size_t linearize(const Point<N, T> &p) const;
 
     size_t volume, offset;
     Point<N, ptrdiff_t> strides;
-    Rect<N,T> dbg_bounds;
+    Rect<N, T> dbg_bounds;
   };
 
   template <int N, typename T>
@@ -1173,20 +1178,20 @@ namespace Realm {
    */
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpaceIterator {
-    Rect<N,T> rect;
-    IndexSpace<N,T> space;
-    Rect<N,T> restriction;
+    Rect<N, T> rect;
+    IndexSpace<N, T> space;
+    Rect<N, T> restriction;
     bool valid;
     // for iterating over SparsityMap's
-    SparsityMapPublicImpl<N,T> *s_impl;
+    SparsityMapPublicImpl<N, T> *s_impl;
     size_t cur_entry;
 
     IndexSpaceIterator(void);
-    IndexSpaceIterator(const IndexSpace<N,T>& _space);
-    IndexSpaceIterator(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
+    IndexSpaceIterator(const IndexSpace<N, T> &_space);
+    IndexSpaceIterator(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict);
 
-    void reset(const IndexSpace<N,T>& _space);
-    void reset(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
+    void reset(const IndexSpace<N, T> &_space);
+    void reset(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict);
 
     // steps to the next subrect, returning true if a next subrect exists
     bool step(void);
@@ -1197,11 +1202,12 @@ namespace Realm {
 // specializations of std::less<T> for IndexSpace<N,T> allow
 //  them to be used in STL containers
 namespace std {
-  template<int N, typename T>
-  struct less<Realm::IndexSpace<N,T> > {
-    bool operator()(const Realm::IndexSpace<N,T>& is1, const Realm::IndexSpace<N,T>& is2) const;
+  template <int N, typename T>
+  struct less<Realm::IndexSpace<N, T>> {
+    bool operator()(const Realm::IndexSpace<N, T> &is1,
+                    const Realm::IndexSpace<N, T> &is2) const;
   };
-};
+}; // namespace std
 
 #include "realm/indexspace.inl"
 
