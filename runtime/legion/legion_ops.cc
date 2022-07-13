@@ -1115,17 +1115,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::select_sources(const unsigned index,
-                                   InstanceView *target,
+    void Operation::select_sources(const unsigned index,PhysicalManager *target,
                                    const std::vector<InstanceView*> &sources,
                                    std::vector<unsigned> &ranking,
-                                   std::map<unsigned,DomainPoint> &keys)
+                                   std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
       assert(false);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent Operation::acquire_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, Memory target)
@@ -1212,6 +1212,7 @@ namespace Legion {
       assert(false);
       return 0;
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
@@ -1954,25 +1955,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::prepare_for_mapping(InstanceView *view,
+    /*static*/ void Operation::prepare_for_mapping(PhysicalManager *manager,
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
     {
-      instance = MappingInstance(view->get_manager());
+      instance = MappingInstance(manager);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(
-                                      const std::vector<InstanceView*> &views, 
-                                      std::vector<MappingInstance> &input_valid)
+                                    const std::vector<InstanceView*> &views,
+                                    std::vector<MappingInstance> &input_valid,
+                                    std::vector<MappingCollective> &collectives)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = input_valid.size();
-      input_valid.resize(offset + views.size());
       for (unsigned idx = 0; idx < views.size(); idx++)
       {
-        MappingInstance &inst = input_valid[offset+idx];
-        inst = MappingInstance(views[idx]->get_manager());
+        if (views[idx]->is_individual_view())
+        {
+          IndividualView *view = views[idx]->as_individual_view();
+          input_valid.emplace_back(MappingInstance(view->get_manager()));
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(views[idx]->is_replicated_view());
+#endif
+          ReplicatedView *view = views[idx]->as_replicated_view();
+          collectives.emplace_back(MappingCollective(view));
+        }
       }
     }
 
@@ -2017,44 +2028,55 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::compute_ranking(MapperManager *mapper,
-                            const std::deque<MappingInstance> &output,
-                            const std::vector<InstanceView*> &sources,
-                            std::vector<unsigned> &ranking,
-                            const std::map<MappingInstance,DomainPoint> &points,
-                            std::map<unsigned,DomainPoint> &keys) const
+                    const std::deque<MappingInstance> &output,
+                    const std::vector<InstanceView*> &sources,
+                    std::vector<unsigned> &ranking,
+                    std::map<unsigned,PhysicalManager*> &collective_insts) const
     //--------------------------------------------------------------------------
     {
       ranking.reserve(output.size());
       for (std::deque<MappingInstance>::const_iterator it = 
             output.begin(); it != output.end(); it++)
       {
-        const InstanceManager *manager = it->impl;
+        const InstanceManager *man = it->impl;
+        if (!man->is_physical_manager())
+          continue;
+        PhysicalManager *manager = man->as_physical_manager();
         bool found = false;
+        bool has_collectives = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
-          if (manager == sources[idx]->get_manager())
+          if (!sources[idx]->is_individual_view())
+          {
+            has_collectives = true;
+            continue;
+          }
+          IndividualView *src = sources[idx]->as_individual_view();
+          if (src->get_manager() == manager)
           {
             found = true;
             ranking.push_back(idx);
-            if (manager->is_collective_manager())
+            break;
+          }
+        }
+        if (!found && has_collectives)
+        {
+          for (unsigned idx = 0; idx < sources.size(); idx++)
+          {
+            if (!sources[idx]->is_collective_view())
+              continue;
+            CollectiveView *src = sources[idx]->as_collective_view();
+            if (src->contains(manager))
             {
-              std::map<MappingInstance,DomainPoint>::const_iterator finder =
-                points.find(*it);
-              if (finder != points.end())
+              found = true;
+              // Only need to save the first instance from each collective
+              if (collective_insts.find(idx) == collective_insts.end())
               {
-                CollectiveManager *collective =
-                  manager->as_collective_manager();
-                if (collective->contains_point(finder->second))
-                  keys[idx] = finder->second;
-                else
-                  REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_INVALID_INSTANCE,
-                      "Ignoring invalid source collective instance point "
-                      "from mapper %s for select source call on  %s (UID %lld)",
-                      mapper->get_mapper_name(), get_logging_name(), 
-                      get_unique_op_id())
+                ranking.push_back(idx);
+                collective_insts[idx] = manager;
+                break;
               }
             }
-            break;
           }
         }
         // Ignore any instances which are not in the original set of sources
@@ -2172,6 +2194,7 @@ namespace Legion {
       return true;
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     ///////////////////////////////////////////////////////////// 
     // CollectiveInstanceCreator
     /////////////////////////////////////////////////////////////
@@ -3506,6 +3529,7 @@ namespace Legion {
     template class CollectiveInstanceCreator<CopyOp>;
     template class CollectiveInstanceCreator<FillOp>;
     template class CollectiveInstanceCreator<TaskOp>;
+#endif // NO_EXPLICIT_COLLECTIVES
 
     ///////////////////////////////////////////////////////////// 
     // External Op 
@@ -4680,7 +4704,6 @@ namespace Legion {
       bool record_valid = true;
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
-      const DomainPoint shard_point = get_shard_point();
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       if (!remap_region)
@@ -4688,7 +4711,7 @@ namespace Legion {
         // Now we've got the valid instances so invoke the mapper
         record_valid = invoke_mapper(mapped_instances, source_instances);
         // First mapping so set the references now
-        region.impl->set_references(mapped_instances, shard_point);
+        region.impl->set_references(mapped_instances);
       }
       else
         region.impl->get_references(mapped_instances);
@@ -4729,7 +4752,7 @@ namespace Legion {
       {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances, shard_point);
+                                              mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
@@ -4853,11 +4876,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::select_sources(const unsigned index,
-                               InstanceView *target,
+    void MapOp::select_sources(const unsigned index, PhysicalManager *target,
                                const std::vector<InstanceView*> &sources,
                                std::vector<unsigned> &ranking,
-                               std::map<unsigned,DomainPoint> &keys)
+                               std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4865,7 +4887,8 @@ namespace Legion {
 #endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
       {
@@ -4873,8 +4896,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     } 
 
     //--------------------------------------------------------------------------
@@ -5138,10 +5160,7 @@ namespace Legion {
                               std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
-      const DomainPoint shard_point = get_shard_point();
-      const bool collective_instances_only = (shard_point.get_dim() > 0); 
       Mapper::MapInlineInput input;
-      input.require_collective_instances = collective_instances_only;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY; 
       output.track_valid_region = true;
@@ -5166,6 +5185,7 @@ namespace Legion {
         }
         else
           prepare_for_mapping(valid_instances, input.valid_instances);
+#ifdef NO_EXPLICIT_COLLECTIVES
         if (collective_instances_only)
         {
           for (std::vector<MappingInstance>::iterator it = 
@@ -5179,6 +5199,7 @@ namespace Legion {
               it++;
           }
         }
+#endif
       }
       mapper->invoke_map_inline(this, &input, &output);
       if (!output.source_instances.empty())
@@ -5295,7 +5316,7 @@ namespace Legion {
         runtime->find_visible_memories(exec_proc, visible_memories);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          const Memory mem = chosen_instances[idx].get_memory(shard_point);
+          const Memory mem = chosen_instances[idx].get_memory();
           if (visible_memories.find(mem) == visible_memories.end())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
@@ -5363,8 +5384,7 @@ namespace Legion {
           PhysicalManager *manager = 
             chosen_instances[idx].get_physical_manager();
           const LayoutConstraint *conflict_constraint = NULL;
-          if (manager->conflicts(constraints, get_shard_point(), 
-                                 &conflict_constraint))
+          if (manager->conflicts(constraints, &conflict_constraint))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected "
                           "instance for inline mapping (ID %lld) in task %s "
@@ -5375,6 +5395,7 @@ namespace Legion {
                           parent_ctx->get_unique_id())
         }
       }
+#ifdef NO_EXPLICIT_COLLECTIVES
       if (!collective_instances_only)
       {
         // Check to make sure that we don't have any collective instances
@@ -5392,6 +5413,7 @@ namespace Legion {
                 parent_ctx->get_unique_id())
         }
       }
+#endif
       return output.track_valid_region;
     }
 
@@ -5487,14 +5509,6 @@ namespace Legion {
         rez.serialize(response);
         applied_events.insert(response);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint MapOp::get_shard_point(void) const
-    //--------------------------------------------------------------------------
-    {
-      // We have no shard point in the non control replicated case
-      return DomainPoint();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6727,7 +6741,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                                 idx, src_requirements[idx],
-                                                src_targets, index_point);
+                                                src_targets);
         const size_t dst_idx = src_requirements.size() + idx;
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -6741,7 +6755,7 @@ namespace Legion {
                                     dst_sources, dst_targets);
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-              dst_idx, dst_requirements[idx], dst_targets, index_point);
+              dst_idx, dst_requirements[idx], dst_targets);
         // Do any exchanges needed for collective cooperation
         const bool src_indirect = (idx < src_indirect_requirements.size());
         const bool dst_indirect = (idx < dst_indirect_requirements.size());
@@ -6894,8 +6908,7 @@ namespace Legion {
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                gather_idx, src_indirect_requirements[idx],
-                gather_targets, index_point);
+                gather_idx, src_indirect_requirements[idx], gather_targets);
         }
         if (idx < dst_indirect_requirements.size())
         { 
@@ -6935,8 +6948,7 @@ namespace Legion {
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                scatter_idx, dst_indirect_requirements[idx],
-                scatter_targets, index_point);
+                scatter_idx, dst_indirect_requirements[idx], scatter_targets);
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
@@ -7286,16 +7298,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::select_sources(const unsigned index,
-                                InstanceView *target,
+    void CopyOp::select_sources(const unsigned index, PhysicalManager *target,
                                 const std::vector<InstanceView*> &sources,
                                 std::vector<unsigned> &ranking,
-                                std::map<unsigned,DomainPoint> &keys)
+                                std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances, 
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       input.is_src = false;
       input.is_dst = false;
@@ -7340,8 +7352,7 @@ namespace Legion {
       }
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -7982,7 +7993,6 @@ namespace Legion {
       }
       if (runtime->unsafe_mapper)
         return composite_idx;
-      size_t collective_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -8002,6 +8012,7 @@ namespace Legion {
                         get_req_type_name<REQ_TYPE>(), ridx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+#ifdef NO_EXPLICIT_COLLECTIVES
         if (manager->is_collective_manager())
         {
           CollectiveManager *collective_manager = 
@@ -8142,6 +8153,7 @@ namespace Legion {
               collective_occurrences = 0;
           }
         }
+#endif // NO_EXPLICIT_COLLECTIVES
       }
       // Make sure all the destinations are real instances, this has
       // to be true for all kinds of explicit copies including reductions
@@ -8267,7 +8279,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : CollectiveInstanceCreator<CopyOp>(rt)
+      : CopyOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -8275,7 +8287,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : CollectiveInstanceCreator<CopyOp>(rhs)
+      : CopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8501,7 +8513,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_copy();
-      activate_collective_instance_creator();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -8523,7 +8534,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_copy();
-      deactivate_collective_instance_creator();
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -8869,6 +8879,7 @@ namespace Legion {
       resolve_speculation();
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain IndexCopyOp::get_collective_dense_points(void) const
     //--------------------------------------------------------------------------
@@ -8882,6 +8893,7 @@ namespace Legion {
       else
         return Domain::NO_DOMAIN;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void IndexCopyOp::enumerate_points(bool replaying)
@@ -9658,6 +9670,7 @@ namespace Legion {
       owner->handle_point_commit(profiling_reported);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointCopyOp::acquire_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, Memory target)
@@ -9733,6 +9746,7 @@ namespace Legion {
     {
       return index_point;
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     RtEvent PointCopyOp::exchange_indirect_records(
@@ -9749,6 +9763,7 @@ namespace Legion {
                                 insts, req, index_point, records, sources);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     bool PointCopyOp::finalize_pending_collective_instance(
                                       MappingCallKind call_kind, unsigned index,
@@ -9775,6 +9790,7 @@ namespace Legion {
     {
       return owner->count_collective_region_occurrences(index, region,inst_did);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     const DomainPoint& PointCopyOp::get_domain_point(void) const
@@ -11850,10 +11866,9 @@ namespace Legion {
         Runtime::trigger_event(NULL, close_event);
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
                                               0/*idx*/, requirement,
-                                              target_instances, no_point);
+                                              target_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
                                         completion_event);
@@ -11937,10 +11952,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::select_sources(const unsigned index,
-                                     InstanceView *target,
+                                     PhysicalManager *target,
                                      const std::vector<InstanceView*> &sources,
                                      std::vector<unsigned> &ranking,
-                                     std::map<unsigned,DomainPoint> &keys)
+                                     std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11949,15 +11964,15 @@ namespace Legion {
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
       prepare_for_mapping(target, input.target);
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -13516,10 +13531,9 @@ namespace Legion {
                                    acquire_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint point = get_collective_instance_point();
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances, point);
+                                              restricted_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         completion_event);
@@ -14445,10 +14459,9 @@ namespace Legion {
                             release_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint point = get_collective_instance_point();
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances, point);
+                                              restricted_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         completion_event);
@@ -14550,11 +14563,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::select_sources(const unsigned index,
-                                   InstanceView *target,
+    void ReleaseOp::select_sources(const unsigned index,PhysicalManager *target,
                                    const std::vector<InstanceView*> &sources,
                                    std::vector<unsigned> &ranking,
-                                   std::map<unsigned,DomainPoint> &keys)
+                                   std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14563,15 +14575,15 @@ namespace Legion {
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
       prepare_for_mapping(target, input.target);
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -17608,7 +17620,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : ExternalPartition(), CollectiveInstanceCreator<Operation>(rt), 
+      : ExternalPartition(), Operation(rt), 
         thunk(NULL)
     //--------------------------------------------------------------------------
     {
@@ -17616,7 +17628,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : ExternalPartition(), CollectiveInstanceCreator<Operation>(NULL)
+      : ExternalPartition(), Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18290,7 +18302,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances, index_point);
+                                              mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -18310,7 +18322,7 @@ namespace Legion {
 #endif
                                               record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
-                                     mapped_instances, trace_info, index_point);
+                                         mapped_instances, trace_info);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       finalize_mapping(); 
@@ -18341,8 +18353,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::trigger_thunk(IndexSpace handle,
                                                 const InstanceSet &mapped_insts,
-                                                const PhysicalTraceInfo &info, 
-                                                const DomainPoint &key)
+                                                const PhysicalTraceInfo &info) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18361,7 +18372,7 @@ namespace Legion {
           const InstanceRef &ref = mapped_insts[0];
           PhysicalManager *manager = ref.get_physical_manager();
           desc.index_space = handle;
-          desc.inst = manager->get_instance(key);
+          desc.inst = manager->get_instance();
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
           index_preconditions.insert(ref.get_ready_event());
@@ -18398,7 +18409,7 @@ namespace Legion {
         const InstanceRef &ref = mapped_insts[0];
         PhysicalManager *manager = ref.get_physical_manager();
         desc.index_space = handle;
-        desc.inst = manager->get_instance(key);
+        desc.inst = manager->get_instance();
         desc.field_offset = manager->layout->find_field_info(
                       *(requirement.privilege_fields.begin())).field_id;
         ApEvent ready_event = ref.get_ready_event();
@@ -18528,7 +18539,6 @@ namespace Legion {
         return output.track_valid_region;
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
-      size_t collective_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
@@ -18551,6 +18561,7 @@ namespace Legion {
                         "partition operation in task %s (ID %lld).",
                         mapper->get_mapper_name(),parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+#ifdef NO_EXPLICIT_COLLECTIVES
         if (manager->is_collective_manager())
         {
           CollectiveManager *collective_manager = 
@@ -18674,6 +18685,7 @@ namespace Legion {
               collective_occurrences = 0;
           }
         }
+#endif // NO_EXPLICIT_COLLECTIVES
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
         // Realm supports for now. In the future this should be fixed
@@ -18938,7 +18950,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      activate_collective_instance_creator();
       is_index_space = false;
       launch_space = NULL;
       index_domain = Domain::NO_DOMAIN;
@@ -18970,7 +18981,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
-      deactivate_collective_instance_creator();
       if (thunk != NULL)
       {
         delete thunk;
@@ -19027,10 +19037,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19038,7 +19048,8 @@ namespace Legion {
 #endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
       {
@@ -19046,8 +19057,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -19163,6 +19173,7 @@ namespace Legion {
       }
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain DependentPartitionOp::get_collective_dense_points(void) const
     //--------------------------------------------------------------------------
@@ -19321,6 +19332,7 @@ namespace Legion {
       return CollectiveInstanceCreator<Operation>::
                 count_collective_region_occurrences(index, counts, points);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::check_privilege(void)
@@ -19616,12 +19628,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent PointDepPartOp::trigger_thunk(IndexSpace handle,
                                           const InstanceSet &mapped_instances,
-                                          const PhysicalTraceInfo &trace_info,
-                                          const DomainPoint &key)
+                                          const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      return owner->trigger_thunk(handle, mapped_instances, 
-                                  trace_info, index_point);
+      return owner->trigger_thunk(handle, mapped_instances, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -19637,6 +19647,7 @@ namespace Legion {
       owner->handle_point_commit(profiling_reported);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointDepPartOp::acquire_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, Memory target)
@@ -19743,6 +19754,7 @@ namespace Legion {
       // should never be called
       assert(false);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     Partition::PartitionKind PointDepPartOp::get_partition_kind(void) const
@@ -20602,7 +20614,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : CollectiveInstanceCreator<FillOp>(rt)
+      : FillOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -20610,7 +20622,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : CollectiveInstanceCreator<FillOp>(rhs)
+      : FillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20717,7 +20729,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_fill();
-      activate_collective_instance_creator();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -20739,7 +20750,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_fill();
-      deactivate_collective_instance_creator();
       // We can deactivate our point operations
       for (std::vector<PointFillOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -20903,6 +20913,7 @@ namespace Legion {
       resolve_speculation();
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain IndexFillOp::get_collective_dense_points(void) const
     //--------------------------------------------------------------------------
@@ -20916,6 +20927,7 @@ namespace Legion {
       else
         return Domain::NO_DOMAIN;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void IndexFillOp::enumerate_points(bool replaying)
@@ -21304,6 +21316,7 @@ namespace Legion {
       owner->handle_point_commit();
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointFillOp::acquire_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, Memory target)
@@ -21380,6 +21393,7 @@ namespace Legion {
     {
       return owner->count_collective_region_occurrences(index, region,inst_did);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     const DomainPoint& PointFillOp::get_domain_point(void) const
@@ -21811,8 +21825,10 @@ namespace Legion {
       if (!attach_event.exists() || (external_instances.size() > 1))
       {
         InnerContext *context = find_physical_context(0/*index*/);
-        std::vector<InstanceView*> external_views;
-        context->convert_target_views(external_instances, external_views);
+        std::vector<IndividualView*> individual_views;
+        context->convert_target_views(external_instances, individual_views);
+        std::vector<InstanceView*> external_views(individual_views.begin(),
+                                                  individual_views.end());
         attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_views,
@@ -21830,8 +21846,7 @@ namespace Legion {
       if (mapping)
         external_instances[0].set_ready_event(attach_event);
       // This operation is ready once the file is attached
-      const DomainPoint dummy_point;
-      region.impl->set_reference(external_instances[0], dummy_point);
+      region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
@@ -23324,7 +23339,7 @@ namespace Legion {
         requirement.privilege = LEGION_READ_WRITE;
       }
       InnerContext *context = find_physical_context(0/*index*/);
-      std::vector<InstanceView*> external_views;
+      std::vector<IndividualView*> external_views;
       context->convert_target_views(references, external_views);
 #ifdef DEBUG_LEGION
       assert(external_views.size() == 1);
@@ -23342,9 +23357,8 @@ namespace Legion {
         detach_event = effects_done;
       if (runtime->legion_spy_enabled)
       {
-        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references,no_point);
+                                              requirement, references);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, detach_event,
                                         completion_event);
@@ -23404,11 +23418,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::select_sources(const unsigned index,
-                                  InstanceView *target,
+    void DetachOp::select_sources(const unsigned index, PhysicalManager *target,
                                   const std::vector<InstanceView*> &sources,
                                   std::vector<unsigned> &ranking,
-                                  std::map<unsigned,DomainPoint> &keys)
+                                  std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -25186,16 +25199,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteMapOp::select_sources(const unsigned index,
-                                     InstanceView *target,
-                                     const std::vector<InstanceView*> &sources,
-                                     std::vector<unsigned> &ranking,
-                                     std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking, keys);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25203,13 +25216,13 @@ namespace Legion {
 #endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -25318,21 +25331,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCopyOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking, keys);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       input.is_src = (index < src_requirements.size());
       if (input.is_src)
@@ -25345,8 +25359,7 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -25455,16 +25468,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCloseOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking, keys);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25472,13 +25485,13 @@ namespace Legion {
 #endif
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -25693,16 +25706,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteReleaseOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking, keys);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25710,13 +25723,13 @@ namespace Legion {
 #endif
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -25936,16 +25949,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemotePartitionOp::select_sources(const unsigned index,
-                                     InstanceView *target,
-                                     const std::vector<InstanceView*> &sources,
-                                     std::vector<unsigned> &ranking,
-                                     std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking, keys);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -25953,13 +25966,13 @@ namespace Legion {
 #endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking,
-                      output.collective_points, keys);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -26156,10 +26169,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       // TODO: invoke the mapper

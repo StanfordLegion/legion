@@ -29665,6 +29665,10 @@ namespace Legion {
           return "Materialized View";
         case REDUCTION_VIEW_ALLOC:
           return "Reduction View";
+        case REPLICATED_VIEW_ALLOC:
+          return "Replicated View";
+        case ALLREDUCE_VIEW_ALLOC:
+          return "Allreduce View";
         case FILL_VIEW_ALLOC:
           return "Fill View";
         case PHI_VIEW_ALLOC:

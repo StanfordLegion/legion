@@ -244,6 +244,7 @@ namespace Legion {
 
   namespace Mapping {
     class PhysicalInstance;
+    class CollectiveView;
     class MapperEvent;
     class ProfilingRequestSet;
     class Mapper;
@@ -1870,8 +1871,13 @@ namespace Legion {
     class InstanceKey;
     class InstanceView;
     class CollectableView; // pure virtual class
-    class DeferredView;
+    class IndividualView;
+    class CollectiveView;
     class MaterializedView;
+    class ReplicatedView;
+    class ReductionView;
+    class AllreduceView;
+    class DeferredView;
     class FillView;
     class PhiView;
     class MappingRef;
@@ -1881,9 +1887,6 @@ namespace Legion {
     class VirtualManager;
     class PhysicalManager;
     class IndividualManager;
-    class CollectiveManager;
-    class ReductionView;
-    class PendingCollectiveManager;
     class InstanceBuilder;
 
     class RegionAnalyzer;
@@ -1918,7 +1921,6 @@ namespace Legion {
 
     // legion_replication.h
     class ShardedMapping;
-    class ReplCollectiveInstanceHandler;
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
@@ -2120,7 +2122,6 @@ namespace Legion {
     friend class Internal::LayoutDescription;               \
     friend class Internal::InstanceManager;                 \
     friend class Internal::IndividualManager;               \
-    friend class Internal::CollectiveManager;               \
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
@@ -2239,6 +2240,7 @@ namespace Legion {
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
+    typedef Internal::ReplicatedView*  CollectiveViewImpl;
   };
 
   namespace Internal { 
@@ -2292,6 +2294,7 @@ namespace Legion {
     // Pull some of the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
     typedef Mapping::PhysicalInstance MappingInstance;
+    typedef Mapping::CollectiveView MappingCollective;
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 

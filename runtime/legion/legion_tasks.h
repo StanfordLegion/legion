@@ -217,11 +217,10 @@ namespace Legion {
       virtual void resolve_true(bool speculated, bool launched);
       virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
-      virtual void select_sources(const unsigned index,
-                                  InstanceView *target,
+      virtual void select_sources(const unsigned index, PhysicalManager *target,
                                   const std::vector<InstanceView*> &sources,
                                   std::vector<unsigned> &ranking,
-                                  std::map<unsigned,DomainPoint> &keys);
+                                  std::map<unsigned,PhysicalManager*> &points);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
@@ -373,11 +372,10 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const unsigned index,
-                                  InstanceView *target,
+      virtual void select_sources(const unsigned index, PhysicalManager *target,
                                   const std::vector<InstanceView*> &sources,
                                   std::vector<unsigned> &ranking,
-                                  std::map<unsigned,DomainPoint> &keys);
+                                  std::map<unsigned,PhysicalManager*> &points);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
@@ -625,7 +623,7 @@ namespace Legion {
      * This is the parent type for each of the multi-task
      * kinds of classes.
      */
-    class MultiTask : public CollectiveInstanceCreator<TaskOp> {
+    class MultiTask : public TaskOp {
     public:
       class OutputOptions {
       public:
@@ -954,6 +952,7 @@ namespace Legion {
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
+#ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation
       virtual bool supports_collective_instances(void) const;
@@ -986,6 +985,7 @@ namespace Legion {
       virtual size_t count_collective_region_occurrences(
                                   unsigned index, LogicalRegion region,
                                   DistributedID inst_did);
+#endif
     public: 
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
@@ -1271,11 +1271,6 @@ namespace Legion {
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
-      // From CollectiveInstanceCreator
-      virtual Domain get_collective_dense_points(void) const;
-      virtual size_t get_total_collective_instance_points(void)
-        { return total_points; }
-    public:
       void enumerate_futures(const Domain &domain);
     public:
       static void process_slice_mapped(Deserializer &derez,
@@ -1347,6 +1342,7 @@ namespace Legion {
                       public LegionHeapify<SliceTask> {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
+#ifdef NO_EXPLICIT_COLLECTIVES
     public:
       enum CollectiveInstMessage {
         SLICE_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
@@ -1357,6 +1353,7 @@ namespace Legion {
         SLICE_COLLECTIVE_VERIFY,
         SLICE_COLLECTIVE_COUNT_REGIONS,
       };
+#endif
     public:
       SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);
@@ -1467,6 +1464,7 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
+#ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation
       virtual Domain get_collective_dense_points(void) const;
@@ -1504,6 +1502,7 @@ namespace Legion {
                                 AddressSpaceID source, Runtime *runtime);
       static void handle_collective_instance_response(Deserializer &derez,
                                                       Runtime *runtime);
+#endif
     protected:
       friend class IndexTask;
       friend class PointTask;

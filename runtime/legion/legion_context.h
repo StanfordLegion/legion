@@ -374,8 +374,7 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances,
-          const DomainPoint &collective_point) = 0;
+          bool virtual_mapped, const InstanceSet &physical_instances) = 0;
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs) = 0;
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -1238,8 +1237,7 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances,
-          const DomainPoint &collective_point);
+          bool virtual_mapped, const InstanceSet &physical_instances);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -1477,18 +1475,14 @@ namespace Legion {
                                RemoteContext *target);
     public:
       void convert_source_views(const std::vector<PhysicalManager*> &sources,
-                                std::vector<InstanceView*> &source_views,
+                                std::vector<IndividualView*> &source_views,
                                 CollectiveMapping *mapping = NULL);
       void convert_target_views(const InstanceSet &targets, 
-                                std::vector<InstanceView*> &target_views,
+                                std::vector<IndividualView*> &target_views,
                                 CollectiveMapping *mapping = NULL);
-      // I hate the container problem, same as previous except MaterializedView
-      void convert_target_views(const InstanceSet &targets, 
-                                std::vector<MaterializedView*> &target_views,
+      IndividualView* create_instance_top_view(PhysicalManager *manager,
+                                AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
-      InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                             AddressSpaceID source,
-                                             CollectiveMapping *mapping = NULL);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1615,9 +1609,9 @@ namespace Legion {
       ApEvent realm_done_event;
       TaskPriority current_priority;
     protected: // Instance top view data structures
-      mutable LocalLock                         instance_view_lock;
-      std::map<PhysicalManager*,InstanceView*>  instance_top_views;
-      std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
+      mutable LocalLock                          instance_view_lock;
+      std::map<PhysicalManager*,IndividualView*> instance_top_views;
+      std::map<PhysicalManager*,RtUserEvent>     pending_top_views;
     protected:
       mutable LocalLock                         pending_set_lock;
       LegionMap<RegionNode*,
@@ -2475,6 +2469,7 @@ namespace Legion {
       ShardingFunction* get_attach_detach_sharding_function(void);
       IndexSpaceNode* compute_index_attach_launch_spaces(
                                             std::vector<size_t> &shard_sizes);
+#ifdef NO_EXPLICIT_COLLECTIVES
     public:
       void register_collective_instance_handler(size_t context_index,
                                       ReplCollectiveInstanceHandler *handler);
@@ -2482,6 +2477,7 @@ namespace Legion {
       void handle_collective_instance_message(Deserializer &derez);
       ReplCollectiveInstanceHandler* find_collective_instance_handler(
                                                   size_t context_index);
+#endif
     public:
       void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
                        const Future &future, const char *description) const;
@@ -2627,6 +2623,7 @@ namespace Legion {
       std::map<size_t/*template index*/,
         std::vector<PendingTemplateUpdate> > pending_template_updates;
       size_t next_physical_template_index;
+#ifdef NO_EXPLICIT_COLLECTIVES
     protected:
       struct PendingCollectiveInstanceMessage :
         public LgTaskArgs<PendingCollectiveInstanceMessage> {
@@ -2649,6 +2646,7 @@ namespace Legion {
       std::map<size_t,std::vector<PendingCollectiveInstanceMessage> > 
                                           pending_collective_instance_messages;
       std::map<size_t,ReplCollectiveInstanceHandler*> collective_inst_handlers;
+#endif
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;
@@ -3071,8 +3069,7 @@ namespace Legion {
     public:
       virtual void add_physical_region(const RegionRequirement &req, 
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances,
-          const DomainPoint &collective_point);
+          bool virtual_mapped, const InstanceSet &physical_instances);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,

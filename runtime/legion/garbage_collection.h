@@ -42,17 +42,18 @@ namespace Legion {
       INDEX_PART_NODE_DC = 0x3,
       MATERIALIZED_VIEW_DC = 0x4,
       REDUCTION_VIEW_DC = 0x5,
-      FILL_VIEW_DC = 0x6,
-      PHI_VIEW_DC = 0x7,
-      // SHARDED_VIEW_DC = 0x8,
+      REPLICATED_VIEW_DC = 0x6,
+      ALLREDUCE_VIEW_DC = 0x7,
+      FILL_VIEW_DC = 0x8,
       FUTURE_DC = 0x9,
       FUTURE_MAP_DC = 0xA,
       INDEX_EXPR_NODE_DC = 0xB,
       FIELD_SPACE_DC = 0xC,
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,
+      PHI_VIEW_DC = 0xF,
       // be careful making this last one bigger than 0x10! see instance encoding
-      DIST_TYPE_LAST_DC = 0xF,  // must be last
+      DIST_TYPE_LAST_DC = 0x10,  // must be last
     };
 
     enum ReferenceSource {

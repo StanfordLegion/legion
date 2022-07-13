@@ -99,16 +99,6 @@ namespace Legion {
         delete manager;
     }
 
-    //--------------------------------------------------------------------------
-    AddressSpaceID InstanceView::get_analysis_space(const DomainPoint &p) const
-    //--------------------------------------------------------------------------
-    {
-      if (manager->is_collective_manager())
-        return manager->get_instance(p).address_space();
-      else
-        return logical_owner;
-    }
-
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void InstanceView::process_replication_request(AddressSpaceID source,
@@ -141,23 +131,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceView::find_atomic_reservations(const FieldMask &mask,
-       Operation *op, unsigned index, const DomainPoint &point, bool excl)
+                                       Operation *op, unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
       std::vector<Reservation> reservations;
-      find_field_reservations(mask, point, reservations); 
+      find_field_reservations(mask, reservations); 
       for (unsigned idx = 0; idx < reservations.size(); idx++)
         op->update_atomic_locks(index, reservations[idx], excl);
     } 
 
     //--------------------------------------------------------------------------
     void InstanceView::find_field_reservations(const FieldMask &mask,
-               const DomainPoint &point, std::vector<Reservation> &reservations)
+                                         std::vector<Reservation> &reservations)
     //--------------------------------------------------------------------------
     {
       RtEvent ready = manager->find_field_reservations(mask, this->did,
-          point, &reservations, runtime->address_space,
-          RtUserEvent::NO_RT_USER_EVENT);
+          &reservations, runtime->address_space, RtUserEvent::NO_RT_USER_EVENT);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       // Sort them into order if necessary
@@ -351,8 +340,6 @@ namespace Legion {
 
       std::vector<ApEvent> *target;
       derez.deserialize(target);
-      DomainPoint collective_point;
-      derez.deserialize(collective_point);
       RegionUsage usage;
       derez.deserialize(usage);
       FieldMask mask;
@@ -370,8 +357,7 @@ namespace Legion {
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
-      inst_view->find_last_users(result, collective_point,
-                                 usage, mask, expr, applied);
+      inst_view->find_last_users(result, usage, mask, expr, applied);
       if (!result.empty())
       {
         Serializer rez;
@@ -2493,9 +2479,6 @@ namespace Legion {
                                    CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!manager->is_collective_manager());
-#endif
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);
       else
@@ -2602,10 +2585,6 @@ namespace Legion {
             trace_info, symbolic);
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         ApUserEvent ready_event;
         // Check to see if this user came from somewhere that wasn't
         // the logical owner, if so we need to send the update back 
@@ -2803,10 +2782,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         // Check to see if there are any replicated fields here which we
         // can handle locally so we don't have to send a message to the owner
         ApEvent result_event;
@@ -2980,10 +2955,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         // Check to see if this update came from some place other than the
         // source in which case we need to send it back to the source
         if (source != logical_owner)
@@ -3134,7 +3105,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_last_users(std::set<ApEvent> &events,
-                                      const DomainPoint &collective_point,
                                       const RegionUsage &usage,
                                       const FieldMask &mask,
                                       IndexSpaceExpression *expr,
@@ -3142,8 +3112,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we're on the right node to perform this analysis
-      const AddressSpaceID target_space = get_analysis_space(collective_point);
-      if (target_space != local_space)
+      if (logical_owner != local_space)
       {
         const RtUserEvent ready = Runtime::create_rt_user_event();
         Serializer rez;
@@ -3151,13 +3120,12 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(&events);
-          rez.serialize(collective_point);
           rez.serialize(usage);
           rez.serialize(mask);
-          expr->pack_expression(rez, target_space);
+          expr->pack_expression(rez, logical_owner);
           rez.serialize(ready);
         }
-        runtime->send_view_find_last_users_request(target_space, rez);
+        runtime->send_view_find_last_users_request(logical_owner, rez);
         ready_events.push_back(ready);
       }
       else
@@ -4484,10 +4452,6 @@ namespace Legion {
             trace_info, symbolic);
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         // If we're not the logical owner send a message there 
         // to do the analysis and provide a user event to trigger
         // with the precondition
@@ -4564,10 +4528,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
         RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -4638,10 +4598,6 @@ namespace Legion {
 #endif
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // This should never happen with collective instances
-        assert(!manager->is_collective_manager());
-#endif
         RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -4684,7 +4640,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_last_users(std::set<ApEvent> &events,
-                                        const DomainPoint &collective_point,
                                         const RegionUsage &usage,
                                         const FieldMask &mask,
                                         IndexSpaceExpression *expr,
@@ -4692,8 +4647,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we're on the right node to perform this analysis
-      const AddressSpaceID target_space = get_analysis_space(collective_point);
-      if (target_space != local_space)
+      if (logical_owner != local_space)
       {
         const RtUserEvent ready = Runtime::create_rt_user_event();
         Serializer rez;
@@ -4701,13 +4655,12 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(&events);
-          rez.serialize(collective_point);
           rez.serialize(usage);
           rez.serialize(mask);
-          expr->pack_expression(rez, target_space);
+          expr->pack_expression(rez, logical_owner);
           rez.serialize(ready);
         }
-        runtime->send_view_find_last_users_request(target_space, rez);
+        runtime->send_view_find_last_users_request(logical_owner, rez);
         ready_events.push_back(ready);
       }
       else
@@ -5061,9 +5014,6 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!manager->is_collective_manager());
-#endif
       // Get the destination fields for this copy
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);

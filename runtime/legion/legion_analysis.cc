@@ -285,18 +285,20 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(InstanceView *view, const DomainPoint &point)
-      : view_did(view->did), collective_point(point)
+    UniqueInst::UniqueInst(IndividualView *view)
+      : view_did(view->did), analysis_space(view->logical_owner)
     //--------------------------------------------------------------------------
     {
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(DistributedID did, const DomainPoint &point)
-      : view_did(did), collective_point(point)
+    UniqueInst::UniqueInst(DistributedID did)
+      : view_did(did)
     //--------------------------------------------------------------------------
     {
     }
+#endif
 
     //--------------------------------------------------------------------------
     void UniqueInst::serialize(Serializer &rez) const
@@ -306,7 +308,7 @@ namespace Legion {
       assert(view_did != 0);
 #endif
       rez.serialize(view_did);
-      rez.serialize(collective_point);
+      rez.serialize(analysis_space);
     }
 
     //--------------------------------------------------------------------------
@@ -314,19 +316,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(view_did);
-      derez.deserialize(collective_point);
+      derez.deserialize(analysis_space);
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID UniqueInst::get_analysis_space(Runtime *runtime) const
+    AddressSpaceID UniqueInst::get_analysis_space(void) const
     //--------------------------------------------------------------------------
     {
-      RtEvent ready;
-      InstanceView *view = static_cast<InstanceView*>(
-          runtime->find_or_request_logical_view(view_did, ready));
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      return view->get_analysis_space(collective_point);
+      return analysis_space;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4295,6 +4292,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_update(InstanceView *dst_view,
+                                           PhysicalManager *dst_man,
                                            LogicalView *src_view,
                                            const FieldMask &src_mask,
                                            IndexSpaceExpression *expr,
@@ -4324,21 +4322,23 @@ namespace Legion {
       else
       {
         InstanceView *inst_view = src_view->as_instance_view();
-        DomainPoint src_point;
-        if (inst_view->manager->is_collective_manager())
+        PhysicalManager *src_man = NULL;
+        if (inst_view->is_collective_view())
         {
           std::vector<InstanceView*> src_views(1, inst_view);
           const SelectSourcesResult &result = 
-            select_sources(dst_view, src_views);
+            select_sources(dst_view, dst_man, src_views);
 #ifdef DEBUG_LEGION
           assert(result.ranking.size() == 1);
 #endif
-          std::map<unsigned,DomainPoint>::const_iterator finder =
-            result.collective_keys.find(0);
-          if (finder != result.collective_keys.end())
-            src_point = finder->second;
+          std::map<unsigned,PhysicalManager*>::const_iterator finder =
+            result.points.find(0);
+          if (finder != result.points.end())
+            src_man = finder->second;
         }
-        record_instance_update(dst_view, inst_view, src_mask, src_point,
+        else
+          src_man = inst_view->as_individual_view()->get_manager();
+        record_instance_update(dst_view, inst_view, src_man, src_mask,
                                expr, tracing_eq, applied, redop, helper);
       }
     }
@@ -4346,8 +4346,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_instance_update(InstanceView *dst_view,
                                                   InstanceView *src_view,
+                                                  PhysicalManager *src_man,
                                                   const FieldMask &src_mask,
-                                                  const DomainPoint &src_point,
                                                   IndexSpaceExpression *expr,
                                                   EquivalenceSet *tracing_eq,
                                                   std::set<RtEvent> &applied,
@@ -4359,7 +4359,7 @@ namespace Legion {
       record_view(dst_view);
       record_view(src_view);
       CopyUpdate *update = 
-        new CopyUpdate(src_view, src_mask, src_point, expr, redop, helper);
+        new CopyUpdate(src_view, src_man, src_mask, expr, redop, helper);
       FieldMaskSet<Update> &updates = sources[dst_view];
       if (helper == NULL)
         updates.insert(update, src_mask);
@@ -4373,6 +4373,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     const CopyFillAggregator::SelectSourcesResult& 
         CopyFillAggregator::select_sources(InstanceView *dst_view, 
+                                    PhysicalManager *dst_man,
                                     const std::vector<InstanceView*> &src_views)
     //--------------------------------------------------------------------------
     {
@@ -4380,8 +4381,10 @@ namespace Legion {
       assert(dst_view != NULL);
       assert(!src_views.empty());
 #endif
-      std::map<InstanceView*,std::vector<SelectSourcesResult> >::iterator
-        finder = mapper_queries.find(dst_view);
+      const std::pair<InstanceView*,PhysicalManager*> key(dst_view, dst_man);
+      std::map<std::pair<InstanceView*,PhysicalManager*>,
+               std::vector<SelectSourcesResult> >::iterator
+        finder = mapper_queries.find(key);
       if (finder != mapper_queries.end())
       {
         for (std::vector<SelectSourcesResult>::const_iterator it = 
@@ -4391,12 +4394,12 @@ namespace Legion {
       }
       else
         finder = mapper_queries.insert(
-            std::make_pair(dst_view,std::vector<SelectSourcesResult>())).first;
+            std::make_pair(key, std::vector<SelectSourcesResult>())).first;
       // If we didn't find the query result we need to do it for ourself
       std::vector<unsigned> ranking;
-      std::map<unsigned,DomainPoint> keys;
+      std::map<unsigned,PhysicalManager*> points;
       // Always use the source index for selecting sources
-      op->select_sources(src_index, dst_view, src_views ,ranking, keys);
+      op->select_sources(src_index, dst_man, src_views ,ranking, points);
       // Check to make sure that the ranking has sound output
       unsigned count = 0;
       std::vector<bool> unique_indexes(src_views.size(), false);
@@ -4421,12 +4424,13 @@ namespace Legion {
       // Save the result for the future
       finder->second.emplace_back(SelectSourcesResult(
             std::vector<InstanceView*>(src_views)/*make a copy*/,
-            std::move(ranking), std::move(keys)));
+            std::move(ranking), std::move(points)));
       return finder->second.back();
     }
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_updates(InstanceView *dst_view, 
+                                    PhysicalManager *dst_man,
                                     const FieldMaskSet<LogicalView> &src_views,
                                     const FieldMask &src_mask,
                                     IndexSpaceExpression *expr,
@@ -4445,7 +4449,7 @@ namespace Legion {
       {
         LogicalView *src_view = src_views.begin()->first;
         const FieldMask record_mask = src_views.get_valid_mask() & src_mask;
-        record_update(dst_view, src_view, record_mask, expr,
+        record_update(dst_view, dst_man, src_view, record_mask, expr,
                       tracing_eq, applied, redop, helper);
       }
       else
@@ -4463,7 +4467,7 @@ namespace Legion {
             // Easy case, just one view so do it  
             LogicalView *src_view = *(vit->elements.begin());
             const FieldMask &record_mask = vit->set_mask;
-            record_update(dst_view, src_view, record_mask, expr,
+            record_update(dst_view, dst_man, src_view, record_mask, expr,
                           tracing_eq, applied, redop, helper); 
           }
           else
@@ -4502,7 +4506,7 @@ namespace Legion {
               {
                 // Easy, just one instance to use and no collective instances
                 InstanceView *src_view = instances.back();
-                record_update(dst_view, src_view, vit->set_mask, expr,
+                record_update(dst_view, dst_man, src_view, vit->set_mask, expr,
                               tracing_eq, applied, redop, helper);
               }
               else
@@ -4510,23 +4514,25 @@ namespace Legion {
                 // Hard, multiple potential sources,
                 // ask the mapper which one to use
                 const SelectSourcesResult &result = 
-                  select_sources(dst_view, instances);
+                  select_sources(dst_view, dst_man, instances);
 #ifdef DEBUG_LEGION
                 assert(result.ranking.size() == instances.size());
 #endif
                 const unsigned first = result.ranking.front();
                 InstanceView *src_view = instances[first];
-                // Find the source point if it is a collective instance
-                DomainPoint src_point;
-                if (src_view->manager->is_collective_manager())
+                PhysicalManager *src_man = NULL;
+                // Find the source point if it is a collective view 
+                if (src_view->is_collective_view())
                 {
-                  std::map<unsigned,DomainPoint>::const_iterator 
-                    key_finder = result.collective_keys.find(first);
-                  if (key_finder != result.collective_keys.end())
-                    src_point = key_finder->second;
+                  std::map<unsigned,PhysicalManager*>::const_iterator 
+                    point_finder = result.points.find(first);
+                  if (point_finder != result.points.end())
+                    src_man = point_finder->second;
                 }
-                record_instance_update(dst_view, src_view, vit->set_mask,
-                    src_point, expr, tracing_eq, applied, redop, helper);
+                else
+                  src_man = src_view->as_individual_view()->get_manager();
+                record_instance_update(dst_view, src_view, src_man,
+                    vit->set_mask, expr, tracing_eq, applied, redop, helper);
               }
             }
             else
@@ -4544,7 +4550,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_partial_updates(InstanceView *dst_view, 
-                 const LegionMap<LogicalView*,
+                          PhysicalManager *dst_man,const LegionMap<LogicalView*,
                                  FieldMaskSet<IndexSpaceExpression> >&src_views,
                           const FieldMask &src_mask, IndexSpaceExpression *expr, 
                           EquivalenceSet *tracing_eq,std::set<RtEvent> &applied,
@@ -4640,31 +4646,32 @@ namespace Legion {
       if (!instances.empty())
       {
         std::vector<unsigned> ranking;
-        std::map<unsigned,DomainPoint> keys;
+        std::map<unsigned,PhysicalManager*> points;
         // Need to ask the mapper which instances it prefers if there are
         // multiple choices or we have a collective instance to pick from
-        if ((instances.size() > 1) ||
-            instances.back()->manager->is_collective_manager())
+        if ((instances.size() > 1) || instances.back()->is_collective_view())
         {
           const SelectSourcesResult &result = 
-            select_sources(dst_view, instances);
+            select_sources(dst_view, dst_man, instances);
           ranking = result.ranking;
-          keys = result.collective_keys;
+          points = result.points;
         }
         else
           ranking.push_back(0);
         for (unsigned idx = 0; idx < ranking.size(); idx++)
         {
           InstanceView *src_view = instances[ranking[idx]];
+          PhysicalManager *src_man = NULL;
           // Find the source key if this is a collective instance
-          DomainPoint src_point;
-          if (src_view->manager->is_collective_manager())
+          if (src_view->is_collective_view())
           {
-            std::map<unsigned,DomainPoint>::const_iterator key_finder =
-              keys.find(ranking[idx]);
-            if (key_finder != keys.end())
-              src_point = key_finder->second;
+            std::map<unsigned,PhysicalManager*>::const_iterator point_finder =
+              points.find(ranking[idx]);
+            if (point_finder != points.end())
+              src_man = point_finder->second;
           }
+          else
+            src_man = src_view->as_individual_view()->get_manager();
           LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
               const_iterator finder = src_views.find(src_view);
 #ifdef DEBUG_LEGION
@@ -4695,10 +4702,10 @@ namespace Legion {
             if (overlap_size < it->first.first->get_volume())
             {
               if (overlap_size == it->first.second->get_volume())
-                record_instance_update(dst_view, src_view, it->second,src_point,
+                record_instance_update(dst_view, src_view, src_man, it->second,
                     it->first.second, tracing_eq, applied, redop,across_helper);
               else
-                record_instance_update(dst_view, src_view, it->second,src_point,
+                record_instance_update(dst_view, src_view, src_man, it->second,
                     overlap, tracing_eq, applied, redop, across_helper);
               // Compute the difference
               IndexSpaceExpression *diff_expr = 
@@ -4707,7 +4714,7 @@ namespace Legion {
             }
             else // completely covers remainder expression
             {
-              record_instance_update(dst_view, src_view, it->second, src_point,
+              record_instance_update(dst_view, src_view, src_man, it->second,
                   it->first.first, tracing_eq, applied, redop, across_helper);
               if (remainders.empty())
                 return;
@@ -4805,7 +4812,7 @@ namespace Legion {
         sources[dst_view].insert(update, helper->convert_src_to_dst(fill_mask));
       if (tracing_eq != NULL)
       {
-        if (dst_view->is_reduction_view())
+        if (dst_view->is_reduction_kind())
           tracing_eq->update_tracing_anti_views(dst_view, expr, 
                                                 fill_mask, applied);
         else
@@ -4816,7 +4823,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_reductions(InstanceView *dst_view,
-                                  const std::list<std::pair<ReductionView*,
+                                  const std::list<std::pair<InstanceView*,
                                             IndexSpaceExpression*> > &src_views,
                                   const unsigned src_fidx,
                                   const unsigned dst_fidx,
@@ -4837,7 +4844,7 @@ namespace Legion {
       dst_mask.set_bit(dst_fidx);
       // Always start scanning from the first redop index
       unsigned redop_index = 0;
-      for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+      for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
             const_iterator it = src_views.begin(); it != src_views.end(); it++)
       {
 #ifdef DEBUG_LEGION
@@ -8228,8 +8235,8 @@ namespace Legion {
     {
       if (view != NULL)
       {
-        if (view->is_reduction_view())
-          reduction_views.insert(view->as_reduction_view(), mask);
+        if (view->is_reduction_kind())
+          reduction_views.insert(view->as_instance_view(), mask);
         else
           views.insert(view, mask);
       }
@@ -8256,8 +8263,8 @@ namespace Legion {
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             vws.begin(); it != vws.end(); it++)
       {
-        if (it->first->is_reduction_view())
-          reduction_views.insert(it->first->as_reduction_view(), it->second);
+        if (it->first->is_reduction_kind())
+          reduction_views.insert(it->first->as_instance_view(), it->second);
         else
           views.insert(it->first, it->second);
       }
@@ -8268,7 +8275,7 @@ namespace Legion {
                         AddressSpaceID prev, Operation *o, unsigned idx, 
                         IndexSpaceExpression *expr, const RegionUsage &use,
                         FieldMaskSet<LogicalView> &vws,
-                        FieldMaskSet<ReductionView> &reductions,
+                        FieldMaskSet<InstanceView> &reductions,
                         const PhysicalTraceInfo &info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
@@ -8386,7 +8393,7 @@ namespace Legion {
           rez.serialize<size_t>(reduction_views.size());
           if (!reduction_views.empty())
           {
-            for (FieldMaskSet<ReductionView>::const_iterator it =
+            for (FieldMaskSet<InstanceView>::const_iterator it =
                   reduction_views.begin(); it != reduction_views.end(); it++)
             {
               rez.serialize(it->first->did);  
@@ -8528,7 +8535,7 @@ namespace Legion {
       }
       size_t num_reductions;
       derez.deserialize(num_reductions);
-      FieldMaskSet<ReductionView> reductions;
+      FieldMaskSet<InstanceView> reductions;
       for (unsigned idx = 0; idx < num_reductions; idx++)
       {
         DistributedID did;
@@ -8539,7 +8546,7 @@ namespace Legion {
           ready_events.insert(ready);
         FieldMask mask;
         derez.deserialize(mask);
-        views.insert(static_cast<ReductionView*>(view), mask);
+        views.insert(static_cast<InstanceView*>(view), mask);
       }
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);
@@ -9164,14 +9171,14 @@ namespace Legion {
       }
       if (!reduction_instances.empty())
       {
-        for (std::map<unsigned,std::list<std::pair<ReductionView*,
+        for (std::map<unsigned,std::list<std::pair<InstanceView*,
               IndexSpaceExpression*> > >::iterator it =
               reduction_instances.begin(); it != 
               reduction_instances.end(); it++)
         {
           while (!it->second.empty())
           {
-            std::pair<ReductionView*,IndexSpaceExpression*> &back = 
+            std::pair<InstanceView*,IndexSpaceExpression*> &back = 
               it->second.back();
             if (back.first->remove_nested_valid_ref(did, mutator))
               delete back.first;
@@ -9373,7 +9380,7 @@ namespace Legion {
           const FieldMask &view_mask = sources[idx].get_valid_fields();
           InstanceView *view = corresponding[idx];
 #ifdef DEBUG_LEGION
-          assert(!view->is_reduction_view());
+          assert(!view->is_reduction_kind());
 #endif
           FieldMaskSet<LogicalView>::iterator finder = 
             total_valid_instances.find(view);
@@ -9452,13 +9459,13 @@ namespace Legion {
         while (fidx >= 0)
         {
           std::map<unsigned,std::list<
-            std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator
+            std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
               current = reduction_instances.find(fidx);
           if (current != reduction_instances.end())
           {
             FieldMask local_mask;
             local_mask.set_bit(fidx);
-            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >
                   ::const_reverse_iterator it = current->second.rbegin(); it !=
                   current->second.rend(); it++)
             {
@@ -9579,29 +9586,29 @@ namespace Legion {
       // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
-      for (FieldMaskSet<LogicalView>::const_iterator it = 
+      for (FieldMaskSet<IndividualView>::const_iterator it = 
             analysis.valid_instances.begin(); it !=
             analysis.valid_instances.end(); it++)
       {
         FieldMask invalid_mask = it->second & user_mask;
         if (!invalid_mask)
           continue;
-        if (it->first->is_reduction_view())
+        if (it->first->is_reduction_kind())
         {
           // Handle reductions special
-          ReductionView *reduction_view = it->first->as_reduction_view();
+          InstanceView *reduction_view = it->first;
           if (!(invalid_mask - reduction_fields))
           {
             int fidx = invalid_mask.find_first_set();
             while (fidx >= 0)
             {
-              std::map<unsigned,std::list<std::pair<ReductionView*,
+              std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > >::const_iterator finder = 
                   reduction_instances.find(fidx);
               if (finder == reduction_instances.end())
                 break;
               std::set<IndexSpaceExpression*> exprs;
-              for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+              for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
                     const_reverse_iterator rit = finder->second.rbegin(); rit !=
                     finder->second.rend(); rit++)
               {
@@ -9710,28 +9717,28 @@ namespace Legion {
       // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
-      for (FieldMaskSet<LogicalView>::const_iterator ait = 
+      for (FieldMaskSet<IndividualView>::const_iterator ait = 
             analysis.antivalid_instances.begin(); ait !=
             analysis.antivalid_instances.end(); ait++)
       {
         const FieldMask antivalid_mask = ait->second & user_mask;
         if (!antivalid_mask)
           continue;
-        if (ait->first->is_reduction_view())
+        if (ait->first->is_reduction_kind())
         {
           // Handle reductions special
           if (antivalid_mask * reduction_fields)
             continue;
-          ReductionView *reduction_view = ait->first->as_reduction_view();
+          InstanceView *reduction_view = ait->first;
           int fidx = antivalid_mask.find_first_set();
           while (fidx >= 0)
           {
-            std::map<unsigned,std::list<std::pair<ReductionView*,
+            std::map<unsigned,std::list<std::pair<InstanceView*,
               IndexSpaceExpression*> > >::const_iterator finder = 
                 reduction_instances.find(fidx);
             if (finder != reduction_instances.end())
             {
-              for (std::list<std::pair<ReductionView*,
+              for (std::list<std::pair<InstanceView*,
                     IndexSpaceExpression*> >::const_iterator it = 
                     finder->second.begin(); it != finder->second.end(); it++)
               {
@@ -9841,8 +9848,7 @@ namespace Legion {
           // Record the reduction instances
           for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
           {
-            ReductionView *red_view = 
-              analysis.target_views[idx]->as_reduction_view();
+            InstanceView *red_view = analysis.target_views[idx];
             const ReductionOpID view_redop = red_view->get_redop(); 
 #ifdef DEBUG_LEGION
             assert(view_redop == analysis.usage.redop);
@@ -9870,7 +9876,7 @@ namespace Legion {
             FieldMaskSet<IndexSpaceExpression> fill_exprs;
             while (fidx >= 0)
             {
-              std::list<std::pair<ReductionView*,IndexSpaceExpression*> >
+              std::list<std::pair<InstanceView*,IndexSpaceExpression*> >
                 &field_views = reduction_instances[fidx]; 
               // Scan through the reduction instances to see if we're
               // already in the list of valid reductions, if not then
@@ -9889,7 +9895,7 @@ namespace Legion {
               // flushed to it anyway
               if (!found_covered)
               {
-                for (std::list<std::pair<ReductionView*,
+                for (std::list<std::pair<InstanceView*,
                       IndexSpaceExpression*> >::iterator it =
                       field_views.begin(); it != field_views.end(); it++)
                 {
@@ -11835,13 +11841,13 @@ namespace Legion {
       while (fidx >= 0)
       {
         std::map<unsigned,std::list<
-          std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator
+          std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
           finder = reduction_instances.find(fidx);
         if (finder != reduction_instances.end())
         {
           if (expr_covers)
           {
-            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
                   const_iterator it = finder->second.begin(); it !=
                   finder->second.end(); it++)
             {
@@ -11874,7 +11880,7 @@ namespace Legion {
           else
           {
             IndexSpaceExpression *full_diff = NULL;
-            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
                   iterator it = finder->second.begin(); it != 
                   finder->second.end(); /*nothing*/)
             {
@@ -12555,12 +12561,12 @@ namespace Legion {
         const FieldMask inst_mask = rit->second & reduction_mask;
         if (!inst_mask)
           continue;
-        const bool target_is_reduction = rit->first->is_reduction_view();
+        const bool target_is_reduction = rit->first->is_reduction_kind();
         int fidx = inst_mask.find_first_set();
         while (fidx >= 0)
         {
           std::map<unsigned,std::list<
-            std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator 
+            std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator 
               finder = reduction_instances.find(fidx);
 #ifdef DEBUG_LEGION
           assert(finder != reduction_instances.end());
@@ -12573,7 +12579,7 @@ namespace Legion {
             if (target_is_reduction)
             {
               // Filter out all of our reductions
-              for (std::list<std::pair<ReductionView*,
+              for (std::list<std::pair<InstanceView*,
                              IndexSpaceExpression*> >::iterator it =
                     finder->second.begin(); it != 
                     finder->second.end(); /*nothing*/)
@@ -12606,7 +12612,7 @@ namespace Legion {
                 across_helper->convert_src_to_dst(fidx),
               trace_info.recording ? this : NULL, applied_events,across_helper);
             bool has_cover = false;
-            for (std::list<std::pair<ReductionView*,
+            for (std::list<std::pair<InstanceView*,
                   IndexSpaceExpression*> >::const_iterator it =
                   finder->second.begin(); it != finder->second.end(); it++)
             {
@@ -12628,7 +12634,7 @@ namespace Legion {
               if (!has_cover)
               {
                 // Expression references flow back but remove duplicates
-                for (std::list<std::pair<ReductionView*,
+                for (std::list<std::pair<InstanceView*,
                       IndexSpaceExpression*> >::const_iterator it =
                       finder->second.begin(); it != finder->second.end(); it++)
                   if (!applied_exprs->insert(it->second, expr_mask) &&
@@ -12640,7 +12646,7 @@ namespace Legion {
                 if (applied_exprs->insert(set_expr, expr_mask))
                   set_expr->add_nested_expression_reference(did, &mutator);
                 // Now we can remove the remaining expression references
-                for (std::list<std::pair<ReductionView*,
+                for (std::list<std::pair<InstanceView*,
                       IndexSpaceExpression*> >::const_iterator it =
                       finder->second.begin(); it != finder->second.end(); it++)
                   if (it->second->remove_nested_expression_reference(did))
@@ -12655,11 +12661,11 @@ namespace Legion {
           {
             bool has_cover = false;
             std::vector<
-              std::pair<ReductionView*,IndexSpaceExpression*> > to_delete;
+              std::pair<InstanceView*,IndexSpaceExpression*> > to_delete;
             std::list<
-              std::pair<ReductionView*,IndexSpaceExpression*> > to_record;
+              std::pair<InstanceView*,IndexSpaceExpression*> > to_record;
             // expr does not cover so we need intersection tests
-            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
                   iterator it = finder->second.begin();
                   it != finder->second.end(); /*nothing*/)
             {
@@ -12740,7 +12746,7 @@ namespace Legion {
                 expr_mask.set_bit(fidx);
                 if (!has_cover)
                 {
-                  for (std::list<std::pair<ReductionView*,
+                  for (std::list<std::pair<InstanceView*,
                         IndexSpaceExpression*> >::const_iterator it = 
                         to_record.begin(); it != to_record.end(); it++)
                     if (applied_exprs->insert(it->second, expr_mask))
@@ -12752,7 +12758,7 @@ namespace Legion {
             }
             if (!to_delete.empty())
             {
-              for (std::vector<std::pair<ReductionView*,
+              for (std::vector<std::pair<InstanceView*,
                     IndexSpaceExpression*> >::const_iterator it =
                     to_delete.begin(); it != to_delete.end(); it++)
               {
@@ -13380,14 +13386,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::update_reductions(const unsigned fidx, 
            ReferenceMutator &mutator,
-           std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates)
+           std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &updates)
     //--------------------------------------------------------------------------
     {
       if (updates.empty())
         return;
       // Check for equivalence to the dst and then add our references
       const size_t volume = set_expr->get_volume();
-      for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::iterator
+      for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::iterator
             it = updates.begin(); it != updates.end(); it++)
       {
         it->first->add_nested_valid_ref(did, &mutator);
@@ -13395,7 +13401,7 @@ namespace Legion {
           it->second = set_expr;
         it->second->add_nested_expression_reference(did, &mutator);
       }
-      std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &current =
+      std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &current =
         reduction_instances[fidx];
       current.splice(current.end(), updates);
       reduction_fields.set_bit(fidx);
@@ -14363,7 +14369,7 @@ namespace Legion {
         if (!analysis.reduction_views.empty())
         {
           WrapperReferenceMutator mutator(applied_events);
-          for (FieldMaskSet<ReductionView>::const_iterator it =
+          for (FieldMaskSet<InstanceView>::const_iterator it =
                 analysis.reduction_views.begin(); it != 
                 analysis.reduction_views.end(); it++)
           {
@@ -14759,7 +14765,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second, mutator);
-        if (view->is_reduction_view())
+        if (view->is_reduction_kind())
         {
           // Invalidate this reduction view since we read it
           if (tracing_postconditions != NULL)
@@ -15382,7 +15388,7 @@ namespace Legion {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
       FieldMaskSet<IndexSpaceExpression> initialized_updates;
       std::map<unsigned,std::list<
-        std::pair<ReductionView*,IndexSpaceExpression*> > > reduction_updates;
+        std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
         restricted_updates, released_updates;
       FieldMaskSet<CopyFillGuard> read_only_guards, reduction_fill_guards;
@@ -15469,7 +15475,7 @@ namespace Legion {
               const LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > &valid_updates,
               const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-              const std::map<unsigned,std::list<std::pair<ReductionView*,
+              const std::map<unsigned,std::list<std::pair<InstanceView*,
                   IndexSpaceExpression*> > > &reduction_updates,
               const LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > &restricted_updates,
@@ -15504,13 +15510,13 @@ namespace Legion {
         rez.serialize(it->second);
       }
       rez.serialize<size_t>(reduction_updates.size());
-      for (std::map<unsigned,std::list<std::pair<ReductionView*,
+      for (std::map<unsigned,std::list<std::pair<InstanceView*,
             IndexSpaceExpression*> > >::const_iterator rit =
             reduction_updates.begin(); rit != reduction_updates.end(); rit++)
       {
         rez.serialize(rit->first);
         rez.serialize<size_t>(rit->second.size());
-        for (std::list<std::pair<ReductionView*,
+        for (std::list<std::pair<InstanceView*,
               IndexSpaceExpression*> >::const_iterator it =
               rit->second.begin(); it != rit->second.end(); it++)
         {
@@ -15595,7 +15601,7 @@ namespace Legion {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
       FieldMaskSet<IndexSpaceExpression> initialized_updates;
       std::map<unsigned,std::list<
-        std::pair<ReductionView*,IndexSpaceExpression*> > > reduction_updates;
+        std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
         restricted_updates, released_updates;
       FieldMaskSet<CopyFillGuard> read_only_updates, reduction_fill_updates;
@@ -15640,7 +15646,7 @@ namespace Legion {
         derez.deserialize(fidx);
         size_t num_views;
         derez.deserialize(num_views);
-        std::list<std::pair<ReductionView*,IndexSpaceExpression*> > 
+        std::list<std::pair<InstanceView*,IndexSpaceExpression*> > 
           &reductions = reduction_updates[fidx];
         for (unsigned idx2 = 0; idx2 < num_views; idx2++)
         {
@@ -15653,8 +15659,8 @@ namespace Legion {
           IndexSpaceExpression *expr = 
             IndexSpaceExpression::unpack_expression(derez,
                                                     runtime->forest, source);
-          reductions.push_back(std::pair<ReductionView*,IndexSpaceExpression*>(
-                static_cast<ReductionView*>(view), expr));
+          reductions.push_back(std::pair<InstanceView*,IndexSpaceExpression*>(
+                static_cast<InstanceView*>(view), expr));
         }
       }
       size_t num_restrictions;
@@ -15815,7 +15821,7 @@ namespace Legion {
             FieldMaskSet<LogicalView> >()),
         initialized_updates(new FieldMaskSet<IndexSpaceExpression>()),
         reduction_updates(new std::map<unsigned,std::list<std::pair<
-            ReductionView*,IndexSpaceExpression*> > >()),
+            InstanceView*,IndexSpaceExpression*> > >()),
         restricted_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >()),
         released_updates(new LegionMap<IndexSpaceExpression*,
@@ -15839,7 +15845,7 @@ namespace Legion {
       initialized_updates->swap(init);
       for (ExprReductionViews::const_iterator rit =
             reductions.begin(); rit != reductions.end(); rit++)
-        for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+        for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
               const_iterator it = rit->second.begin();
               it != rit->second.end(); it++)
           it->second->add_base_expression_reference(META_TASK_REF, &mutator);
@@ -15871,7 +15877,7 @@ namespace Legion {
           delete it->first;
       for (ExprReductionViews::const_iterator rit =
             reduction_updates->begin(); rit != reduction_updates->end(); rit++)
-        for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+        for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
               const_iterator it = rit->second.begin(); 
               it != rit->second.end(); it++)
           if (it->second->remove_base_expression_reference(META_TASK_REF))
@@ -16087,7 +16093,7 @@ namespace Legion {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
       FieldMaskSet<IndexSpaceExpression> initialized_updates;
       std::map<unsigned,std::list<
-        std::pair<ReductionView*,IndexSpaceExpression*> > > reduction_updates;
+        std::pair<InstanceView*,IndexSpaceExpression*> > > reduction_updates;
       LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >
         restricted_updates, released_updates;
       TraceViewSet *precondition_updates = NULL;
@@ -16204,7 +16210,7 @@ namespace Legion {
               const FieldMask &mask, LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > &valid_updates,
               FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-              std::map<unsigned,std::list<std::pair<ReductionView*,
+              std::map<unsigned,std::list<std::pair<InstanceView*,
                   IndexSpaceExpression*> > > &reduction_updates,
               LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > &restricted_updates,
@@ -16353,19 +16359,19 @@ namespace Legion {
       // Get updates from the reductions
       if (!reduction_instances.empty() && !(mask * reduction_fields))
       {
-        for (std::map<unsigned,std::list<std::pair<ReductionView*,
+        for (std::map<unsigned,std::list<std::pair<InstanceView*,
               IndexSpaceExpression*> > >::const_iterator rit =
               reduction_instances.begin(); rit != 
               reduction_instances.end(); rit++)
         {
           if (!mask.is_set(rit->first))
             continue;
-          std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates =
+          std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &updates =
             reduction_updates[rit->first];
           updates = rit->second;
           if (!overlap_covers)
           {
-            for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
                  iterator it = updates.begin(); it != updates.end();/*nothing*/)
             {
               if (it->second == set_expr)
@@ -16558,7 +16564,7 @@ namespace Legion {
     void EquivalenceSet::apply_state(LegionMap<IndexSpaceExpression*,
                       FieldMaskSet<LogicalView> > &valid_updates,
                   FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-                  std::map<unsigned,std::list<std::pair<ReductionView*,
+                  std::map<unsigned,std::list<std::pair<InstanceView*,
                       IndexSpaceExpression*> > > &reduction_updates,
                   LegionMap<IndexSpaceExpression*,
                       FieldMaskSet<InstanceView> > &restricted_updates,
@@ -16660,7 +16666,7 @@ namespace Legion {
           update_initialized_data(it->first,false/*covers*/,it->second,mutator);
       }
       for (std::map<unsigned,std::list<
-            std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator
+            std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
             it = reduction_updates.begin(); it != reduction_updates.end(); it++)
         update_reductions(it->first, mutator, it->second);
       for (LegionMap<IndexSpaceExpression*,

@@ -853,14 +853,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InstanceManager::entails(LayoutConstraints *constraints,
-                                  const DomainPoint &key,
                                const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       const PointerConstraint &pointer = constraints->pointer_constraint;
       if (pointer.is_valid)
       {
-        PointerConstraint pointer_constraint = get_pointer_constraint(key);
+        PointerConstraint pointer_constraint = get_pointer_constraint();
         // Always test the pointer constraint locally
         if (!pointer_constraint.entails(constraints->pointer_constraint))
         {
@@ -876,14 +875,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InstanceManager::entails(const LayoutConstraintSet &constraints,
-                                  const DomainPoint &key,
                                const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       const PointerConstraint &pointer = constraints.pointer_constraint;
       if (pointer.is_valid)
       {
-        PointerConstraint pointer_constraint = get_pointer_constraint(key);
+        PointerConstraint pointer_constraint = get_pointer_constraint();
         // Always test the pointer constraint locally
         if (!pointer_constraint.entails(constraints.pointer_constraint))
         {
@@ -899,14 +897,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InstanceManager::conflicts(LayoutConstraints *constraints,
-                                    const DomainPoint &key,
                              const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
       const PointerConstraint &pointer = constraints->pointer_constraint;
       if (pointer.is_valid)
       {
-        PointerConstraint pointer_constraint = get_pointer_constraint(key);
+        PointerConstraint pointer_constraint = get_pointer_constraint();
         // Always test the pointer constraint locally
         if (pointer_constraint.conflicts(constraints->pointer_constraint))
         {
@@ -923,14 +920,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InstanceManager::conflicts(const LayoutConstraintSet &constraints,
-                                    const DomainPoint &key,
                              const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
       const PointerConstraint &pointer = constraints.pointer_constraint;
       if (pointer.is_valid)
       {
-        PointerConstraint pointer_constraint = get_pointer_constraint(key);
+        PointerConstraint pointer_constraint = get_pointer_constraint();
         // Always test the pointer constraint locally
         if (pointer_constraint.conflicts(constraints.pointer_constraint))
         {
@@ -998,12 +994,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::log_instance_creation(UniqueID creator_id,
-                                      Processor proc,
-                                      const std::vector<LogicalRegion> &regions,
-                                      const DomainPoint &collective_point) const
+                Processor proc, const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
-      const ApEvent inst_event = get_unique_event(collective_point);
+      const ApEvent inst_event = get_unique_event();
       const LayoutConstraints *constraints = layout->constraints;
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -1056,7 +1050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::construct_top_view(
+    IndividualView* PhysicalManager::construct_top_view(
                                            AddressSpaceID logical_owner,
                                            DistributedID view_did, UniqueID uid,
                                            CollectiveMapping *mapping)
@@ -1095,7 +1089,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::find_or_create_instance_top_view(
+    IndividualView* PhysicalManager::find_or_create_instance_top_view(
                                                    InnerContext *own_ctx,
                                                    AddressSpaceID logical_owner,
                                                    CollectiveMapping *mapping)
@@ -1164,7 +1158,7 @@ namespace Legion {
         return finder->second.first;
       }
       // At this point we're repsonsibile for doing the work to make the view 
-      InstanceView *result = NULL;
+      IndividualView *result = NULL;
       // Check to see if we're the owner
       if (is_owner())
       {
@@ -1221,7 +1215,7 @@ namespace Legion {
         runtime->send_create_top_view_request(owner_space, rez); 
         ready.wait();
         RtEvent view_ready;
-        result = static_cast<InstanceView*>(
+        result = static_cast<IndividualView*>(
             runtime->find_or_request_logical_view(view_did.load(), view_ready));
         if (view_ready.exists() && !view_ready.has_triggered())
           view_ready.wait();
@@ -2612,8 +2606,6 @@ namespace Legion {
       derez.deserialize(mask);
       DistributedID view_did;
       derez.deserialize(view_did);
-      DomainPoint point;
-      derez.deserialize(point);
       std::vector<Reservation> *target;
       derez.deserialize(target);
       AddressSpaceID source;
@@ -2623,7 +2615,7 @@ namespace Legion {
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      manager->find_field_reservations(mask, view_did, point, target, 
+      manager->find_field_reservations(mask, view_did, target, 
                                        source, to_trigger);
     }
 
@@ -2642,8 +2634,6 @@ namespace Legion {
       derez.deserialize(mask);
       DistributedID view_did;
       derez.deserialize(view_did);
-      DomainPoint point;
-      derez.deserialize(point);
       std::vector<Reservation> *target;
       derez.deserialize(target);
       size_t num_reservations;
@@ -2653,7 +2643,7 @@ namespace Legion {
         derez.deserialize((*target)[idx]);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      manager->update_field_reservations(mask, view_did, point, *target);
+      manager->update_field_reservations(mask, view_did, *target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
@@ -2780,8 +2770,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PointerConstraint IndividualManager::get_pointer_constraint(
-                                                 const DomainPoint &point) const
+    PointerConstraint IndividualManager::get_pointer_constraint(void) const
     //--------------------------------------------------------------------------
     {
       if (use_event.exists() && !use_event.has_triggered_faultignorant())
@@ -2790,6 +2779,7 @@ namespace Legion {
       return PointerConstraint(memory_manager->memory, uintptr_t(inst_ptr));
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     ApEvent IndividualManager::fill_from(FillView *fill_view, 
                                          InstanceView *dst_view,
@@ -3224,6 +3214,7 @@ namespace Legion {
         delete src_mask;
       return result;
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     void IndividualManager::pack_fields(Serializer &rez,
@@ -3262,7 +3253,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndividualManager::find_field_reservations(const FieldMask &mask,
-                               DistributedID view_did, const DomainPoint &point,
+                               DistributedID view_did,
                                std::vector<Reservation> *reservations,
                                AddressSpaceID source, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
@@ -3320,7 +3311,6 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(mask);
             rez.serialize(view_did);
-            rez.serialize(point);
             rez.serialize(reservations);
             rez.serialize(source);
             rez.serialize(to_trigger);
@@ -3341,7 +3331,6 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(mask);
           rez.serialize(view_did);
-          rez.serialize(point);
           rez.serialize(reservations);
           rez.serialize<size_t>(results.size());
           for (std::vector<Reservation>::const_iterator it =
@@ -3362,8 +3351,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::update_field_reservations(const FieldMask &mask,
-                               DistributedID view_did, const DomainPoint &point,
-                               const std::vector<Reservation> &reservations)
+           DistributedID view_did, const std::vector<Reservation> &reservations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3395,6 +3383,7 @@ namespace Legion {
       view_reservations.erase(finder);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     ApEvent IndividualManager::register_collective_user(InstanceView *view, 
                                          const RegionUsage &usage,
@@ -3732,6 +3721,7 @@ namespace Legion {
       if (mapping->remove_reference())
         delete mapping;
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     void IndividualManager::initialize_across_helper(CopyAcrossHelper *helper,
@@ -4287,6 +4277,7 @@ namespace Legion {
         delete manager;
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /////////////////////////////////////////////////////////////
     // Collective Manager
     /////////////////////////////////////////////////////////////
@@ -10779,6 +10770,7 @@ namespace Legion {
       derez.deserialize(done);
       Runtime::trigger_event(done, manager->perform_deletion(source));
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     /////////////////////////////////////////////////////////////
     // Virtual Manager 
@@ -10881,8 +10873,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PointerConstraint VirtualManager::get_pointer_constraint(
-                                                   const DomainPoint &key) const
+    PointerConstraint VirtualManager::get_pointer_constraint(void) const
     //--------------------------------------------------------------------------
     {
       return PointerConstraint(Memory::NO_MEMORY, 0);
@@ -10896,6 +10887,7 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /////////////////////////////////////////////////////////////
     // Pending Collective Instance 
     /////////////////////////////////////////////////////////////
@@ -10955,6 +10947,7 @@ namespace Legion {
       return new PendingCollectiveManager(did, total_points, dense_points,
                                           mapping, multi_instance);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     /////////////////////////////////////////////////////////////
     // Instance Builder
@@ -10994,8 +10987,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
-        RegionTreeForest *forest, PendingCollectiveManager *pending_collective,
-        const DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
+        RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
         unsigned *unsat_index, size_t *footprint, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -11148,6 +11140,7 @@ namespace Legion {
                                   field_sizes, serdez);
       }
       const AddressSpaceID local_space = forest->runtime->address_space;
+#ifdef NO_EXPLICIT_COLLECTIVES
       if (pending_collective != NULL)
       {
         // Creating a collective manager
@@ -11200,11 +11193,9 @@ namespace Legion {
         result = manager;
       }
       else
+#endif // NO_EXPLICIT_COLLECTIVES
       {
         // Creating an individual manager
-#ifdef DEBUG_LEGION
-        assert(collective_point == NULL);
-#endif 
         DistributedID did = forest->runtime->get_available_distributed_id();
         // Figure out what kind of instance we just made
         switch (constraints.specialized_constraint.get_kind())

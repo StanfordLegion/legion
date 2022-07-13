@@ -800,10 +800,8 @@ namespace Legion {
       void unmap_region(void);
       ApEvent remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &references, 
-                         const DomainPoint &collective_point,bool safe = false);
-      void set_references(const InstanceSet &instances,
-                         const DomainPoint &collective_point,bool safe = false);
+      void set_reference(const InstanceRef &references, bool safe = false);
+      void set_references(const InstanceSet &instances, bool safe = false);
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories, 
@@ -1419,16 +1417,6 @@ namespace Legion {
         const RtUserEvent ready;
         std::atomic<bool> success;
       };
-    public:
-      struct PendingCollectiveAllocation {
-      public:
-        PendingCollectiveAllocation(unsigned idx, RtUserEvent trigger)
-          : index(idx), to_trigger(trigger) { }
-      public:
-        std::vector<Memory> targets;
-        unsigned index;
-        RtUserEvent to_trigger;
-      };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       struct MallocInstanceArgs : public LgTaskArgs<MallocInstanceArgs> {
@@ -1488,9 +1476,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
-                                    PendingCollectiveManager *target,
-                                    const DomainPoint *p, UniqueID creator_id,
-                                    bool remote = false);
+                                    UniqueID creator_id, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
@@ -1498,9 +1484,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
-                                    PendingCollectiveManager *target,
-                                    const DomainPoint *p, UniqueID creator_id,
-                                    bool remote = false);
+                                    UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1548,11 +1532,6 @@ namespace Legion {
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     GCPriority priority, bool remote);
-      void record_pending_collective_instance(CollectiveManager *collective,
-                                              GCPriority priority);
-      void finalize_pending_collective_instance(CollectiveManager *collective,
-                                                bool acquire, bool remote);
-      bool remove_pending_collective_instance(CollectiveManager *collective);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
@@ -1611,14 +1590,8 @@ namespace Legion {
       PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
                                           size_t *footprint,
                                           LayoutConstraintKind *unsat_kind,
-                                          unsigned *unsat_index,
-                                          PendingCollectiveManager*
-                                                             collective = NULL,
-                                          const DomainPoint *point = NULL); 
+                                          unsigned *unsat_index);
     public:
-      bool acquire_collective_allocation_privileges(
-          std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
-      void release_collective_allocation_privileges(void);
       void remove_collectable(GCPriority priority, PhysicalManager *manager);
     public:
       RtEvent attach_external_instance(PhysicalManager *manager);
@@ -1688,19 +1661,6 @@ namespace Legion {
       // garbage collection priorities and placement in memory
       std::map<GCPriority,std::set<PhysicalManager*>,
                std::greater<GCPriority> > collectable_instances;
-      // A set of pending collective managers that still need to 
-      // check whether the full collective allocation was successful
-      std::map<CollectiveManager*,
-                std::pair<GCPriority,unsigned> > pending_collective_instances;
-      // Keep track of outstanding requuests for allocations which 
-      // will be tried in the order that they arrive
-      std::deque<RtUserEvent> pending_allocation_attempts;
-      // Collective instances also need a different set of allocation
-      // privileges for find and create collective instances so that
-      // we know that collective instance allocations are globally ordered
-      std::deque<PendingCollectiveAllocation> pending_collective_allocations;
-      // Whether we have an outstanding collective allocation on this memory
-      bool outstanding_collective_allocation;
     protected:
       std::set<Memory> visible_memories;
     protected:
@@ -3839,9 +3799,7 @@ namespace Legion {
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id,
-                                    PendingCollectiveManager *target,
-                                    const DomainPoint *p);
+                                    size_t *footprint, UniqueID creator_id);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3849,9 +3807,7 @@ namespace Legion {
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id,
-                                    PendingCollectiveManager *target,
-                                    const DomainPoint *p);
+                                    size_t *footprint, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,

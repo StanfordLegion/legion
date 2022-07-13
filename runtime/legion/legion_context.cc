@@ -864,7 +864,6 @@ namespace Legion {
       std::vector<MappingInstance> instances(1, 
             Mapping::PhysicalInstance::get_virtual_instance());
       const UniqueID unique_op_id = get_unique_id();
-      const DomainPoint &index_point = owner_task->index_point;
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -879,7 +878,7 @@ namespace Legion {
             it->second, instances, instance_set, bad_tree, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
         runtime->forest->log_mapping_decision(unique_op_id, this,
-            it->first, it->second, instance_set, index_point);
+            it->first, it->second, instance_set);
       }
     } 
 
@@ -1249,7 +1248,7 @@ namespace Legion {
                 req, instances, instance_set, bad_tree, 
                 missing_fields, NULL, unacquired, false/*do acquire_checks*/);
             runtime->forest->log_mapping_decision(get_unique_id(), this,
-                it->first, req, instance_set, owner_task->index_point);
+                it->first, req, instance_set);
           }
         }
       }
@@ -1285,7 +1284,6 @@ namespace Legion {
         std::vector<MappingInstance> instances(1, 
               Mapping::PhysicalInstance::get_virtual_instance());
         const UniqueID unique_op_id = get_unique_id();
-        const DomainPoint &index_point = owner_task->index_point;
         AutoLock priv_lock(privilege_lock);
         for (std::map<unsigned,RegionRequirement>::iterator it = 
               created_requirements.begin(); it != 
@@ -1311,7 +1309,7 @@ namespace Legion {
                   it->second, instances, instance_set, bad_tree, 
                   missing_fields, NULL, unacquired, false/*do acquire_checks*/);
               runtime->forest->log_mapping_decision(unique_op_id, this,
-                  it->first, it->second, instance_set, index_point);
+                  it->first, it->second, instance_set);
               // Then do the result of the normal operations
               delete_reqs.resize(delete_reqs.size()+1);
               RegionRequirement &req = delete_reqs.back();
@@ -6242,8 +6240,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances,
-          const DomainPoint &collective_point)
+          bool virtual_mapped, const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6257,7 +6254,7 @@ namespace Legion {
           mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
-        impl->set_references(physical_instances, collective_point,true/*safe*/);
+        impl->set_references(physical_instances, true/*safe*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9710,7 +9707,7 @@ namespace Legion {
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
       const UniqueID context_uid = get_unique_id();
-      std::map<PhysicalManager*,InstanceView*> top_views;
+      std::map<PhysicalManager*,IndividualView*> top_views;
       const ContextID ctx = tree_context.get_id();
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
@@ -9763,71 +9760,35 @@ namespace Legion {
 #endif
           // Find or make views for each of our instances and then 
           // add initial users for each of them
-          std::vector<InstanceView*> corresponding(sources.size());
+          std::vector<IndividualView*> corresponding(sources.size());
           // Build our set of corresponding views
-          if (IS_REDUCE(req))
+          for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
           {
-            for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
-            {
-              const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_physical_manager();
-              const FieldMask &view_mask = src_ref.get_valid_fields();
+            const InstanceRef &src_ref = sources[idx2];
+            PhysicalManager *manager = src_ref.get_physical_manager();
+            const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
-              assert(!(view_mask - user_mask)); // should be dominated
+            assert(!(view_mask - user_mask)); // should be dominated
 #endif
-              // Check to see if the view exists yet or not
-              std::map<PhysicalManager*,InstanceView*>::const_iterator 
-                finder = top_views.find(manager);
-              if (finder == top_views.end())
-              {
-                ReductionView *new_view = create_instance_top_view(manager, 
-                    runtime->address_space)->as_reduction_view();
-                top_views[manager] = new_view;
-                corresponding[idx2] = new_view;
-                // Record the initial user for the instance
-                new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
-                                    region_node->row_source, context_uid, idx1);
-              }
-              else
-              {
-                corresponding[idx2] = finder->second;
-                // Record the initial user for the instance
-                finder->second->add_initial_user(unmap_events[idx1], usage,
-                     view_mask, region_node->row_source, context_uid, idx1);
-              }
+            // Check to see if the view exists yet or not
+            std::map<PhysicalManager*,IndividualView*>::const_iterator 
+              finder = top_views.find(manager);
+            if (finder == top_views.end())
+            {
+              IndividualView *new_view =
+                create_instance_top_view(manager, runtime->address_space);
+              top_views[manager] = new_view;
+              corresponding[idx2] = new_view;
+              // Record the initial user for the instance
+              new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
+                                  region_node->row_source, context_uid, idx1);
             }
-          }
-          else
-          {
-            for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
+            else
             {
-              const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_physical_manager();
-              const FieldMask &view_mask = src_ref.get_valid_fields();
-#ifdef DEBUG_LEGION
-              assert(!(view_mask - user_mask)); // should be dominated
-#endif
-              // Check to see if the view exists yet or not
-              std::map<PhysicalManager*,InstanceView*>::const_iterator 
-                finder = top_views.find(manager);
-              if (finder == top_views.end())
-              {
-                MaterializedView *new_view = 
-                 create_instance_top_view(manager, 
-                     runtime->address_space)->as_materialized_view();
-                top_views[manager] = new_view;
-                corresponding[idx2] = new_view;
-                // Record the initial user for the instance
-                new_view->add_initial_user(unmap_events[idx1], usage, view_mask,
-                                   region_node->row_source, context_uid, idx1);
-              }
-              else
-              {
-                corresponding[idx2] = finder->second;
-                // Record the initial user for the instance
-                finder->second->add_initial_user(unmap_events[idx1], usage,
-                     view_mask, region_node->row_source, context_uid, idx1);
-              }
+              corresponding[idx2] = finder->second;
+              // Record the initial user for the instance
+              finder->second->add_initial_user(unmap_events[idx1], usage,
+                   view_mask, region_node->row_source, context_uid, idx1);
             }
           }
           // The parent region requirement is restricted if it is
@@ -10036,7 +9997,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::convert_source_views(
                                    const std::vector<PhysicalManager*> &sources,
-                                   std::vector<InstanceView*> &source_views,
+                                   std::vector<IndividualView*> &source_views,
                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -10048,7 +10009,7 @@ namespace Legion {
         {
           // See if we can find it
           PhysicalManager *manager = sources[idx];
-          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          std::map<PhysicalManager*,IndividualView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
             source_views[idx] = finder->second;
@@ -10073,7 +10034,7 @@ namespace Legion {
     void InnerContext::clear_instance_top_views(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+      for (std::map<PhysicalManager*,IndividualView*>::const_iterator it = 
             instance_top_views.begin(); it != instance_top_views.end(); it++)
       {
         if (it->first->is_owner())
@@ -10138,7 +10099,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
-           std::vector<InstanceView*> &target_views, CollectiveMapping *mapping)
+         std::vector<IndividualView*> &target_views, CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       target_views.resize(targets.size());
@@ -10149,7 +10110,7 @@ namespace Legion {
         {
           // See if we can find it
           PhysicalManager *manager = targets[idx].get_physical_manager();
-          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          std::map<PhysicalManager*,IndividualView*>::const_iterator finder =
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
             target_views[idx] = finder->second;
@@ -10171,19 +10132,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::convert_target_views(const InstanceSet &targets,
-       std::vector<MaterializedView*> &target_views, CollectiveMapping *mapping)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<InstanceView*> inst_views(targets.size());
-      convert_target_views(targets, inst_views, mapping);
-      target_views.resize(inst_views.size());
-      for (unsigned idx = 0; idx < inst_views.size(); idx++)
-        target_views[idx] = inst_views[idx]->as_materialized_view();
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* InnerContext::create_instance_top_view(
+    IndividualView* InnerContext::create_instance_top_view(
                         PhysicalManager *manager, AddressSpaceID request_source,
                         CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
@@ -10194,7 +10143,7 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock inst_lock(instance_view_lock);
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+        std::map<PhysicalManager*,IndividualView*>::const_iterator finder = 
           instance_top_views.find(manager);
         if (finder != instance_top_views.end())
           // We've already got the view, so we are done
@@ -10219,14 +10168,14 @@ namespace Legion {
         wait_on.wait();
         // Retake the lock and read out the result
         AutoLock inst_lock(instance_view_lock, 1, false/*exclusive*/);
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+        std::map<PhysicalManager*,IndividualView*>::const_iterator finder = 
             instance_top_views.find(manager);
 #ifdef DEBUG_LEGION
         assert(finder != instance_top_views.end());
 #endif
         return finder->second;
       }
-      InstanceView *result =
+      IndividualView *result =
        manager->find_or_create_instance_top_view(this, request_source, mapping);
       result->add_base_resource_ref(CONTEXT_REF);
       // Record the result and trigger any user event to signal that the
@@ -10317,7 +10266,7 @@ namespace Legion {
       InstanceView *removed = NULL;
       {
         AutoLock inst_lock(instance_view_lock);
-        std::map<PhysicalManager*,InstanceView*>::iterator finder =  
+        std::map<PhysicalManager*,IndividualView*>::iterator finder =  
           instance_top_views.find(deleted);
         if (finder == instance_top_views.end())
           return;
@@ -11812,6 +11761,7 @@ namespace Legion {
         wait_on.wait();
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     void ReplicateContext::register_collective_instance_handler(
                    size_t context_index, ReplCollectiveInstanceHandler *handler)
@@ -11910,6 +11860,7 @@ namespace Legion {
       }
       handler->handle_collective_instance_message(derez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::hash_future(Murmur3Hasher &hasher,
@@ -22400,8 +22351,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances,
-          const DomainPoint &collective_point)
+          bool virtual_mapped, const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22413,7 +22363,7 @@ namespace Legion {
           true/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (mapped)
-        impl->set_references(physical_instances, collective_point,true/*safe*/);
+        impl->set_references(physical_instances, true/*safe*/);
     }
 
     //--------------------------------------------------------------------------

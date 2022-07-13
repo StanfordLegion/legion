@@ -167,32 +167,29 @@ namespace Legion {
      */
     struct UniqueInst {
     public:
-      UniqueInst(void) : view_did(0) { }
-      UniqueInst(InstanceView *v, const DomainPoint &point);
-      UniqueInst(DistributedID did, const DomainPoint &point);
+      UniqueInst(void) : view_did(0), analysis_space(0) { }
+      UniqueInst(IndividualView *v);
+      //UniqueInst(DistributedID did);
     public:
       inline bool operator<(const UniqueInst &rhs) const
       {
-        if (view_did < rhs.view_did) return true;
-        if (view_did > rhs.view_did) return false;
-        return (collective_point < rhs.collective_point);
+        return (view_did < rhs.view_did);
       }
       inline bool operator==(const UniqueInst &rhs) const
       {
-        if (view_did != rhs.view_did) return false;
-        return (collective_point == rhs.collective_point);
+        return (view_did == rhs.view_did);
       }
       inline bool operator!=(const UniqueInst &rhs) const
         { return !this->operator==(rhs); }
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-      AddressSpaceID get_analysis_space(Runtime *runtime) const;
+      AddressSpaceID get_analysis_space(void) const;
     public:
       // Distributed ID for the view to the instance
       DistributedID view_did;
-      // Point for the case of collective instances
-      DomainPoint collective_point;
+      // Logical owner space for the view
+      AddressSpaceID analysis_space;
     };
 
     /**
@@ -1196,7 +1193,7 @@ namespace Legion {
       void remove_valid_reference(ReferenceSource source,
                                   ReferenceMutator *mutator) const;
     public:
-      Memory get_memory(const DomainPoint &point) const;
+      Memory get_memory(void) const;
       PhysicalManager* get_physical_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;
@@ -1421,20 +1418,17 @@ namespace Legion {
       };
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
-        CopyUpdate(InstanceView *src, const FieldMask &mask,
-                   const DomainPoint &src_point,
+        CopyUpdate(InstanceView *src, PhysicalManager *man,
+                   const FieldMask &mask,
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
                    CopyAcrossHelper *helper = NULL)
           : Update(expr, mask, helper), 
-            source(src), point(src_point), redop(red) { }
+            source(src), manager(man), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
-        CopyUpdate(const CopyUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
-            source(rhs.source), redop(rhs.redop) { assert(false); }
-        CopyUpdate& operator=(const CopyUpdate &rhs)
-          { assert(false); return *this; }
+        CopyUpdate(const CopyUpdate &rhs) = delete;
+        CopyUpdate& operator=(const CopyUpdate &rhs) = delete;
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
@@ -1443,7 +1437,7 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
-        const DomainPoint point; // which point instance in collective instance
+        PhysicalManager *const manager; // which source manager for collectives
         const ReductionOpID redop;
       };
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
@@ -1454,11 +1448,8 @@ namespace Legion {
           : Update(expr, mask, helper), source(src) { }
         virtual ~FillUpdate(void) { }
       private:
-        FillUpdate(const FillUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper),
-            source(rhs.source) { assert(false); }
-        FillUpdate& operator=(const FillUpdate &rhs)
-          { assert(false); return *this; }
+        FillUpdate(const FillUpdate &rhs) = delete;
+        FillUpdate& operator=(const FillUpdate &rhs) = delete;
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
@@ -1485,6 +1476,7 @@ namespace Legion {
       CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
     public:
       void record_update(InstanceView *dst_view,
+                          PhysicalManager *dst_man,
                           LogicalView *src_view,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
@@ -1493,6 +1485,7 @@ namespace Legion {
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL); 
       void record_updates(InstanceView *dst_view, 
+                          PhysicalManager *dst_man,
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
@@ -1501,6 +1494,7 @@ namespace Legion {
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_partial_updates(InstanceView *dst_view,
+                          PhysicalManager *dst_man,
                           const LegionMap<LogicalView*,
                           FieldMaskSet<IndexSpaceExpression> > &src_views,
                           const FieldMask &src_mask,
@@ -1519,7 +1513,7 @@ namespace Legion {
                        std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
-                             const std::list<std::pair<ReductionView*,
+                             const std::list<std::pair<InstanceView*,
                                     IndexSpaceExpression*> > &src_views,
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
@@ -1546,8 +1540,8 @@ namespace Legion {
             std::set<RtEvent> &applied_events) const;
       void record_instance_update(InstanceView *dst_view,
                           InstanceView *src_view,
+                          PhysicalManager *src_man,
                           const FieldMask &src_mask,
-                          const DomainPoint &src_point,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
@@ -1555,6 +1549,7 @@ namespace Legion {
                           CopyAcrossHelper *across_helper);
       struct SelectSourcesResult;
       const SelectSourcesResult& select_sources(InstanceView *target,
+                          PhysicalManager *target_manager,
                           const std::vector<InstanceView*> &sources);
       void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
@@ -1623,8 +1618,8 @@ namespace Legion {
         SelectSourcesResult(void) { }
         SelectSourcesResult(std::vector<InstanceView*> &&srcs,
                             std::vector<unsigned> &&rank,
-                            std::map<unsigned,DomainPoint> &&keys)
-          : sources(srcs), ranking(rank), collective_keys(keys) { }
+                            std::map<unsigned,PhysicalManager*> &&pts)
+          : sources(srcs), ranking(rank), points(pts) { }
       public:
         inline bool matches(const std::vector<InstanceView*> &srcs) const
           {
@@ -1638,10 +1633,11 @@ namespace Legion {
       public:
         std::vector<InstanceView*> sources;
         std::vector<unsigned> ranking;
-        std::map<unsigned,DomainPoint> collective_keys;
+        std::map<unsigned,PhysicalManager*> points;
       };
       // Cached calls to the mapper for selecting sources
-      std::map<InstanceView*,std::vector<SelectSourcesResult> > mapper_queries;
+      std::map<std::pair<InstanceView*,PhysicalManager*>,
+               std::vector<SelectSourcesResult> > mapper_queries;
     };
 
     /**
@@ -1819,7 +1815,7 @@ namespace Legion {
                                  std::vector<InstanceView*> &source_views,
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *mapping, bool first_local,
-                                 const DomainPoint &point, bool exclusive);
+                                 bool exclusive);
       CollectiveCopyFillAnalysis(Runtime *rt, AddressSpaceID src, 
                                  AddressSpaceID prev, Operation *op,
                                  unsigned index, IndexSpaceExpression *expr,
@@ -1828,10 +1824,8 @@ namespace Legion {
                                  std::vector<InstanceView*> &source_views,
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *collective_mapping,
-                                 bool first_local, const DomainPoint &point,
-                                 bool exclusive);
+                                 bool first_local, bool exclusive);
     public:
-      const DomainPoint collective_point;
       const size_t context_index;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
@@ -1887,11 +1881,11 @@ namespace Legion {
     public:
       InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<LogicalView> &valid_instances);
+                          const FieldMaskSet<IndividualView> &valid_instances);
       InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index, 
                         IndexSpaceExpression *expr, InvalidInstAnalysis *target,
-                        const FieldMaskSet<LogicalView> &valid_instances);
+                        const FieldMaskSet<IndividualView> &valid_instances);
       InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
       virtual ~InvalidInstAnalysis(void);
     public:
@@ -1917,7 +1911,7 @@ namespace Legion {
       static void handle_remote_request_invalid(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
     public:
-      const FieldMaskSet<LogicalView> valid_instances;
+      const FieldMaskSet<IndividualView> valid_instances;
       InvalidInstAnalysis *const target_analysis;
     };
 
@@ -1930,11 +1924,11 @@ namespace Legion {
     public:
       AntivalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<LogicalView> &anti_instances);
+                          const FieldMaskSet<IndividualView> &anti_instances);
       AntivalidInstAnalysis(Runtime *rt, AddressSpaceID src,AddressSpaceID prev,
                       Operation *op, unsigned index, 
                       IndexSpaceExpression *expr, AntivalidInstAnalysis *target,
-                      const FieldMaskSet<LogicalView> &anti_instances);
+                      const FieldMaskSet<IndividualView> &anti_instances);
       AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
       virtual ~AntivalidInstAnalysis(void);
     public:
@@ -1960,7 +1954,7 @@ namespace Legion {
       static void handle_remote_request_antivalid(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
     public:
-      const FieldMaskSet<LogicalView> antivalid_instances;
+      const FieldMaskSet<IndividualView> antivalid_instances;
       AntivalidInstAnalysis *const target_analysis;
     };
 
@@ -2265,7 +2259,18 @@ namespace Legion {
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<LogicalView> &views,
+                        const FieldMaskSet<InstanceView> &views,
+                        const PhysicalTraceInfo &trace_info,
+                        CollectiveMapping *collective_mapping,
+                        const ApEvent precondition,
+                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
+                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const bool track_effects = false,
+                        const bool add_restriction = false,
+                        const bool first_local = true);
+      OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
+                        const FieldMaskSet<IndividualView> &views,
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
@@ -2278,7 +2283,7 @@ namespace Legion {
                         Operation *op, unsigned index,
                         IndexSpaceExpression *expr, const RegionUsage &usage, 
                         FieldMaskSet<LogicalView> &views,
-                        FieldMaskSet<ReductionView> &reduction_views,
+                        FieldMaskSet<InstanceView> &reduction_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event,
@@ -2315,7 +2320,7 @@ namespace Legion {
     public:
       const RegionUsage usage;
       FieldMaskSet<LogicalView> views;
-      FieldMaskSet<ReductionView> reduction_views;
+      FieldMaskSet<InstanceView> reduction_views;
       const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const RtEvent guard_event;
@@ -2519,7 +2524,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > ExprLogicalViews; 
-        typedef std::map<unsigned,std::list<std::pair<ReductionView*,
+        typedef std::map<unsigned,std::list<std::pair<InstanceView*,
           IndexSpaceExpression*> > > ExprReductionViews;
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
@@ -2589,7 +2594,7 @@ namespace Legion {
                           const FieldMask &user_mask,
                           const bool restricted,
                           const InstanceSet &sources,
-            const std::vector<InstanceView*> &corresponding,
+            const std::vector<IndividualView*> &corresponding,
                           std::set<RtEvent> &applied_events);
       void traverse_set(PhysicalAnalysis &analysis,
                         IndexSpaceExpression *expr,
@@ -2811,7 +2816,7 @@ namespace Legion {
                               InstanceView *restricted_view,
                               ReferenceMutator &mutator);
       void update_reductions(const unsigned fidx, ReferenceMutator &mutator,
-          std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates);
+          std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &updates);
       void update_released(IndexSpaceExpression *expr, const bool expr_covers,
                 FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
       void filter_initialized_data(IndexSpaceExpression *expr, 
@@ -2857,7 +2862,7 @@ namespace Legion {
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            std::map<unsigned,std::list<std::pair<ReductionView*,
+            std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2872,7 +2877,7 @@ namespace Legion {
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            std::map<unsigned,std::list<std::pair<ReductionView*,
+            std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2889,7 +2894,7 @@ namespace Legion {
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            const std::map<unsigned,std::list<std::pair<ReductionView*,
+            const std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2940,7 +2945,7 @@ namespace Legion {
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
       // Reductions always need to be applied in order so keep them in order
       std::map<unsigned/*fidx*/,std::list<std::pair<
-        ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
+        InstanceView*,IndexSpaceExpression*> > >        reduction_instances;
       FieldMask                                         reduction_fields;
       // The list of expressions with the single instance for each
       // field that represents the restriction of that expression

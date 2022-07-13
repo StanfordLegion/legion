@@ -884,6 +884,7 @@ namespace Legion {
       std::set<ApEvent> tasks_complete;
     }; 
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class CheckCollectiveMapping
      * A class for exchanging the names of collective instances for confirming
@@ -904,6 +905,7 @@ namespace Legion {
     protected:
       LegionMap<DistributedID,FieldMask> chosen_instances;
     };
+#endif
 
     /**
      * \class CheckCollectiveSources
@@ -1327,6 +1329,7 @@ namespace Legion {
       size_t radix;
     };
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class ReplCollectiveInstanceHandler
      * This is a pure virtual class that handles incoming messages
@@ -1475,6 +1478,7 @@ namespace Legion {
       std::atomic<bool> first_entry;
       RtUserEvent collectives_done;
     };
+#endif // NO_EXPLICIT_COLLECTIVES
 
     /**
      * \class ReplIndividualTask
@@ -1528,7 +1532,7 @@ namespace Legion {
      * An individual task that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexTask : public ReplCollectiveInstanceCreator<IndexTask> {
+    class ReplIndexTask : public IndexTask {
     public:
       ReplIndexTask(Runtime *rt);
       ReplIndexTask(const ReplIndexTask &rhs);
@@ -1699,7 +1703,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexFillOp : public ReplCollectiveInstanceCreator<IndexFillOp> {
+    class ReplIndexFillOp : public IndexFillOp {
     public:
       ReplIndexFillOp(Runtime *rt);
       ReplIndexFillOp(const ReplIndexFillOp &rhs);
@@ -1777,7 +1781,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexCopyOp : public ReplCollectiveInstanceCreator<IndexCopyOp> {
+    class ReplIndexCopyOp : public IndexCopyOp {
     public:
       ReplIndexCopyOp(Runtime *rt);
       ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
@@ -1897,8 +1901,7 @@ namespace Legion {
      * A dependent partitioning operation that knows that it
      * is being executed in a control replication context
      */
-    class ReplDependentPartitionOp :
-      public ReplCollectiveInstanceCreator<DependentPartitionOp> { 
+    class ReplDependentPartitionOp : public DependentPartitionOp { 
     public:
       class ReplByFieldThunk : public ByFieldThunk {
       public:
@@ -2250,8 +2253,7 @@ namespace Legion {
      * mappings can act like a kind of communication between shards
      * where they are all reading/writing to the same logical region.
      */
-    class ReplMapOp : public ReplCollectiveInstanceCreator<
-                                  CollectiveInstanceCreator<MapOp> > {
+    class ReplMapOp : public MapOp {
     public:
       ReplMapOp(Runtime *rt);
       ReplMapOp(const ReplMapOp &rhs);
@@ -2269,12 +2271,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual bool invoke_mapper(InstanceSet &mapped_instances,
               std::vector<PhysicalManager*> &source_instances);
-      virtual DomainPoint get_shard_point(void) const;
-      virtual DomainPoint get_collective_instance_point(void) const;
       virtual bool supports_collective_instances(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
-      // From collective instance creator
-      virtual Domain get_collective_dense_points(void) const;
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
@@ -2308,7 +2306,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual DomainPoint get_collective_instance_point(void) const;
       virtual size_t get_collective_local_arrivals(void) const;
     public:
       virtual PhysicalManager* create_manager(RegionNode *node,
@@ -2393,11 +2390,10 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void select_sources(const unsigned index,
-                                  InstanceView *target,
+                                  PhysicalManager *target,
                                   const std::vector<InstanceView*> &sources,
                                   std::vector<unsigned> &ranking,
-                                  std::map<unsigned,DomainPoint> &keys);
-      virtual DomainPoint get_collective_instance_point(void) const;
+                                  std::map<unsigned,PhysicalManager*> &points);
       virtual size_t get_collective_local_arrivals(void) const;
       virtual CollectiveMapping* get_collective_mapping(void);
       virtual bool is_collective_first_local_shard(void) const
@@ -2459,7 +2455,6 @@ namespace Legion {
       virtual bool is_collective_first_local_shard(void) const 
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
-      virtual DomainPoint get_collective_instance_point(void) const;
       virtual size_t get_collective_local_arrivals(void) const;
     protected:
       RtBarrier collective_map_barrier;
@@ -2485,7 +2480,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
-      virtual DomainPoint get_collective_instance_point(void) const;
       virtual size_t get_collective_local_arrivals(void) const;
       virtual bool is_collective_first_local_shard(void) const 
         { return is_first_local_shard; }

@@ -718,7 +718,6 @@ namespace Legion {
                                 const unsigned index, 
                                 const RegionRequirement &req,
                                 const InstanceSet &targets,
-                                const DomainPoint &collective_point,
                                 bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op, const RegionRequirement &req,

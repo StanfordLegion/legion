@@ -2263,7 +2263,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::insert(LogicalView *view, IndexSpaceExpression *expr, 
+    void TraceViewSet::insert(IndividualView *view, IndexSpaceExpression *expr, 
                               const FieldMask &mask, ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
@@ -2363,9 +2363,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::invalidate(
-           LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
-           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-           std::map<LogicalView*,unsigned> *view_refs_to_remove)
+       IndividualView *view, IndexSpaceExpression *expr, const FieldMask &mask,
+       std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+       std::map<IndividualView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2405,7 +2405,7 @@ namespace Legion {
             }
             if (view_refs_to_remove != NULL)
             {
-              std::map<LogicalView*,unsigned>::iterator finder = 
+              std::map<IndividualView*,unsigned>::iterator finder = 
                 view_refs_to_remove->find(view);
               if (finder == view_refs_to_remove->end())
                 (*view_refs_to_remove)[view] = 1;
@@ -2453,7 +2453,7 @@ namespace Legion {
             {
               if (view_refs_to_remove != NULL)
               {
-                std::map<LogicalView*,unsigned>::iterator finder = 
+                std::map<IndividualView*,unsigned>::iterator finder = 
                   view_refs_to_remove->find(view);
                 if (finder == view_refs_to_remove->end())
                   (*view_refs_to_remove)[view] = 1;
@@ -2535,7 +2535,7 @@ namespace Legion {
           {
             if (view_refs_to_remove != NULL)
             {
-              std::map<LogicalView*,unsigned>::iterator finder = 
+              std::map<IndividualView*,unsigned>::iterator finder = 
                 view_refs_to_remove->find(view);
               if (finder == view_refs_to_remove->end())
                 (*view_refs_to_remove)[view] = 1;
@@ -2553,13 +2553,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::invalidate_all_but(LogicalView *except,
+    void TraceViewSet::invalidate_all_but(IndividualView *except,
                               IndexSpaceExpression *expr, const FieldMask &mask,
                   std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+                  std::map<IndividualView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
     {
-      std::vector<LogicalView*> to_invalidate;
+      std::vector<IndividualView*> to_invalidate;
       for (ViewExprs::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
       {
@@ -2569,14 +2569,14 @@ namespace Legion {
           continue;
         to_invalidate.push_back(it->first);
       }
-      for (std::vector<LogicalView*>::const_iterator it = 
+      for (std::vector<IndividualView*>::const_iterator it = 
             to_invalidate.begin(); it != to_invalidate.end(); it++)
         invalidate(*it, expr, mask, expr_refs_to_remove, view_refs_to_remove);
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::dominates(LogicalView *view, IndexSpaceExpression *expr, 
-                                 FieldMask &non_dominated) const
+    bool TraceViewSet::dominates(IndividualView *view,
+                     IndexSpaceExpression *expr, FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
       // If this is for an empty equivalence set then it doesn't matter
@@ -2634,7 +2634,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::dominates(LogicalView *view, 
+    void TraceViewSet::dominates(IndividualView *view, 
                             IndexSpaceExpression *expr, FieldMask mask,
                             FieldMaskSet<IndexSpaceExpression> &non_dominated,
                             FieldMaskSet<IndexSpaceExpression> *dominated) const
@@ -2864,9 +2864,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::transpose_uniquely(
-            LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > &target,
-            std::set<IndexSpaceExpression*> &unique_exprs,
-            ReferenceMutator &mutator) const
+        LegionMap<IndexSpaceExpression*,FieldMaskSet<IndividualView> > &target,
+        std::set<IndexSpaceExpression*> &unique_exprs,
+        ReferenceMutator &mutator) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2891,10 +2891,10 @@ namespace Legion {
       // have multiple overwrites for the same fields and index expressions
       FieldMaskSet<IndexSpaceExpression> expr_fields;
       LegionMap<IndexSpaceExpression*,
-                FieldMaskSet<LogicalView> > intermediate;
+                FieldMaskSet<IndividualView> > intermediate;
       intermediate.swap(target);
       for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<LogicalView> >::const_iterator it =
+            FieldMaskSet<IndividualView> >::const_iterator it =
             intermediate.begin(); it != intermediate.end(); it++)
         expr_fields.insert(it->first, it->second.get_valid_mask());
       LegionList<FieldSet<IndexSpaceExpression*> > field_exprs;
@@ -2905,13 +2905,13 @@ namespace Legion {
         if (eit->elements.size() == 1)
         {
           IndexSpaceExpression *expr = *(eit->elements.begin());
-          FieldMaskSet<LogicalView> &src_views = intermediate[expr];
-          FieldMaskSet<LogicalView> &dst_views = target[expr];
+          FieldMaskSet<IndividualView> &src_views = intermediate[expr];
+          FieldMaskSet<IndividualView> &dst_views = target[expr];
           // No chance of overlapping so just move everything over
           if (eit->set_mask != src_views.get_valid_mask())
           {
             // Move over the relevant expressions
-            for (FieldMaskSet<LogicalView>::const_iterator it = 
+            for (FieldMaskSet<IndividualView>::const_iterator it = 
                   src_views.begin(); it != src_views.end(); it++)
             {
               const FieldMask overlap = eit->set_mask & it->second;
@@ -2922,7 +2922,7 @@ namespace Legion {
           }
           else if (!dst_views.empty())
           {
-            for (FieldMaskSet<LogicalView>::const_iterator it = 
+            for (FieldMaskSet<IndividualView>::const_iterator it = 
                   src_views.begin(); it != src_views.end(); it++)
               dst_views.insert(it->first, it->second);
           }
@@ -3008,7 +3008,7 @@ namespace Legion {
         // can now build the actual output target
         for (unsigned idx = 0; idx < disjoint_expressions.size(); idx++)
         {
-          FieldMaskSet<LogicalView> &dst_views =
+          FieldMaskSet<IndividualView> &dst_views =
             target[disjoint_expressions[idx]];
           for (std::vector<IndexSpaceExpression*>::const_iterator sit =
                 disjoint_components[idx].begin(); sit !=
@@ -3017,8 +3017,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(intermediate.find(*sit) != intermediate.end());
 #endif
-            const FieldMaskSet<LogicalView> &src_views = intermediate[*sit];
-            for (FieldMaskSet<LogicalView>::const_iterator it =
+            const FieldMaskSet<IndividualView> &src_views = intermediate[*sit];
+            for (FieldMaskSet<IndividualView>::const_iterator it =
                   src_views.begin(); it != src_views.end(); it++)
             {
               const FieldMask overlap = it->second & eit->set_mask;
@@ -3154,8 +3154,8 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        LogicalView *view = 
-          forest->runtime->find_or_request_logical_view(did, ready);
+        IndividualView *view = static_cast<IndividualView*>( 
+          forest->runtime->find_or_request_logical_view(did, ready));
         size_t num_exprs;
         derez.deserialize(num_exprs);
         FieldMaskSet<IndexSpaceExpression> &exprs = conditions[view];
@@ -3180,7 +3180,7 @@ namespace Legion {
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
-        LogicalView *view = vit->first;
+        IndividualView *view = vit->first;
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
@@ -3193,8 +3193,7 @@ namespace Legion {
                     << (view->is_reduction_view() ? "Reduction" : 
                        (view->is_fill_view() ? "Fill" : "Materialized"))
                     << " view: " << view << ", Inst: " << std::hex
-                    << ((manager != NULL) ? 
-                        manager->get_instance(DomainPoint()).id : 0)
+                    << ((manager != NULL) ? manager->get_instance().id : 0)
                     << std::dec
                     << ", Index expr: " << it->first->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
@@ -3234,10 +3233,10 @@ namespace Legion {
       assert(current_sets.empty());
 #endif
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::const_iterator eit =
+                     FieldMaskSet<IndividualView> >::const_iterator eit =
             preconditions.begin(); eit != preconditions.end(); eit++)
       {
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
+        for (FieldMaskSet<IndividualView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
           if (it->first->remove_base_valid_ref(TRACE_REF))
             delete it->first;
@@ -3245,10 +3244,10 @@ namespace Legion {
           delete eit->first;
       }
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::const_iterator eit =
+                     FieldMaskSet<IndividualView> >::const_iterator eit =
             anticonditions.begin(); eit != anticonditions.end(); eit++)
       {
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
+        for (FieldMaskSet<IndividualView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
           if (it->first->remove_base_valid_ref(TRACE_REF))
             delete it->first;
@@ -3256,10 +3255,10 @@ namespace Legion {
           delete eit->first;
       }
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::const_iterator eit =
+                     FieldMaskSet<IndividualView> >::const_iterator eit =
             postconditions.begin(); eit != postconditions.end(); eit++)
       {
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
+        for (FieldMaskSet<IndividualView>::const_iterator it = 
               eit->second.begin(); it != eit->second.end(); it++)
           if (it->first->remove_base_valid_ref(TRACE_REF))
             delete it->first;
@@ -3430,11 +3429,11 @@ namespace Legion {
         precondition_views->transpose_uniquely(preconditions,
                             unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
+                       FieldMaskSet<IndividualView> >::const_iterator 
               eit = preconditions.begin(); eit != preconditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it = 
+          for (FieldMaskSet<IndividualView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
             it->first->add_base_valid_ref(TRACE_REF, &mutator);
         }
@@ -3444,11 +3443,11 @@ namespace Legion {
         anticondition_views->transpose_uniquely(anticonditions,
                               unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
+                       FieldMaskSet<IndividualView> >::const_iterator 
               eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it = 
+          for (FieldMaskSet<IndividualView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
             it->first->add_base_valid_ref(TRACE_REF, &mutator);
         }
@@ -3458,11 +3457,11 @@ namespace Legion {
         postcondition_views->transpose_uniquely(postconditions,
                               unique_view_expressions, mutator);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::const_iterator 
+                       FieldMaskSet<IndividualView> >::const_iterator 
               eit = postconditions.begin(); eit != postconditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
-          for (FieldMaskSet<LogicalView>::const_iterator it = 
+          for (FieldMaskSet<IndividualView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
             it->first->add_base_valid_ref(TRACE_REF, &mutator);
         }
@@ -3536,7 +3535,7 @@ namespace Legion {
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
+        for (FieldMaskSet<IndividualView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
           dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
@@ -3553,7 +3552,7 @@ namespace Legion {
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
+        for (FieldMaskSet<IndividualView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
           dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
@@ -3570,7 +3569,7 @@ namespace Legion {
       LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
-        for (FieldMaskSet<LogicalView>::const_iterator it =
+        for (FieldMaskSet<IndividualView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
           dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
@@ -4281,7 +4280,7 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
-      for (std::map<DistributedID,InstanceView*>::const_iterator it =
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
         if (it->second->remove_base_valid_ref(TRACE_REF))
           delete it->second;
@@ -4337,7 +4336,7 @@ namespace Legion {
         {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
-          std::map<DistributedID,InstanceView*>::const_iterator finder =
+          std::map<DistributedID,IndividualView*>::const_iterator finder =
             recorded_views.find(uit->instance.view_did);
 #ifdef DEBUG_LEGION
           assert(finder != recorded_views.end());
@@ -4349,13 +4348,11 @@ namespace Legion {
           if (!trace->perform_fence_elision)
           {
             const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            finder->second->find_last_users(result.events,
-                uit->instance.collective_point, usage,
+            finder->second->find_last_users(result.events, usage,
                 uit->mask, uit->expr, frontier_events);
           }
           else
-            finder->second->find_last_users(result.events,
-                uit->instance.collective_point, uit->usage,
+            finder->second->find_last_users(result.events, uit->usage,
                 uit->mask, uit->expr, frontier_events);
         }
       }
@@ -6465,7 +6462,7 @@ namespace Legion {
       if (recorded_views.find(instance.view_did) == recorded_views.end())
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(
                                 instance.view_did, ready));
         recorded_views[instance.view_did] = view;
@@ -6492,7 +6489,7 @@ namespace Legion {
           (recorded_views.find(inst.view_did) == recorded_views.end()))
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(inst.view_did, ready));
         recorded_views[inst.view_did] = view;
         WrapperReferenceMutator mutator(applied_events);
@@ -8503,8 +8500,7 @@ namespace Legion {
       // that node. This algorithm guarantees that all the related instances
       // end up on the same shard for analysis to determine if the trace is
       // replayable or not.
-      const AddressSpaceID inst_owner =
-        inst.get_analysis_space(trace->runtime);
+      const AddressSpaceID inst_owner = inst.get_analysis_space();
       std::vector<ShardID> owner_shards;
       find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION

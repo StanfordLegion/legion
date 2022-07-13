@@ -170,7 +170,6 @@ namespace Legion {
       enum {
         EXTERNAL_CODE = 0x10,
         REDUCTION_CODE = 0x20,
-        COLLECTIVE_CODE = 0x40,
       };
     public:
       InstanceManager(RegionTreeForest *forest, AddressSpaceID owner, 
@@ -180,8 +179,7 @@ namespace Legion {
                       CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
-      virtual PointerConstraint 
-                     get_pointer_constraint(const DomainPoint &point) const = 0;
+      virtual PointerConstraint get_pointer_constraint(void) const = 0;
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_accessor(void) const = 0;
@@ -193,18 +191,15 @@ namespace Legion {
       inline bool is_physical_manager(void) const;
       inline bool is_virtual_manager(void) const;
       inline bool is_external_instance(void) const;
-      inline bool is_collective_manager(void) const;
       inline PhysicalManager* as_physical_manager(void) const;
       inline VirtualManager* as_virtual_manager(void) const;
       inline IndividualManager* as_individual_manager(void) const;
-      inline CollectiveManager* as_collective_manager(void) const;
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
                         bool external, bool reduction, bool collective);
       static inline bool is_physical_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
-      static inline bool is_collective_did(DistributedID did);
     public:
       // Interface to the mapper for layouts
       inline void get_fields(std::set<FieldID> &fields) const
@@ -219,15 +214,13 @@ namespace Legion {
         { if (layout != NULL) layout->remove_space_fields(fields);
           else fields.clear(); } 
     public:
-      bool entails(LayoutConstraints *constraints, const DomainPoint &key,
+      bool entails(LayoutConstraints *constraints,
                    const LayoutConstraint **failed_constraint) const;
       bool entails(const LayoutConstraintSet &constraints, 
-                   const DomainPoint &key,
                    const LayoutConstraint **failed_constraint) const;
-      bool conflicts(LayoutConstraints *constraints, const DomainPoint &key,
+      bool conflicts(LayoutConstraints *constraints,
                      const LayoutConstraint **conflict_constraint) const;
       bool conflicts(const LayoutConstraintSet &constraints,
-                     const DomainPoint &key,
                      const LayoutConstraint **conflict_constraint) const;
     public:
       RegionTreeForest *const context;
@@ -344,19 +337,13 @@ namespace Legion {
       virtual ~PhysicalManager(void); 
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
-                                 const std::vector<LogicalRegion> &regions,
-                                 const DomainPoint &collective_point) const; 
+                                 const std::vector<LogicalRegion> &regions) const;
     public: 
       virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
-      virtual ApEvent get_unique_event(const DomainPoint &point) const = 0;
-      virtual bool has_collective_point(const DomainPoint &p) const 
-        { return false; }
-      virtual PhysicalInstance get_instance(const DomainPoint &point,
-                                            bool from_mapper = false) const = 0;
-      virtual PointerConstraint 
-                     get_pointer_constraint(const DomainPoint &point) const = 0;
-      virtual Memory get_memory(const DomainPoint &point, 
-                                bool from_mapper = false) const = 0;
+      virtual ApEvent get_unique_event(void) const = 0;
+      virtual PhysicalInstance get_instance(bool from_mapper = false) const = 0;
+      virtual PointerConstraint get_pointer_constraint(void) const = 0;
+      virtual Memory get_memory(bool from_mapper = false) const = 0;
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -403,12 +390,12 @@ namespace Legion {
                                 const bool symbolic) = 0;
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
-                                DistributedID view_did,const DomainPoint &point,
+                                DistributedID view_did,
                                 std::vector<Reservation> *reservations,
                                 AddressSpaceID source,
                                 RtUserEvent to_trigger) = 0;
       virtual void update_field_reservations(const FieldMask &mask,
-                                DistributedID view_did,const DomainPoint &point,
+                                DistributedID view_did,
                                 const std::vector<Reservation> &rsrvs) = 0;
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete) = 0;
@@ -442,11 +429,11 @@ namespace Legion {
         { instance_footprint = footprint; }
     public:
       // Methods for creating/finding/destroying logical top views
-      InstanceView* find_or_create_instance_top_view(InnerContext *context,
+      IndividualView* find_or_create_instance_top_view(InnerContext *context,
           AddressSpaceID logical_owner, CollectiveMapping *mapping);
-      InstanceView* construct_top_view(AddressSpaceID logical_owner,
-                                       DistributedID did, UniqueID uid,
-                                       CollectiveMapping *mapping);
+      IndividualView* construct_top_view(AddressSpaceID logical_owner,
+                                         DistributedID did, UniqueID uid,
+                                         CollectiveMapping *mapping);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
@@ -504,7 +491,7 @@ namespace Legion {
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
       typedef std::pair<ReplicationID,UniqueID> ContextKey;
-      typedef std::pair<InstanceView*,unsigned> ViewEntry;
+      typedef std::pair<IndividualView*,unsigned> ViewEntry;
       std::map<ContextKey,ViewEntry> context_views;
       std::map<ReplicationID,RtUserEvent> pending_views;
     protected:
@@ -640,15 +627,11 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key,
-                                            bool from_mapper = false) const 
+      virtual PhysicalInstance get_instance(bool from_mapper = false) const 
                                                    { return instance; }
-      virtual ApEvent get_unique_event(const DomainPoint &point) const 
-        { return unique_event; }
-      virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
-      virtual Memory get_memory(const DomainPoint &point, 
-                                bool from_mapper = false) const
+      virtual ApEvent get_unique_event(void) const { return unique_event; }
+      virtual PointerConstraint get_pointer_constraint(void) const;
+      virtual Memory get_memory(bool from_mapper = false) const
         { return memory_manager->memory; }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
@@ -697,12 +680,12 @@ namespace Legion {
                                 const bool symbolic);
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
-                                DistributedID view_did,const DomainPoint &point,
+                                DistributedID view_did,
                                 std::vector<Reservation> *reservations,
                                 AddressSpaceID source,
                                 RtUserEvent to_trigger);
       virtual void update_field_reservations(const FieldMask &mask,
-                                DistributedID view_did,const DomainPoint &point,
+                                DistributedID view_did,
                                 const std::vector<Reservation> &rsrvs);
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete);
@@ -817,6 +800,7 @@ namespace Legion {
       std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     };
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class CollectiveManager
      * The collective instance manager class supports the interface
@@ -1416,6 +1400,7 @@ namespace Legion {
       // algorithm for performing an in-place all-reduce
       const bool multi_instance;
     };
+#endif
 
     /**
      * \class VirtualManager
@@ -1444,11 +1429,11 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual PointerConstraint 
-                     get_pointer_constraint(const DomainPoint &point) const;
+      virtual PointerConstraint get_pointer_constraint(void) const;
       virtual void send_manager(AddressSpaceID target);
     };
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class PendingCollectiveManager
      * This data structure stores the necessary meta-data required
@@ -1474,6 +1459,7 @@ namespace Legion {
       void pack(Serializer &rez) const;
       static PendingCollectiveManager* unpack(Deserializer &derez);
     };
+#endif
 
     /**
      * \class InstanceBuilder 
@@ -1498,7 +1484,6 @@ namespace Legion {
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
-            PendingCollectiveManager *collective, const DomainPoint *point,
             LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL,
                         RtEvent collection_done = RtEvent::NO_RT_EVENT);
@@ -1544,8 +1529,7 @@ namespace Legion {
     {
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHYSICAL_MANAGER_DC | 
                                         (external ? EXTERNAL_CODE : 0) | 
-                                        (reduction ? REDUCTION_CODE : 0) |
-                                        (collective ? COLLECTIVE_CODE : 0));
+                                        (reduction ? REDUCTION_CODE : 0));
     }
 
     //--------------------------------------------------------------------------
@@ -1577,16 +1561,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline bool InstanceManager::is_collective_did(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
-        return false;
-      return ((decode & COLLECTIVE_CODE) != 0);
-    }
-
-    //--------------------------------------------------------------------------
     inline bool InstanceManager::is_reduction_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -1615,13 +1589,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool InstanceManager::is_collective_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_collective_did(did);
-    }
-
-    //--------------------------------------------------------------------------
     inline PhysicalManager* InstanceManager::as_physical_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -1645,22 +1612,8 @@ namespace Legion {
     inline IndividualManager* InstanceManager::as_individual_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!is_collective_manager());
-#endif
       return 
         static_cast<IndividualManager*>(const_cast<InstanceManager*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline CollectiveManager* InstanceManager::as_collective_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_collective_manager());
-#endif
-      return 
-        static_cast<CollectiveManager*>(const_cast<InstanceManager*>(this));
     }
 
   }; // namespace Internal 
