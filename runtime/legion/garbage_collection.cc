@@ -1873,16 +1873,19 @@ namespace Legion {
     void DistributedCollectable::UnregisterFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      runtime->send_did_remote_unregister(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedCollectable::DeferRemoteUnregisterArgs::
-      DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &n)
-      : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
-        did(id), nodes(new NodeSet(n))
-    //--------------------------------------------------------------------------
-    {
+      const RtEvent precondition = dc->find_unregister_precondition(target);
+      if (precondition.exists() && ! precondition.has_triggered())
+      {
+        DistributedCollectable::DeferRemoteUnregisterArgs args(dc->did, target);
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_MESSAGE_PRIORITY, precondition); 
+      }
+      else
+      {
+        Serializer rez;
+        rez.serialize(dc->did);
+        runtime->send_did_remote_unregister(target, rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1893,20 +1896,7 @@ namespace Legion {
       assert(is_owner());
       assert(!remote_instances.empty() || (collective_mapping != NULL));
 #endif
-      // handle the unusual case where the derived type has some precondition
-      // on sending out any unregsiter messages, see the comment on the
-      // 'reentrant_event' member for why we are using it here to detect
-      // this particular event precondition
-      if (reentrant_event.exists() && !reentrant_event.has_triggered())
-      {
-        DeferRemoteUnregisterArgs args(did, remote_instances);
-        runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_MESSAGE_PRIORITY, reentrant_event);
-        return;
-      }
-      Serializer rez;
-      rez.serialize(did);
-      UnregisterFunctor functor(runtime, rez);
+      UnregisterFunctor functor(runtime, this);
       // No need for the lock since we're being destroyed
       remote_instances.map(functor);
     }
@@ -2393,9 +2383,7 @@ namespace Legion {
         (const DeferRemoteUnregisterArgs*)args;
       Serializer rez;
       rez.serialize(dargs->did);
-      UnregisterFunctor functor(runtime, rez);
-      dargs->nodes->map(functor);
-      delete dargs->nodes;
+      runtime->send_did_remote_unregister(dargs->target, rez);
     }
 
     //--------------------------------------------------------------------------

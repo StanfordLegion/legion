@@ -8405,23 +8405,22 @@ namespace Legion {
     IndexTreeNode::~IndexTreeNode(void)
     //--------------------------------------------------------------------------
     {
-      // make sure all our gc updates are on the wire before sending unregisters
-      // we do this in a hacky way by setting the reentrant_event, see the
-      // comment on the reentrant_event member of DistributedCollectable to
-      // see why we do it this way
-      if (!send_effects.empty())
-      {
-        std::vector<RtEvent> effects;
-        for (std::map<AddressSpaceID,RtEvent>::const_iterator it =
-              send_effects.begin(); it != send_effects.end(); it++)
-          if (!it->second.has_triggered())
-            effects.push_back(it->second);
-        reentrant_event = Runtime::merge_events(effects);
-      }
       for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
     } 
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexTreeNode::find_unregister_precondition(AddressSpaceID t) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<AddressSpaceID,RtEvent>::const_iterator finder =
+        send_effects.find(t);
+      if (finder == send_effects.end())
+        return RtEvent::NO_RT_EVENT;
+      else
+        return finder->second;
+    }
 
     //--------------------------------------------------------------------------
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,

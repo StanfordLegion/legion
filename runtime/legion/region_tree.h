@@ -1997,6 +1997,7 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator) { }
       virtual void notify_valid(ReferenceMutator *mutator) = 0;
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual RtEvent find_unregister_precondition(AddressSpaceID target) const;
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
