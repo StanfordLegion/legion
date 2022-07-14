@@ -53,6 +53,10 @@ variables:
   CC:  "clang-8"
   CXX: "clang++-8"
   F90: "gfortran-5"
+.clang9: &clang9 # FIXME (Elliott): this configuration for kokkos_openmp only. do not use for any other test job
+  CC:  "clang-9"
+  CXX: "clang++-9"
+  F90: "gfortran-9"
 .clang10: &clang10
   CC:  "clang-10"
   CXX: "clang++-10"
@@ -535,6 +539,9 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:220713
 .image_2204: &image_2204
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:220713
+# FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
+.image_kokkos_openmp: &image_kokkos_openmp
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 .image_icc: &image_icc
@@ -1257,10 +1264,15 @@ clang12_cxx14_debug_kokkos_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*clang12, *terra12, *debug, *cxx14_normal, *kokkos, *cmake, *legion]
-clang14_cxx17_debug_kokkos_openmp_legion:
-  <<: [*linux, *image_2204, *tests]
+# FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
+clang9_cxx17_debug_kokkos_openmp_legion:
+  <<: [*linux, *image_kokkos_openmp, *tests]
   variables:
-    <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+    <<: [*clang9, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+# clang14_cxx17_debug_kokkos_openmp_legion:
+#   <<: [*linux, *image_2204, *tests]
+#   variables:
+#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
 p100_cuda90_clang7_cxx14_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
