@@ -787,17 +787,10 @@ namespace Realm {
         source_bbox.lo = transform[it2.rect.lo];
         source_bbox.hi = transform[it2.rect.hi];
 
-        IndexSpace<N, T> intersection;
-        IndexSpace<N, T>::compute_intersection(
-            parent_space, IndexSpace<N, T>(source_bbox), intersection,
-            ProfilingRequestSet())
-            .wait();
-
-        if (intersection.is_valid() && intersection.volume() > 0) {
-          if (!bmpp) bmpp = &bitmasks[i];
-          if (!*bmpp) *bmpp = new BM;
-          (*bmpp)->add_rect(intersection.bounds);
-        }
+        Rect<N, T> isec_rect = parent_space.bounds.intersection(source_bbox);
+        if (!bmpp) bmpp = &bitmasks[i];
+        if (!*bmpp) *bmpp = new BM;
+        (*bmpp)->add_rect(isec_rect);
       }
     }
   }
