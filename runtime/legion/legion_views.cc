@@ -4335,8 +4335,7 @@ namespace Legion {
                                  PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now, CollectiveMapping *mapping)
       : InstanceView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
-                     own_ctx, register_now, mapping),
-        fill_view(runtime->find_or_create_reduction_fill_view(manager->redop))
+                     own_ctx, register_now, mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC

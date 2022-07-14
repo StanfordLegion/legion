@@ -148,7 +148,7 @@ namespace Legion {
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
-                                const DomainPoint &src_point,
+                                PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -179,6 +179,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
+      virtual ReductionOpID get_redop(void) const = 0;
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -292,6 +293,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       bool contains(PhysicalManager *manager) const;
+      void register_collective_analysis(CollectiveCopyFillAnalysis *analysis); 
     };
 
     /**
@@ -628,6 +630,7 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const;
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const { return 0; }
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -645,7 +648,7 @@ namespace Legion {
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
-                                const DomainPoint &src_point,
+                                PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -794,6 +797,7 @@ namespace Legion {
 
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const { return 0; }
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -811,7 +815,7 @@ namespace Legion {
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
-                                const DomainPoint &src_point,
+                                PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -879,6 +883,7 @@ namespace Legion {
       virtual void collect_users(const std::set<ApEvent> &term_events);
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const; 
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -896,7 +901,7 @@ namespace Legion {
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
-                                const DomainPoint &src_point,
+                                PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -988,8 +993,6 @@ namespace Legion {
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
-    public:
-      FillView *const fill_view; // fill view for this reduction value
     protected:
       EventFieldUsers writing_users;
       EventFieldUsers reduction_users;
@@ -1007,10 +1010,11 @@ namespace Legion {
     class AllreduceView : public CollectiveView,
                           public LegionHeapify<AllreduceView> {
     public:
-      static const AllocationType alloc_type = REPLICATED_VIEW_ALLOC;
+      static const AllocationType alloc_type = ALLREDUCE_VIEW_ALLOC;
 
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const;
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -1028,7 +1032,7 @@ namespace Legion {
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
-                                const DomainPoint &src_point,
+                                PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,

@@ -1424,7 +1424,7 @@ namespace Legion {
                    ReductionOpID red = 0,
                    CopyAcrossHelper *helper = NULL)
           : Update(expr, mask, helper), 
-            source(src), manager(man), redop(red) { }
+            source(src), src_man(man), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
         CopyUpdate(const CopyUpdate &rhs) = delete;
@@ -1437,7 +1437,7 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
-        PhysicalManager *const manager; // which source manager for collectives
+        PhysicalManager *const src_man; // which source manager for collectives
         const ReductionOpID redop;
       };
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
@@ -1513,6 +1513,7 @@ namespace Legion {
                        std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
+                             PhysicalManager *dst_man,
                              const std::list<std::pair<InstanceView*,
                                     IndexSpaceExpression*> > &src_views,
                              const unsigned src_fidx,
@@ -1966,7 +1967,7 @@ namespace Legion {
                            public LegionHeapify<UpdateAnalysis> {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     const DomainPoint &point, const RegionRequirement &req,
+                     const RegionRequirement &req,
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      std::vector<InstanceView*> &source_views,
@@ -1976,7 +1977,7 @@ namespace Legion {
                      const bool check_initialized, const bool record_valid,
                      const bool skip_output, const bool first_local = false);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, const DomainPoint &point,
+                     Operation *op, unsigned index,
                      const RegionUsage &usage, RegionNode *node, 
                      InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
@@ -2090,7 +2091,7 @@ namespace Legion {
                       std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
-                      const bool first_local, const DomainPoint &point);
+                      const bool first_local);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
@@ -2098,8 +2099,7 @@ namespace Legion {
                       std::vector<InstanceView*> &target_views,
                       std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &info,
-                      CollectiveMapping *mapping, const bool first_local,
-                      const DomainPoint &point);
+                      CollectiveMapping *mapping, const bool first_local);
       ReleaseAnalysis(const ReleaseAnalysis &rhs) = delete;
       virtual ~ReleaseAnalysis(void);
     public:
@@ -2757,8 +2757,9 @@ namespace Legion {
                                IndexSpaceExpression *expr, 
                                const bool expr_covers,
                                const FieldMask &user_mask,
-                               const FieldMaskSet<InstanceView> &target_insts,
-                               const std::vector<InstanceView*> &source_insts,
+                               const InstanceSet &target_instances,
+                               const std::vector<InstanceView*> &target_views,
+                               const std::vector<InstanceView*> &source_views,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_events,
                                const bool record_valid);
@@ -2769,8 +2770,9 @@ namespace Legion {
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers,
                                 const FieldMask &update_mask,
-                                const FieldMaskSet<InstanceView> &target_insts,
-                                const std::vector<InstanceView*> &source_insts,
+                                const InstanceSet &target_instances,
+                                const std::vector<InstanceView*> &target_views,
+                                const std::vector<InstanceView*> &source_views,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &applied_events,
                                 const bool skip_check = false,
@@ -2778,6 +2780,7 @@ namespace Legion {
                                 const ReductionOpID redop = 0,
                                 CopyAcrossHelper *across_helper = NULL);
       void issue_update_copies_and_fills(InstanceView *target,
+                                         PhysicalManager *target_manager,
                                 const std::vector<InstanceView*> &source_views,
                                          CopyFillAggregator *&aggregator,
                                          CopyFillGuard *previous_guard,
@@ -2791,17 +2794,48 @@ namespace Legion {
                                          const int dst_index,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
-      void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
+      void apply_reductions(const InstanceSet &target_instances,
+                            const std::vector<InstanceView*> &target_views,
                             IndexSpaceExpression *expr, const bool expr_covers,
-                            const FieldMask &reduction_mask, 
+                            const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index, 
+                            Operation *op, const unsigned index,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
+      void apply_restricted_reductions(
+                            const FieldMaskSet<InstanceView> &reduction_targets,
+                            IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &reduction_mask,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
+                            Operation *op, const unsigned index,
+                            const bool track_events,
+                            const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs);
+      void apply_reduction(InstanceView *target,PhysicalManager *target_manager,
+                            IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &reduction_mask,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
+                            Operation *op, const unsigned index,
+                            const bool track_events,
+                            const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs,
+                            CopyAcrossHelper *across_helper);
+      void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
+                    const FieldMask &restricted_mask, 
+                    const InstanceSet &target_instances,
+                    const std::vector<InstanceView*> &target_views,
+                    Operation *op, const unsigned index,
+                    const PhysicalTraceInfo &trace_info,
+                    std::set<RtEvent> &applied_events,
+                    CopyFillAggregator *&aggregator);
       template<typename T>
       void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
                     const FieldMask &restricted_mask, 
