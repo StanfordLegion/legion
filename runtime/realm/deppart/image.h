@@ -127,11 +127,18 @@ namespace Realm {
                              SparsityMap<N, T> _sparsity);
 
     template <typename BM>
-    void populate_bitmasks(std::map<int, BM*>& bitmasks);
+    void populate(std::map<int, BM*>& bitmasks);
 
     virtual void execute(void);
 
     void dispatch(PartitioningOperation* op, bool inline_ok);
+
+   protected:
+    template <typename BM>
+    void populate_dense(std::map<int, BM*>& bitmasks);
+
+    template <typename BM>
+    void populate_sparse(std::map<int, BM*>& bitmasks);
 
    protected:
     IndexSpace<N,T> parent_space;

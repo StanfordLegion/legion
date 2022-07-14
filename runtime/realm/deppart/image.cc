@@ -718,7 +718,7 @@ namespace Realm {
     if (!sparsity_outputs.empty()) {
       std::map<int, HybridRectangleList<N, T> *> rect_map;
 
-      populate_bitmasks(rect_map);
+      populate(rect_map);
 
 #ifdef DEBUG_PARTITIONING
       std::cout << rect_map.size() << " non-empty images present in instance "
@@ -778,7 +778,19 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   template <typename BM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate(
+      std::map<int, BM *> &bitmasks) {
+    if (parent_space.dense()) {
+      populate_dense(bitmasks);
+    } else {
+      // TODO(apryakhin@): Test sparse directly from deppart.cc
+      populate_sparse(bitmasks);
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  template <typename BM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_dense(
       std::map<int, BM *> &bitmasks) {
     for (size_t i = 0; i < sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
@@ -786,11 +798,29 @@ namespace Realm {
         Rect<N, T> source_bbox;
         source_bbox.lo = transform[it2.rect.lo];
         source_bbox.hi = transform[it2.rect.hi];
-
         Rect<N, T> isec_rect = parent_space.bounds.intersection(source_bbox);
         if (!bmpp) bmpp = &bitmasks[i];
         if (!*bmpp) *bmpp = new BM;
         (*bmpp)->add_rect(isec_rect);
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  template <typename BM>
+  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_sparse(
+      std::map<int, BM *> &bitmasks) {
+    for (size_t i = 0; i < sources.size(); i++) {
+      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
+        for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
+          BM **bmpp = 0;
+          Point<N, T> point = transform[pir.p];
+          if (parent_space.contains(point)) {
+            if (!bmpp) bmpp = &bitmasks[i];
+            if (!*bmpp) *bmpp = new BM;
+            (*bmpp)->add_point(point);
+          }
+        }
       }
     }
   }
