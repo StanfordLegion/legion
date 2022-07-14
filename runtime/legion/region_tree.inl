@@ -6633,12 +6633,20 @@ namespace Legion {
         {
           const RtEvent defer = Runtime::merge_events(prev_done, 
               src_preimages_ready, dst_preimages_ready);
-          DeferCopyAcrossArgs args(this, op, pred_guard, copy_precondition,
-              src_indirect_precondition, dst_indirect_precondition,
-              trace_info, recurrent_replay, stage);
-          prev_done = runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, defer);
-          return args.done_event;
+          // Note that for tracing, we can't actually defer this in 
+          // the normal way because we need to actually get the real
+          // finish event for the copy
+          if (!trace_info.recording)
+          {
+            DeferCopyAcrossArgs args(this, op, pred_guard, copy_precondition,
+                src_indirect_precondition, dst_indirect_precondition,
+                trace_info, recurrent_replay, stage);
+            prev_done = runtime->issue_runtime_meta_task(args,
+                LG_LATENCY_DEFERRED_PRIORITY, defer);
+            return args.done_event;
+          }
+          else
+            defer.wait();
         }
       }
       // Need to rebuild indirections in the first time through or if we
