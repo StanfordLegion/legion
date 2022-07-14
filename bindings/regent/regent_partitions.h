@@ -74,8 +74,8 @@ legion_terra_index_cross_product_create_multi(
 
 legion_terra_index_cross_product_t
 legion_terra_index_cross_product_import(
-  legion_runtime_t runtime,
-  legion_index_partition_t partition);
+  legion_index_partition_t first_partition,
+  legion_color_t second_color);
 
 void
 legion_terra_index_cross_product_create_list(

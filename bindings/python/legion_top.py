@@ -409,11 +409,17 @@ def legion_python_main(raw_args, user_data, proc):
             c.legion_runtime_set_return_code(1)
     elif args[start] == '-m':
         if len(args) > (start+1):
-            filename = args[start+1] + '.py'
+            mod_name = args[start+1]
+            filename = mod_name + '.py'
             found = False
             for path in sys.path:
                 for root,dirs,files in os.walk(path):
-                    if filename not in files:
+                    if mod_name in dirs:
+                        main_py = os.path.join(root, mod_name, '__main__.py')
+                        if not os.path.exists(main_py):
+                            continue
+                        filename = main_py
+                    elif filename not in files:
                         continue
                     module = os.path.join(root, filename)
                     sys.argv = [module] + list(args[start+2:])
@@ -423,7 +429,7 @@ def legion_python_main(raw_args, user_data, proc):
                 if found:
                     break
             if not found:
-                print('No module named '+args[start+1])
+                print('No module named ' + mod_name)
                 c.legion_runtime_set_return_code(1)
         else:
             print('Argument expected for the -m option')

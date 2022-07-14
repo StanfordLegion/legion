@@ -287,7 +287,6 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Projection]                 = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
-    for k, v in pairs(node.value) do print(k, v) end
     report.error(node, "unable to specialize value of type table")
   end,
 
