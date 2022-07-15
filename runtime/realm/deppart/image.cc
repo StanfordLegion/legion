@@ -780,49 +780,36 @@ namespace Realm {
   template <typename BM>
   void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate(
       std::map<int, BM *> &bitmasks) {
-    if (parent_space.dense()) {
-      populate_dense(bitmasks);
-    } else {
-      // TODO(apryakhin@): Test sparse directly from deppart.cc
-      populate_sparse(bitmasks);
-    }
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  template <typename BM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_dense(
-      std::map<int, BM *> &bitmasks) {
     for (size_t i = 0; i < sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
         BM **bmpp = 0;
         Rect<N, T> source_bbox;
         source_bbox.lo = transform[it2.rect.lo];
         source_bbox.hi = transform[it2.rect.hi];
-        Rect<N, T> isec_rect = parent_space.bounds.intersection(source_bbox);
+        Rect<N, T> isect = compute_parent_intersection(source_bbox);
+        if (isect.empty()) continue;
         if (!bmpp) bmpp = &bitmasks[i];
         if (!*bmpp) *bmpp = new BM;
-        (*bmpp)->add_rect(isec_rect);
+        (*bmpp)->add_rect(isect);
       }
     }
   }
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  template <typename BM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate_sparse(
-      std::map<int, BM *> &bitmasks) {
-    for (size_t i = 0; i < sources.size(); i++) {
-      for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
-        for (PointInRectIterator<N2, T2> pir(it2.rect); pir.valid; pir.step()) {
-          BM **bmpp = 0;
-          Point<N, T> point = transform[pir.p];
-          if (parent_space.contains(point)) {
-            if (!bmpp) bmpp = &bitmasks[i];
-            if (!*bmpp) *bmpp = new BM;
-            (*bmpp)->add_point(point);
-          }
-        }
+  Rect<N, T>
+  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::compute_parent_intersection(
+      const Rect<N, T> &source) {
+    Rect<N, T> isect;
+    if (parent_space.dense()) {
+      isect = parent_space.bounds.intersection(source);
+    } else {
+      for (IndexSpaceIterator<N, T> parent_it(parent_space); parent_it.valid;
+           parent_it.step()) {
+        isect = parent_it.rect.intersection(source);
+        if (!isect.empty()) break;
       }
     }
+    return isect;
   }
 
   ////////////////////////////////////////////////////////////////////////

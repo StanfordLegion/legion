@@ -2219,7 +2219,10 @@ public:
 
   void fill_instance_data(IndexSpace<N1,T1> ibounds, RegionInstance inst);
 
-protected:
+  int verify_results(const IndexSpace<N2, T2> &root,
+                     const std::vector<IndexSpace<N2, T1>> &images);
+
+ protected:
   T1 base1_min, base1_max, extent1_min, extent1_max;
   T2 base2_min, base2_max, extent2_min, extent2_max;
   int num_pieces, num_colors;
@@ -2227,12 +2230,14 @@ protected:
   AffineTransform<N2, N1, T2> transform;
 
   std::vector<IndexSpace<N2, T1>> ss_images;
+  std::vector<IndexSpace<N2, T1>> ss_images1;
   std::vector<IndexSpace<N1,T1> > ss_by_color;
 
   Rect<N1,T1> bounds1;
   Rect<N2,T2> bounds2;
-  IndexSpace<N1,T1> root1;
-  IndexSpace<N2,T2> root2;
+  IndexSpace<N1, T1> root1;
+  IndexSpace<N2, T2> root2;
+  IndexSpace<N2, T2> root2_sparse;
   std::vector<FT> colors;
   std::vector<RegionInstance> ri_data1;
   std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, FT> > fd_vals1;
@@ -2294,7 +2299,7 @@ void RandomAffineTest<N1, T1, N2, T2, FT>::fill_instance_data(
     // iterate over all points in root1 with initial random values
     RandStream<> rs1(random_seed + 1);
     for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
-      FT v = colors[rs1.rand_int(colors.size())];
+      FT v = colors[rs1.rand_int(2)];
       if (ibounds.contains(pir.p)) a_vals.write(pir.p, v);
     }
 
@@ -2310,10 +2315,21 @@ template <int N1, typename T1, int N2, typename T2, typename FT>
 Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& memories,
 						  const std::vector<Processor>& procs)
 {
-  root1 = IndexSpace<N1,T1>(bounds1);
-  root2 = IndexSpace<N2,T2>(bounds2);
+  std::vector<Point<N2, T2>> sparse_points;
+  int index = 0;
+  for (PointInRectIterator<N2, T2> pir(bounds2); pir.valid; pir.step()) {
+    if (index++ % 2 == 0) sparse_points.push_back(pir.p);
+  }
+  SparsityMap<N2, T2> sparse_map =
+      SparsityMap<N2, T2>::construct(sparse_points, true, true);
+
+  root1 = IndexSpace<N1, T1>(bounds1);
+  root2 = IndexSpace<N2, T2>(bounds2);
+  root2_sparse = IndexSpace<N2, T2>(bounds2, sparse_map);
+
   log_app.debug() << "root1 = " << root1;
   log_app.debug() << "root2 = " << root2;
+  log_app.debug() << "root2_sparse = " << root2_sparse;
 
   // create instances to hold actual data
   size_t num_insts = memories.size();
@@ -2361,7 +2377,6 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
 
- // std::vector<IndexSpace<N1,T1> > ss_by_color;
   Event e1 = root1.create_subspaces_by_field(fd_vals1,
 					     piece_colors,
 					     ss_by_color,
@@ -2374,7 +2389,6 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
   }
 
   // images
-  //std::vector<IndexSpace<N2,T2> > ss_images;
   Event e2 = root2.create_subspaces_by_image(transform,
 					     ss_by_color,
 					     ss_images,
@@ -2388,6 +2402,19 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
     dump_sparse_index_space("", ss_images[i]);
   }
 
+  Event e3 = root2_sparse.create_subspaces_by_image(transform,
+					     ss_by_color,
+					     ss_images1,
+					     ProfilingRequestSet(),
+					     e2);
+
+  e3.wait();
+
+  for(int i = 0; i < num_pieces; i++) {
+    log_app.debug() << "image1[" << i << "] = " << ss_images1[i];
+    dump_sparse_index_space("", ss_images1[i]);
+  }
+
   return Event::NO_EVENT;
 }
 
@@ -2398,10 +2425,12 @@ int RandomAffineTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
-int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
-  int actual_points = 0;
-  for (const auto &image : ss_images) {
-    actual_points += image.volume();
+int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
+    const IndexSpace<N2, T2> &root,
+    const std::vector<IndexSpace<N2, T1>> &images) {
+  int image_points = 0;
+  for (const auto &image : images) {
+    image_points += image.volume();
   }
   // Verify the result of an image operation.
   for (const auto &source : ss_by_color) {
@@ -2409,12 +2438,12 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
       for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
            point.step()) {
         auto target_point = transform[point.p];
-        if (root2.contains(target_point)) {
+        if (root.contains(target_point)) {
           bool found = false;
-          for (const auto image : ss_images) {
+          for (const auto image : images) {
             if (image.contains(target_point)) {
               found = true;
-              actual_points--;
+              image_points--;
               break;
             }
           }
@@ -2423,7 +2452,13 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
       }
     }
   }
-  return !(actual_points == 0);
+  return !(image_points == 0);
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
+  return verify_results(root2, ss_images) &&
+         verify_results(root2_sparse, ss_images1);
 }
 
 int main(int argc, char **argv) {

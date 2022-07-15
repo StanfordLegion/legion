@@ -134,11 +134,7 @@ namespace Realm {
     void dispatch(PartitioningOperation* op, bool inline_ok);
 
    protected:
-    template <typename BM>
-    void populate_dense(std::map<int, BM*>& bitmasks);
-
-    template <typename BM>
-    void populate_sparse(std::map<int, BM*>& bitmasks);
+    Rect<N, T> compute_parent_intersection(const Rect<N, T>& source);
 
    protected:
     IndexSpace<N,T> parent_space;
