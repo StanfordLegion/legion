@@ -10667,16 +10667,16 @@ namespace Legion {
       if (allocated)
       {
         eager_remaining_capacity -= size;
-        uintptr_t ptr = eager_pool + offset;
+        uintptr_t ptr = size > 0 ? eager_pool + offset : 0;
         Realm::ProfilingRequestSet no_requests;
         const Realm::ExternalMemoryResource resource(ptr, 
                     layout->bytes_used, false/*read only*/);
         wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
                         instance, memory, layout, resource, no_requests));
 #ifdef DEBUG_LEGION
-        assert(eager_allocations.find(ptr) == eager_allocations.end());
+        assert(ptr == 0 || eager_allocations.find(ptr) == eager_allocations.end());
 #endif
-        eager_allocations[ptr] = allocation_id;
+        if (ptr != 0) eager_allocations[ptr] = allocation_id;
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,

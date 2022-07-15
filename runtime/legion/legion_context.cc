@@ -2376,9 +2376,6 @@ namespace Legion {
         else
           new_instances.push_back(*it);
 
-#ifdef DEBUG_LEGION
-      assert(ptr != 0);
-#endif
       task_local_instances.swap(new_instances);
       return ptr;
 #else
@@ -2390,9 +2387,6 @@ namespace Legion {
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
       void *ptr = instance.pointer_untyped(0,0);
-#ifdef DEBUG_LEGION
-      assert(ptr != NULL);
-#endif
       return reinterpret_cast<uintptr_t>(ptr);
 #endif
     }
