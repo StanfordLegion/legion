@@ -98,35 +98,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Memory PhysicalInstance::get_location(const DomainPoint *point) const
+    Memory PhysicalInstance::get_location(void) const
     //--------------------------------------------------------------------------
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
       Internal::PhysicalManager *manager = impl->as_physical_manager();
-      if (point == NULL)
-      {
-        const DomainPoint dummy_point;
-        return manager->get_memory(dummy_point, true/*from mapper*/);
-      }
-      else
-        return manager->get_memory(*point, true/*from mapper*/);
+      return manager->get_memory(true/*from mapper*/);
     }
 
     //--------------------------------------------------------------------------
-    unsigned long PhysicalInstance::get_instance_id(const DomainPoint *p) const
+    unsigned long PhysicalInstance::get_instance_id(void) const
     //--------------------------------------------------------------------------
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
       Internal::PhysicalManager *manager = impl->as_physical_manager();
-      if (p == NULL)
-      {
-        const DomainPoint dummy_point;
-        return manager->get_instance(dummy_point, true/*from mapper*/).id;
-      }
-      else
-        return manager->get_instance(*p, true/*from mapper*/).id;
+      return manager->get_instance(true/*from mapper*/).id;
     }
 
     //--------------------------------------------------------------------------
@@ -139,15 +127,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::has_collective_point(const DomainPoint &point) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl == NULL) || !impl->is_physical_manager())
-        return false;
-      return impl->as_physical_manager()->has_collective_point(point);
-    }
-
-    //--------------------------------------------------------------------------
     Domain PhysicalInstance::get_instance_domain(void) const
     //--------------------------------------------------------------------------
     {
@@ -157,25 +136,6 @@ namespace Legion {
       Domain domain = impl->instance_domain->get_domain(ready, true);
       ready.wait_faultignorant();
       return domain;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalInstance::find_points_in_memory(Memory memory,
-                                         std::vector<DomainPoint> &points) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl != NULL) && impl->is_collective_manager())
-        impl->as_collective_manager()->find_points_in_memory(memory, points);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalInstance::find_points_nearest_memory(Memory memory,
-                     std::map<DomainPoint,Memory> &points, bool bandwidth) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl != NULL) && impl->is_collective_manager())
-        impl->as_collective_manager()->find_points_nearest_memory(memory, 
-                                                      points, bandwidth);
     }
 
     //--------------------------------------------------------------------------
@@ -255,15 +215,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::is_collective_instance(void) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl == NULL) || !impl->is_physical_manager())
-        return false;
-      return impl->is_collective_manager();
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
@@ -317,7 +268,7 @@ namespace Legion {
     {
       if (impl == NULL)
         return false;
-      return impl->entails(constraint_set, DomainPoint(), failed_constraint);
+      return impl->entails(constraint_set, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -328,7 +279,7 @@ namespace Legion {
       if (!p.impl->is_physical_manager())
         return os << Realm::RegionInstance::NO_INST;
       else
-        return os << p.impl->as_physical_manager()->get_instance(DomainPoint());
+        return os << p.impl->as_physical_manager()->get_instance();
     }
 
     /////////////////////////////////////////////////////////////
@@ -733,14 +684,12 @@ namespace Legion {
                                     PhysicalInstance &result, 
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag) const
+                                    const LayoutConstraint **unsat) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->create_physical_instance(ctx, target_memory, 
                                  constraints, regions, result, acquire, 
-                                 priority, tight_bounds, footprint, unsat,
-                                 collective_tag);
+                                 priority, tight_bounds, footprint, unsat);
     }
 
     //--------------------------------------------------------------------------
@@ -751,14 +700,12 @@ namespace Legion {
                                     PhysicalInstance &result,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag) const
+                                    const LayoutConstraint **unsat) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->create_physical_instance(ctx, target_memory, 
                                    layout_id, regions, result, acquire, 
-                                   priority, tight_bounds, footprint, unsat,
-                                   collective_tag);
+                                   priority, tight_bounds, footprint, unsat);
     }
 
     //--------------------------------------------------------------------------
@@ -769,14 +716,13 @@ namespace Legion {
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag) const
+                                    const LayoutConstraint **unsat) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory, 
                                        constraints, regions, result, created, 
                                        acquire, priority, tight_bounds,
-                                       footprint, unsat, collective_tag);
+                                       footprint, unsat);
     }
 
     //--------------------------------------------------------------------------
@@ -787,14 +733,12 @@ namespace Legion {
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag) const
+                                    const LayoutConstraint **unsat) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory,
                                   layout_id, regions, result, created, acquire, 
-                                  priority, tight_bounds, footprint, unsat,
-                                  collective_tag);
+                                  priority, tight_bounds, footprint, unsat);
     }
 
     //--------------------------------------------------------------------------
@@ -803,12 +747,11 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result,
-                                    bool acquire, bool tight_bounds,
-                                    size_t collective_tag) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory, 
-          constraints, regions, result, acquire, tight_bounds, collective_tag);
+                constraints, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -817,12 +760,11 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions, 
                                     PhysicalInstance &result,
-                                    bool acquire, bool tight_bounds,
-                                    size_t collective_tag) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory,
-          layout_id, regions, result, acquire, tight_bounds, collective_tag);
+                  layout_id, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -831,12 +773,11 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<PhysicalInstance> &results,
-                                    bool acquire, bool tight_bounds,
-                                    size_t collective_tag) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->find_physical_instances(ctx, target_memory, constraints, 
-                    regions, results, acquire, tight_bounds, collective_tag);
+                                    regions, results, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -845,21 +786,11 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions, 
                                     std::vector<PhysicalInstance> &results,
-                                    bool acquire, bool tight_bounds,
-                                    size_t collective_tag) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->find_physical_instances(ctx, target_memory, layout_id, 
-                  regions, results, acquire, tight_bounds, collective_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MapperRuntime::match_collective_instances(MapperContext ctx,
-            std::vector<PhysicalInstance> &matches, size_t collective_tag) const
-    //--------------------------------------------------------------------------
-    {
-      return ctx->manager->match_collective_instances(ctx, matches, 
-                                                      collective_tag);
+                                  regions, results, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------

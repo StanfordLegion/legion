@@ -1882,11 +1882,11 @@ namespace Legion {
     public:
       InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<IndividualView> &valid_instances);
+                          const FieldMaskSet<LogicalView> &valid_instances);
       InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index, 
                         IndexSpaceExpression *expr, InvalidInstAnalysis *target,
-                        const FieldMaskSet<IndividualView> &valid_instances);
+                        const FieldMaskSet<LogicalView> &valid_instances);
       InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
       virtual ~InvalidInstAnalysis(void);
     public:
@@ -1912,7 +1912,7 @@ namespace Legion {
       static void handle_remote_request_invalid(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
     public:
-      const FieldMaskSet<IndividualView> valid_instances;
+      const FieldMaskSet<LogicalView> valid_instances;
       InvalidInstAnalysis *const target_analysis;
     };
 
@@ -1925,11 +1925,11 @@ namespace Legion {
     public:
       AntivalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                           IndexSpaceExpression *expr,
-                          const FieldMaskSet<IndividualView> &anti_instances);
+                          const FieldMaskSet<LogicalView> &anti_instances);
       AntivalidInstAnalysis(Runtime *rt, AddressSpaceID src,AddressSpaceID prev,
                       Operation *op, unsigned index, 
                       IndexSpaceExpression *expr, AntivalidInstAnalysis *target,
-                      const FieldMaskSet<IndividualView> &anti_instances);
+                      const FieldMaskSet<LogicalView> &anti_instances);
       AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
       virtual ~AntivalidInstAnalysis(void);
     public:
@@ -1955,7 +1955,7 @@ namespace Legion {
       static void handle_remote_request_antivalid(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
     public:
-      const FieldMaskSet<IndividualView> antivalid_instances;
+      const FieldMaskSet<LogicalView> antivalid_instances;
       AntivalidInstAnalysis *const target_analysis;
     };
 
@@ -2259,18 +2259,7 @@ namespace Legion {
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<InstanceView> &views,
-                        const PhysicalTraceInfo &trace_info,
-                        CollectiveMapping *collective_mapping,
-                        const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
-                        const bool add_restriction = false,
-                        const bool first_local = true);
-      OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<IndividualView> &views,
+                        const FieldMaskSet<LogicalView> &views,
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,

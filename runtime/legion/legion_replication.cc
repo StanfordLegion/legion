@@ -371,6 +371,7 @@ namespace Legion {
       return result;
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     /////////////////////////////////////////////////////////////
     // Repl Collective Instance Creator
     /////////////////////////////////////////////////////////////
@@ -1385,6 +1386,7 @@ namespace Legion {
           assert(false);
       }
     } 
+#endif // NO_EXPLICIT_COLLECTIVES
 
     /////////////////////////////////////////////////////////////
     // Repl Individual Task 
@@ -1744,14 +1746,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(Runtime *rt)
-      : ReplCollectiveInstanceCreator<IndexTask>(rt)
+      : IndexTask(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(const ReplIndexTask &rhs)
-      : ReplCollectiveInstanceCreator<IndexTask>(rhs)
+      : IndexTask(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1778,7 +1780,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_task();
-      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       serdez_redop_collective = NULL;
@@ -1793,7 +1794,6 @@ namespace Legion {
     void ReplIndexTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_repl_collective_instance_creator();
       deactivate_index_task();
       if (serdez_redop_collective != NULL)
       {
@@ -2067,36 +2067,6 @@ namespace Legion {
                                                      refinement_tracker,
                                                      map_applied_conditions);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplIndexTask::get_total_collective_instance_points(void)
-    //--------------------------------------------------------------------------
-    {
-      // Do the base call first
-      size_t result = ReplCollectiveInstanceCreator<IndexTask>::
-                          get_total_collective_instance_points();
-      if (must_epoch != NULL)
-      {
-#ifdef DEBUG_LEGION
-        ReplMustEpochOp *repl_must = dynamic_cast<ReplMustEpochOp*>(must_epoch);
-        assert(repl_must != NULL);
-#else
-        ReplMustEpochOp *repl_must = static_cast<ReplMustEpochOp*>(must_epoch);
-#endif
-        // For must epoch operations we have to do an adjustment because we
-        // don't eagerly prune out our non-local points
-        const size_t local = repl_must->count_shard_local_points(launch_space);
-#ifdef DEBUG_LEGION
-        assert(local <= total_points);
-#endif
-        const size_t nonlocal = total_points - local;
-#ifdef DEBUG_LEGION
-        assert(nonlocal < result);
-#endif
-        result -= nonlocal;
-      }
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2482,25 +2452,6 @@ namespace Legion {
                               runtime->address_space, &mapping))
           delete parent;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedMapping* ReplIndexTask::get_collective_instance_sharded_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      if (sharding_space.exists())
-        return sharding_function->find_sharded_mapping(launch_space,
-            sharding_space, repl_ctx->get_shard_collective_radix());
-      else
-        return sharding_function->find_sharded_mapping(launch_space,
-            launch_space->handle, repl_ctx->get_shard_collective_radix());
     }
 
     /////////////////////////////////////////////////////////////
@@ -3431,14 +3382,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(Runtime *rt)
-      : ReplCollectiveInstanceCreator<IndexFillOp>(rt)
+      : IndexFillOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(const ReplIndexFillOp &rhs)
-      : ReplCollectiveInstanceCreator<IndexFillOp>(rhs)
+      : IndexFillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3465,7 +3416,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_fill();
-      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       shard_points = NULL;
@@ -3483,7 +3433,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      deactivate_repl_collective_instance_creator();
       deactivate_index_fill();
       remove_launch_space_reference(shard_points);
       runtime->free_repl_index_fill_op(this);
@@ -3645,22 +3594,6 @@ namespace Legion {
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedMapping* 
-                  ReplIndexFillOp::get_collective_instance_sharded_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return sharding_function->find_sharded_mapping(launch_space,
-          sharding_space, repl_ctx->get_shard_collective_radix());
     }
 
     /////////////////////////////////////////////////////////////
@@ -3889,14 +3822,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(Runtime *rt)
-      : ReplCollectiveInstanceCreator<IndexCopyOp>(rt)
+      : IndexCopyOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(const ReplIndexCopyOp &rhs)
-      : ReplCollectiveInstanceCreator<IndexCopyOp>(rhs)
+      : IndexCopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3923,7 +3856,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_copy();
-      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       shard_points = NULL;
@@ -3957,7 +3889,6 @@ namespace Legion {
         dst_collectives.clear();
       }
       unique_intra_space_deps.clear();
-      deactivate_repl_collective_instance_creator();
       deactivate_index_copy();
       remove_launch_space_reference(shard_points);
       runtime->free_repl_index_copy_op(this);
@@ -4428,22 +4359,6 @@ namespace Legion {
         else
           return ready;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedMapping*
-                  ReplIndexCopyOp::get_collective_instance_sharded_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return sharding_function->find_sharded_mapping(launch_space,
-          sharding_space, repl_ctx->get_shard_collective_radix());
     }
 
     //--------------------------------------------------------------------------
@@ -5094,7 +5009,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(Runtime *rt)
-      : ReplCollectiveInstanceCreator<DependentPartitionOp>(rt)
+      : DependentPartitionOp(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -5102,7 +5017,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(
                                             const ReplDependentPartitionOp &rhs)
-      : ReplCollectiveInstanceCreator<DependentPartitionOp>(rhs)
+      : DependentPartitionOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5387,7 +5302,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
-      activate_repl_collective_instance_creator();
       sharding_function = NULL;
       shard_points = NULL;
 #ifdef DEBUG_LEGION
@@ -5406,23 +5320,6 @@ namespace Legion {
 #endif
       remove_launch_space_reference(shard_points);
       runtime->free_repl_dependent_partition_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedMapping* 
-         ReplDependentPartitionOp::get_collective_instance_sharded_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // No special sharding domain here
-      return sharding_function->find_sharded_mapping(launch_space,
-          launch_space->handle, repl_ctx->get_shard_collective_radix());
     }
 
     //--------------------------------------------------------------------------
@@ -7243,14 +7140,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(Runtime *rt)
-      : ReplCollectiveInstanceCreator<CollectiveInstanceCreator<MapOp> >(rt)
+      : MapOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(const ReplMapOp &rhs)
-      : ReplCollectiveInstanceCreator<CollectiveInstanceCreator<MapOp> >(rhs)
+      : MapOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7487,49 +7384,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint ReplMapOp::get_shard_point(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_collective_instance_point();
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint ReplMapOp::get_collective_instance_point(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->get_shard_point();
-    }
-
-    //--------------------------------------------------------------------------
-    Domain ReplMapOp::get_collective_dense_points(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      const Domain &points = repl_ctx->shard_manager->shard_domain;
-      if (points.dense())
-        return points;
-      else
-        return Domain::NO_DOMAIN;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
     //--------------------------------------------------------------------------
     {
       MapOp::activate();
-      activate_collective_instance_creator();
-      activate_repl_collective_instance_creator();
       mapping_check = 0;
       sources_check = 0;
       shard_space = IndexSpace::NO_SPACE;
@@ -7545,31 +7403,8 @@ namespace Legion {
       // Make sure that we consumed this if we had one
       assert(!collective_map_barrier.exists());
 #endif
-      deactivate_repl_collective_instance_creator();
-      deactivate_collective_instance_creator();
       deactivate_map_op();
       runtime->free_repl_map_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedMapping* ReplMapOp::get_collective_instance_sharded_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // We know that there is exactly one point for each shard so therefore
-      // all the shards have at least one point
-      std::vector<ShardID> all_shards(repl_ctx->total_shards);
-      for (ShardID sid = 0; sid < all_shards.size(); sid++)
-        all_shards[sid] = sid;
-      ShardedMapping *mapping = new ShardedMapping(all_shards, 
-                      repl_ctx->get_shard_collective_radix());
-      mapping->add_reference();
-      return mapping;
     }
 
     /////////////////////////////////////////////////////////////

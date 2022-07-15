@@ -1547,7 +1547,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual size_t get_total_collective_instance_points(void);
     protected:
       virtual void create_future_instances(std::vector<Memory> &target_mems);
       virtual void finish_index_task_reduction(void);
@@ -1571,8 +1570,6 @@ namespace Legion {
                                                  RtEvent point_mapped);
     protected:
       virtual void finalize_output_regions(void);
-    protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1721,8 +1718,6 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
-    protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1800,7 +1795,6 @@ namespace Legion {
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
     protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
           const ApEvent local_post, ApEvent &collective_pre,
@@ -2060,8 +2054,6 @@ namespace Legion {
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
     protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
-    protected:
       void select_sharding_function(void);
     protected:
       ShardingFunction *sharding_function;
@@ -2273,8 +2265,6 @@ namespace Legion {
               std::vector<PhysicalManager*> &source_instances);
       virtual bool supports_collective_instances(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
-    protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       CollectiveID mapping_check, sources_check;
       IndexSpace shard_space;

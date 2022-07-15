@@ -6153,7 +6153,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, Operation *o, 
                                 unsigned idx, IndexSpaceExpression *expr, 
-                                const FieldMaskSet<IndividualView> &valid_insts)
+                                const FieldMaskSet<LogicalView> &valid_insts)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, true/*immutable*/),
         valid_instances(valid_insts), target_analysis(this)
     //--------------------------------------------------------------------------
@@ -6164,7 +6164,7 @@ namespace Legion {
     InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, 
                              AddressSpaceID prev, Operation *o, unsigned idx,
                              IndexSpaceExpression *expr, InvalidInstAnalysis *t,
-                             const FieldMaskSet<IndividualView> &valid_insts)
+                             const FieldMaskSet<LogicalView> &valid_insts)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         valid_instances(valid_insts), target_analysis(t)
     //--------------------------------------------------------------------------
@@ -6258,7 +6258,7 @@ namespace Legion {
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(valid_instances.size());
-          for (FieldMaskSet<IndividualView>::const_iterator it = 
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
                 valid_instances.begin(); it != valid_instances.end(); it++)
           {
             rez.serialize(it->first->did);
@@ -6350,7 +6350,7 @@ namespace Legion {
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
-      FieldMaskSet<IndividualView> valid_instances;
+      FieldMaskSet<LogicalView> valid_instances;
       size_t num_valid_instances;
       derez.deserialize<size_t>(num_valid_instances);
       for (unsigned idx = 0; idx < num_valid_instances; idx++)
@@ -6358,8 +6358,7 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        IndividualView *view = static_cast<IndividualView*>(
-            runtime->find_or_request_logical_view(did, ready));
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
         if (ready.exists())
           ready_events.insert(ready);
         FieldMask view_mask;
@@ -6417,7 +6416,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AntivalidInstAnalysis::AntivalidInstAnalysis(Runtime *rt, Operation *o,
                                  unsigned idx, IndexSpaceExpression *expr,
-                                 const FieldMaskSet<IndividualView> &anti_insts)
+                                 const FieldMaskSet<LogicalView> &anti_insts)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, true/*immutable*/),
         antivalid_instances(anti_insts), target_analysis(this)
     //--------------------------------------------------------------------------
@@ -6428,7 +6427,7 @@ namespace Legion {
     AntivalidInstAnalysis::AntivalidInstAnalysis(Runtime *rt,AddressSpaceID src, 
                            AddressSpaceID prev, Operation *o, unsigned idx,
                            IndexSpaceExpression *expr, AntivalidInstAnalysis *a,
-                           const FieldMaskSet<IndividualView> &anti_insts)
+                           const FieldMaskSet<LogicalView> &anti_insts)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         antivalid_instances(anti_insts), target_analysis(a)
     //--------------------------------------------------------------------------
@@ -6523,7 +6522,7 @@ namespace Legion {
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(antivalid_instances.size());
-          for (FieldMaskSet<IndividualView>::const_iterator it = 
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
                 antivalid_instances.begin(); it != 
                 antivalid_instances.end(); it++)
           {
@@ -6616,7 +6615,7 @@ namespace Legion {
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
-      FieldMaskSet<IndividualView> antivalid_instances;
+      FieldMaskSet<LogicalView> antivalid_instances;
       size_t num_antivalid_instances;
       derez.deserialize<size_t>(num_antivalid_instances);
       for (unsigned idx = 0; idx < num_antivalid_instances; idx++)
@@ -6624,8 +6623,7 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        IndividualView *view = static_cast<IndividualView*>(
-            runtime->find_or_request_logical_view(did, ready));
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
         if (ready.exists())
           ready_events.insert(ready);
         FieldMask view_mask;
@@ -8241,7 +8239,7 @@ namespace Legion {
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
                         IndexSpaceExpression *e,
-                        const FieldMaskSet<InstanceView> &vws,
+                        const FieldMaskSet<LogicalView> &vws,
                         const PhysicalTraceInfo &t_info,
                         CollectiveMapping *mapping,
                         const ApEvent pre, const RtEvent guard, 
@@ -8255,39 +8253,11 @@ namespace Legion {
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<InstanceView>::const_iterator it = 
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
             vws.begin(); it != vws.end(); it++)
       {
         if (it->first->is_reduction_kind())
-          reduction_views.insert(it->first, it->second);
-        else
-          views.insert(it->first, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
-                        unsigned idx, const RegionUsage &use,
-                        IndexSpaceExpression *e,
-                        const FieldMaskSet<IndividualView> &vws,
-                        const PhysicalTraceInfo &t_info,
-                        CollectiveMapping *mapping,
-                        const ApEvent pre, const RtEvent guard, 
-                        const PredEvent pred, const bool track, 
-                        const bool restriction,
-                        const bool first_local)
-      : PhysicalAnalysis(rt, o, idx, e, true/*on heap*/, false/*immutable*/,
-                         mapping, true/*exclusive*/, first_local), usage(use),
-        trace_info(t_info), precondition(pre), guard_event(guard),
-        pred_guard(pred), track_effects(track), add_restriction(restriction),
-        output_aggregator(NULL)
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<IndividualView>::const_iterator it = 
-            vws.begin(); it != vws.end(); it++)
-      {
-        if (it->first->is_reduction_kind())
-          reduction_views.insert(it->first, it->second);
+          reduction_views.insert(it->first->as_instance_view(), it->second);
         else
           views.insert(it->first, it->second);
       }
@@ -9608,7 +9578,7 @@ namespace Legion {
       // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
-      for (FieldMaskSet<IndividualView>::const_iterator it = 
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
             analysis.valid_instances.begin(); it !=
             analysis.valid_instances.end(); it++)
       {
@@ -9618,7 +9588,7 @@ namespace Legion {
         if (it->first->is_reduction_kind())
         {
           // Handle reductions special
-          InstanceView *reduction_view = it->first;
+          InstanceView *reduction_view = it->first->as_instance_view();
           if (!(invalid_mask - reduction_fields))
           {
             int fidx = invalid_mask.find_first_set();
@@ -9739,7 +9709,7 @@ namespace Legion {
       // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
-      for (FieldMaskSet<IndividualView>::const_iterator ait = 
+      for (FieldMaskSet<LogicalView>::const_iterator ait = 
             analysis.antivalid_instances.begin(); ait !=
             analysis.antivalid_instances.end(); ait++)
       {
@@ -9751,7 +9721,7 @@ namespace Legion {
           // Handle reductions special
           if (antivalid_mask * reduction_fields)
             continue;
-          InstanceView *reduction_view = ait->first;
+          InstanceView *reduction_view = ait->first->as_instance_view();
           int fidx = antivalid_mask.find_first_set();
           while (fidx >= 0)
           {
@@ -12930,8 +12900,9 @@ namespace Legion {
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op, index,
                                   NULL/*no previous guard*/, true/*track*/);
-          aggregator->record_update(it->first.first, it->first.second, overlap,
-              overlap_expr, trace_info.recording ? this : NULL, applied_events);
+          aggregator->record_update(it->first.first, NULL/*no manager*/,
+              it->first.second, overlap, overlap_expr,
+              trace_info.recording ? this : NULL, applied_events);
         }
       }
     }

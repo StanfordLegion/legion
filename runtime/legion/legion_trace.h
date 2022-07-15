@@ -538,7 +538,7 @@ namespace Legion {
     class TraceViewSet {
     public:
       struct FailedPrecondition {
-        IndividualView *view;
+        LogicalView *view;
         IndexSpaceExpression *expr;
         FieldMask mask;
 
@@ -552,24 +552,24 @@ namespace Legion {
                    std::set<RtEvent> &applied_events);
       virtual ~TraceViewSet(void);
     public:
-      void insert(IndividualView *view,
+      void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
                   const FieldMask &mask,
                   ReferenceMutator &mutator);
-      void invalidate(IndividualView *view,
+      void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
-           std::map<IndividualView*,unsigned> *view_refs_to_remove = NULL);
-      void invalidate_all_but(IndividualView *except,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+      void invalidate_all_but(LogicalView*except,
                               IndexSpaceExpression *expr,
                               const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
-           std::map<IndividualView*,unsigned> *view_refs_to_remove = NULL);
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     public:
-      bool dominates(IndividualView *view, IndexSpaceExpression *expr, 
+      bool dominates(LogicalView *view, IndexSpaceExpression *expr, 
                      FieldMask &non_dominated) const;
-      void dominates(IndividualView *view, 
+      void dominates(LogicalView *view, 
                      IndexSpaceExpression *expr, FieldMask mask,
                      FieldMaskSet<IndexSpaceExpression> &non_dominated,
                      FieldMaskSet<IndexSpaceExpression> *dominate = NULL) const;
@@ -581,7 +581,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                                        FieldMaskSet<IndividualView> > &target,
+                                        FieldMaskSet<LogicalView> > &target,
                               std::set<IndexSpaceExpression*> &unique_exprs,
                               ReferenceMutator &mutator) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
@@ -596,7 +596,7 @@ namespace Legion {
     public:
       void dump(void) const;
     protected:
-      typedef LegionMap<IndividualView*,
+      typedef LegionMap<LogicalView*,
                         FieldMaskSet<IndexSpaceExpression> > ViewExprs;
     protected:
       RegionTreeForest *const forest;
@@ -713,7 +713,7 @@ namespace Legion {
       TraceViewSet *postcondition_views; 
       // Transpose of conditions for testing
       typedef LegionMap<IndexSpaceExpression*,
-                        FieldMaskSet<IndividualView> > ExprViews;
+                        FieldMaskSet<LogicalView> > ExprViews;
       ExprViews preconditions;
       ExprViews anticonditions;
       ExprViews postconditions;
