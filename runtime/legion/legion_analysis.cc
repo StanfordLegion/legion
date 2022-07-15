@@ -2510,6 +2510,8 @@ namespace Legion {
       }
       disjoint_complete_accesses.swap(src.disjoint_complete_accesses);
       disjoint_complete_child_counts.swap(src.disjoint_complete_child_counts);
+      disjoint_complete_children.swap(src.disjoint_complete_children);
+      disjoint_complete_projections.swap(src.disjoint_complete_projections);
       for (LegionList<FieldState>::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
@@ -2519,7 +2521,6 @@ namespace Legion {
             disjoint_complete_children.begin(); it != 
             disjoint_complete_children.end(); it++)
         to_traverse.insert(it->first);
-      disjoint_complete_projections.swap(src.disjoint_complete_projections);
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -18052,16 +18053,11 @@ namespace Legion {
         assert(equivalence_sets_ready.empty());
         assert(!disjoint_complete);
         assert(disjoint_complete_children.empty());
-        assert(refinement_subscriptions.empty());
 #endif
-        if (equivalence_sets.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(subscription_owners.empty());
-#endif
+        if (!equivalence_sets.empty())
+          to_remove.swap(equivalence_sets);
+        else if (subscription_owners.empty())
           return;
-        }
-        to_remove.swap(equivalence_sets);
         for (std::map<std::pair<VersionManager*,AddressSpaceID>,unsigned>::
               const_iterator it = subscription_owners.begin();
               it != subscription_owners.end(); it++)
