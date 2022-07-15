@@ -895,7 +895,7 @@ function type_check.expr_method_call(cx, node)
     local args_with_casts = terralib.newlist()
     assert(not defs[1].type.isvararg)
     local param_types = defs[1].type.parameters
-    for idx, arg_type in pairs(arg_types) do
+    for idx, arg_type in ipairs(arg_types) do
       args_with_casts:insert(
         insert_implicit_cast(args[idx], arg_type, param_types[idx + 1]))
     end
@@ -2002,7 +2002,7 @@ function type_check.expr_image(cx, node)
     if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
       return true
     elseif ty:isstruct() then
-      for _, entry in pairs(ty:getentries()) do
+      for _, entry in ipairs(ty:getentries()) do
         local entry_type = entry[2] or entry.type
         if not is_base_type_64bit(entry_type) then return false end
       end
@@ -2199,7 +2199,7 @@ function type_check.expr_preimage(cx, node)
       if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
         return true
       elseif ty:isstruct() then
-        for _, entry in pairs(ty:getentries()) do
+        for _, entry in ipairs(ty:getentries()) do
           local entry_type = entry[2] or entry.type
           if not is_base_type_64bit(entry_type) then return false end
         end
@@ -3542,7 +3542,7 @@ end
 function type_check.expr_import_cross_product(cx, node)
   local partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end)
   local partition_type
-  for idx, p in pairs(partitions) do
+  for idx, p in ipairs(partitions) do
     partition_type = std.as_read(p.expr_type)
     if not std.is_partition(partition_type) then
       report.error(p,
