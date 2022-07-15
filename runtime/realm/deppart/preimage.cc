@@ -637,17 +637,21 @@ namespace Realm {
   template <typename BM>
   void StructuredPreimageMicroOp<N, T, N2, T2, TRANSFORM>::populate_bitmasks(
       std::map<int, BM *> &bitmasks) {
+    Rect<N2, T2> target_bbox = targets[0].bounds;
+    for (size_t i = 1; i < targets.size(); i++) {
+      target_bbox = target_bbox.union_bbox(targets[i].bounds);
+    }
     for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid; it2.step()) {
       for (PointInRectIterator<N, T> pir(it2.rect); pir.valid; pir.step()) {
         Point<N2, T2> target_point = transform[pir.p];
-        // TODO(apryakhin@): Consider finding an inverse of a transform
-        // to avoid point-wise iteration.
-        for (size_t i = 0; i < targets.size(); i++)
+        if (!target_bbox.contains(target_point)) continue;
+        for (size_t i = 0; i < targets.size(); i++) {
           if (targets[i].contains(target_point)) {
             BM *&bmp = bitmasks[i];
             if (!bmp) bmp = new BM;
             bmp->add_point(pir.p);
           }
+        }
       }
     }
   }
