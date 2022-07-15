@@ -369,7 +369,7 @@ function analyze_var_flow.stat_assignment(cx, node)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
-    for i, cond in pairs(cx.conds) do
+    for i, cond in ipairs(cx.conds) do
       if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
         flow_value_into(cx, lhs, cond)
       end
@@ -388,7 +388,7 @@ function analyze_var_flow.stat_reduce(cx, node)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
-    for i, cond in pairs(cx.conds) do
+    for i, cond in ipairs(cx.conds) do
       if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
         flow_value_into(cx, lhs, cond)
       end

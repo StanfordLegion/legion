@@ -17350,12 +17350,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+                                                     0/*fid*/,
+                                                     bounds.bounds);
 #endif
       assert(is_compatible);
 #endif
       // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      accessor = Realm::AffineAccessor<FT,N,T>(instance,
+                                               0/*field id*/,
+                                               bounds.bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -17850,12 +17854,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+                                                     0/*fid*/,
+                                                     bounds.bounds);
 #endif
       assert(is_compatible);
 #endif
       // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      accessor = Realm::AffineAccessor<FT,N,T>(instance,
+                                               0/*field id*/,
+                                               bounds.bounds);
     }
 
     //--------------------------------------------------------------------------
