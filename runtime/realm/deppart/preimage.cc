@@ -642,9 +642,14 @@ namespace Realm {
       target_bbox = target_bbox.union_bbox(targets[i].bounds);
     }
     for (IndexSpaceIterator<N, T> it2(parent_space); it2.valid; it2.step()) {
+      Rect<N2, T2> parent_bbox;
+      parent_bbox.lo = transform[it2.rect.lo];
+      parent_bbox.hi = transform[it2.rect.hi];
+
+      if (target_bbox.intersection(parent_bbox).empty()) continue;
+
       for (PointInRectIterator<N, T> pir(it2.rect); pir.valid; pir.step()) {
         Point<N2, T2> target_point = transform[pir.p];
-        if (!target_bbox.contains(target_point)) continue;
         for (size_t i = 0; i < targets.size(); i++) {
           if (targets[i].contains(target_point)) {
             BM *&bmp = bitmasks[i];
