@@ -2318,7 +2318,10 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory
   std::vector<Point<N2, T2>> sparse_points;
   int index = 0;
   for (PointInRectIterator<N2, T2> pir(bounds2); pir.valid; pir.step()) {
-    if (index++ % 2 == 0) sparse_points.push_back(pir.p);
+    if (index % 2 == 0) {
+      sparse_points.push_back(pir.p);
+    }
+    index++;
   }
   SparsityMap<N2, T2> sparse_map =
       SparsityMap<N2, T2>::construct(sparse_points, true, true);
@@ -2457,8 +2460,8 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
 int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
-  return verify_results(root2, ss_images) &&
-         verify_results(root2_sparse, ss_images1);
+  return (verify_results(root2, ss_images) ||
+          verify_results(root2_sparse, ss_images1));
 }
 
 int main(int argc, char **argv) {

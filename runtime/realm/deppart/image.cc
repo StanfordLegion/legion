@@ -780,36 +780,31 @@ namespace Realm {
   template <typename BM>
   void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::populate(
       std::map<int, BM *> &bitmasks) {
+    std::vector<Rect<N, T>> parent_rects;
+    if (parent_space.dense()) {
+      parent_rects.push_back(parent_space.bounds);
+    } else {
+      for (IndexSpaceIterator<N, T> parent_it(parent_space); parent_it.valid;
+           parent_it.step()) {
+        parent_rects.push_back(parent_it.rect);
+      }
+    }
     for (size_t i = 0; i < sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
         BM **bmpp = 0;
         Rect<N, T> source_bbox;
         source_bbox.lo = transform[it2.rect.lo];
         source_bbox.hi = transform[it2.rect.hi];
-        Rect<N, T> isect = compute_parent_intersection(source_bbox);
-        if (isect.empty()) continue;
         if (!bmpp) bmpp = &bitmasks[i];
         if (!*bmpp) *bmpp = new BM;
-        (*bmpp)->add_rect(isect);
+        for (const auto &parent_rect : parent_rects) {
+          Rect<N, T> isect = parent_rect.intersection(source_bbox);
+          if (!isect.empty()) {
+            (*bmpp)->add_rect(isect);
+          }
+        }
       }
     }
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  Rect<N, T>
-  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::compute_parent_intersection(
-      const Rect<N, T> &source) {
-    Rect<N, T> isect;
-    if (parent_space.dense()) {
-      isect = parent_space.bounds.intersection(source);
-    } else {
-      for (IndexSpaceIterator<N, T> parent_it(parent_space); parent_it.valid;
-           parent_it.step()) {
-        isect = parent_it.rect.intersection(source);
-        if (!isect.empty()) break;
-      }
-    }
-    return isect;
   }
 
   ////////////////////////////////////////////////////////////////////////

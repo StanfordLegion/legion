@@ -134,9 +134,6 @@ namespace Realm {
     void dispatch(PartitioningOperation* op, bool inline_ok);
 
    protected:
-    Rect<N, T> compute_parent_intersection(const Rect<N, T>& source);
-
-   protected:
     IndexSpace<N,T> parent_space;
     std::vector<IndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
