@@ -2466,6 +2466,21 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
     const std::vector<IndexSpace<N2, T1>> &images) {
   assert(ss_by_color.size() == ss_images.size() &&
          ss_images.size() == ss_preimages.size());
+  int image_total = 0;
+  for (const auto &image : ss_images) {
+    for (IndexSpaceIterator<N2, T2> it2(image); it2.valid; it2.step()) {
+      image_total += it2.rect.volume();
+    }
+  }
+
+  int preimage_total = 0;
+  for (const auto &preimage : ss_preimages) {
+    for (IndexSpaceIterator<N1, T1> it2(preimage); it2.valid; it2.step()) {
+      preimage_total += it2.rect.volume();
+    }
+  }
+  if (image_total != preimage_total) return 1;
+
   for (size_t i = 0; i < ss_by_color.size(); i++) {
     for (IndexSpaceIterator<N1, T1> it(ss_by_color[i]); it.valid; it.step()) {
       for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
