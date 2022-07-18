@@ -2243,6 +2243,7 @@ namespace Legion {
         profiling_info.clear();
       }
       untracked_valid_regions.clear();
+      check_collective_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context; 
       if ((shard_manager != NULL) && shard_manager->remove_reference())
@@ -2354,6 +2355,12 @@ namespace Legion {
           rez.serialize(copy_profiling_requests[idx]);
         if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
           rez.serialize(profiling_priority);
+        rez.serialize<size_t>(untracked_valid_regions.size());
+        for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
+          rez.serialize(untracked_valid_regions[idx]);
+        rez.serialize<size_t>(check_collective_regions.size());
+        for (unsigned idx = 0; idx < check_collective_regions.size(); idx++)
+          rez.serialize(check_collective_regions[idx]);
       }
       else
       { 
@@ -2453,6 +2460,16 @@ namespace Legion {
         if (!task_profiling_requests.empty() || 
             !copy_profiling_requests.empty())
           derez.deserialize(profiling_priority);
+        size_t num_untracked_valid_regions;
+        derez.deserialize(num_untracked_valid_regions);
+        untracked_valid_regions.resize(num_untracked_valid_regions);
+        for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
+          derez.deserialize(untracked_valid_regions[idx]);
+        size_t num_check_collective_regions;
+        derez.deserialize(num_check_collective_regions);
+        check_collective_regions.resize(num_check_collective_regions);
+        for (unsigned idx = 0; idx < num_check_collective_regions; idx++)
+          derez.deserialize(check_collective_regions[idx]);
       }
       else
       {
@@ -2640,15 +2657,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::initialize_map_task_input(Mapper::MapTaskInput &input,
                                                Mapper::MapTaskOutput &output,
-                                               MustEpochOp *must_epoch_owner,
-                                               std::vector<InstanceSet> &valid)
+                                               MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_MAP_TASK_CALL);
       // Do the traversals for all the regions and find
       // their valid instances, then fill in the mapper input structure
-      valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
+      input.valid_collectives.resize(regions.size());
       output.chosen_instances.resize(regions.size());
       output.source_instances.resize(regions.size());
       output.output_targets.resize(output_regions.size());
@@ -2664,10 +2680,6 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
-        InstanceSet &current_valid = valid[idx];
-        if (request_valid_instances)
-          runtime->forest->physical_premap_region(this, idx, regions[idx],
-                version_infos[idx], current_valid, map_applied_conditions);
         // See if we've already got an output from a must-epoch mapping
         if (!output.chosen_instances[idx].empty())
         {
@@ -2677,14 +2689,21 @@ namespace Legion {
           // We can skip this since we already know the result
           continue;
         }
-        // Now we can prepare this for mapping,
-        // filter for visible memories if necessary
-        if (regions[idx].is_no_access())
-          prepare_for_mapping(current_valid, input.valid_instances[idx]);
-        // There are no valid instances for reduction-only cases
-        else if (regions[idx].privilege != LEGION_REDUCE)
-          prepare_for_mapping(current_valid, visible_memories,
-                              input.valid_instances[idx]);
+        if (request_valid_instances && 
+            (regions[idx].privilege != LEGION_REDUCE))
+        {
+          InstanceSet current_valid;
+          FieldMaskSet<ReplicatedView> collectives;
+          runtime->forest->physical_premap_region(this, idx, regions[idx],
+                version_infos[idx], current_valid, 
+                collectives, map_applied_conditions);
+          if (regions[idx].is_no_access())
+            prepare_for_mapping(current_valid, collectives,
+                input.valid_instances[idx], input.valid_collectives[idx]);
+          else
+            prepare_for_mapping(current_valid, collectives, visible_memories,
+                input.valid_instances[idx], input.valid_collectives[idx]);
+        }
       }
 #ifdef DEBUG_LEGION
       // Save the inputs for premapped regions so we can check them later
@@ -2706,8 +2725,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::finalize_map_task_output(Mapper::MapTaskInput &input,
                                               Mapper::MapTaskOutput &output,
-                                              MustEpochOp *must_epoch_owner,
-                                              std::vector<InstanceSet> &valid)
+                                              MustEpochOp *must_epoch_owner)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
@@ -3416,25 +3434,44 @@ namespace Legion {
       perform_postmap = output.postmap_task;
       if (!output.untracked_valid_regions.empty())
       {
-        untracked_valid_regions.swap(output.untracked_valid_regions);
-        for (std::set<unsigned>::iterator it = untracked_valid_regions.begin();
-              it != untracked_valid_regions.end(); /*nothing*/)
+        for (std::set<unsigned>::const_iterator it =
+              output.untracked_valid_regions.begin(); it != 
+              output.untracked_valid_regions.end(); it++)
         {
-          // Remove it if it is too big or 
+          // Remove it if it is too big or is not read-only
           if ((*it >= regions.size()) || !IS_READ_ONLY(regions[*it]))
           {
-            std::set<unsigned>::iterator to_remove = it++;
-            if (*to_remove < regions.size())
+            if (*it < regions.size())
               REPORT_LEGION_WARNING(LEGION_WARNING_NON_READ_ONLY_UNTRACK_VALID,
                   "Ignoring request by mapper %s to not track valid instances "
                   "for region requirement %d of task %s (UID %lld) because "
                   "region requirement does not have read-only privileges.",
-                  mapper->get_mapper_name(), *to_remove, 
+                  mapper->get_mapper_name(), *it, 
                   get_task_name(), unique_op_id)
-            untracked_valid_regions.erase(to_remove);
           }
           else
-            it++;
+            untracked_valid_regions.push_back(*it);
+        }
+      }
+      if (!output.check_collective_regions.empty())
+      {
+        for (std::set<unsigned>::const_iterator it = 
+              output.check_collective_regions.begin(); it !=
+              output.check_collective_regions.end(); it++)
+        {
+          // Remove it if it is too big or 
+          if ((*it >= regions.size()) || IS_WRITE(regions[*it]))
+          {
+            if (*it < regions.size())
+              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
+                  "Ignoring request by mapper %s to check for collective usage "
+                  "for region requirement %d of task %s (UID %lld) because "
+                  "region requirement has writing privileges.",
+                  mapper->get_mapper_name(), *it, 
+                  get_task_name(), unique_op_id)
+          }
+          else
+            check_collective_regions.push_back(*it);
         }
       }
     }
@@ -3745,15 +3782,13 @@ namespace Legion {
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       // Initialize the mapping input which also does all the traversal
       // down to the target nodes
-      std::vector<InstanceSet> valid_instances(regions.size());
-      initialize_map_task_input(input, output, must_epoch_owner, 
-                                valid_instances);
+      initialize_map_task_input(input, output, must_epoch_owner); 
       // Now we can invoke the mapper to do the mapping
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_map_task(this, &input, &output);
       // Now we can convert the mapper output into our physical instances
-      finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
+      finalize_map_task_output(input, output, must_epoch_owner);
 
       if (is_recording())
       {
@@ -3806,9 +3841,7 @@ namespace Legion {
       Mapper::MapReplicateTaskOutput output;
       // Initialize the mapping input which also does all the traversal
       // down to the target nodes
-      std::vector<InstanceSet> valid_instances(regions.size());
-      initialize_map_task_input(input, default_output, 
-                                must_epoch_owner, valid_instances);
+      initialize_map_task_input(input, default_output, must_epoch_owner);
       // Now we can invoke the mapper to do the mapping
       mapper->invoke_map_replicate_task(this, &input, &default_output, &output);
       if (output.task_mappings.empty())
@@ -3823,8 +3856,8 @@ namespace Legion {
       {
         // Set replicate back to false since this is no longer replicated
         replicate = false;
-        finalize_map_task_output(input, output.task_mappings[0], 
-                                 must_epoch_owner, valid_instances);
+        finalize_map_task_output(input, output.task_mappings[0],
+                                 must_epoch_owner);
         return;
       }
       else
@@ -4022,7 +4055,7 @@ namespace Legion {
           shard->map_origin = true;
           // Finalize the mapping output
           shard->finalize_map_task_output(input,output.task_mappings[shard_idx],
-                                          must_epoch_owner, valid_instances);
+                                          must_epoch_owner);
           // All shards can just record themselves as being done their 
           // mapping now, their mapping effects will actually come back
           // through the shard manager
@@ -4192,8 +4225,12 @@ namespace Legion {
           {
             if (!no_access_regions[0] && !virtual_mapped[0])
             {
-              const bool record_valid = (untracked_valid_regions.find(0) == 
-                                         untracked_valid_regions.end());
+              const bool record_valid = !std::binary_search(
+                  untracked_valid_regions.begin(),
+                  untracked_valid_regions.end(), 0);
+              const bool check_collective = std::binary_search(
+                  check_collective_regions.begin(),
+                  check_collective_regions.end(), 0);
 #ifdef DEBUG_LEGION
               assert(!task_effects_complete.exists());
 #endif
@@ -4202,7 +4239,7 @@ namespace Legion {
                     regions[0], version_infos[0], this, 0, 
                     init_precondition, single_task_termination,
                     physical_instances[0], source_instances[0],
-                    PhysicalTraceInfo(trace_info, 0), map_applied_conditions,
+                    PhysicalTraceInfo(trace_info, 0), check_collective, map_applied_conditions,
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
                                           unique_op_id,
@@ -4230,6 +4267,7 @@ namespace Legion {
             std::vector<UpdateAnalysis*> analyses(region_count, NULL);
             std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
             std::vector<RtEvent> reg_pre(region_count, RtEvent::NO_RT_EVENT);
+            std::vector<std::vector<size_t> > target_arrivals(region_count);
             for (unsigned idx = 0; idx < logical_regions.size(); idx++)
             {
               if (no_access_regions[idx])
@@ -4239,8 +4277,12 @@ namespace Legion {
               if (virtual_mapped[idx])
                 continue;
               performed_regions.push_back(idx);
-              const bool record_valid = (untracked_valid_regions.find(idx) ==
-                                         untracked_valid_regions.end());
+              const bool record_valid = !std::binary_search(
+                  untracked_valid_regions.begin(),
+                  untracked_valid_regions.end(), idx);
+              const bool check_collective = std::binary_search(
+                  check_collective_regions.begin(),
+                  check_collective_regions.end(), idx);
               // apply the results of the mapping to the tree
               reg_pre[idx] = runtime->forest->physical_perform_updates(
                                           logical_regions[idx], local_info,
@@ -4250,6 +4292,7 @@ namespace Legion {
                                           source_instances[idx],
                                           PhysicalTraceInfo(trace_info, idx),
                                           map_applied_conditions,
+                                          target_arrivals[idx], check_collective,
                                           analyses[idx],
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
@@ -4305,7 +4348,8 @@ namespace Legion {
                 InstanceSet &targets = physical_instances[*it];
                 const RtEvent registration_post = 
                   runtime->forest->defer_physical_perform_registration(
-                                        reg_pre[*it], analyses[*it], targets,
+                                        reg_pre[*it], analyses[*it],
+                                        targets, target_arrivals[*it],
                                         map_applied_conditions, effects[*it],
                                         PhysicalTraceInfo(trace_info, *it),
                                         logical_regions.is_output_created(*it));
@@ -4315,7 +4359,8 @@ namespace Legion {
               {
                 InstanceSet &targets = physical_instances[*it];
                 effects[*it] = runtime->forest->physical_perform_registration(
-                                        analyses[*it], targets,
+                                        analyses[*it], targets, 
+                                        target_arrivals[*it],
                                         PhysicalTraceInfo(trace_info, *it),
                                         map_applied_conditions,
                                         logical_regions.is_output_created(*it));
@@ -4464,9 +4509,9 @@ namespace Legion {
       Mapper::PostMapOutput output;
       input.mapped_regions.resize(regions.size());
       input.valid_instances.resize(regions.size());
+      input.valid_collectives.resize(regions.size());
       output.chosen_instances.resize(regions.size());
       output.source_instances.resize(regions.size());
-      std::vector<InstanceSet> postmap_valid(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (no_access_regions[idx] || virtual_mapped[idx])
@@ -4476,13 +4521,20 @@ namespace Legion {
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
         if (request_valid_instances)
+        {
+          InstanceSet postmap_valid;
+          FieldMaskSet<ReplicatedView> collectives;
           runtime->forest->physical_premap_region(this, idx, regions[idx], 
                                                   get_version_info(idx),
-                                                  postmap_valid[idx],
+                                                  postmap_valid, collectives,
                                                   map_applied_conditions);
-        // No need to filter these because they are on the way out
-        prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
-        prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);
+          // No need to filter these because they are on the way out
+          prepare_for_mapping(postmap_valid, collectives,
+              input.valid_instances[idx], input.valid_collectives[idx]);  
+        }
+        FieldMaskSet<ReplicatedView> no_collectives;
+        prepare_for_mapping(physical_instances[idx], no_collectives,
+            input.mapped_regions[idx], input.valid_collectives[idx]);
       }
       // Now we can do the mapper call
       if (mapper == NULL)
@@ -4629,7 +4681,7 @@ namespace Legion {
                           completion_event/*wait for task to be done*/,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           result, sources, PhysicalTraceInfo(trace_info, idx), 
-                          map_applied_conditions,
+                          false/*check for collectives*/, map_applied_conditions,
 #ifdef DEBUG_LEGION
                           get_logging_name(), unique_op_id,
 #endif

@@ -884,13 +884,11 @@ namespace Legion {
       std::set<ApEvent> tasks_complete;
     }; 
 
-#ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class CheckCollectiveMapping
-     * A class for exchanging the names of collective instances for confirming
-     * that all shards are using the same collective instances
+     * A class for exchanging the names of instances used for collective mapping
      */
-    class CheckCollectiveMapping : public BroadcastCollective {
+    class CheckCollectiveMapping : public AllGatherCollective<true/*inorder*/> {
     public:
       CheckCollectiveMapping(ReplicateContext *ctx, CollectiveID id);
       CheckCollectiveMapping(const CheckCollectiveMapping&) = delete;
@@ -898,14 +896,14 @@ namespace Legion {
     public:
       CheckCollectiveMapping& operator=(const CheckCollectiveMapping&) = delete;
     public:
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      bool verify(const FieldMaskSet<CollectiveManager> &instances);
+      void verify(const InstanceSet &instances, MapperManager *mapper);
     protected:
-      LegionMap<DistributedID,FieldMask> chosen_instances;
+      typedef LegionVector<std::pair<ShardID,FieldMask > > ShardFields;
+      std::map<PhysicalInstance,ShardFields> mapped_instances;
     };
-#endif
 
     /**
      * \class CheckCollectiveSources
@@ -1800,7 +1798,6 @@ namespace Legion {
           const ApEvent local_post, ApEvent &collective_pre,
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
-          const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources);
       virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
@@ -2309,7 +2306,6 @@ namespace Legion {
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     protected:
-      IndexSpace shard_space;
       RtBarrier collective_map_barrier;
       size_t exchange_index;
       bool collective_instance;
@@ -2379,11 +2375,6 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void select_sources(const unsigned index,
-                                  PhysicalManager *target,
-                                  const std::vector<InstanceView*> &sources,
-                                  std::vector<unsigned> &ranking,
-                                  std::map<unsigned,PhysicalManager*> &points);
       virtual size_t get_collective_local_arrivals(void) const;
       virtual CollectiveMapping* get_collective_mapping(void);
       virtual bool is_collective_first_local_shard(void) const

@@ -285,20 +285,18 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(IndividualView *view)
-      : view_did(view->did), analysis_space(view->logical_owner)
+    UniqueInst::UniqueInst(InstanceView *view, PhysicalManager *manager)
+      : inst_did(manager->did), view_did(view->did)
     //--------------------------------------------------------------------------
     {
+      // If the view is an individual view then we can find its analysis
+      // space directly from it, otherwise we know that all individual views
+      // made for any other kind of view are made on the owner space
+      if (view->is_individual_view())
+        analysis_space = view->as_individual_view()->logical_owner;
+      else
+        analysis_space = manager->owner_space;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(DistributedID did)
-      : view_did(did)
-    //--------------------------------------------------------------------------
-    {
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void UniqueInst::serialize(Serializer &rez) const
@@ -306,8 +304,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(view_did != 0);
+      assert(inst_did != 0);
 #endif
       rez.serialize(view_did);
+      rez.serialize(inst_did);
       rez.serialize(analysis_space);
     }
 
@@ -316,6 +316,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(view_did);
+      derez.deserialize(inst_did);
       derez.deserialize(analysis_space);
     }
 
@@ -10821,7 +10822,6 @@ namespace Legion {
       }
       else
         return false;
-
     }
 
     //--------------------------------------------------------------------------

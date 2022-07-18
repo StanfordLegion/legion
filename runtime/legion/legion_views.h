@@ -165,12 +165,21 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t target_space_arrivals,
                                     std::set<RtEvent> &applied_events,
-                                    CollectiveMapping *collective_mapping,
-                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false) = 0;
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
+                                   const RegionUsage &usage,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *user_expr,
+                                   std::vector<RtEvent> &applied) const = 0;
+      virtual void find_atomic_reservations(PhysicalManager *manager,
+                                    const FieldMask &mask, Operation *op, 
+                                    const unsigned index, bool exclusive) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -228,14 +237,16 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source) = 0;
-      virtual void find_last_users(std::set<ApEvent> &events,
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
                                    std::vector<RtEvent> &applied) const = 0;
-    public:
-      void find_atomic_reservations(const FieldMask &mask, Operation *op, 
+      virtual void find_atomic_reservations(PhysicalManager *manager,
+                                    const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
+    public:
       void find_field_reservations(const FieldMask &mask,
                                    std::vector<Reservation> &results);
     public:
@@ -292,7 +303,18 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
+                                   const RegionUsage &usage,
+                                   const FieldMask &mask,
+                                   IndexSpaceExpression *user_expr,
+                                   std::vector<RtEvent> &applied) const;
+      virtual void find_atomic_reservations(PhysicalManager *manager,
+                                    const FieldMask &mask, Operation *op, 
+                                    const unsigned index, bool exclusive);
+    public:
       bool contains(PhysicalManager *manager) const;
+      bool meets_region(LogicalRegion region) const;
       void register_collective_analysis(CollectiveCopyFillAnalysis *analysis); 
     };
 
@@ -665,9 +687,9 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t target_space_arrivals,
                                     std::set<RtEvent> &applied_events,
-                                    CollectiveMapping *collective_mapping,
-                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);
@@ -693,7 +715,8 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source);
-      virtual void find_last_users(std::set<ApEvent> &events,
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
@@ -832,9 +855,9 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t target_space_arrivals,
                                     std::set<RtEvent> &applied_events,
-                                    CollectiveMapping *collective_mapping,
-                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);
@@ -918,9 +941,9 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t target_space_arrivals,
                                     std::set<RtEvent> &applied_events,
-                                    CollectiveMapping *collective_mapping,
-                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);
@@ -946,7 +969,8 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source);
-      virtual void find_last_users(std::set<ApEvent> &events,
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
@@ -1049,9 +1073,9 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t target_space_arrivals,
                                     std::set<RtEvent> &applied_events,
-                                    CollectiveMapping *collective_mapping,
-                                    Operation *local_collective_op,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);

@@ -4193,18 +4193,18 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info, 
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info,
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_pre.exists());
       assert(local_post.exists());
@@ -4263,7 +4263,7 @@ namespace Legion {
         assert(src_indirect_records[index].size() < points.size());
 #endif
         src_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.src_records.push_back(&records);
         if (src_indirect_records[index].size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -4315,7 +4315,7 @@ namespace Legion {
         assert(dst_indirect_records[index].size() < points.size());
 #endif
         dst_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.dst_records.push_back(&records);
         if (dst_indirect_records[index].size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -7205,22 +7205,6 @@ namespace Legion {
             "non-canonical Legion features such as arrive phase barriers are "
             "not permitted with control replication.",
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-#ifdef DEBUG_LEGION
-      if (remap_region)
-      {
-        InstanceSet mapped_instances;
-        region.impl->get_references(mapped_instances);
-        // These should all be collective instances
-        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-        {
-          InstanceManager *manager = mapped_instances[idx].get_manager();
-          assert(manager->is_collective_manager());
-          CollectiveManager *collective = manager->as_collective_manager();
-          assert(collective->contains_point(get_shard_point()));
-          assert(collective->total_points == ctx->shard_manager->total_shards);
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7296,71 +7280,29 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        // Check that all the produced mappings are collective instances
-        FieldMaskSet<CollectiveManager> collective_instances;
-        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        // For read-write or write-discard cases make sure that all the 
+        // shards mapped to independent physical instances
+        if (IS_WRITE(requirement))
         {
-          InstanceManager *manager = mapped_instances[idx].get_manager();
-          if (!manager->is_collective_manager())
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Invalid mapper output from invocation of 'map_inline' "
-                "by mapper %s. Mapper selected a non-collective instance "
-                "for mapping an inline mapping in control-replicated "
-                "parent task %s (UID %lld). All inline mappings in "
-                "control-replicated parent tasks must select created or "
-                "select a collective instance for mapping.",
-                mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                parent_ctx->get_unique_id())
-          CollectiveManager *collective = manager->as_collective_manager();
-          if (!collective->contains_point(get_shard_point()))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Invalid mapper output from invocation of 'map_inline' "
-                "by mapper %s. Mapper selected a collective instance "
-                "for mapping an inline mapping in control-replicated "
-                "parent task %s (UID %lld) that does not contain an entry "
-                "for shard %lld. All inline mappings must select collective "
-                "instances that have entries for all points in the parent "
-                "task's sharding space.", mapper->get_mapper_name(),
-                parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                get_shard_point()[0])
-          if (collective->total_points !=
-              repl_ctx->shard_manager->total_shards)
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Invalid mapper output from invocation of 'map_inline' "
-                "by mapper %s. Mapper selected a collective instance "
-                "for mapping an inline mapping in control-replicated "
-                "parent task %s (UID %lld) that contains more points than "
-                "shards. All inline mappings must select collective "
-                "instances that have exactly one point in the parent task's "
-                "sharding space and no more.", mapper->get_mapper_name(),
-                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-          collective_instances.insert(collective,
-              mapped_instances[idx].get_valid_fields());
+          CheckCollectiveMapping mapping_collective(repl_ctx, mapping_check);
+          mapping_collective.verify(mapped_instances, mapper);
         }
-        // Then check that all the mappers agreed on the mapping
-        CheckCollectiveMapping mapping_collective(repl_ctx, mapping_check);
-        if (!mapping_collective.verify(collective_instances))
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Invalid mapper output from invocation of 'map_inline' "
-                "by mapper %s. Mapper selected different collective "
-                "instances on shard 0 and shard %d when "
-                "mapping an inline mapping in control-replicated "
-                "parent task %s (UID %lld). Each inline mapping in a "
-                "control-replicated parent task must map to the same "
-                "collective instances across all shards.",
-                mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
-                parent_ctx->get_task_name(), parent_ctx->get_unique_id()) 
-        CheckCollectiveSources sources_collective(repl_ctx, sources_check);
-        if (!sources_collective.verify(source_instances))
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Invalid mapper output from invocation of 'map_inline' "
-                "by mapper %s. Mapper selected different 'source_instances' "
-                "on shard 0 and shard %d when mapping an inline mapping in "
-                "control-replicated parent task %s (UID %lld). Each inline "
-                "mapping in a control-replicated parent task must provide "
-                "same 'source_instances' across all shards.",
-                mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
-                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        // For anything that is not a reduce inline mapping we check that
+        // the names of the sources are the same across all the shards
+        if (!IS_REDUCE(requirement))
+        {
+          CheckCollectiveSources sources_collective(repl_ctx, sources_check);
+          if (!sources_collective.verify(source_instances))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected different 'source_instances' "
+                  "on shard 0 and shard %d when mapping an inline mapping in "
+                  "control-replicated parent task %s (UID %lld). Each inline "
+                  "mapping in a control-replicated parent task must provide "
+                  "same 'source_instances' across all shards.",
+                  mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        }
       }
       return result;
     }
@@ -7487,13 +7429,6 @@ namespace Legion {
                 ctx->owner_shard->shard_id, runtime->address_space)
           }
         }
-        if (!deduplicate_across_shards)
-          shard_space = ctx->find_sharding_launch_space();
-        const ShardID owner_shard = ctx->get_next_attach_did_origin();
-        did_broadcast = 
-          new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_77);
-        if (did_broadcast->is_origin())
-          did_broadcast->broadcast(runtime->get_available_distributed_id());
       }
       else
       {
@@ -7544,7 +7479,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_attach_op();
-      shard_space = IndexSpace::NO_SPACE;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       exchange_index = 0;
       collective_instance = false;
@@ -7626,11 +7560,12 @@ namespace Legion {
       // Create the external instance
       create_external_instance();
       // Register this instance with the memory manager
-      PhysicalManager *external_manager = 
+      PhysicalManager *external_manager =
         external_instances[0].get_physical_manager();
-      if (external_manager->is_collective_manager())
+      if (collective_instance)
       {
-        if (is_first_local_shard)
+        // Everybody does the attach in the case of collective construction
+        if (!deduplicate_across_shards || is_first_local_shard)
         {
           const RtEvent attached = external_manager->attach_external_instance();
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
@@ -7661,19 +7596,6 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint ReplAttachOp::get_collective_instance_point(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
@@ -7843,105 +7765,31 @@ namespace Legion {
       // Now we need to make the instance to span the shards
       if (collective_instance)
       {
-        // Get the distributed ID from the broadcast
-        const DistributedID manager_did = 
-          did_broadcast->get_value(!did_broadcast->is_origin());
-        // Making a collective instance across the shards
-        CollectiveManager *manager = NULL;
-        // Make the manager first
-        if (is_first_local_shard)
+        if (deduplicate_across_shards)
         {
-          // Pointer constraint doesn't matter here
-          constraints.pointer_constraint = PointerConstraint();
-          const size_t total_dims = node->row_source->get_num_dims();
-          FieldSpaceNode *field_node = node->column_source;
-          LayoutDescription *layout = field_node->find_layout_description(
-                                  external_mask, total_dims, constraints);
-          if (layout == NULL)
+          if (is_first_local_shard)
           {
-            LayoutConstraints *layout_constraints = 
-              runtime->register_layout(field_node->handle,
-                            constraints, true/*internal*/);
-            layout = field_node->create_layout_description(external_mask,
-                total_dims, layout_constraints, mask_index_map, field_set,
-                field_sizes, serdez);
-          }
-#ifdef DEBUG_LEGION
-          assert(layout != NULL);
-          assert(shard_space.exists());
-#endif
-          Domain dense_points;
-          if (shard_manager->shard_domain.dense())
-            dense_points = shard_manager->shard_domain;
-          manager = new CollectiveManager(runtime->forest, manager_did,
-              runtime->determine_owner(manager_did), dense_points,
-              shard_manager->total_shards,
-              &shard_manager->get_collective_mapping(), node->row_source,
-              NULL/*piece list*/, 0/*no piece list*/, field_node,
-              node->handle.get_tree_id(), layout, 0/*redop*/,
-              true/*register now*/, footprint,
-              true/*external instance*/, false/*not multi instance*/);
-          // If we're the owner address space, record that we have 
-          // instances on all other address spaces in the control
-          // replicated parent task's collective mapping
-          if (manager->is_owner())
-          {
-            const CollectiveMapping &mapping = 
-              shard_manager->get_collective_mapping();
-            for (unsigned idx = 0; idx < mapping.size(); idx++)
-            {
-              const AddressSpaceID space = mapping[idx];
-              if (space == manager->owner_space)
-                continue;
-              manager->update_remote_instances(space);
-            }
-          }
-          // Send the manager to the other shards if we're not
-          // deduplicating so we can set the points
-          if (!deduplicate_across_shards)
+            PhysicalManager *manager =
+              node->column_source->create_external_manager(instance,
+                  ready_event, footprint, constraints, field_set, 
+                  field_sizes, external_mask, mask_index_map, node,
+                  serdez, runtime->get_available_distributed_id()); 
             shard_manager->exchange_shard_local_op_data(context_index, 
                                             exchange_index++, manager);
-        }
-        else if (!deduplicate_across_shards)
-          manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
-                                               context_index, exchange_index++);
-        // Then record the local instance data with the manager
-        // If this is an external instance then we need to do the 
-        // exchange to check to make sure that we always attach instances
-        // on the local node to where they live, file instances don't have
-        // this problem because the memory is "local" everywhere
-        if (!deduplicate_across_shards)
-        {
-          const DomainPoint point(repl_ctx->owner_shard->shard_id);
-          manager->record_point_instance(point, instance, ready_event);
-          // Make sure that all the shards are done recording before we proceed
-          shard_manager->barrier_shard_local(context_index, exchange_index++);
-        }
-        else if (is_first_local_shard)
-        {
-          // Figure out which point we are in the collective mapping
-          CollectiveMapping &mapping = 
-            shard_manager->get_collective_mapping();
-          DomainPoint point;
-          for (unsigned idx = 0; idx < mapping.size(); idx++)
-          {
-            const AddressSpaceID space = mapping[idx];
-            if (space != runtime->address_space)
-              continue;
-            point = DomainPoint(idx);
-            break;
+            return manager;
           }
-#ifdef DEBUG_LEGION
-          assert(point.get_dim() == 1); // test if point was set
-#endif
-          manager->record_point_instance(point, instance, ready_event);
-          shard_manager->exchange_shard_local_op_data(context_index,
-                                          exchange_index++, manager);
+          else
+            return shard_manager->find_shard_local_op_data<PhysicalManager*>(
+                                             context_index, exchange_index++);
         }
         else
-          manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
-                                               context_index, exchange_index++);
-        return manager;
+        {
+          // Each shard is just going to make its own physical manager
+          return node->column_source->create_external_manager(instance,
+              ready_event, footprint, constraints, field_set, field_sizes,
+              external_mask, mask_index_map, node, serdez, 
+              runtime->get_available_distributed_id());
+        }
       }
       else
       {
@@ -8157,19 +8005,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint ReplDetachOp::get_collective_instance_point(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->get_shard_point();
-    }
-
-    //--------------------------------------------------------------------------
     size_t ReplDetachOp::get_collective_local_arrivals(void) const
     //--------------------------------------------------------------------------
     {
@@ -8193,34 +8028,6 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       return &(repl_ctx->shard_manager->get_collective_mapping()); 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDetachOp::select_sources(const unsigned index,
-                                      InstanceView *target,
-                                      const std::vector<InstanceView*> &sources,
-                                      std::vector<unsigned> &ranking,
-                                      std::map<unsigned,DomainPoint> &keys)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index == 0);
-#endif
-      // Pick any instances other than external ones
-      std::vector<unsigned> remote_ranking;
-      for (unsigned idx = 0; idx < sources.size(); idx++)
-      {
-        PhysicalManager *manager = sources[idx]->get_manager();
-        if (manager->is_external_instance())
-          continue;
-        if (manager->owner_space == runtime->address_space)
-          ranking.push_back(idx);
-        else
-          remote_ranking.push_back(idx);
-      }
-      if (!remote_ranking.empty())
-        ranking.insert(ranking.end(), 
-                       remote_ranking.begin(), remote_ranking.end());
     }
 
     //--------------------------------------------------------------------------
@@ -8684,19 +8491,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint ReplAcquireOp::get_collective_instance_point(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->get_shard_point();
-    }
-
-    //--------------------------------------------------------------------------
     size_t ReplAcquireOp::get_collective_local_arrivals(void) const
     //--------------------------------------------------------------------------
     {
@@ -8872,19 +8666,6 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       return &(repl_ctx->shard_manager->get_collective_mapping()); 
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint ReplReleaseOp::get_collective_instance_point(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->get_shard_point();
     }
 
     //--------------------------------------------------------------------------
@@ -15410,7 +15191,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CheckCollectiveMapping::CheckCollectiveMapping(ReplicateContext *ctx,
                                                    CollectiveID id)
-      : BroadcastCollective(ctx, id, 0/*origin shard*/)
+      : AllGatherCollective<true>(ctx, id)
     //--------------------------------------------------------------------------
     {
     }
@@ -15422,61 +15203,91 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CheckCollectiveMapping::pack_collective(Serializer &rez) const
+    void CheckCollectiveMapping::pack_collective_stage(Serializer &rez,
+                                                       int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(chosen_instances.size());
-      for (LegionMap<DistributedID,FieldMask>::const_iterator it =
-            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      rez.serialize<size_t>(mapped_instances.size());
+      for (std::map<PhysicalInstance,ShardFields>::const_iterator mit =
+            mapped_instances.begin(); mit != mapped_instances.end(); mit++)
       {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
+        rez.serialize(mit->first);
+        rez.serialize<size_t>(mit->second.size());
+        for (ShardFields::const_iterator it = mit->second.begin();
+              it != mit->second.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void CheckCollectiveMapping::unpack_collective(Deserializer &derez)
+    void CheckCollectiveMapping::unpack_collective_stage(Deserializer &derez,
+                                                         int stage)
     //--------------------------------------------------------------------------
     {
       size_t num_instances;
       derez.deserialize(num_instances);
-      for (unsigned idx = 0; idx < num_instances; idx++)
+      for (unsigned idx1 = 0; idx1 < num_instances; idx1++)
       {
-        DistributedID did;
-        derez.deserialize(did);
-        derez.deserialize(chosen_instances[did]);
+        PhysicalInstance inst;
+        derez.deserialize(inst);
+        ShardFields &shard_fields = mapped_instances[inst];
+        size_t offset = shard_fields.size();
+        size_t num_copies;
+        derez.deserialize(num_copies);
+        shard_fields.resize(offset+num_copies);
+        for (unsigned idx2 = 0; idx2 < num_copies; idx2++)
+        {
+          derez.deserialize(shard_fields[offset+idx2].first);
+          derez.deserialize(shard_fields[offset+idx2].second);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    bool CheckCollectiveMapping::verify(
-                               const FieldMaskSet<CollectiveManager> &instances)
+    void CheckCollectiveMapping::verify(const InstanceSet &instances,
+                                        MapperManager *mapper)
     //--------------------------------------------------------------------------
     {
-      if (local_shard == 0)
+      for (unsigned idx = 0; idx < instances.size(); idx++) 
       {
-        for (FieldMaskSet<CollectiveManager>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
-          chosen_instances[it->first->did] = it->second;
-        perform_collective_async();
+        const InstanceRef &ref = instances[idx];
+        PhysicalManager *manager = ref.get_physical_manager();
+        PhysicalInstance inst = manager->get_instance();
+        mapped_instances[inst].emplace_back(
+            std::make_pair(local_shard, ref.get_valid_fields()));
       }
-      else
+      perform_collective_sync();
+      for (unsigned idx = 0; idx < instances.size(); idx++) 
       {
-        perform_collective_wait();
-        if (instances.size() != chosen_instances.size())
-          return false;
-        for (FieldMaskSet<CollectiveManager>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
+        const InstanceRef &ref = instances[idx];
+        PhysicalManager *manager = ref.get_physical_manager();
+        PhysicalInstance inst = manager->get_instance();
+        ShardFields &shard_fields = mapped_instances[inst];
+#ifdef DEBUG_LEGION
+        assert(!shard_fields.empty());
+#endif
+        for (ShardFields::const_iterator it =
+              shard_fields.begin(); it != shard_fields.end(); it++)
         {
-          LegionMap<DistributedID,FieldMask>::const_iterator finder =
-            chosen_instances.find(it->first->did);
-          if (finder == chosen_instances.end())
-            return false;
-          if (finder->second != it->second)
-            return false;
+          if (it->first == local_shard)
+            continue;
+          if (it->second * ref.get_valid_fields())
+            continue;
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected the same physical instance "
+                  IDFMT " on both shards %d and %d with write privileges for "
+                  "inline mapping in control-replicated parent task %s "
+                  "(UID %lld). Each inline mapping with write privileges in a "
+                  "control-replicated parent task must map to a different "
+                  "physical instance to avoid races.",
+                  mapper->get_mapper_name(), inst.id, local_shard, it->first,
+                  context->get_task_name(), context->get_unique_id())
         }
       }
-      return true;
     }
 
     /////////////////////////////////////////////////////////////

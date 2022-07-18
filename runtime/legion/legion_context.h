@@ -1475,11 +1475,16 @@ namespace Legion {
                                RemoteContext *target);
     public:
       void convert_source_views(const std::vector<PhysicalManager*> &sources,
-                                std::vector<IndividualView*> &source_views,
-                                CollectiveMapping *mapping = NULL);
-      void convert_target_views(const InstanceSet &targets, 
-                                std::vector<IndividualView*> &target_views,
-                                CollectiveMapping *mapping = NULL);
+                                std::vector<InstanceView*> &source_views);
+      void convert_target_views(const InstanceSet &targets,
+                                std::vector<InstanceView*> &target_views);
+      // Return true if we are the first local participant in analysis mapping
+      bool convert_collective_views(Operation *op, unsigned index, 
+                                    LogicalRegion region, 
+                                    const InstanceSet &targets,
+                                    CollectiveMapping *&analysis_mapping,
+                                    std::vector<InstanceView*> &target_views,
+                                    std::vector<size_t> &target_space_arrivals);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
@@ -2409,7 +2414,6 @@ namespace Legion {
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
     public:
-      ShardID get_next_attach_did_origin(void);
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
       bool replicate_partition_equivalence_sets(PartitionNode *node) const;
@@ -2543,7 +2547,6 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
-      ShardID attach_did_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;

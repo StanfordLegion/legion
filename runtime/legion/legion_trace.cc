@@ -4306,7 +4306,7 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
-      for (std::map<DistributedID,IndividualView*>::const_iterator it =
+      for (std::map<DistributedID,InstanceView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
         if (it->second->remove_base_valid_ref(TRACE_REF))
           delete it->second;
@@ -4362,11 +4362,17 @@ namespace Legion {
         {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
-          std::map<DistributedID,IndividualView*>::const_iterator finder =
+          std::map<DistributedID,InstanceView*>::const_iterator finder =
             recorded_views.find(uit->instance.view_did);
+          RtEvent ready;
+          PhysicalManager *manager = 
+            trace->runtime->find_or_request_instance_manager(
+                                uit->instance.inst_did, ready);
 #ifdef DEBUG_LEGION
           assert(finder != recorded_views.end());
 #endif
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
           // Query the view for the events that it needs
           // Note that if we're not performing actual fence elision
           // we switch the usage to full read-write privileges so 
@@ -4374,12 +4380,12 @@ namespace Legion {
           if (!trace->perform_fence_elision)
           {
             const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            finder->second->find_last_users(result.events, usage,
+            finder->second->find_last_users(manager, result.events, usage,
                 uit->mask, uit->expr, frontier_events);
           }
           else
-            finder->second->find_last_users(result.events, uit->usage,
-                uit->mask, uit->expr, frontier_events);
+            finder->second->find_last_users(manager, result.events,
+                uit->usage, uit->mask, uit->expr, frontier_events);
         }
       }
     }
@@ -6488,7 +6494,7 @@ namespace Legion {
       if (recorded_views.find(instance.view_did) == recorded_views.end())
       {
         RtEvent ready;
-        IndividualView *view = static_cast<IndividualView*>(
+        InstanceView *view = static_cast<InstanceView*>(
             trace->runtime->find_or_request_logical_view(
                                 instance.view_did, ready));
         recorded_views[instance.view_did] = view;
@@ -6515,7 +6521,7 @@ namespace Legion {
           (recorded_views.find(inst.view_did) == recorded_views.end()))
       {
         RtEvent ready;
-        IndividualView *view = static_cast<IndividualView*>(
+        InstanceView *view = static_cast<InstanceView*>(
             trace->runtime->find_or_request_logical_view(inst.view_did, ready));
         recorded_views[inst.view_did] = view;
         WrapperReferenceMutator mutator(applied_events);

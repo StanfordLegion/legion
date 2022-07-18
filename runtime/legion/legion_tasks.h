@@ -446,12 +446,10 @@ namespace Legion {
       RtEvent perform_versioning_analysis(const bool post_mapper);
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
-                                     MustEpochOp *must_epoch_owner,
-                                     std::vector<InstanceSet> &valid_instances);
+                                     MustEpochOp *must_epoch_owner);
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
-                                    MustEpochOp *must_epoch_owner,
-                                    std::vector<InstanceSet> &valid_instances);
+                                    MustEpochOp *must_epoch_owner);
     protected:
       void prepare_output_instance(unsigned index,
                                    InstanceSet &instance_set,
@@ -561,7 +559,8 @@ namespace Legion {
       std::vector<std::vector<PhysicalManager*> > source_instances;
       std::vector<Memory>                         future_memories;
     protected: // Mapper choices 
-      std::set<unsigned>                          untracked_valid_regions;
+      std::vector<unsigned>                       untracked_valid_regions;
+      std::vector<unsigned>                       check_collective_regions;
       VariantID                                   selected_variant;
       TaskPriority                                task_priority;
       bool                                        perform_postmap;

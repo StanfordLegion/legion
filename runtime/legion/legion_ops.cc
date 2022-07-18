@@ -1989,40 +1989,66 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
-                                      std::vector<MappingInstance> &input_valid)
+                              const FieldMaskSet<ReplicatedView> &collectives,
+                              std::vector<MappingInstance> &input_valid,
+                              std::vector<MappingCollective> &collectives_valid)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = input_valid.size();
-      input_valid.resize(offset + valid.size());
-      for (unsigned idx = 0; idx < valid.size(); idx++)
+      if (!valid.empty())
       {
-        const InstanceRef &ref = valid[idx];
+        unsigned offset = input_valid.size();
+        input_valid.resize(offset + valid.size());
+        for (unsigned idx = 0; idx < valid.size(); idx++)
+        {
+          const InstanceRef &ref = valid[idx];
 #ifdef DEBUG_LEGION
-        assert(!ref.is_virtual_ref());
+          assert(!ref.is_virtual_ref());
 #endif
-        MappingInstance &inst = input_valid[offset+idx];
-        inst = ref.get_mapping_instance();
+          MappingInstance &inst = input_valid[offset+idx];
+          inst = ref.get_mapping_instance();
+        }
+      }
+      if (!collectives.empty())
+      {
+        collectives_valid.reserve(
+            collectives_valid.size() + collectives.size());
+        for (FieldMaskSet<ReplicatedView>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          collectives_valid.emplace_back(MappingCollective(it->first));
       }
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
-                                      const std::set<Memory> &visible_filter,
-                                      std::vector<MappingInstance> &input_valid)
+                              const FieldMaskSet<ReplicatedView> &collectives,
+                              const std::set<Memory> &visible_filter,
+                              std::vector<MappingInstance> &input_valid,
+                              std::vector<MappingCollective> &collectives_valid)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = input_valid.size();
-      input_valid.reserve(offset+valid.size());
-      unsigned next_index = offset;
-      for (unsigned idx = 0; idx < valid.size(); idx++)
+      if (!valid.empty())
       {
-        const InstanceRef &ref = valid[idx];
-        PhysicalManager *manager = ref.get_physical_manager();
-        if (!manager->has_visible_from(visible_filter))
-          continue;
-        input_valid.resize(next_index+1);
-        MappingInstance &inst = input_valid[next_index++];
-        inst = ref.get_mapping_instance();
+        unsigned offset = input_valid.size();
+        input_valid.reserve(offset+valid.size());
+        unsigned next_index = offset;
+        for (unsigned idx = 0; idx < valid.size(); idx++)
+        {
+          const InstanceRef &ref = valid[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          if (!manager->has_visible_from(visible_filter))
+            continue;
+          input_valid.resize(next_index+1);
+          MappingInstance &inst = input_valid[next_index++];
+          inst = ref.get_mapping_instance();
+        }
+      }
+      if (!collectives.empty())
+      {
+        collectives_valid.reserve(
+            collectives_valid.size() + collectives.size());
+        for (FieldMaskSet<ReplicatedView>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          collectives_valid.emplace_back(MappingCollective(it->first));
       }
     }
 
@@ -4725,6 +4751,7 @@ namespace Legion {
                                                 mapped_instances,
                                                 source_instances,
                                                 trace_info,
+                                                true/*check collective*/,
                                                 map_applied_conditions,
 #ifdef DEBUG_LEGION
                                                 get_logging_name(),
@@ -5173,18 +5200,20 @@ namespace Legion {
       if (mapper->request_valid_instances)
       {
         InstanceSet valid_instances;
+        FieldMaskSet<ReplicatedView> collectives;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                      version_info, valid_instances, map_applied_conditions);
+            version_info, valid_instances, collectives, map_applied_conditions);
         if (!requirement.is_no_access())
         {
           std::set<Memory> visible_memories;
           runtime->find_visible_memories(parent_ctx->get_executing_processor(),
                                          visible_memories);
-          prepare_for_mapping(valid_instances, visible_memories,
-                              input.valid_instances);
+          prepare_for_mapping(valid_instances, collectives, visible_memories,
+                              input.valid_instances, input.valid_collectives);
         }
         else
-          prepare_for_mapping(valid_instances, input.valid_instances);
+          prepare_for_mapping(valid_instances, collectives,
+              input.valid_instances, input.valid_collectives);
 #ifdef NO_EXPLICIT_COLLECTIVES
         if (collective_instances_only)
         {
@@ -6592,18 +6621,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const TraceInfo trace_info(this, true/*initialize*/);
-      std::vector<InstanceSet> valid_src_instances(src_requirements.size());
-      std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
-      std::vector<InstanceSet> valid_gather_instances(
-                                          src_indirect_requirements.size());
-      std::vector<InstanceSet> valid_scatter_instances(
-                                          dst_indirect_requirements.size());
       Mapper::MapCopyInput input;
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
       input.dst_instances.resize(dst_requirements.size());
       input.src_indirect_instances.resize(src_indirect_requirements.size());
       input.dst_indirect_instances.resize(dst_indirect_requirements.size());
+      input.src_collectives.resize(src_requirements.size());
+      input.dst_collectives.resize(dst_requirements.size());
+      input.src_indirect_collectives.resize(src_indirect_requirements.size());
+      input.dst_indirect_collectives.resize(dst_indirect_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
@@ -6627,19 +6654,22 @@ namespace Legion {
         // First go through and do the traversals to find the valid instances
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          InstanceSet &valid_instances = valid_src_instances[idx];
+          InstanceSet valid_instances;
+          FieldMaskSet<ReplicatedView> collectives;
           runtime->forest->physical_premap_region(this, idx, 
                                                   src_requirements[idx],
                                                   src_versions[idx],
-                                                  valid_instances,
+                                                  valid_instances, collectives,
                                                   map_applied_conditions);
           // Convert these to the valid set of mapping instances
           // No need to filter for copies
-          prepare_for_mapping(valid_instances, input.src_instances[idx]);
+          prepare_for_mapping(valid_instances, collectives,
+              input.src_instances[idx], input.src_collectives[idx]);
         }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
-          InstanceSet &valid_instances = valid_dst_instances[idx];
+          InstanceSet valid_instances;
+          FieldMaskSet<ReplicatedView> collectives;
           // Little bit of a hack here, if we are going to do a reduction
           // explicit copy, switch the privileges to read-write when doing
           // the registration since we know we are using normal instances
@@ -6650,10 +6680,11 @@ namespace Legion {
                                                   idx+src_requirements.size(),
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
-                                                  valid_instances,
+                                                  valid_instances, collectives,
                                                   map_applied_conditions);
           // No need to filter for copies
-          prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+          prepare_for_mapping(valid_instances, collectives,
+              input.dst_instances[idx], input.dst_collectives[idx]);
           // Switch the privileges back when we are done
           if (is_reduce_req)
             dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -6664,16 +6695,18 @@ namespace Legion {
             src_requirements.size() + dst_requirements.size();
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            InstanceSet &valid_instances = valid_gather_instances[idx];
+            InstanceSet valid_instances;
+            FieldMaskSet<ReplicatedView> collectives;
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 src_indirect_requirements[idx],
                                                 gather_versions[idx],
-                                                valid_instances,
+                                                valid_instances, collectives,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
-            prepare_for_mapping(valid_instances, 
-                                input.src_indirect_instances[idx]);
+            prepare_for_mapping(valid_instances, collectives,
+                                input.src_indirect_instances[idx],
+                                input.src_indirect_collectives[idx]);
           }
         }
         if (!dst_indirect_requirements.empty())
@@ -6682,16 +6715,18 @@ namespace Legion {
             dst_requirements.size() + src_indirect_requirements.size();
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            InstanceSet &valid_instances = valid_scatter_instances[idx];
+            InstanceSet valid_instances;
+            FieldMaskSet<ReplicatedView> collectives;
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 dst_indirect_requirements[idx],
                                                 scatter_versions[idx],
-                                                valid_instances,
+                                                valid_instances, collectives,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
-            prepare_for_mapping(valid_instances, 
-                                input.dst_indirect_instances[idx]);
+            prepare_for_mapping(valid_instances, collectives,
+                                input.dst_indirect_instances[idx],
+                                input.dst_indirect_collectives[idx]);
           }
         }
       }
@@ -6771,8 +6806,7 @@ namespace Legion {
           RtEvent exchange_done = exchange_indirect_records(idx, 
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, src_targets,
-              src_requirements[idx], index_point, 
-              src_indirect_records[idx], true/*source*/);
+              src_requirements[idx], src_indirect_records[idx], true/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -6784,8 +6818,7 @@ namespace Legion {
           RtEvent exchange_done = exchange_indirect_records(idx, 
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, dst_targets,
-              dst_requirements[idx], index_point, 
-              dst_indirect_records[idx], false/*source*/);
+              dst_requirements[idx], dst_indirect_records[idx],false/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -6796,6 +6829,9 @@ namespace Legion {
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
+          const bool check_collective = 
+            (output.check_collective_srcs.find(idx) !=
+             output.check_collective_srcs.end());
           const RegionRequirement &src_req = src_requirements[idx];
           runtime->forest->physical_perform_updates_and_registration(
                                               src_req, src_versions[idx],
@@ -6807,6 +6843,7 @@ namespace Legion {
                                               src_targets,
                                               src_sources,
                                               src_info,
+                                              check_collective,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
@@ -6852,6 +6889,7 @@ namespace Legion {
                                           dst_targets,
                                           dst_sources,
                                           dst_info,
+                                          false/*check collective*/,
                                           (src_virtual >= 0) ?
                                             perform_ready_events :
                                             map_applied_conditions,
@@ -6888,6 +6926,9 @@ namespace Legion {
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
+          const bool check_collective = 
+            (output.check_collective_ind_srcs.find(idx) !=
+             output.check_collective_ind_srcs.end());
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
@@ -6898,6 +6939,7 @@ namespace Legion {
                                        gather_targets,
                                        gather_sources,
                                        gather_info,
+                                       check_collective,
                                        map_applied_conditions,
 #ifdef DEBUG_LEGION
                                        get_logging_name(),
@@ -6927,6 +6969,9 @@ namespace Legion {
             dst_requirements.size() + src_indirect_requirements.size() + idx;
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
+          const bool check_collective =
+            (output.check_collective_ind_dsts.find(idx) !=
+             output.check_collective_ind_dsts.end());
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
@@ -6938,6 +6983,7 @@ namespace Legion {
                                       scatter_targets,
                                       scatter_sources,
                                       scatter_info,
+                                      check_collective,
                                       map_applied_conditions,
 #ifdef DEBUG_LEGION
                                       get_logging_name(),
@@ -7268,13 +7314,13 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       collective_pre = local_pre;
       collective_post = local_post;
-      records.emplace_back(IndirectRecord(runtime->forest, req, insts, key));
+      records.emplace_back(IndirectRecord(runtime->forest, req, insts));
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -9032,18 +9078,18 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info, 
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info,
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_pre.exists());
       assert(local_post.exists());
@@ -9086,7 +9132,7 @@ namespace Legion {
         assert(src_indirect_records[index].size() < points.size());
 #endif
         src_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.src_records.push_back(&records);
         if (src_indirect_records[index].size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -9124,7 +9170,7 @@ namespace Legion {
         assert(dst_indirect_records[index].size() < points.size());
 #endif
         dst_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.dst_records.push_back(&records);
         if (dst_indirect_records[index].size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -9753,14 +9799,14 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
       return owner->exchange_indirect_records(index, local_pre, local_post,
                                 collective_pre, collective_post, trace_info,
-                                insts, req, index_point, records, sources);
+                                insts, req, records, sources);
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -11843,6 +11889,7 @@ namespace Legion {
                                               target_instances, 
                                               dummy_sources,
                                               trace_info,
+                                              false/*check collective*/,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
@@ -18297,8 +18344,9 @@ namespace Legion {
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
+      bool check_collective = false;
       const bool record_valid = 
-        invoke_mapper(mapped_instances, source_instances);
+        invoke_mapper(mapped_instances, source_instances, check_collective);
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
@@ -18315,6 +18363,7 @@ namespace Legion {
                                               mapped_instances,
                                               source_instances,
                                               trace_info,
+                                              check_collective,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
@@ -18420,13 +18469,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances,
-                                std::vector<PhysicalManager*> &source_instances)
+        std::vector<PhysicalManager*> &source_instances, bool &check_collective)
     //--------------------------------------------------------------------------
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       output.track_valid_region = true;
+      output.check_collective = false;
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -18436,11 +18486,14 @@ namespace Legion {
       if (mapper->request_valid_instances)
       {
         InstanceSet valid_instances;
+        FieldMaskSet<ReplicatedView> collectives;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                      version_info, valid_instances, map_applied_conditions);
-        prepare_for_mapping(valid_instances, input.valid_instances);
+            version_info, valid_instances, collectives, map_applied_conditions);
+        prepare_for_mapping(valid_instances, collectives,
+                            input.valid_instances, input.valid_collectives);
       }
       mapper->invoke_map_partition(this, &input, &output);
+      check_collective = output.check_collective;
       if (!output.source_instances.empty())
         runtime->forest->physical_convert_sources(this, requirement,
             output.source_instances, source_instances, 
@@ -21825,20 +21878,25 @@ namespace Legion {
       if (!attach_event.exists() || (external_instances.size() > 1))
       {
         InnerContext *context = find_physical_context(0/*index*/);
-        std::vector<IndividualView*> individual_views;
-        context->convert_target_views(external_instances, individual_views);
-        std::vector<InstanceView*> external_views(individual_views.begin(),
-                                                  individual_views.end());
+        std::vector<InstanceView*> external_views;
+        std::vector<size_t> target_space_arrivals;
+        CollectiveMapping *analysis_mapping = NULL;
+        const bool first_local = context->convert_collective_views(this, 
+            0/*index*/, requirement.region, external_instances,
+            analysis_mapping, external_views, target_space_arrivals);
         attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
+                                                        external_instances,
                                                         external_views,
+                                                        target_space_arrivals,
                                                         mapping ?
                                                           termination_event :
                                                           completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
-                                                        restricted);
+                                                        analysis_mapping,
+                                                        restricted,first_local);
         // Signal to any other point tasks that we performed the attach for them
         if (attached_event.exists())
           Runtime::trigger_event(&trace_info, attached_event, attach_event);
@@ -23329,6 +23387,7 @@ namespace Legion {
                                                   ApEvent::NO_AP_EVENT,
                                                   references, dummy_sources,
                                                   trace_info,
+                                                  true/*check collectives*/,
                                                   map_applied_conditions,
 #ifdef DEBUG_LEGION
                                                   get_logging_name(),
@@ -23339,17 +23398,23 @@ namespace Legion {
         requirement.privilege = LEGION_READ_WRITE;
       }
       InnerContext *context = find_physical_context(0/*index*/);
-      std::vector<IndividualView*> external_views;
-      context->convert_target_views(references, external_views);
+      std::vector<InstanceView*> external_views;
+      std::vector<size_t> target_space_arrivals;
+      CollectiveMapping *analysis_mapping = NULL;
+      const bool first_local = context->convert_collective_views(this,
+          0/*index*/, requirement.region, references, analysis_mapping,
+          external_views, target_space_arrivals);
 #ifdef DEBUG_LEGION
       assert(external_views.size() == 1);
+      assert(target_space_arrivals.size() == 1);
 #endif
-      InstanceView *ext_view = external_views[0];
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, ext_view, trace_info,
-                                         map_applied_conditions,
-                                         NULL/*no collective map*/);
+                                         version_info, manager, 
+                                         external_views.back(), 
+                                         target_space_arrivals.back(),
+                                         trace_info, map_applied_conditions,
+                                         analysis_mapping, first_local);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);

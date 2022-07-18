@@ -37,8 +37,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(RegionTreeForest *forest,
                                    const RegionRequirement &req,
-                                   const InstanceSet &insts,
-                                   const DomainPoint &key)
+                                   const InstanceSet &insts)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
@@ -71,9 +70,9 @@ namespace Legion {
           if (!mask.is_set(field_indexes[fidx]))
             continue;
           PhysicalManager *manager = ref.get_physical_manager();
-          instances[fidx] = manager->get_instance(key);
+          instances[fidx] = manager->get_instance();
 #ifdef LEGION_SPY
-          instance_events[fidx] = manager->get_unique_event(key);
+          instance_events[fidx] = manager->get_unique_event();
 #endif
 #ifdef DEBUG_LEGION
           found = true;
@@ -2058,7 +2057,8 @@ namespace Legion {
                                                   RegionRequirement &req,
                                                   VersionInfo &version_info,
                                                   InstanceSet &targets,
-                                          std::set<RtEvent> &map_applied_events)
+                                      FieldMaskSet<ReplicatedView> &collectives,
+                                      std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
@@ -2099,9 +2099,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->is_instance_view());
 #endif
-        PhysicalManager *manager = it->first->as_instance_view()->get_manager();
-        if (manager->meets_regions(to_meet))
-          targets.add_instance(InstanceRef(manager, it->second));
+        if (it->first->is_materialized_view())
+        {
+          MaterializedView *view = it->first->as_materialized_view();
+          PhysicalManager *manager = view->get_manager();
+          if (manager->meets_regions(to_meet))
+            targets.add_instance(InstanceRef(manager, it->second));
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->is_replicated_view());
+#endif
+          ReplicatedView *view = it->first->as_replicated_view();
+          if (view->meets_region(req.region))
+            collectives.insert(view, it->second);
+        }
       }
     }
 
@@ -2115,6 +2128,8 @@ namespace Legion {
                                const std::vector<PhysicalManager*> &sources,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
+                               std::vector<size_t> &target_space_arrivals,
+                               const bool collective_rendezvous,
                                UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                const char *log_name,
@@ -2138,6 +2153,7 @@ namespace Legion {
               (req.handle_type == LEGION_REGION_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
+      assert(target_space_arrivals.empty());
 #endif
       RegionNode *region_node = get_node(req.region);
       const FieldMask user_mask = 
@@ -2158,118 +2174,31 @@ namespace Legion {
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets =
         version_info.get_equivalence_sets();
-      // If one manager is collective then they all should be
-      if (targets[0].get_manager()->is_collective_manager())
+      // Being by converting all the target views
+      bool first_local = true;
+      std::vector<InstanceView*> target_views, source_views;
+      CollectiveMapping *analysis_mapping = NULL;
+      if (!collective_rendezvous)
       {
-        CollectiveManager *collective =
-          targets[0].get_manager()->as_collective_manager();
-        // It's crucial that all the point mappings be using the same
-        // collective manager for picking the first local shard, so 
-        // select the one with the smallest distributed ID if there
-        // is more than one collective manager
-        for (unsigned idx = 1; idx < targets.size(); idx++)
-        {
-          InstanceManager *man = targets[idx].get_manager();
-          if (man->did < collective->did)
-            collective = man->as_collective_manager();
-        }
-        const DomainPoint local_point = op->get_collective_instance_point();
-        const bool first_local = collective->is_first_local_point(local_point);
-        CollectiveMapping *collective_mapping = collective->collective_mapping;
-        std::vector<InstanceView*> target_views, source_views;
-        context->convert_target_views(targets, target_views, 
-                                      collective_mapping);
-        if (!sources.empty())
-          context->convert_source_views(sources, source_views,
-                                        collective_mapping);
-        analysis = new UpdateAnalysis(runtime, op, index, local_point, req,
-                                      region_node, targets, target_views,
-                                      source_views, trace_info, 
-                                      collective_mapping, precondition,
-                                      term_event, check_initialized,
-                                      record_valid, skip_output, first_local);
-        analysis->add_reference();
-        // For collective instances, we need to make sure that we are on the
-        // right node for the first pass of the traversal
-        FieldMask local_mask;
-        const AddressSpace local_space = runtime->address_space;
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          const InstanceRef &ref = targets[idx];
-          InstanceManager *manager = ref.get_manager();
-#ifdef DEBUG_LEGION
-          assert(manager->is_collective_manager());
-#endif
-          collective = manager->as_collective_manager();
-#ifdef DEBUG_LEGION
-          // Each of the instances must have the same collective mapping
-          // even if they have different mapppings for points to memories
-          CollectiveMapping *to_compare = collective->collective_mapping;
-          assert((collective_mapping == to_compare) ||
-                  (*collective_mapping == *to_compare));
-#endif
-          PhysicalInstance instance = collective->get_instance(local_point);
-          const AddressSpaceID inst_space = instance.address_space();
-          const FieldMask &inst_mask = ref.get_valid_fields();
-          if (inst_space != local_space)
-          {
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  eq_sets.begin(); it != eq_sets.end(); it++)
-            {
-              const FieldMask overlap = it->second & inst_mask;
-              if (!!overlap)
-                analysis->record_remote(it->first, overlap, inst_space);
-            }
-          }
-          else
-            local_mask |= inst_mask;
-        }
-        if (!!local_mask)
-        {
-          if (local_mask != user_mask)
-          {
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  eq_sets.begin(); it != eq_sets.end(); it++)
-            {
-              const FieldMask overlap = it->second & local_mask;
-              if (!overlap)
-                continue;
-              analysis->traverse(it->first, overlap, deferral_events,
-                                 map_applied_events);
-            }
-          }
-          else
-          {
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                  eq_sets.begin(); it != eq_sets.end(); it++)
-              analysis->traverse(it->first, it->second, deferral_events,
-                                 map_applied_events);   
-          }
-        }
+        context->convert_target_views(targets, target_views);
+        target_space_arrivals.resize(target_views.size(), 1);
       }
       else
-      {
-        // Iterate over all the equivalence classes and perform the analysis
-        // Only need to check for uninitialized data for things not discarding
-        // and things that are not simultaneous (simultaneous can appear 
-        // uninitialized since it might be reading, but then use internal
-        // synchronization to wait for something running concurrently to write)
-        std::vector<InstanceView*> target_views, source_views;
-        context->convert_target_views(targets, target_views); 
-        if (!sources.empty())
-          context->convert_source_views(sources, source_views);
-        const DomainPoint empty;
-        analysis = new UpdateAnalysis(runtime, op, index, empty,req,region_node,
-                                      targets, target_views, source_views, 
-                                      trace_info, NULL/*collective mapping*/,
-                                      precondition,term_event,check_initialized,
-                                      record_valid, skip_output);
-        analysis->add_reference();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-          analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events);
-      }
+        first_local = context->convert_collective_views(op, index,
+            req.region, targets, analysis_mapping,
+            target_views, target_space_arrivals);
+      if (!sources.empty())
+        context->convert_source_views(sources, source_views);
+      analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
+                                    targets, target_views, source_views, 
+                                    trace_info, analysis_mapping,
+                                    precondition,term_event,check_initialized,
+                                    record_valid, skip_output, first_local);
+      analysis->add_reference();
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        analysis->traverse(it->first, it->second, deferral_events,
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -2284,11 +2213,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_registration(
-                                         UpdateAnalysis *analysis,
-                                         InstanceSet &targets,
-                                         const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events,
-                                         bool symbolic /*=false*/)
+                               UpdateAnalysis *analysis,
+                               InstanceSet &targets,
+                               const std::vector<size_t> &target_space_arrivals,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &map_applied_events,
+                               bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
@@ -2314,14 +2244,14 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
-                user_applied, analysis->collective_mapping, analysis->op,
-                trace_info, local_space, symbolic);
+                ref.get_physical_manager(), target_space_arrivals[idx],
+                user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
               const UniqueInst unique_inst(analysis->target_views[idx],
-                                           analysis->collective_point);
+                                           ref.get_physical_manager());
               trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
                                         analysis->node, map_applied_events);
             }
@@ -2344,14 +2274,14 @@ namespace Legion {
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
                 analysis->index, analysis->term_event, collect_event,
-                map_applied_events, analysis->collective_mapping, analysis->op,
-                trace_info, local_space, symbolic);
+                ref.get_physical_manager(), target_space_arrivals[idx],
+                map_applied_events, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
             if (trace_info.recording)
             {
               const UniqueInst unique_inst(analysis->target_views[idx],
-                                           analysis->collective_point);
+                                           ref.get_physical_manager());
               trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
                                         analysis->node, map_applied_events);
             }
@@ -2370,9 +2300,10 @@ namespace Legion {
         const bool exclusive = HAS_WRITE(analysis->usage);
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          const FieldMask &inst_mask = targets[idx].get_valid_fields();
-          analysis->target_views[idx]->find_atomic_reservations(inst_mask,
-             analysis->op,analysis->index,analysis->collective_point,exclusive);
+          const InstanceRef &ref = targets[idx];
+          analysis->target_views[idx]->find_atomic_reservations(
+              ref.get_physical_manager(), ref.get_valid_fields(),
+              analysis->op, analysis->index, exclusive);
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done
@@ -2396,6 +2327,7 @@ namespace Legion {
                                        InstanceSet &targets,
                                        const std::vector<PhysicalManager*> &src,
                                        const PhysicalTraceInfo &trace_info,
+                                       const bool collective_rendezvous,
                                        std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
                                        const char *log_name,
@@ -2406,9 +2338,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       UpdateAnalysis *analysis = NULL;
+      std::vector<size_t> target_space_arrivals;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
-         trace_info, map_applied_events, analysis,
+         trace_info, map_applied_events, target_space_arrivals, collective_rendezvous, analysis,
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
@@ -2416,13 +2349,14 @@ namespace Legion {
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();
-      return physical_perform_registration(analysis, targets, trace_info, 
-                                           map_applied_events);
+      return physical_perform_registration(analysis, targets,
+          target_space_arrivals, trace_info, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
+                         std::vector<size_t> &target_space_arrivals,
                          std::set<RtEvent> &map_applied_events,
                          ApEvent &result, const PhysicalTraceInfo &info,
                          bool symbolic)
@@ -2431,8 +2365,8 @@ namespace Legion {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result, info,
-                             symbolic);
+                             analysis, targets, map_applied_done, result,
+                             target_space_arrivals, info, symbolic);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2441,11 +2375,12 @@ namespace Legion {
     void RegionTreeForest::handle_defer_registration(const void *args)
     //--------------------------------------------------------------------------
     {
-      const DeferPhysicalRegistrationArgs *dargs = 
+      const DeferPhysicalRegistrationArgs *dargs =
         (const DeferPhysicalRegistrationArgs*)args;
       std::set<RtEvent> applied_events;
-      dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, *dargs, applied_events, dargs->symbolic);
+      dargs->result = physical_perform_registration(dargs->analysis,
+                        dargs->targets, dargs->target_space_arrivals,
+                        *dargs, applied_events, dargs->symbolic);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
@@ -2516,7 +2451,7 @@ namespace Legion {
         assert(it->first->is_instance_view());
 #endif
         InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index] = 
+        restricted_instances[inst_index] =
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, op_ctx_index, index, term_event,
@@ -2749,13 +2684,15 @@ namespace Legion {
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            const UniqueInst unique_inst(source_views[idx], op->index_point);
+            const UniqueInst unique_inst(source_views[idx],
+                                         ref.get_physical_manager());
             tracing_srcs[unique_inst] = ref.get_valid_fields();
           }
           for (unsigned idx = 0; idx < dst_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            const UniqueInst unique_inst(target_views[idx], op->index_point);
+            const UniqueInst unique_inst(target_views[idx],
+                                         ref.get_physical_manager());
             tracing_dsts[unique_inst] = ref.get_valid_fields();
           }
           trace_info.record_across_insts(result, src_index, dst_index,
@@ -2950,7 +2887,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx],
+                                       ref.get_physical_manager());
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
@@ -2958,14 +2896,16 @@ namespace Legion {
           InnerContext *idx_context = op->find_physical_context(idx_index); 
           std::vector<InstanceView*> indirect_views;
           idx_context->convert_target_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          const UniqueInst unique_inst(indirect_views.back(),
+                                       idx_target.get_physical_manager());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx],
+                                       ref.get_physical_manager());
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
@@ -3099,7 +3039,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx],
+                                       ref.get_physical_manager());
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
@@ -3107,7 +3048,8 @@ namespace Legion {
           std::vector<InstanceView*> indirect_views;
           InnerContext *idx_context = op->find_physical_context(idx_index);
           idx_context->convert_target_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          const UniqueInst unique_inst(indirect_views.back(),
+                                       idx_target.get_physical_manager());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
@@ -3117,7 +3059,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx],
+                                       ref.get_physical_manager());
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         trace_info.record_across_insts(copy_post, src_index, idx_index,
@@ -3277,7 +3220,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx],
+                                       ref.get_physical_manager());
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the src_idx_insts
@@ -3288,7 +3232,7 @@ namespace Legion {
           src_idx_context->convert_target_views(src_idx_targets,
                                                 src_indirect_views);
           const UniqueInst unique_inst(src_indirect_views.back(), 
-                                       op->index_point);
+                                       src_idx_target.get_physical_manager());
           src_idx_insts[unique_inst] = src_idx_target.get_valid_fields();
         }
         // Get the dst_insts
@@ -3298,7 +3242,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx],
+                                       ref.get_physical_manager());
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the dst_idx_insts
@@ -3309,7 +3254,7 @@ namespace Legion {
           dst_idx_context->convert_target_views(dst_idx_targets,
                                                 dst_indirect_views);
           const UniqueInst unique_inst(dst_indirect_views.back(),
-                                       op->index_point);
+                                       dst_idx_target.get_physical_manager());
           dst_idx_insts[unique_inst] = dst_idx_target.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
@@ -3391,14 +3336,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
-                                        unsigned index,
-                                        const RegionRequirement &req,
-                                        std::vector<InstanceView*> &local_views,
-                                        const ApEvent termination_event,
-                                        VersionInfo &version_info,
-                                        const PhysicalTraceInfo &trace_info,
-                                        std::set<RtEvent> &map_applied_events,
-                                        const bool restricted)
+                               unsigned index,
+                               const RegionRequirement &req,
+                               const InstanceSet &external_instances,
+                               const std::vector<InstanceView*> &local_views,
+                               const std::vector<size_t> &target_space_arrivals,
+                               const ApEvent termination_event,
+                               VersionInfo &version_info,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &map_applied_events,
+                               CollectiveMapping *analysis_mapping,
+                               const bool restricted, 
+                               const bool first_local)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -3414,20 +3363,19 @@ namespace Legion {
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
       const size_t op_ctx_index = attach_op->get_ctx_index();
-      CollectiveMapping *collective_mapping = 
-        attach_op->get_collective_mapping();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> ready_events;
       FieldMaskSet<LogicalView> registration_views;
-      for (std::vector<InstanceView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
-        registration_views.insert(*it, ext_mask);
-        const ApEvent ready = (*it)->register_user(usage, ext_mask,
+        InstanceView *view = local_views[idx];
+        registration_views.insert(view, ext_mask);
+        const InstanceRef &ref = external_instances[idx];
+        const ApEvent ready = view->register_user(usage, ext_mask,
                     region_node->row_source, op_id, op_ctx_index, index,
-                    termination_event, collect_event, registration_applied,
-                    collective_mapping, attach_op, trace_info, 
-                    runtime->address_space);
+                    termination_event, collect_event, 
+                    ref.get_physical_manager(), target_space_arrivals[idx],
+                    registration_applied, trace_info, runtime->address_space);
         if (ready.exists())
           ready_events.push_back(ready);
       }
@@ -3440,10 +3388,9 @@ namespace Legion {
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
             index, RegionUsage(req), region_node->row_source,
-            registration_views, trace_info, collective_mapping,
+            registration_views, trace_info, analysis_mapping,
             ApEvent::NO_AP_EVENT, guard_event, PredEvent::NO_PRED_EVENT,
-            false/*track effects*/, restricted, 
-            attach_op->is_collective_first_local_shard());
+            false/*track effects*/, restricted, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3468,10 +3415,13 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
+                                          PhysicalManager *target_manager,
                                           InstanceView *local_view,
+                                          size_t target_arrivals,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                          LogicalView *registration_view)
+                                          CollectiveMapping *analysis_mapping,
+                                          const bool first_local)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -3486,15 +3436,14 @@ namespace Legion {
       const ApEvent term_event = detach_op->get_completion_event();
       const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
-      CollectiveMapping *collective_mapping =
-        detach_op->get_collective_mapping();
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                   region_node->row_source,
                                                   op_id, op_ctx_index, index,
                                                   term_event, collect_event, 
+                                                  target_manager,
+                                                  target_arrivals,
                                                   map_applied_events, 
-                                                  collective_mapping,
-                                                  detach_op, trace_info,
+                                                  trace_info,
                                                   runtime->address_space);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
                                   collective_mapping, region_node->row_source,
@@ -3767,7 +3716,6 @@ namespace Legion {
                                         const unsigned index,
                                         const RegionRequirement &req,
                                         const InstanceSet &targets,
-                                        const DomainPoint &collective_point,
                                         bool postmapping)
     //--------------------------------------------------------------------------
     {
@@ -3788,7 +3736,7 @@ namespace Legion {
         if (manager->is_physical_manager())
         {
           PhysicalManager *man = manager->as_physical_manager();
-          inst_event = man->get_unique_event(collective_point);
+          inst_event = man->get_unique_event();
         }
         for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
               it != valid_fields.end(); it++)
@@ -3809,51 +3757,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This code is very similar to what we see in the MapperManager
-      bool has_collectives = false;
-      std::vector<MappingInstance> collectives;
       for (unsigned idx = 0; idx < unacquired.size(); idx++)
       {
         PhysicalManager *manager = unacquired[idx];
-        const bool is_collective = manager->is_collective_manager();
-        if (is_collective && !has_collectives)
-          has_collectives = true;
         // Try and do the acquires for any instances that weren't acquired
         if (manager->acquire_instance(MAPPING_ACQUIRE_REF, op))
-        {
           // We already know it wasn't there before
           acquired.insert(std::pair<PhysicalManager*,unsigned>(manager, 1));
-          if (is_collective)
-            collectives.push_back(MappingInstance(manager));
-        }
-      }
-      if (has_collectives)
-      {
-        // Finally, if we have any collectives then we need to do the
-        // parallel rendezvous to see if all the other points picked
-        // the same thing as the other points in this operation
-        const std::vector<MappingInstance> copy_collectives = collectives;
-        // Use some dummy values here that will never be used by
-        // the MapperManager so we will never conflict
-        op->match_collective_instances(LAST_MAPPER_CALL, 0/*index*/,
-              req.region.index_space.get_id()/*tag*/, collectives);
-        // Add all the ones we acquired to the instances
-        for (std::vector<MappingInstance>::const_iterator it =
-              collectives.begin(); it != collectives.end(); it++)
-          acquired[it->impl->as_collective_manager()] = 1;
-        if (collectives.size() < copy_collectives.size())
-        {
-          // If we filtered some because we couldn't match across all 
-          // the point tasks then remove the valid references on them
-          for (unsigned idx = 0; idx < copy_collectives.size(); idx++)
-          {
-            CollectiveManager *manager =
-              copy_collectives[idx].impl->as_collective_manager();
-            // If we can't find it that is because it was filterd by the match
-            if ((acquired.find(manager) == acquired.end()) &&
-                manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-              delete manager;
-          }
-        }
       }
     }
 

@@ -9994,6 +9994,7 @@ namespace Legion {
       TaskContext::report_leaks_and_duplicates(preconds);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void InnerContext::convert_source_views(
                                    const std::vector<PhysicalManager*> &sources,
@@ -10029,6 +10030,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InnerContext::clear_instance_top_views(void)
@@ -10097,6 +10099,7 @@ namespace Legion {
       delete dargs->to_remove;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
          std::vector<IndividualView*> &target_views, CollectiveMapping *mapping)
@@ -10130,6 +10133,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndividualView* InnerContext::create_instance_top_view(
@@ -11025,9 +11029,8 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), dynamic_id_allocator_shard(0),
-        equivalence_set_allocator_shard(0), attach_did_allocator_shard(0),
-        next_available_collective_index(0), next_logical_collective_index(1),
-        next_physical_template_index(0), 
+        equivalence_set_allocator_shard(0), next_available_collective_index(0),
+        next_logical_collective_index(1), next_physical_template_index(0), 
         sharding_launch_space(IndexSpace::NO_SPACE),
         collective_map_launch_space(IndexSpace::NO_SPACE),
         next_replicate_bar_index(0), next_logical_bar_index(0),
@@ -20279,16 +20282,6 @@ namespace Legion {
 #else
       physical_templates.erase(index);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ShardID ReplicateContext::get_next_attach_did_origin(void)
-    //--------------------------------------------------------------------------
-    {
-      const ShardID result = attach_did_allocator_shard++;
-      if (attach_did_allocator_shard == total_shards)
-        attach_did_allocator_shard = 0;
-      return result;
     }
 
     //--------------------------------------------------------------------------

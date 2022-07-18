@@ -694,10 +694,14 @@ namespace Legion {
                            std::vector<MappingInstance> &input_valid,
                            std::vector<MappingCollective> &collective_valid);
       static void prepare_for_mapping(const InstanceSet &valid,
-                           std::vector<MappingInstance> &input_valid);
+                           const FieldMaskSet<ReplicatedView> &collectives,
+                           std::vector<MappingInstance> &input_valid,
+                           std::vector<MappingCollective> &collective_valid);
       static void prepare_for_mapping(const InstanceSet &valid,
+                           const FieldMaskSet<ReplicatedView> &collectives,
                            const std::set<Memory> &filter_memories,
-                           std::vector<MappingInstance> &input_valid);
+                           std::vector<MappingInstance> &input_valid,
+                           std::vector<MappingCollective> &collective_valid);
       void compute_ranking(MapperManager            *mapper,
           const std::deque<MappingInstance>         &output,
           const std::vector<InstanceView*>          &sources,
@@ -1494,7 +1498,6 @@ namespace Legion {
           const ApEvent local_post, ApEvent &collective_pre,
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
-          const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
@@ -1649,7 +1652,6 @@ namespace Legion {
           const ApEvent local_post, ApEvent &collective_pre,
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
-          const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources); 
       virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
@@ -1725,7 +1727,6 @@ namespace Legion {
           const ApEvent local_post, ApEvent &collective_pre,
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
-          const DomainPoint &key,
           std::vector<IndirectRecord> &records, const bool sources);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
@@ -3660,7 +3661,8 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances,
-                         std::vector<PhysicalManager*> &source_instances);
+                         std::vector<PhysicalManager*> &source_instances,
+                         bool &check_collective);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
       void finalize_partition_profiling(void);

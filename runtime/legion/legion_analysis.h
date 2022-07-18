@@ -167,17 +167,16 @@ namespace Legion {
      */
     struct UniqueInst {
     public:
-      UniqueInst(void) : view_did(0), analysis_space(0) { }
-      UniqueInst(IndividualView *v);
-      //UniqueInst(DistributedID did);
+      UniqueInst(void) : inst_did(0), view_did(0), analysis_space(0) { }
+      UniqueInst(InstanceView *v, PhysicalManager *m);
     public:
       inline bool operator<(const UniqueInst &rhs) const
       {
-        return (view_did < rhs.view_did);
+        return (inst_did < rhs.inst_did);
       }
       inline bool operator==(const UniqueInst &rhs) const
       {
-        return (view_did == rhs.view_did);
+        return (inst_did == rhs.inst_did);
       }
       inline bool operator!=(const UniqueInst &rhs) const
         { return !this->operator==(rhs); }
@@ -186,6 +185,8 @@ namespace Legion {
       void deserialize(Deserializer &derez);
       AddressSpaceID get_analysis_space(void) const;
     public:
+      // Distributed ID for the physical manager
+      DistributedID inst_did;
       // Distributed ID for the view to the instance
       DistributedID view_did;
       // Logical owner space for the view

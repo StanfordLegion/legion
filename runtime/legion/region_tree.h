@@ -51,8 +51,7 @@ namespace Legion {
       IndirectRecord(void) { }
       IndirectRecord(RegionTreeForest *forest, 
                      const RegionRequirement &req,
-                     const InstanceSet &insts,
-                     const DomainPoint &key);
+                     const InstanceSet &insts);
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -147,11 +146,12 @@ namespace Legion {
       public:
         DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
                   InstanceSet &t, RtUserEvent map_applied, ApEvent &res,
+                  const std::vector<size_t> &arrivals,
                   const PhysicalTraceInfo &info, bool sym)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
             PhysicalTraceInfo(info), analysis(ana), 
-            map_applied_done(map_applied), targets(t), result(res),
-            symbolic(sym)
+            map_applied_done(map_applied), targets(t), 
+            target_space_arrivals(arrivals), result(res), symbolic(sym)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -167,6 +167,7 @@ namespace Legion {
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
         InstanceSet &targets;
+        const std::vector<size_t> &target_space_arrivals;
         ApEvent &result;
         bool symbolic;
       };
@@ -508,6 +509,7 @@ namespace Legion {
                                   RegionRequirement &req,
                                   VersionInfo &version_info,
                                   InstanceSet &valid_instances,
+                                  FieldMaskSet<ReplicatedView> &collectives,
                                   std::set<RtEvent> &map_applied_events);
       // Return a runtime event for when it's safe to perform
       // the registration for this equivalence set
@@ -519,6 +521,8 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &sources,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
+                                std::vector<size_t> &target_space_arrivals,
+                                const bool collective_rendezvous,
                                 UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                 const char *log_name,
@@ -531,10 +535,11 @@ namespace Legion {
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
-                                 InstanceSet &targets,
-                                 const PhysicalTraceInfo &trace_info,
-                                 std::set<RtEvent> &map_applied_events,
-                                 bool symbolic = false);
+                               InstanceSet &targets,
+                               const std::vector<size_t> &target_space_arrivals,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &map_applied_events,
+                               bool symbolic = false);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
@@ -544,6 +549,7 @@ namespace Legion {
                                    InstanceSet &targets,
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
+                                   const bool collective_rendezvous,
                                    std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
                                    const char *log_name,
@@ -554,6 +560,7 @@ namespace Legion {
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                            UpdateAnalysis *analysis, InstanceSet &targets,
+                           std::vector<size_t> &target_space_arrivals,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result, const PhysicalTraceInfo &info,
                            bool symbolic = false);
@@ -673,18 +680,23 @@ namespace Legion {
                                 const std::vector<FieldID> &field_set);
       ApEvent attach_external(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
-                              std::vector<InstanceView*> &local_views,
+                              const InstanceSet &external_instances,
+                              const std::vector<InstanceView*> &local_views,
+                              const std::vector<size_t> &target_space_arrivals,
                               const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
-                              const bool restricted);
+                              CollectiveMapping *analysis_mapping,
+                              const bool restricted, const bool first_local);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
-                              unsigned index, VersionInfo &version_info, 
-                              InstanceView *local_view,
+                              unsigned index, VersionInfo &version_info,
+                              PhysicalManager *target_manager,
+                              InstanceView *local_view, size_t target_arrivals,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
-                              LogicalView *registration_view = NULL);
+                              CollectiveMapping *analysis_mapping,
+                              const bool first_local);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,
                              VersionInfo &version_info,

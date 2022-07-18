@@ -580,6 +580,7 @@ namespace Legion {
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> > valid_instances;
+        std::vector<std::vector<CollectiveView> >   valid_collectives;
         std::vector<unsigned>                       premapped_regions;
       };
       struct MapTaskOutput {
@@ -588,6 +589,7 @@ namespace Legion {
         std::vector<Memory>                         output_targets;
         std::vector<LayoutConstraintSet>            output_constraints;
         std::set<unsigned>                          untracked_valid_regions;
+        std::set<unsigned>                          check_collective_regions;
         std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
@@ -695,6 +697,7 @@ namespace Legion {
       struct PostMapInput {
         std::vector<std::vector<PhysicalInstance> >     mapped_regions;
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
+        std::vector<std::vector<CollectiveView> >       valid_collectives;
       };
       struct PostMapOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
@@ -854,6 +857,7 @@ namespace Legion {
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
@@ -977,6 +981,10 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >   dst_instances;
         std::vector<std::vector<PhysicalInstance> >   src_indirect_instances;
         std::vector<std::vector<PhysicalInstance> >   dst_indirect_instances;
+        std::vector<std::vector<CollectiveView> >     src_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_collectives;
+        std::vector<std::vector<CollectiveView> >     src_indirect_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_indirect_collectives;
       };
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >   src_instances;
@@ -991,6 +999,9 @@ namespace Legion {
         std::set<unsigned>                            untracked_valid_srcs;
         std::set<unsigned>                            untracked_valid_ind_srcs;
         std::set<unsigned>                            untracked_valid_ind_dsts;
+        std::set<unsigned>                            check_collective_srcs;
+        std::set<unsigned>                            check_collective_ind_srcs;
+        std::set<unsigned>                            check_collective_ind_dsts;
         ProfilingRequest                              profiling_requests;
         TaskPriority                                  profiling_priority;
         bool                                          compute_preimages;
@@ -1475,6 +1486,7 @@ namespace Legion {
        */
       struct MapPartitionInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
@@ -1482,6 +1494,7 @@ namespace Legion {
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
         bool                                    track_valid_region; /*=true*/
+        bool                                    check_collective; /*=false*/
       };
       //------------------------------------------------------------------------
       virtual void map_partition(const MapperContext        ctx,
