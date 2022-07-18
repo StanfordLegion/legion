@@ -109,7 +109,7 @@ namespace Realm {
 	log_kokkos.info() << "doing openmp init on proc " << p;
 #ifdef REALM_USE_KOKKOS_INITIALIZATION_SETTINGS
         Kokkos::InitializationSettings init_settings;
-	init_settings.set_thread_count(-1); // todo - get from proc
+	init_settings.set_num_threads(-1); // todo - get from proc
         Kokkos::OpenMP::impl_initialize(init_settings);
 #else
 	int thread_count = -1; // todo - get from proc
