@@ -3451,14 +3451,13 @@ class State(object):
                 groups = [str(proc.node_id), "all"]
                 for node in groups:
                     group = node + " (" + proc.kind + ")"
-                    if group not in timepoints_dict:
-                        if len(proc.tasks) > 0:
-                            timepoints_dict[group] = [proc.util_time_points]
-                        proc_count[group] = 1;
-                    else:
-                        if len(proc.tasks) > 0:
-                            timepoints_dict[group].append(proc.util_time_points)
-                        proc_count[group] = proc_count[group]+1;
+                    if group not in proc_count:
+                        proc_count[group] = 0
+                    proc_count[group] = proc_count[group]+1
+                    if len(proc.tasks) > 0:
+                        if group not in timepoints_dict:
+                            timepoints_dict[group] = []
+                        timepoints_dict[group].append(proc.util_time_points)
         # memories
         for mem in itervalues(self.memories):
             if len(mem.time_points) > 0:
