@@ -6689,13 +6689,13 @@ namespace Legion {
                      CollectiveMapping *mapping,
                      const ApEvent pre, const ApEvent term,
                      const bool check, const bool record,
-                     const bool skip, const bool first_local)
+                     const bool first_local)
       : CollectiveCopyFillAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
                                    target_insts, target_vws, source_vws, t_info,
                                    mapping, first_local, IS_WRITE(req)),
         usage(req), node(rn), precondition(pre), term_event(term),
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        record_valid(record), skip_output(skip), output_aggregator(NULL)
+        record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6710,12 +6710,12 @@ namespace Legion {
                      const PhysicalTraceInfo &info, CollectiveMapping *mapping,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool check, 
-                     const bool record, const bool skip, const bool first_local)
+                     const bool record, const bool first_local)
       : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, rn->row_source,
           true/*on heap*/, target_insts, target_vws, source_vws, info,
           mapping, first_local, IS_WRITE(use)),
         usage(use), node(rn), precondition(pre), term_event(term),
-        check_initialized(check), record_valid(record), skip_output(skip), 
+        check_initialized(check), record_valid(record),
         output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
@@ -6848,7 +6848,6 @@ namespace Legion {
           rez.serialize(effects);
           rez.serialize<bool>(check_initialized);
           rez.serialize<bool>(record_valid);
-          rez.serialize<bool>(skip_output);
         }
         runtime->send_equivalence_set_remote_updates(target, rez);
         remote_events.insert(updated);
@@ -6932,23 +6931,12 @@ namespace Legion {
         DeferPerformOutputArgs args(this, trace_info);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        // If we're skipping the output we still need to launch this 
-        // meta-task to prevent the analysis from being deleted until
-        // everything else is done, we just don't record any output
-        if (!skip_output)
-        {
-          applied_events.insert(args.applied_event);
-          return args.effects_event;
-        }
-        else
-          return ApEvent::NO_AP_EVENT;
+        applied_events.insert(args.applied_event);
+        return args.effects_event;
       }
       ApEvent result;
       if (output_aggregator != NULL)
       {
-#ifdef DEBUG_LEGION
-        assert(!skip_output);
-#endif
         output_aggregator->issue_updates(trace_info, term_event,
                                          true/*restricted output*/);
         // We need to wait for the aggregator updates to be applied
@@ -7062,16 +7050,13 @@ namespace Legion {
       derez.deserialize(check_initialized);
       bool record_valid;
       derez.deserialize(record_valid);
-      bool skip_output;
-      derez.deserialize(skip_output);
 
       RegionNode *node = runtime->forest->get_node(handle);
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
-          previous, op, index, usage, node, targets, target_views,
-          source_views, trace_info, collective_mapping, remote_user_registered,
-          precondition, term_event, check_initialized, record_valid, 
-          skip_output, first_local);
+        previous, op, index, usage, node, targets, target_views,
+        source_views, trace_info, collective_mapping, remote_user_registered,
+        precondition, term_event, check_initialized, record_valid, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
@@ -8602,12 +8587,10 @@ namespace Legion {
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
                               CollectiveMapping *mapping,
                               IndexSpaceExpression *expr, InstanceView *view,
-                              LogicalView *reg_view, const bool remove_restrict,
-                              const bool first_local)
+                              const bool remove_restrict,const bool first_local)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
                          mapping, true/*exclusive*/, first_local),
-        inst_view(view), registration_view(reg_view),
-        remove_restriction(remove_restrict)
+        inst_view(view), remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
     }
@@ -8616,10 +8599,9 @@ namespace Legion {
     FilterAnalysis::FilterAnalysis(Runtime *rt, AddressSpaceID src, 
                               AddressSpaceID prev, Operation *o, unsigned idx, 
                               IndexSpaceExpression *expr, InstanceView *view, 
-                              LogicalView *reg_view, const bool remove_restrict)
+                              const bool remove_restrict)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
-        inst_view(view), registration_view(reg_view),
-        remove_restriction(remove_restrict)
+        inst_view(view), remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
     }
@@ -8627,7 +8609,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(const FilterAnalysis &rhs)
       : PhysicalAnalysis(rhs), inst_view(rhs.inst_view), 
-        registration_view(rhs.registration_view), 
         remove_restriction(rhs.remove_restriction)
     //--------------------------------------------------------------------------
     {
@@ -8715,13 +8696,6 @@ namespace Legion {
           }
           else
             rez.serialize<DistributedID>(0);
-          if (registration_view != NULL)
-          {
-            registration_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
-            rez.serialize(registration_view->did);
-          }
-          else
-            rez.serialize<DistributedID>(0);
           rez.serialize(remove_restriction);
           rez.serialize(applied);
         }
@@ -8771,16 +8745,6 @@ namespace Legion {
         if (view_ready.exists())
           ready_events.insert(view_ready);
       }
-      derez.deserialize(view_did);
-      LogicalView *registration_view = NULL;
-      if (view_did != 0)
-      {
-        RtEvent view_ready;
-        registration_view = 
-          runtime->find_or_request_logical_view(view_did, view_ready);
-        if (view_ready.exists())
-          ready_events.insert(view_ready);
-      }
       bool remove_restriction;
       derez.deserialize(remove_restriction);
       RtUserEvent applied;
@@ -8788,8 +8752,7 @@ namespace Legion {
 
       // This takes ownership of the remote operation
       FilterAnalysis *analysis = new FilterAnalysis(runtime, original_source,
-                                      previous, op, index, expr, inst_view, 
-                                      registration_view, remove_restriction);
+                    previous, op, index, expr, inst_view, remove_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -8817,8 +8780,6 @@ namespace Legion {
         ready_event.wait();
       if (inst_view != NULL)
         inst_view->send_remote_valid_decrement(previous, NULL, applied);
-      if (registration_view != NULL)
-        registration_view->send_remote_valid_decrement(previous, NULL, applied);
     }
 
     /////////////////////////////////////////////////////////////

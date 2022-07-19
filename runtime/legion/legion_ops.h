@@ -4053,8 +4053,6 @@ namespace Legion {
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<CustomSerdezID> &serez,
                                               const FieldMask &external_mask);
-      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
-      virtual bool is_collective_first_local_shard(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       void activate_attach_op(void);
@@ -4218,8 +4216,6 @@ namespace Legion {
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
-      virtual bool is_collective_first_local_shard(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       void activate_detach_op(void);

@@ -4292,12 +4292,13 @@ namespace Legion {
                                           source_instances[idx],
                                           PhysicalTraceInfo(trace_info, idx),
                                           map_applied_conditions,
-                                          target_arrivals[idx], check_collective,
+                                          target_arrivals[idx],
                                           analyses[idx],
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
                                           unique_op_id,
 #endif
+                                          check_collective,
                                           record_valid);
               if (IS_READ_ONLY(logical_regions[idx]))
                 read_only_count++;

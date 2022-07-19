@@ -23397,24 +23397,11 @@ namespace Legion {
                                                   false/*check initialized*/);
         requirement.privilege = LEGION_READ_WRITE;
       }
-      InnerContext *context = find_physical_context(0/*index*/);
-      std::vector<InstanceView*> external_views;
-      std::vector<size_t> target_space_arrivals;
-      CollectiveMapping *analysis_mapping = NULL;
-      const bool first_local = context->convert_collective_views(this,
-          0/*index*/, requirement.region, references, analysis_mapping,
-          external_views, target_space_arrivals);
-#ifdef DEBUG_LEGION
-      assert(external_views.size() == 1);
-      assert(target_space_arrivals.size() == 1);
-#endif
+      
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, manager, 
-                                         external_views.back(), 
-                                         target_space_arrivals.back(),
-                                         trace_info, map_applied_conditions,
-                                         analysis_mapping, first_local);
+                                         version_info, references, 
+                                         trace_info, map_applied_conditions);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);

@@ -399,7 +399,6 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
-      LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
@@ -525,7 +524,6 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Instance Manager Deletion",                        \
-        "Defer Collective Manager Registration",                  \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
@@ -785,8 +783,6 @@ namespace Legion {
       SLICE_REMOTE_COMMIT,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
-      SLICE_COLLECTIVE_REQUEST,
-      SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -803,8 +799,6 @@ namespace Legion {
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_MANAGER_UPDATE,
-      SEND_COLLECTIVE_MANAGER,
-      SEND_COLLECTIVE_CREATION,
       SEND_COLLECTIVE_DISTRIBUTE_FILL,
       SEND_COLLECTIVE_DISTRIBUTE_POINT,
       SEND_COLLECTIVE_DISTRIBUTE_POINTWISE,
@@ -959,8 +953,6 @@ namespace Legion {
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
-      SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES,
-      SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES,
       SEND_REMOTE_DISTRIBUTED_ID_REQUEST,
       SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
@@ -1032,8 +1024,6 @@ namespace Legion {
         "Slice Remote Commit",                                        \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
-        "Slice Collective Instance Request",                          \
-        "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
@@ -1050,8 +1040,6 @@ namespace Legion {
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Manager Update",                                        \
-        "Send Collective Instance Manager",                           \
-        "Send Collective Instance Creation",                          \
         "Send Collective Distribute Fill",                            \
         "Send Collective Distribute Point",                           \
         "Send Collective Distribute Pointwise",                       \
@@ -1206,8 +1194,6 @@ namespace Legion {
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
-        "Send Acquire Collective Instance Privileges",                \
-        "Send Release Collective Instance Privileges",                \
         "Send Remote Distributed ID Request",                         \
         "Send Remote Distributed ID Response",                        \
         "Send Shutdown Notification",                                 \

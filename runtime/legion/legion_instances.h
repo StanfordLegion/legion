@@ -372,8 +372,7 @@ namespace Legion {
                                 const bool copy_restricted,
                                 const bool need_valid_return) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields,
-                                const DomainPoint *collective_point = NULL) = 0;
+                                std::vector<CopySrcDstField> &fields) = 0;
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -633,7 +632,6 @@ namespace Legion {
       virtual PointerConstraint get_pointer_constraint(void) const;
       virtual Memory get_memory(bool from_mapper = false) const
         { return memory_manager->memory; }
-      inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -662,8 +660,7 @@ namespace Legion {
                                 const bool copy_restricted,
                                 const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields,
-                                const DomainPoint *collective_point = NULL);
+                                std::vector<CopySrcDstField> &fields);
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -955,8 +952,7 @@ namespace Legion {
                                 const bool copy_restricted,
                                 const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields,
-                                const DomainPoint *collective_point = NULL);
+                                std::vector<CopySrcDstField> &fields);
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,

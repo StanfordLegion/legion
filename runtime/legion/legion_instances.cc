@@ -3233,7 +3233,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::compute_copy_offsets(const FieldMask &copy_mask,
-      std::vector<CopySrcDstField> &fields, const DomainPoint *collective_point)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       // Make sure the instance is ready before we compute the offsets

@@ -2129,16 +2129,15 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
                                std::vector<size_t> &target_space_arrivals,
-                               const bool collective_rendezvous,
                                UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                const char *log_name,
                                UniqueID uid,
 #endif
+                               const bool collective_rendezvous,
                                const bool record_valid,
                                const bool check_initialized,
-                               const bool defer_copies,
-                               const bool skip_output)
+                               const bool defer_copies)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
@@ -2193,7 +2192,7 @@ namespace Legion {
                                     targets, target_views, source_views, 
                                     trace_info, analysis_mapping,
                                     precondition,term_event,check_initialized,
-                                    record_valid, skip_output, first_local);
+                                    record_valid, first_local);
       analysis->add_reference();
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
@@ -2341,11 +2340,12 @@ namespace Legion {
       std::vector<size_t> target_space_arrivals;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
-         trace_info, map_applied_events, target_space_arrivals, collective_rendezvous, analysis,
+         trace_info, map_applied_events, target_space_arrivals, analysis,
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
-         record_valid, check_initialized, false/*defer copies*/);
+         collective_rendezvous, record_valid,
+         check_initialized, false/*defer copies*/);
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();
@@ -2391,6 +2391,7 @@ namespace Legion {
       dargs->remove_recorder_reference();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::acquire_restrictions(
                                          const RegionRequirement &req,
@@ -2596,6 +2597,7 @@ namespace Legion {
         return Runtime::merge_events(&trace_info, released_events);
       return ApEvent::NO_AP_EVENT;
     }
+#endif
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::copy_across(
@@ -2645,16 +2647,12 @@ namespace Legion {
         across->dst_tree_id = dst_req.region.get_tree_id();
 #endif
         // Fill in the source fields 
-        InnerContext *src_context = op->find_physical_context(src_index);
-        std::vector<InstanceView*> source_views;
-        src_context->convert_target_views(src_targets, source_views);
-        across->initialize_source_fields(this, src_req, src_targets, 
-                          source_views, trace_info, op->index_point);
+        across->initialize_source_fields(this, src_req, src_targets,trace_info);
         // Fill in the destination fields 
         const bool exclusive_redop = 
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
         across->initialize_destination_fields(this, dst_req, dst_targets, 
-                              target_views, trace_info, exclusive_redop);
+                                              trace_info, exclusive_redop);
         // Get the preconditions for this copy
         std::vector<ApEvent> copy_preconditions;
         if (precondition.exists())
@@ -2681,6 +2679,9 @@ namespace Legion {
           trace_info.record_issue_across(result, precondition, precondition,
                         ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
           LegionMap<UniqueInst,FieldMask> tracing_srcs, tracing_dsts;
+          InnerContext *src_context = op->find_physical_context(src_index);
+          std::vector<InstanceView*> source_views;
+          src_context->convert_target_views(src_targets, source_views);
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
@@ -2828,21 +2829,17 @@ namespace Legion {
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
-      across->initialize_source_indirections(this, src_records,
-          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
-          possible_src_out_of_range);
+      across->initialize_source_indirections(this, src_records, src_req,
+          idx_req, idx_target, gather_is_range, possible_src_out_of_range);
 #ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event(op->index_point);
 #endif
       // Initialize the destination fields
-      InnerContext *context = op->find_physical_context(dst_index);
-      std::vector<InstanceView*> target_views;
-      context->convert_target_views(dst_targets, target_views);
       const bool exclusive_redop =
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
       across->initialize_destination_fields(this, dst_req, dst_targets,
-          target_views, trace_info, exclusive_redop);
+                                            trace_info, exclusive_redop);
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -2901,6 +2898,9 @@ namespace Legion {
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        std::vector<InstanceView*> target_views;
+        dst_context->convert_target_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
@@ -2980,11 +2980,7 @@ namespace Legion {
         copy_expr->create_across_unstructured(reservations, compute_preimages);
       across->add_reference();
       // Initialize the sources
-      InnerContext *context = op->find_physical_context(src_index);
-      std::vector<InstanceView*> source_views;
-      context->convert_target_views(src_targets, source_views);
-      across->initialize_source_fields(this, src_req, src_targets,
-                        source_views, trace_info, op->index_point);
+      across->initialize_source_fields(this, src_req, src_targets, trace_info);
       // Initialize the destination indirections
       const InstanceRef idx_target = idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2992,7 +2988,7 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
+          dst_req, idx_req, idx_target, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
@@ -3035,6 +3031,9 @@ namespace Legion {
            copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the insts for this copy
         LegionMap<UniqueInst,FieldMask> src_insts, idx_insts, dst_insts;
+        InnerContext *context = op->find_physical_context(src_index);
+        std::vector<InstanceView*> source_views;
+        context->convert_target_views(src_targets, source_views);
         // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
@@ -3150,9 +3149,8 @@ namespace Legion {
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];
-      across->initialize_source_indirections(this, src_records,
-          src_req, src_idx_req, src_idx_target, op->index_point, 
-          both_are_range, possible_src_out_of_range);
+      across->initialize_source_indirections(this, src_records, src_req,
+        src_idx_req, src_idx_target, both_are_range, possible_src_out_of_range);
 #ifdef LEGION_SPY
       across->src_indirect_instance_event = 
        src_idx_target.get_physical_manager()->get_unique_event(op->index_point);
@@ -3164,7 +3162,7 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
+          dst_req, dst_idx_req, dst_idx_target, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
 #ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
@@ -3415,18 +3413,15 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          PhysicalManager *target_manager,
-                                          InstanceView *local_view,
-                                          size_t target_arrivals,
+                                          const InstanceSet &instances,
                                           const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events,
-                                          CollectiveMapping *analysis_mapping,
-                                          const bool first_local)
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(instances.size() == 1);
 #endif 
       RegionNode *region_node = get_node(req.region);
       FieldSpaceNode *fs_node = region_node->column_source;
@@ -3436,20 +3431,31 @@ namespace Legion {
       const ApEvent term_event = detach_op->get_completion_event();
       const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
+      InnerContext *context = detach_op->find_physical_context(index);
+      std::vector<InstanceView*> external_views;
+      std::vector<size_t> target_space_arrivals;
+      CollectiveMapping *analysis_mapping = NULL;
+      const bool first_local = context->convert_collective_views(detach_op,
+          index, req.region, instances, analysis_mapping, 
+          external_views, target_space_arrivals);
+#ifdef DEBUG_LEGION
+      assert(external_views.size() == 1);
+      assert(target_space_arrivals.size() == 1);
+#endif
+      InstanceView *local_view = external_views[0];
+      PhysicalManager *target_manager = instances[0].get_physical_manager();
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                   region_node->row_source,
                                                   op_id, op_ctx_index, index,
                                                   term_event, collect_event, 
                                                   target_manager,
-                                                  target_arrivals,
+                                                  target_space_arrivals.back(),
                                                   map_applied_events, 
                                                   trace_info,
                                                   runtime->address_space);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
-                                  collective_mapping, region_node->row_source,
-                                  local_view, registration_view,
-                                  true/*remove restriction*/,
-                                  detach_op->is_collective_first_local_shard());
+                        analysis_mapping, region_node->row_source, local_view,
+                        true/*remove restriction*/, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -7278,8 +7284,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_source_fields(
        RegionTreeForest *forest, const RegionRequirement &req,
-       const InstanceSet &insts, const std::vector<InstanceView*> &views,
-       const PhysicalTraceInfo &trace_info, const DomainPoint &collective_point)
+       const InstanceSet &insts, const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7303,7 +7308,8 @@ namespace Legion {
             continue;
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
-          views[idx]->copy_from(copy_mask, collective_point, src_fields);
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->compute_copy_offsets(copy_mask, src_fields);
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -7317,9 +7323,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_destination_fields(
-              RegionTreeForest *forest, const RegionRequirement &req,
-              const InstanceSet &insts, const std::vector<InstanceView*> &views,
-              const PhysicalTraceInfo &trace_info, const bool exclusive_redop)
+                  RegionTreeForest *forest, const RegionRequirement &req,
+                  const InstanceSet &insts, const PhysicalTraceInfo &trace_info,
+                  const bool exclusive_redop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7343,7 +7349,8 @@ namespace Legion {
             continue;
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
-          views[idx]->copy_to(copy_mask, dst_fields);
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->compute_copy_offsets(copy_mask, dst_fields);
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -7364,7 +7371,7 @@ namespace Legion {
     void CopyAcrossUnstructured::initialize_source_indirections(
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &src_req, const RegionRequirement &idx_req,
-            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const InstanceRef &indirect_instance,
             const bool are_range, const bool possible_out_of_range)
     //--------------------------------------------------------------------------
     {
@@ -7375,7 +7382,7 @@ namespace Legion {
       src_indirections.swap(records);
       src_indirect_field = *(idx_req.privilege_fields.begin());
       src_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance(point);
+        indirect_instance.get_physical_manager()->get_instance();
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
@@ -7393,7 +7400,7 @@ namespace Legion {
     void CopyAcrossUnstructured::initialize_destination_indirections(
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &dst_req, const RegionRequirement &idx_req,
-            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const InstanceRef &indirect_instance,
             const bool are_range, const bool possible_out_of_range,
             const bool possible_aliasing, const bool exclusive_redop)
     //--------------------------------------------------------------------------
@@ -7405,7 +7412,7 @@ namespace Legion {
       dst_indirections.swap(records);
       dst_indirect_field = *(idx_req.privilege_fields.begin());
       dst_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance(point);
+        indirect_instance.get_physical_manager()->get_instance();
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;

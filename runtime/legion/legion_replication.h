@@ -2293,7 +2293,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual size_t get_collective_local_arrivals(void) const;
     public:
       virtual PhysicalManager* create_manager(RegionNode *node,
                                    const std::vector<FieldID> &field_set,
@@ -2301,9 +2300,6 @@ namespace Legion {
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<CustomSerdezID> &serez,
                                               const FieldMask &external_mask);
-      virtual CollectiveMapping* get_collective_mapping(void);
-      virtual bool is_collective_first_local_shard(void) const
-        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     protected:
       RtBarrier collective_map_barrier;
@@ -2375,10 +2371,6 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual size_t get_collective_local_arrivals(void) const;
-      virtual CollectiveMapping* get_collective_mapping(void);
-      virtual bool is_collective_first_local_shard(void) const
-        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     public:
       // Help for unordered detachments

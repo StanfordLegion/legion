@@ -522,16 +522,15 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
                                 std::vector<size_t> &target_space_arrivals,
-                                const bool collective_rendezvous,
                                 UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                 const char *log_name,
                                 UniqueID uid,
 #endif
+                                const bool collective_rendezvous,
                                 const bool record_valid = true,
                                 const bool check_initialized = true,
-                                const bool defer_copies = true,
-                                const bool skip_output = false);
+                                const bool defer_copies = true);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
@@ -691,12 +690,9 @@ namespace Legion {
                               const bool restricted, const bool first_local);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info,
-                              PhysicalManager *target_manager,
-                              InstanceView *local_view, size_t target_arrivals,
+                              const InstanceSet &target_instances,
                               const PhysicalTraceInfo &trace_info,
-                              std::set<RtEvent> &map_applied_events,
-                              CollectiveMapping *analysis_mapping,
-                              const bool first_local);
+                              std::set<RtEvent> &map_applied_events);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,
                              VersionInfo &version_info,
@@ -1147,13 +1143,10 @@ namespace Legion {
       void initialize_source_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
                                     const InstanceSet &instances,
-                                    const std::vector<InstanceView*> &views,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const DomainPoint &collective_point);
+                                    const PhysicalTraceInfo &trace_info);
       void initialize_destination_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
                                     const InstanceSet &instances,
-                                    const std::vector<InstanceView*> &views,
                                     const PhysicalTraceInfo &trace_info,
                                     const bool exclusive_redop);
       void initialize_source_indirections(RegionTreeForest *forest,
@@ -1161,7 +1154,6 @@ namespace Legion {
                                     const RegionRequirement &src_req,
                                     const RegionRequirement &idx_req,
                                     const InstanceRef &indirect_instance,
-                                    const DomainPoint &index_point,
                                     const bool both_are_range,
                                     const bool possible_out_of_range);
       void initialize_destination_indirections(RegionTreeForest *forest,
@@ -1169,7 +1161,6 @@ namespace Legion {
                                     const RegionRequirement &dst_req,
                                     const RegionRequirement &idx_req,
                                     const InstanceRef &indirect_instance,
-                                    const DomainPoint &index_point,
                                     const bool both_are_range,
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,

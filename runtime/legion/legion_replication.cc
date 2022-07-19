@@ -7599,32 +7599,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t ReplAttachOp::get_collective_local_arrivals(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->shard_manager->local_shard_count();
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping* ReplAttachOp::get_collective_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return &(repl_ctx->shard_manager->get_collective_mapping()); 
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalManager* ReplAttachOp::create_manager(RegionNode *node,
                                    const std::vector<FieldID> &field_set,
                                    const std::vector<size_t> &field_sizes,
@@ -8002,32 +7976,6 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplDetachOp::get_collective_local_arrivals(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->shard_manager->local_shard_count();
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping* ReplDetachOp::get_collective_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return &(repl_ctx->shard_manager->get_collective_mapping()); 
     }
 
     //--------------------------------------------------------------------------

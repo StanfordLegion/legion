@@ -1976,7 +1976,7 @@ namespace Legion {
                      CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
-                     const bool skip_output, const bool first_local = false);
+                     const bool first_local);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index,
                      const RegionUsage &usage, RegionNode *node, 
@@ -1988,7 +1988,7 @@ namespace Legion {
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
-                     const bool skip_output, const bool first_local);
+                     const bool first_local);
       UpdateAnalysis(const UpdateAnalysis &rhs) = delete;
       virtual ~UpdateAnalysis(void);
     public:
@@ -2024,7 +2024,6 @@ namespace Legion {
       const ApEvent term_event;
       const bool check_initialized;
       const bool record_valid;
-      const bool skip_output;
     public:
       // Have to lock the analysis to access these safely
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
@@ -2333,13 +2332,11 @@ namespace Legion {
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
                      CollectiveMapping *collective_mapping,
                      IndexSpaceExpression *expr, InstanceView *inst_view,
-                     LogicalView *registration_view,
                      const bool remove_restriction = false,
                      const bool first_local = false);
       FilterAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index, IndexSpaceExpression *expr,
-                     InstanceView *inst_view, LogicalView *registration_view,
-                     const bool remove_restriction);
+                     InstanceView *inst_view, const bool remove_restriction);
       FilterAnalysis(const FilterAnalysis &rhs);
       virtual ~FilterAnalysis(void);
     public:
@@ -2360,7 +2357,6 @@ namespace Legion {
                                         AddressSpaceID previous);
     public:
       InstanceView *const inst_view;
-      LogicalView *const registration_view;
       const bool remove_restriction;
     };
 
