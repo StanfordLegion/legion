@@ -1416,8 +1416,7 @@ namespace Legion {
                  it = input.valid_instances[idx].begin(),
                  ie = input.valid_instances[idx].end(); it != ie; ++it)
           {
-            if (!it->is_collective_instance() &&
-                (it->get_location() == target_memory))
+            if (it->get_location() == target_memory)
               valid_instances.push_back(*it);
           }
 
@@ -2469,99 +2468,44 @@ namespace Legion {
     {
       // For right now we'll rank instances by the bandwidth of the memory
       // they are in to the destination
-      // TODO: consider layouts when ranking source to help out the DMA system
+      // TODO: consider layouts when ranking source  to help out the DMA system
       std::map<Memory,unsigned/*bandwidth*/> source_memories;
-      if (target.is_collective_instance())
+      Memory destination_memory = target.get_location();
+      std::vector<MemoryMemoryAffinity> affinity(1);
+      // fill in a vector of the sources with their bandwidths and sort them
+      std::vector<std::pair<PhysicalInstance,
+                          unsigned/*bandwidth*/> > band_ranking(sources.size());
+      for (unsigned idx = 0; idx < sources.size(); idx++)
       {
-        // This case will only happen if we're mapping an inline mapping 
-        // in a control replicated context because that is the only case
-        // where the default mapper will make a collective instance
-        std::list<PhysicalInstance> individual_instances;
-        for (std::vector<PhysicalInstance>::const_iterator it =
-              sources.begin(); it != sources.end(); it++)
+        const PhysicalInstance &instance = sources[idx];
+        Memory location = instance.get_location();
+        std::map<Memory,unsigned>::const_iterator finder =
+          source_memories.find(location);
+        if (finder == source_memories.end())
         {
-          if (it->is_collective_instance())
-            ranking.push_back(*it);
-          else
-            individual_instances.push_back(*it);
-        }
-        // Afterwards we'll rank individual instances by any that 
-        // are in the same instances as our collective target
-        for (std::list<PhysicalInstance>::iterator it =
-              individual_instances.begin(); it !=
-              individual_instances.end(); /*nothing*/)
-        {
-          std::vector<DomainPoint> local_points;
-          target.find_points_in_memory(it->get_location(), local_points);
-          if (!local_points.empty())
-          {
-            ranking.push_back(*it);
-            it = individual_instances.erase(it);
+          affinity.clear();
+          machine.get_mem_mem_affinity(affinity, location, destination_memory,
+				       false /*not just local affinities*/);
+          unsigned memory_bandwidth = 0;
+          if (!affinity.empty()) {
+            assert(affinity.size() == 1);
+            memory_bandwidth = affinity[0].bandwidth;
           }
-          else
-            it++;
+          source_memories[location] = memory_bandwidth;
+          band_ranking[idx] =
+            std::pair<PhysicalInstance,unsigned>(instance, memory_bandwidth);
         }
-        if (!individual_instances.empty())
-          ranking.insert(ranking.end(), individual_instances.begin(),
-              individual_instances.end());
+        else
+          band_ranking[idx] =
+            std::pair<PhysicalInstance,unsigned>(instance, finder->second);
       }
-      else
-      {
-        // We're mapping an individual instance so we can get its location
-        Memory destination_memory = target.get_location();
-        std::vector<MemoryMemoryAffinity> affinity(1);
-        // fill in a vector of the sources with their bandwidths and sort them
-        std::vector<std::pair<PhysicalInstance,
-                            unsigned/*bandwidth*/> > band_ranking(sources.size());
-        for (unsigned idx = 0; idx < sources.size(); idx++)
-        {
-          const PhysicalInstance &instance = sources[idx];
-          Memory location;
-          if (instance.is_collective_instance())
-          {
-            // Ignore any collective instances that do not have
-            // any local copies in the same memory. The runtime 
-            // can pick from them in an arbitrary order for now
-            std::vector<DomainPoint> local_points;
-            instance.find_points_in_memory(destination_memory, local_points);
-            if (!local_points.empty())
-            {
-              // Give non-local collective instances the worst possible ranking
-              band_ranking[idx] = std::pair<PhysicalInstance,unsigned>(instance, 0);
-              continue;
-            }
-            location = destination_memory;
-          }
-          else
-            location = instance.get_location();
-          std::map<Memory,unsigned>::const_iterator finder =
-            source_memories.find(location);
-          if (finder == source_memories.end())
-          {
-            affinity.clear();
-            machine.get_mem_mem_affinity(affinity, location, destination_memory,
-                                         false /*not just local affinities*/);
-            unsigned memory_bandwidth = 0;
-            if (!affinity.empty()) {
-              assert(affinity.size() == 1);
-              memory_bandwidth = affinity[0].bandwidth;
-            }
-            source_memories[location] = memory_bandwidth;
-            band_ranking[idx] =
-              std::pair<PhysicalInstance,unsigned>(instance, memory_bandwidth);
-          }
-          else
-            band_ranking[idx] =
-              std::pair<PhysicalInstance,unsigned>(instance, finder->second);
-        }
-        // Sort them by bandwidth
-        std::sort(band_ranking.begin(), band_ranking.end(), physical_sort_func);
-        // Iterate from largest bandwidth to smallest
-        for (std::vector<std::pair<PhysicalInstance,unsigned> >::
-              const_reverse_iterator it = band_ranking.rbegin();
-              it != band_ranking.rend(); it++)
-          ranking.push_back(it->first);
-      }
+      // Sort them by bandwidth
+      std::sort(band_ranking.begin(), band_ranking.end(), physical_sort_func);
+      // Iterate from largest bandwidth to smallest
+      for (std::vector<std::pair<PhysicalInstance,unsigned> >::
+            const_reverse_iterator it = band_ranking.rbegin();
+            it != band_ranking.rend(); it++)
+        ranking.push_back(it->first);
     }
 
     //--------------------------------------------------------------------------
@@ -2608,19 +2552,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default map_inline in %s", get_mapper_name());
-      // There is one and only one case where the default mapper will
-      // actually make a collective instance and that is the case where
-      // we are doing an inline mapping in a control replication parent
-      // task and the runtime has told us that it is required for correctness.
-      // Be careful when walking through this function for such cases.
-      // We need to avoid polluting some of our other data structures such
-      // as sets of layout constraints with collective instances
-      // Everything below here is the normal path for inline mappings
       // check to see if we have any constraints we have to abide by
       LayoutConstraintSet creation_constraints;
       bool force_new_instances = false;
       Memory target_memory = Memory::NO_MEMORY;
-      
       if (inline_op.layout_constraint_id > 0)
       {
         // Find our constraints
@@ -2662,27 +2597,16 @@ namespace Legion {
         // do an acquire on them and see which instances are no longer valid
         if (!input.valid_instances.empty())
         {
-          const DomainPoint shard_point = inline_op.get_parent_shard();
           for (std::vector<PhysicalInstance>::const_iterator it =
                 input.valid_instances.begin(); it !=
                 input.valid_instances.end(); it++)
           {
-            if (it->is_collective_instance())
-            {
-              if (input.require_collective_instances &&
-                  (it->get_location(&shard_point) == target_memory))
-                output.chosen_instances.push_back(*it);
-            }
-            else if (it->get_location() == target_memory)
+            if (it->get_location() == target_memory)
               output.chosen_instances.push_back(*it);
           }
           if (!output.chosen_instances.empty())
             runtime->acquire_and_filter_instances(ctx,
                                               output.chosen_instances);
-          // For the collective instance case, do a match to make sure that
-          // we have the same set on every shard 
-          if (input.require_collective_instances)
-            runtime->match_collective_instances(ctx, output.chosen_instances);
         }
         // Now see if we have any fields which we still make space for
         std::set<FieldID> missing_fields =
@@ -2699,27 +2623,17 @@ namespace Legion {
         if (missing_fields.empty())
           return;
         // Otherwise, let's make an instance for our missing fields
-        // Avoid pollution the layout constraints cache with constraints
-        // referring to collective instances
-        if (!input.require_collective_instances)
-        {
-          LayoutConstraintID our_layout_id =
-           default_policy_select_layout_constraints(ctx, target_memory,
-                                                 inline_op.requirement,
-                                                 INLINE_MAPPING,
-                                                 true/*needs check*/,
-                                                 force_new_instances);
-          creation_constraints =
-                  runtime->find_layout_constraints(ctx, our_layout_id);
-        }
-        else
-          default_policy_select_constraints(ctx, creation_constraints,
-                                            target_memory, inline_op.requirement);
+        LayoutConstraintID our_layout_id =
+         default_policy_select_layout_constraints(ctx, target_memory,
+                                               inline_op.requirement,
+                                               INLINE_MAPPING,
+                                               true/*needs check*/,
+                                               force_new_instances);
+        creation_constraints =
+                runtime->find_layout_constraints(ctx, our_layout_id);
         creation_constraints.add_constraint(
             FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
-      } 
-      if (input.require_collective_instances)
-        creation_constraints.specialized_constraint.collective = true; 
+      }
       output.chosen_instances.resize(output.chosen_instances.size()+1);
       size_t footprint;
       if (!default_make_instance(ctx, target_memory, creation_constraints,
@@ -2787,7 +2701,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
       {
         output.src_instances[idx] = input.src_instances[idx];
-        filter_collective_instances(output.src_instances[idx]);
         if (!output.src_instances[idx].empty())
           runtime->acquire_and_filter_instances(ctx,
                                               output.src_instances[idx]);
@@ -2806,7 +2719,6 @@ namespace Legion {
           output.src_instances[idx].push_back(
               PhysicalInstance::get_virtual_instance());
         output.dst_instances[idx] = input.dst_instances[idx];
-        filter_collective_instances(output.dst_instances[idx]);
         if (!output.dst_instances[idx].empty())
           runtime->acquire_and_filter_instances(ctx,
                                   output.dst_instances[idx]);
@@ -2819,7 +2731,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < copy.dst_requirements.size(); idx++)
         {
           output.dst_instances[idx] = input.dst_instances[idx];
-          filter_collective_instances(output.dst_instances[idx]);
           if (!copy.dst_requirements[idx].is_restricted())
             default_create_copy_instance<false/*is src*/>(ctx, copy,
                 copy.dst_requirements[idx], idx, output.dst_instances[idx]);
@@ -2830,10 +2741,9 @@ namespace Legion {
         for (unsigned idx = 0; idx <
               copy.src_indirect_requirements.size(); idx++)
         {
-          if (!input.src_indirect_instances[idx].empty() &&
-              !input.src_indirect_instances[idx].front().is_collective_instance())
+          if (!input.src_indirect_instances[idx].empty())
             output.src_indirect_instances[idx] =
-              input.src_indirect_instances[idx].front();
+              input.src_indirect_instances[idx][0];
           if (!copy.src_indirect_requirements[idx].is_restricted())
           {
             std::vector<PhysicalInstance> temp_instances;
@@ -2849,10 +2759,9 @@ namespace Legion {
         for (unsigned idx = 0; idx <
               copy.dst_indirect_requirements.size(); idx++)
         {
-          if (!input.dst_indirect_instances[idx].empty() &&
-              !input.dst_indirect_instances[idx].front().is_collective_instance())
+          if (!input.dst_indirect_instances[idx].empty())
             output.dst_indirect_instances[idx] =
-              input.dst_indirect_instances[idx].front();
+              input.dst_indirect_instances[idx][0];
           if (!copy.dst_indirect_requirements[idx].is_restricted())
           {
             std::vector<PhysicalInstance> temp_instances;
@@ -3160,8 +3069,7 @@ namespace Legion {
             output.chosen_instances.begin(); it !=
             output.chosen_instances.end(); it++)
       {
-        if (it->is_collective_instance() ||
-            (it->get_location().kind() == Memory::GPU_FB_MEM)) {
+        if (it->get_location().kind() == Memory::GPU_FB_MEM) {
           // These instances are not supported yet (see Legion issue #516)
           to_erase.push_back(it - output.chosen_instances.begin());
         } else {
@@ -3469,19 +3377,6 @@ namespace Legion {
         }
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DefaultMapper::filter_collective_instances(
-                                       std::vector<PhysicalInstance> &instances)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<PhysicalInstance>::iterator it =
-            instances.begin(); it != instances.end(); /*nothing*/)
-        if (it->is_collective_instance())
-          it = instances.erase(it);
-        else
-          it++;
     }
 
     //--------------------------------------------------------------------------

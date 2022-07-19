@@ -1252,9 +1252,6 @@ namespace Legion {
         if (inst.is_external_instance()) {
           ss << "EXTERNAL,";
         }
-        if (inst.is_collective_instance()) {
-          ss << "COLLECTIVE,";
-        }
         ss << "memory=" << inst.get_location();
         ss << ",domain=" << to_string(runtime, ctx, inst.get_instance_domain());
         std::set<FieldID> fields;
