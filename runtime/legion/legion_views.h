@@ -125,10 +125,9 @@ namespace Legion {
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      InstanceView(RegionTreeForest *ctx,DistributedID did,PhysicalManager *man,
-                   AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
-                   UniqueID owner_context, bool register_now,
-                   CollectiveMapping *mapping); 
+      InstanceView(RegionTreeForest *ctx, DistributedID did,
+                   AddressSpaceID owner_proc, UniqueID owner_context,
+                   bool register_now, CollectiveMapping *mapping); 
       virtual ~InstanceView(void); 
     public:
       virtual ApEvent fill_from(FillView *fill_view,
@@ -192,6 +191,10 @@ namespace Legion {
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
+    public:
+      // The ID of the context that made this view
+      // instance made for a virtual mapping
+      const UniqueID owner_context;
     }; 
 
     /**
@@ -260,7 +263,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source) = 0;
-      virtual void find_last_users(PhysicalManager *manager,
+      virtual void find_last_users(PhysicalManager *target,
                                    std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
@@ -269,9 +272,16 @@ namespace Legion {
       virtual void find_atomic_reservations(PhysicalManager *manager,
                                     const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
-    public:
+    protected:
       void find_field_reservations(const FieldMask &mask,
                                    std::vector<Reservation> &results);
+      RtEvent find_field_reservations(const FieldMask &mask,
+                                      std::vector<Reservation> *results,
+                                      AddressSpaceID source,
+                                      RtUserEvent to_trigger =
+                                        RtUserEvent::NO_RT_USER_EVENT);
+      void update_field_reservations(const FieldMask &mask,
+                                     const std::vector<Reservation> &rsrvs);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -302,10 +312,7 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
 #endif
     public:
-      PhysicalManager *const manager;
-      // The ID of the context that made this view
-      // instance made for a virtual mapping
-      const UniqueID owner_context;
+      PhysicalManager *const manager; 
       // This is the owner space for the purpose of logical analysis
       // If you ever make this non-const then be sure to update the
       // code in register_collective_user
@@ -419,11 +426,11 @@ namespace Legion {
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(RegionTreeForest *ctx, PhysicalManager *manager,
-               InstanceView *view, IndexSpaceExpression *expr); 
-      ExprView(const ExprView &rhs);
+               MaterializedView *view, IndexSpaceExpression *expr); 
+      ExprView(const ExprView &rhs) = delete;
       virtual ~ExprView(void);
     public:
-      ExprView& operator=(const ExprView &rhs);
+      ExprView& operator=(const ExprView &rhs) = delete;
     public:
       inline bool deterministic_pointer_less(const ExprView *rhs) const
         { return view_expr->deterministic_pointer_less(rhs->view_expr); }
@@ -577,7 +584,7 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       PhysicalManager *const manager;
-      InstanceView *const inst_view;
+      MaterializedView *const inst_view;
       IndexSpaceExpression *const view_expr;
       std::atomic<size_t> view_volume;
 #if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)

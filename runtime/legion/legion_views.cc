@@ -76,27 +76,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               PhysicalManager *man, AddressSpaceID owner_sp,
-                               AddressSpaceID log_own,
-                               UniqueID own_ctx, bool register_now,
-                               CollectiveMapping *mapping)
-      : LogicalView(ctx, did, owner_sp, register_now, mapping), manager(man),
-        owner_context(own_ctx), logical_owner(log_own)
+                               AddressSpaceID owner_sp, UniqueID own_ctx,
+                               bool register_now, CollectiveMapping *mapping)
+      : LogicalView(ctx, did, owner_sp, register_now, mapping),
+        owner_context(own_ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      // Keep the manager from being collected
-      manager->add_nested_resource_ref(did);
     }
 
     //--------------------------------------------------------------------------
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
     { 
-      if (manager->remove_nested_resource_ref(did))
-        delete manager;
     }
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -127,32 +118,7 @@ namespace Legion {
       // Should only be called by derived classes
       assert(false);
     }
-#endif // ENABLE_VIEW_REPLICATION
-
-    //--------------------------------------------------------------------------
-    void InstanceView::find_atomic_reservations(const FieldMask &mask,
-                                       Operation *op, unsigned index, bool excl)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<Reservation> reservations;
-      find_field_reservations(mask, reservations); 
-      for (unsigned idx = 0; idx < reservations.size(); idx++)
-        op->update_atomic_locks(index, reservations[idx], excl);
-    } 
-
-    //--------------------------------------------------------------------------
-    void InstanceView::find_field_reservations(const FieldMask &mask,
-                                         std::vector<Reservation> &reservations)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent ready = manager->find_field_reservations(mask, this->did,
-          &reservations, runtime->address_space, RtUserEvent::NO_RT_USER_EVENT);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      // Sort them into order if necessary
-      if (reservations.size() > 1)
-        std::sort(reservations.begin(), reservations.end());
-    }
+#endif // ENABLE_VIEW_REPLICATION 
 
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
@@ -182,6 +148,13 @@ namespace Legion {
       derez.deserialize(term_event);
       RtEvent collect_event;
       derez.deserialize(collect_event);
+      DistributedID target_did;
+      derez.deserialize(target_did);
+      RtEvent target_ready;
+      PhysicalManager *target =
+        runtime->find_or_request_instance_manager(target_did, target_ready);
+      size_t target_space_arrivals;
+      derez.deserialize(target_space_arrivals);
       ApUserEvent ready_event;
       derez.deserialize(ready_event);
       RtUserEvent applied_event;
@@ -191,6 +164,8 @@ namespace Legion {
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
+      if (target_ready.exists() && !target_ready.has_triggered())
+        target_ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -199,213 +174,17 @@ namespace Legion {
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
                                              term_event, collect_event, 
+                                             target, target_space_arrivals,
                                              applied_events, 
-                                             NULL/*no collective mapping*/,
-                                             NULL/*local collective op*/,
                                              trace_info, source);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
       if (!applied_events.empty())
-      {
-        const RtEvent precondition = Runtime::merge_events(applied_events);
-        Runtime::trigger_event(applied_event, precondition);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, NULL, precondition);
-      }
+        Runtime::trigger_event(applied_event, 
+            Runtime::merge_events(applied_events));
       else
-      {
         Runtime::trigger_event(applied_event);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_find_copy_pre_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      bool reading;
-      derez.deserialize<bool>(reading);
-      ReductionOpID redop;
-      derez.deserialize(redop);
-      FieldMask copy_mask;
-      derez.deserialize(copy_mask);
-      IndexSpaceExpression *copy_expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      ApUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      RtUserEvent applied;
-      derez.deserialize(applied);
-      std::set<RtEvent> applied_events;
-      const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
-
-      // This blocks the virtual channel, but keeps queries in-order 
-      // with respect to updates from the same node which is necessary
-      // for preventing cycles in the realm event graph
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      InstanceView *inst_view = view->as_instance_view();
-      const ApEvent pre = inst_view->find_copy_preconditions(reading, redop,
-          copy_mask, copy_expr, op_id, index, applied_events, trace_info);
-      Runtime::trigger_event(&trace_info, to_trigger, pre);
-      if (!applied_events.empty())
-        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(applied);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_add_copy_user(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      bool reading;
-      derez.deserialize(reading);
-      ReductionOpID redop;
-      derez.deserialize(redop);
-      ApEvent term_event;
-      derez.deserialize(term_event);
-      RtEvent collect_event;
-      derez.deserialize(collect_event);
-      FieldMask copy_mask;
-      derez.deserialize(copy_mask);
-      IndexSpaceExpression *copy_expr =
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      RtUserEvent applied_event;
-      derez.deserialize(applied_event);
-      bool trace_recording;
-      derez.deserialize(trace_recording);
-
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
-
-      std::set<RtEvent> applied_events;
-      inst_view->add_copy_user(reading,redop,term_event,collect_event,copy_mask,
-          copy_expr, op_id, index, applied_events, trace_recording, source);
-      if (!applied_events.empty())
-      {
-        const RtEvent precondition = Runtime::merge_events(applied_events);
-        Runtime::trigger_event(applied_event, precondition);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, NULL, precondition);
-      }
-      else
-      {
-        Runtime::trigger_event(applied_event);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceView::handle_view_find_last_users_request(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      std::vector<ApEvent> *target;
-      derez.deserialize(target);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      FieldMask mask;
-      derez.deserialize(mask);
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      RtUserEvent done;
-      derez.deserialize(done);
-
-      std::set<ApEvent> result;
-      std::vector<RtEvent> applied;
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
-      inst_view->find_last_users(result, usage, mask, expr, applied);
-      if (!result.empty())
-      {
-        Serializer rez;
-        {
-          RezCheck z2(rez);
-          rez.serialize(target);
-          rez.serialize<size_t>(result.size());
-          for (std::set<ApEvent>::const_iterator it =
-                result.begin(); it != result.end(); it++)
-            rez.serialize(*it);
-          rez.serialize(done);
-          if (!applied.empty())
-            rez.serialize(Runtime::merge_events(applied));
-          else
-            rez.serialize(RtEvent::NO_RT_EVENT);
-        }
-        runtime->send_view_find_last_users_response(source, rez);
-      }
-      else
-      {
-        if (!applied.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(applied));
-        else
-          Runtime::trigger_event(done);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceView::handle_view_find_last_users_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      std::set<ApEvent> *target;
-      derez.deserialize(target);
-      size_t num_events;
-      derez.deserialize(num_events);
-      for (unsigned idx = 0; idx < num_events; idx++)
-      {
-        ApEvent event;
-        derez.deserialize(event);
-        target->insert(event);
-      }
-      RtUserEvent done;
-      derez.deserialize(done);
-      RtEvent pre;
-      derez.deserialize(pre);
-      Runtime::trigger_event(done, pre);
-    }
+    } 
 
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
@@ -526,7 +305,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
-                       InstanceView *view, IndexSpaceExpression *exp) 
+                       MaterializedView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
         view_expr(exp), view_volume(SIZE_MAX),
 #if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
@@ -536,19 +315,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       view_expr->add_nested_expression_reference(view->did);
-    }
-
-    //--------------------------------------------------------------------------
-    ExprView::ExprView(const ExprView &rhs)
-      : context(rhs.context), manager(rhs.manager), inst_view(rhs.inst_view),
-        view_expr(rhs.view_expr), view_volume(rhs.view_volume.load())
-#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
-        , view_did(rhs.view_did)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -595,15 +361,6 @@ namespace Legion {
         }
         previous_epoch_users.clear();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    ExprView& ExprView::operator=(const ExprView &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2388,15 +2145,217 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    IndividualView::IndividualView(RegionTreeForest *ctx, DistributedID did,
+                     PhysicalManager *man, AddressSpaceID owner_proc,
+                     AddressSpaceID log_owner, UniqueID owner_context,
+                     bool register_now, CollectiveMapping *mapping)
+      : InstanceView(ctx, did, owner_proc, owner_context, register_now,mapping),
+        manager(man), logical_owner(log_owner)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      // Keep the manager from being collected
+      manager->add_nested_resource_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
     IndividualView::~IndividualView(void)
     //--------------------------------------------------------------------------
     {
+      if (manager->remove_nested_resource_ref(did))
+        delete manager;
       if (is_owner())
       {
         for (std::map<unsigned,Reservation>::iterator it =
               view_reservations.begin(); it != view_reservations.end(); it++)
           it->second.destroy_reservation();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      manager->add_nested_gc_ref(did, mutator);
+      // If we're the logical owner, but not the original owner
+      // then we use a gc reference on the original owner to 
+      // keep all the views allive until we're done
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_increment(owner_space, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      manager->remove_nested_gc_ref(did, mutator);
+      // If we're the logical owner but not the original owner
+      // then we remove the gc reference that we added
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_decrement(owner_space, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // The logical owner is where complete set of users is and is therefore
+      // where garbage collection will take place so we need to send our 
+      // valid update there if we're not the owner, otherwise we send it 
+      // down to the manager
+      if (is_logical_owner())
+        manager->add_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_increment(logical_owner, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_logical_owner())
+        // we have a resource reference on the manager so no need to check
+        manager->remove_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_decrement(logical_owner, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::find_atomic_reservations(PhysicalManager *instance,
+                const FieldMask &mask, Operation *op, unsigned index, bool excl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance == manager);
+#endif
+      std::vector<Reservation> reservations;
+      find_field_reservations(mask, reservations); 
+      
+      
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        op->update_atomic_locks(index, reservations[idx], excl);
+    } 
+
+    //--------------------------------------------------------------------------
+    void IndividualView::find_field_reservations(const FieldMask &mask,
+                                         std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent ready = 
+        find_field_reservations(mask, &reservations, runtime->address_space);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      // Sort them into order if necessary
+      if (reservations.size() > 1)
+        std::sort(reservations.begin(), reservations.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndividualView::find_field_reservations(const FieldMask &mask,
+                               std::vector<Reservation> *reservations,
+                               AddressSpaceID source, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Reservation> results;
+      if (is_owner())
+      {
+        results.reserve(mask.pop_count());
+        // We're the owner so we can make all the fields
+        AutoLock v_lock(view_lock);
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder =
+            view_reservations.find(idx);
+          if (finder == view_reservations.end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            view_reservations[idx] = handle;
+            results.push_back(handle);
+          }
+          else
+            results.push_back(finder->second);
+        }
+      }
+      else
+      {
+        // See if we can find them all locally
+        {
+          AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+          for (int idx = mask.find_first_set(); idx >= 0;
+                idx = mask.find_next_set(idx+1))
+          {
+            std::map<unsigned,Reservation>::const_iterator finder =
+              view_reservations.find(idx);
+            if (finder != view_reservations.end())
+              results.push_back(finder->second);
+            else
+              break;
+          }
+        }
+        if (results.size() < mask.pop_count())
+        {
+          // Couldn't find them all so send the request to the owner
+          if (!to_trigger.exists())
+            to_trigger = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(mask);
+            rez.serialize(reservations);
+            rez.serialize(source);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_atomic_reservation_request(owner_space, rez);
+          return to_trigger;
+        }
+      }
+      if (source != local_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_trigger.exists());
+#endif
+        // Send the result back to the source
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(mask);
+          rez.serialize(reservations);
+          rez.serialize<size_t>(results.size());
+          for (std::vector<Reservation>::const_iterator it =
+                results.begin(); it != results.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_atomic_reservation_response(source, rez);
+      }
+      else
+      {
+        reservations->swap(results);
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+      }
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::update_field_reservations(const FieldMask &mask,
+                                   const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+#endif
+      AutoLock v_lock(view_lock);
+      unsigned offset = 0;
+      for (int idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        view_reservations[idx] = reservations[offset++];
     }
 
     //--------------------------------------------------------------------------
@@ -2409,11 +2368,9 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       IndividualView *view = static_cast<IndividualView*>(
-        runtime->find_or_request_instance_manager(did, ready));
+        runtime->find_or_request_logical_view(did, ready));
       FieldMask mask;
       derez.deserialize(mask);
-      DistributedID view_did;
-      derez.deserialize(view_did);
       std::vector<Reservation> *target;
       derez.deserialize(target);
       AddressSpaceID source;
@@ -2423,8 +2380,7 @@ namespace Legion {
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->find_field_reservations(mask, view_did, target, 
-                                    source, to_trigger);
+      view->find_field_reservations(mask, target, source, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -2437,11 +2393,9 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       IndividualView *view = static_cast<IndividualView*>(
-        runtime->find_or_request_instance_manager(did, ready));
+        runtime->find_or_request_logical_view(did, ready));
       FieldMask mask;
       derez.deserialize(mask);
-      DistributedID view_did;
-      derez.deserialize(view_did);
       std::vector<Reservation> *target;
       derez.deserialize(target);
       size_t num_reservations;
@@ -2451,10 +2405,203 @@ namespace Legion {
         derez.deserialize((*target)[idx]);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->update_field_reservations(mask, view_did, *target);
+      view->update_field_reservations(mask, *target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualView::handle_view_find_copy_pre_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      bool reading;
+      derez.deserialize<bool>(reading);
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      FieldMask copy_mask;
+      derez.deserialize(copy_mask);
+      IndexSpaceExpression *copy_expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      ApUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      std::set<RtEvent> applied_events;
+      const PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
+
+      // This blocks the virtual channel, but keeps queries in-order 
+      // with respect to updates from the same node which is necessary
+      // for preventing cycles in the realm event graph
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      IndividualView *inst_view = view->as_individual_view();
+      const ApEvent pre = inst_view->find_copy_preconditions(reading, redop,
+          copy_mask, copy_expr, op_id, index, applied_events, trace_info);
+      Runtime::trigger_event(&trace_info, to_trigger, pre);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualView::handle_view_add_copy_user(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      bool reading;
+      derez.deserialize(reading);
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      RtEvent collect_event;
+      derez.deserialize(collect_event);
+      FieldMask copy_mask;
+      derez.deserialize(copy_mask);
+      IndexSpaceExpression *copy_expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      RtUserEvent applied_event;
+      derez.deserialize(applied_event);
+      bool trace_recording;
+      derez.deserialize(trace_recording);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_individual_view());
+#endif
+      IndividualView *inst_view = view->as_individual_view();
+
+      std::set<RtEvent> applied_events;
+      inst_view->add_copy_user(reading,redop,term_event,collect_event,copy_mask,
+          copy_expr, op_id, index, applied_events, trace_recording, source);
+      if (!applied_events.empty())
+      {
+        const RtEvent precondition = Runtime::merge_events(applied_events);
+        Runtime::trigger_event(applied_event, precondition);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source, NULL, precondition);
+      }
+      else
+      {
+        Runtime::trigger_event(applied_event);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::handle_view_find_last_users_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      DistributedID manager_did;
+      derez.deserialize(manager_did);
+      RtEvent manager_ready;
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(manager_did, manager_ready);
+
+      std::vector<ApEvent> *target;
+      derez.deserialize(target);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask mask;
+      derez.deserialize(mask);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::set<ApEvent> result;
+      std::vector<RtEvent> applied;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      if (manager_ready.exists() && !manager_ready.has_triggered())
+        manager_ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_individual_view());
+#endif
+      IndividualView *inst_view = view->as_individual_view();
+      inst_view->find_last_users(manager, result, usage, mask, expr, applied);
+      if (!result.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(result.size());
+          for (std::set<ApEvent>::const_iterator it =
+                result.begin(); it != result.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(done);
+          if (!applied.empty())
+            rez.serialize(Runtime::merge_events(applied));
+          else
+            rez.serialize(RtEvent::NO_RT_EVENT);
+        }
+        runtime->send_view_find_last_users_response(source, rez);
+      }
+      else
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::handle_view_find_last_users_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::set<ApEvent> *target;
+      derez.deserialize(target);
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        ApEvent event;
+        derez.deserialize(event);
+        target->insert(event);
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
+      RtEvent pre;
+      derez.deserialize(pre);
+      Runtime::trigger_event(done, pre);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2468,8 +2615,8 @@ namespace Legion {
                                AddressSpaceID log_own, PhysicalManager *man,
                                UniqueID own_ctx, bool register_now,
                                CollectiveMapping *mapping)
-      : InstanceView(ctx, encode_materialized_did(did), man, own_addr,
-                     log_own, own_ctx, register_now, mapping), 
+      : IndividualView(ctx, encode_materialized_did(did), man, own_addr,
+                       log_own, own_ctx, register_now, mapping), 
         expr_cache_uses(0), outstanding_additions(0)
 #ifdef ENABLE_VIEW_REPLICATION
         , remote_added_users(0), remote_pending_users(NULL)
@@ -2491,15 +2638,6 @@ namespace Legion {
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, 
           LEGION_DISTRIBUTED_ID_FILTER(manager->did)); 
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2525,15 +2663,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MaterializedView& MaterializedView::operator=(const MaterializedView &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     const FieldMask& MaterializedView::get_physical_mask(void) const
     //--------------------------------------------------------------------------
     {
@@ -2545,27 +2674,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return !(space_mask - manager->layout->allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::copy_to(const FieldMask &copy_mask,
-                                   std::vector<CopySrcDstField> &dst_fields,
-                                   CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      if (across_helper == NULL)
-        manager->compute_copy_offsets(copy_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(copy_mask, dst_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::copy_from(const FieldMask &copy_mask,
-                                     const DomainPoint &collective_point,
-                                     std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-      manager->compute_copy_offsets(copy_mask, src_fields, &collective_point);
     }
 
     //--------------------------------------------------------------------------
@@ -3178,13 +3286,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::find_last_users(std::set<ApEvent> &events,
+    void MaterializedView::find_last_users(PhysicalManager *instance,
+                                      std::set<ApEvent> &events,
                                       const RegionUsage &usage,
                                       const FieldMask &mask,
                                       IndexSpaceExpression *expr,
                                       std::vector<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instance == manager);
+#endif
       // Check to see if we're on the right node to perform this analysis
       if (logical_owner != local_space)
       {
@@ -3193,6 +3305,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(manager->did);
           rez.serialize(&events);
           rez.serialize(usage);
           rez.serialize(mask);
@@ -3370,55 +3483,6 @@ namespace Legion {
     }
 #endif // ENABLE_VIEW_REPLICATION
  
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      manager->add_nested_gc_ref(did, mutator);
-      // If we're the logical owner, but not the original owner
-      // then we use a gc reference on the original owner to 
-      // keep all the views allive until we're done
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // we have a resource reference on the manager so no need to check
-      manager->remove_nested_gc_ref(did, mutator);
-      // If we're the logical owner but not the original owner
-      // then we remove the gc reference that we added
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // The logical owner is where complete set of users is and is therefore
-      // where garbage collection will take place so we need to send our 
-      // valid update there if we're not the owner, otherwise we send it 
-      // down to the manager
-      if (is_logical_owner())
-        manager->add_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_increment(logical_owner, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_logical_owner())
-        // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_decrement(logical_owner, mutator);
-    }
-
     //--------------------------------------------------------------------------
     void MaterializedView::add_internal_task_user(const RegionUsage &usage,
                                             IndexSpaceExpression *user_expr,
@@ -4408,8 +4472,8 @@ namespace Legion {
                                  AddressSpaceID log_own,
                                  PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now, CollectiveMapping *mapping)
-      : InstanceView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
-                     own_ctx, register_now, mapping)
+      : IndividualView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
+                       own_ctx, register_now, mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -4417,15 +4481,6 @@ namespace Legion {
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL), fill_view(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4444,22 +4499,6 @@ namespace Legion {
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionView& ReductionView::operator=(const ReductionView &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* ReductionView::get_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return manager;
     }
 
     //--------------------------------------------------------------------------
@@ -4712,13 +4751,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::find_last_users(std::set<ApEvent> &events,
+    void ReductionView::find_last_users(PhysicalManager *instance,
+                                        std::set<ApEvent> &events,
                                         const RegionUsage &usage,
                                         const FieldMask &mask,
                                         IndexSpaceExpression *expr,
                                         std::vector<RtEvent> &ready_events)const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instance == manager);
+#endif
       // Check to see if we're on the right node to perform this analysis
       if (logical_owner != local_space)
       {
@@ -4727,6 +4770,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(instance->did);
           rez.serialize(&events);
           rez.serialize(usage);
           rez.serialize(mask);
@@ -5079,79 +5123,6 @@ namespace Legion {
         }
         outstanding_gc_events.erase(event_finder);
       }
-    } 
- 
-    //--------------------------------------------------------------------------
-    void ReductionView::copy_to(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &dst_fields,
-                                CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      // Get the destination fields for this copy
-      if (across_helper == NULL)
-        manager->compute_copy_offsets(copy_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(copy_mask, dst_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::copy_from(const FieldMask &copy_mask,
-                                  const DomainPoint &collective_point,
-                                  std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(FieldMask::pop_count(copy_mask) == 1); // only one field
-#endif
-      manager->compute_copy_offsets(copy_mask, src_fields, &collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      manager->add_nested_gc_ref(did, mutator);
-      // If we're the logical owner, but not the original owner
-      // then we use a gc reference on the original owner to 
-      // keep all the views allive until we're done
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      manager->remove_nested_gc_ref(did, mutator);
-      // If we're the logical owner but not the original owner
-      // then we remove the gc reference that we added
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // The logical owner is where complete set of users is and is therefore
-      // where garbage collection will take place so we need to send our 
-      // valid update there if we're not the owner, otherwise we send it 
-      // down to the manager
-      if (is_logical_owner())
-        manager->add_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_increment(logical_owner, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_logical_owner())
-        // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_decrement(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
