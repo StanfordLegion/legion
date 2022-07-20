@@ -8317,6 +8317,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       is_first_local_shard = first_local_shard;
+      if (restricted_region.impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Acquire operation in control replicated parent task %s "
+            "(UID %lld) did not specify a `physical_region' argument. "
+            "All acquire operations in control replicated contexts must "
+            "specify an explicit PhysicalRegion.",
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (!grants.empty())
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
             "Illegal use of grants with an acquire operation in control "
@@ -8425,32 +8432,6 @@ namespace Legion {
       AcquireOp::resolve_false(speculated, launched);
     }
 
-    //--------------------------------------------------------------------------
-    CollectiveMapping* ReplAcquireOp::get_collective_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return &(repl_ctx->shard_manager->get_collective_mapping()); 
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplAcquireOp::get_collective_local_arrivals(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->shard_manager->local_shard_count();
-    }
-
     /////////////////////////////////////////////////////////////
     // Repl Release Op
     /////////////////////////////////////////////////////////////
@@ -8494,6 +8475,13 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
         sources_check = context->get_next_collective_index(COLLECTIVE_LOC_105);
       is_first_local_shard = first_local_shard;
+      if (restricted_region.impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Acquire operation in control replicated parent task %s "
+            "(UID %lld) did not specify a `physical_region' argument. "
+            "All acquire operations in control replicated contexts must "
+            "specify an explicit PhysicalRegion.",
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (!grants.empty())
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
             "Illegal use of grants with a release operation in control "
@@ -8601,32 +8589,6 @@ namespace Legion {
       assert(!collective_map_barrier.exists());
 #endif
       ReleaseOp::resolve_false(speculated, launched);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping* ReplReleaseOp::get_collective_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return &(repl_ctx->shard_manager->get_collective_mapping()); 
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplReleaseOp::get_collective_local_arrivals(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->shard_manager->local_shard_count();
     }
 
     //--------------------------------------------------------------------------

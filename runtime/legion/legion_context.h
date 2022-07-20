@@ -1474,13 +1474,31 @@ namespace Legion {
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
     public:
+      // These three methods guard all access to the creation of views onto
+      // physical instances within a parent task context. This is important
+      // because we need to guarantee the invariant that for every given 
+      // physical instance in a context it has at most one logical view
+      // that represents its state in the physical analysis.
       void convert_source_views(const std::vector<PhysicalManager*> &sources,
-                                std::vector<InstanceView*> &source_views);
+                                std::vector<InstanceView*> &source_views,
+                                CollectiveMapping *mapping = NULL);
       void convert_target_views(const InstanceSet &targets,
                                 std::vector<InstanceView*> &target_views);
+      // Same as convert target views, but will also perform a check for 
+      // any collective behavior across multiple points of the same index
+      // space launch of the operation. Note that if the operation is not
+      // an index space operation or a singular operation in a control
+      // replicated context then there the behavior will be the same as 
+      // convert_target_views.
+      // This method does not guarantee that there will be any collective views
+      // The analysis mapping gives collective mapping of all the address
+      // spaces that called into this method collectively
+      // Target views gives one view for each physical instance 
+      // The target space arrivals says how many different arrivals can be
+      // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
-      bool convert_collective_views(Operation *op, unsigned index, 
-                                    LogicalRegion region, 
+      bool convert_collective_views(Operation *op, unsigned index,
+                                    LogicalRegion region,
                                     const InstanceSet &targets,
                                     CollectiveMapping *&analysis_mapping,
                                     std::vector<InstanceView*> &target_views,

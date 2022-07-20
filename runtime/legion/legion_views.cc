@@ -2384,6 +2384,80 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // IndividualView 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndividualView::~IndividualView(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        for (std::map<unsigned,Reservation>::iterator it =
+              view_reservations.begin(); it != view_reservations.end(); it++)
+          it->second.destroy_reservation();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualView::handle_atomic_reservation_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      IndividualView *view = static_cast<IndividualView*>(
+        runtime->find_or_request_instance_manager(did, ready));
+      FieldMask mask;
+      derez.deserialize(mask);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      std::vector<Reservation> *target;
+      derez.deserialize(target);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      view->find_field_reservations(mask, view_did, target, 
+                                    source, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualView::handle_atomic_reservation_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      IndividualView *view = static_cast<IndividualView*>(
+        runtime->find_or_request_instance_manager(did, ready));
+      FieldMask mask;
+      derez.deserialize(mask);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      std::vector<Reservation> *target;
+      derez.deserialize(target);
+      size_t num_reservations;
+      derez.deserialize(num_reservations);
+      target->resize(num_reservations);
+      for (unsigned idx = 0; idx < num_reservations; idx++)
+        derez.deserialize((*target)[idx]);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      view->update_field_reservations(mask, view_did, *target);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      Runtime::trigger_event(to_trigger);
+    }
+
+    /////////////////////////////////////////////////////////////
     // MaterializedView 
     /////////////////////////////////////////////////////////////
 

@@ -397,8 +397,8 @@ namespace Legion {
       LG_DEFER_PERFORM_REMOTE_TASK_ID,
       LG_DEFER_PERFORM_UPDATE_TASK_ID,
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
-      LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
-      LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
+      LG_DEFER_PHYSICAL_MANAGER_TASK_ID,
+      LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
@@ -522,8 +522,8 @@ namespace Legion {
         "Defer Physical Analysis Remote Stage",                   \
         "Defer Physical Analysis Update Stage",                   \
         "Defer Physical Analysis Output Stage",                   \
-        "Defer Instance Manager Registration",                    \
-        "Defer Instance Manager Deletion",                        \
+        "Defer Physical Manager Registration",                    \
+        "Defer Physical Manager Deletion",                        \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
@@ -1872,7 +1872,6 @@ namespace Legion {
     class InnerTaskView;
     class VirtualManager;
     class PhysicalManager;
-    class IndividualManager;
     class InstanceBuilder;
 
     class RegionAnalyzer;
@@ -2107,7 +2106,7 @@ namespace Legion {
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
     friend class Internal::InstanceManager;                 \
-    friend class Internal::IndividualManager;               \
+    friend class Internal::PhysicalManager;                 \
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \

@@ -2424,11 +2424,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual CollectiveMapping* get_collective_mapping(void);
-      virtual bool is_collective_first_local_shard(void) const 
-        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
-      virtual size_t get_collective_local_arrivals(void) const;
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2452,10 +2448,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual CollectiveMapping* get_collective_mapping(void);
-      virtual size_t get_collective_local_arrivals(void) const;
-      virtual bool is_collective_first_local_shard(void) const 
-        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     public:

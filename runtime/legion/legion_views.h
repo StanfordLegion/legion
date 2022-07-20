@@ -201,6 +201,29 @@ namespace Legion {
      */
     class IndividualView : public InstanceView {
     public:
+      // This structure acts as a key for performing rendezvous
+      // between collective user registrations
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void)
+          : view_did(0), op_context_index(0), index(0) { }
+        RendezvousKey(DistributedID did, size_t ctx, unsigned idx)
+          : view_did(did), op_context_index(ctx), index(idx) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (view_did < rhs.view_did) return true;
+          if (view_did > rhs.view_did) return false;
+          if (op_context_index < rhs.op_context_index) return true;
+          if (op_context_index > rhs.op_context_index) return false;
+          return (index < rhs.index);
+        }
+      public:
+        DistributedID view_did; // uniquely names context
+        size_t op_context_index; // unique name operation in context
+        unsigned index; // uniquely name analysis for op by region req index
+      };
+    public:
       IndividualView(RegionTreeForest *ctx, DistributedID did,
                      PhysicalManager *man, AddressSpaceID owner_proc,
                      AddressSpaceID logical_owner, UniqueID owner_context,
@@ -257,6 +280,11 @@ namespace Legion {
       static void handle_view_find_last_users_request(Deserializer &derz,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_last_users_response(Deserializer &derez);
+    public:
+      static void handle_atomic_reservation_request(Runtime *runtime,
+                                                    Deserializer &derez);
+      static void handle_atomic_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -282,6 +310,43 @@ namespace Legion {
       // If you ever make this non-const then be sure to update the
       // code in register_collective_user
       const AddressSpaceID logical_owner;
+    protected:
+      std::map<unsigned,Reservation> view_reservations;
+    protected:
+      // This is an infrequently used data structure for handling collective
+      // register user calls on individual managers that occurs with certain
+      // operation in control replicated contexts
+      struct UserRendezvous {
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            trace_info(NULL), view(NULL), mask(NULL), expr(NULL), op_id(0),
+            symbolic(false), local_initialized(false) { }
+        // event for when local instances can be used
+        ApUserEvent ready_event; 
+        // remote ready events to trigger
+        std::map<ApUserEvent,PhysicalTraceInfo*> remote_ready_events;
+        // all the local term events
+        std::vector<ApEvent> term_events;
+        // event that marks when all registrations are done
+        RtUserEvent registered;
+        // event for when any local effects are applied
+        RtUserEvent applied;
+        // Counts of remaining notficiations before registration
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+        // PhysicalTraceInfo that made the ready_event and should trigger it
+        PhysicalTraceInfo *trace_info;
+        // Arguments for performing the local registration
+        InstanceView *view;
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        RtEvent collect_event;
+        bool symbolic;
+        bool local_initialized;
+      };
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     };
 
     /**

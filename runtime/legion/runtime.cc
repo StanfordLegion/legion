@@ -5387,7 +5387,7 @@ namespace Legion {
                                       size_t &alignment) const
     //--------------------------------------------------------------------------
     {
-      IndividualManager *manager = get_manager(field_id);
+      PhysicalManager *manager = get_manager(field_id);
       LayoutConstraints *cons = manager->layout->constraints;
 
 #ifdef DEBUG_LEGION
@@ -5510,7 +5510,7 @@ namespace Legion {
                               bool check_constraints)
     //--------------------------------------------------------------------------
     {
-      IndividualManager *manager = get_manager(field_id);
+      PhysicalManager *manager = get_manager(field_id);
       if (instance.get_location() != manager->get_memory())
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
           "Field %u of output region %u of task %s (UID: %lld) is requested "
@@ -5671,7 +5671,7 @@ namespace Legion {
            returned_instances.end(); ++it)
       {
         FieldID field_id = it->first;
-        IndividualManager *manager = get_manager(field_id);
+        PhysicalManager *manager = get_manager(field_id);
 
         // Create a Realm layout
         LayoutConstraints *manager_cons = manager->layout->constraints;
@@ -5791,7 +5791,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id) const
+    PhysicalManager *OutputRegionImpl::get_manager(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(req.region);
@@ -5802,13 +5802,13 @@ namespace Legion {
 
       // Find the right physical manager by checking against
       // the field mask of the instance ref
-      IndividualManager *manager = NULL;
+      PhysicalManager *manager = NULL;
       for (unsigned idx = 0; idx < instance_set.size(); ++idx)
       {
         const InstanceRef &instance = instance_set[idx];
         if (!!(instance.get_valid_fields() & mask))
         {
-          manager = instance.get_physical_manager()->as_individual_manager();
+          manager = instance.get_physical_manager();
           break;
         }
       }
@@ -9761,30 +9761,30 @@ namespace Legion {
         ready_event = unique_event;
       }
 
-      IndividualManager *manager =
-        new IndividualManager(runtime->forest, did,
-                              runtime->address_space,
-                              this,
-                              PhysicalInstance::NO_INST,
-                              node->get_row_source()->as_index_space_node(),
-                              NULL/*piece_list*/,
-                              0/*piece_list_size*/,
-                              fspace_node,
-                              region.get_tree_id(),
-                              layout,
-                              0/*redop id*/, true/*register now*/,
-                              -1U/*instance_footprint*/,
-                              ready_event,
-                              PhysicalManager::UNBOUND_INSTANCE_KIND,
-                              NULL/*op*/,
-                              NULL/*collective mapping*/,
-                              producer_event);
+      PhysicalManager *manager =
+        new PhysicalManager(runtime->forest, did,
+                            runtime->address_space,
+                            this,
+                            PhysicalInstance::NO_INST,
+                            node->get_row_source()->as_index_space_node(),
+                            NULL/*piece_list*/,
+                            0/*piece_list_size*/,
+                            fspace_node,
+                            region.get_tree_id(),
+                            layout,
+                            0/*redop id*/, true/*register now*/,
+                            -1U/*instance_footprint*/,
+                            ready_event,
+                            PhysicalManager::UNBOUND_INSTANCE_KIND,
+                            NULL/*op*/,
+                            NULL/*collective mapping*/,
+                            producer_event);
 
-      // Register the instance to make it visible to downstream tasks
-      record_created_instance(manager,
-                              true/*acquire*/,
-                              priority,
-                              false/*remote*/);
+    // Register the instance to make it visible to downstream tasks
+    record_created_instance(manager,
+                            true/*acquire*/,
+                            priority,
+                            false/*remote*/);
       return manager;
     }
 
@@ -9833,7 +9833,7 @@ namespace Legion {
       : collection_lock(c_lock), manager_lock(m_lock), 
         collectable_instances(collectables), current_instances(instances),
         memory(mem), local_space(local), needed_size(needed),
-        small_manager(NULL), sort_current_priority(true)
+        sort_current_priority(true)
     //--------------------------------------------------------------------------
     {
       if (collectable_instances.empty())
@@ -9951,70 +9951,61 @@ namespace Legion {
         // size then try grouping the small holes together into chunks that 
         // are either as big as possible or as big as the hole we need and 
         // try deleting them
-        while (!small_holes.empty() || !pointers.empty())
+        while (!small_holes.empty())
         {
-          if (pointers.empty())
+          PhysicalManager *small_manager = small_holes.back();
+          small_holes.pop_back();
+          uintptr_t ptr = small_manager->get_instance_pointer();
+          // Insert our range
+          std::map<uintptr_t,Range>::iterator rit = 
+            ranges.insert(std::make_pair(ptr, Range(small_manager))).first;
+          // Check if we can join it with the one before or after
+          if (rit != ranges.begin())
           {
-            small_manager= small_holes.back();
-            small_holes.pop_back();
-            // Get the instance pointer(s) for this memory
-            small_manager->get_instance_pointers(memory, pointers);
-          }
-          while (!pointers.empty())
-          {
-            uintptr_t ptr = pointers.back();
-            pointers.pop_back();
-            // Insert our range
-            std::map<uintptr_t,Range>::iterator rit = 
-              ranges.insert(std::make_pair(ptr, Range(small_manager))).first;
-            // Check if we can join it with the one before or after
-            if (rit != ranges.begin())
+            std::map<uintptr_t,Range>::iterator prev = std::prev(rit);
+            if ((prev->first + prev->second.size) == rit->first)
             {
-              std::map<uintptr_t,Range>::iterator prev = std::prev(rit);
-              if ((prev->first + prev->second.size) == rit->first)
-              {
-                // Merge rit into prev
-                prev->second.size += rit->second.size;
-                prev->second.managers.insert(
-                    rit->second.managers.begin(), rit->second.managers.end());
-                ranges.erase(rit);
-                rit = prev;
-              }
-            }
-            if (std::next(rit) != ranges.end())
-            {
-              std::map<uintptr_t,Range>::iterator next= std::next(rit);
-              if ((rit->first + rit->second.size) == next->first)
-              {
-                // Merge next into rit
-                rit->second.size += next->second.size;
-                rit->second.managers.insert(
-                  next->second.managers.begin(), next->second.managers.end());
-                ranges.erase(next);
-              }
-            }
-            // See if it is is big enough to try an allocation
-            if (needed_size <= rit->second.size)
-            {
-              std::vector<RtEvent> collected_events;
-              for (std::set<PhysicalManager*>::const_iterator it =
-                    rit->second.managers.begin(); it != 
-                    rit->second.managers.end(); it++)
-              {
-                RtEvent collected;
-                if (!(*it)->collect(collected))
-                  continue;
-                pit->second.erase(*it);
-                deleted.insert(*it);
-                if (collected.exists())
-                  collected_events.push_back(collected);
-              }
+              // Merge rit into prev
+              prev->second.size += rit->second.size;
+              prev->second.managers.insert(
+                  rit->second.managers.begin(), rit->second.managers.end());
               ranges.erase(rit);
-              if (!collected_events.empty())
-                return Runtime::merge_events(collected_events);
-              else
-                return RtEvent::NO_RT_EVENT;
+              rit = prev;
             }
+          }
+          if (std::next(rit) != ranges.end())
+          {
+            std::map<uintptr_t,Range>::iterator next= std::next(rit);
+            if ((rit->first + rit->second.size) == next->first)
+            {
+              // Merge next into rit
+              rit->second.size += next->second.size;
+              rit->second.managers.insert(
+                next->second.managers.begin(), next->second.managers.end());
+              ranges.erase(next);
+            }
+          }
+          // See if it is is big enough to try an allocation
+          if (needed_size <= rit->second.size)
+          {
+            std::vector<RtEvent> collected_events;
+            for (std::set<PhysicalManager*>::const_iterator it =
+                  rit->second.managers.begin(); it != 
+                  rit->second.managers.end(); it++)
+            {
+              RtEvent collected;
+              if (!(*it)->collect(collected))
+                continue;
+              pit->second.erase(*it);
+              deleted.insert(*it);
+              if (collected.exists())
+                collected_events.push_back(collected);
+            }
+            ranges.erase(rit);
+            if (!collected_events.empty())
+              return Runtime::merge_events(collected_events);
+            else
+              return RtEvent::NO_RT_EVENT;
           }
         }
         // At this point, things look pretty hopeless, so just
@@ -24326,14 +24317,14 @@ namespace Legion {
     void Runtime::handle_send_atomic_reservation_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_atomic_reservation_request(this, derez);
+      IndividualView::handle_atomic_reservation_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_send_atomic_reservation_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_atomic_reservation_response(this, derez);
+      IndividualView::handle_atomic_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24373,7 +24364,7 @@ namespace Legion {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndividualManager::handle_send_manager(this, source, derez);
+      PhysicalManager::handle_send_manager(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24381,7 +24372,7 @@ namespace Legion {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndividualManager::handle_send_manager_update(this, source, derez);
+      PhysicalManager::handle_send_manager_update(this, source, derez);
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -26669,7 +26660,7 @@ namespace Legion {
       DistributedCollectable *dc = NULL;
       if (InstanceManager::is_physical_did(did))
         dc = find_or_request_distributed_collectable<
-          IndividualManager, SEND_MANAGER_REQUEST>(did, ready);
+          PhysicalManager, SEND_MANAGER_REQUEST>(did, ready);
       else
         assert(false);
       // Have to static cast since the memory might not have been initialized
@@ -29141,10 +29132,8 @@ namespace Legion {
           return "Default Predicate";
         case FUTURE_RESULT_ALLOC:
           return "Future Result";
-        case INDIVIDUAL_INST_MANAGER_ALLOC:
-          return "Individual Manager";
-        case COLLECTIVE_INST_MANAGER_ALLOC:
-          return "Collective Manager";
+        case PHYSICAL_MANAGER_ALLOC:
+          return "Physical Manager";
         case TREE_CLOSE_ALLOC:
           return "Tree Close List";
         case TREE_CLOSE_IMPL_ALLOC:
@@ -29229,8 +29218,6 @@ namespace Legion {
           return "Executed Children";
         case COMPLETE_CHILD_ALLOC:
           return "Complete Children";
-        case PHYSICAL_MANAGER_ALLOC:
-          return "Physical Managers";
         case LOGICAL_VIEW_ALLOC:
           return "Logical Views";
         case LOGICAL_FIELD_VERSIONS_ALLOC:
@@ -32307,14 +32294,14 @@ namespace Legion {
             PhysicalAnalysis::handle_deferred_output(args);
             break;
           }
-        case LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID:
+        case LG_DEFER_PHYSICAL_MANAGER_TASK_ID:
           {
-            IndividualManager::handle_defer_manager(args, runtime);
+            PhysicalManager::handle_defer_manager(args, runtime);
             break;
           }
-        case LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID:
+        case LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID:
           {
-            IndividualManager::handle_defer_perform_deletion(args, runtime);
+            PhysicalManager::handle_defer_perform_deletion(args, runtime);
             break;
           }
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:

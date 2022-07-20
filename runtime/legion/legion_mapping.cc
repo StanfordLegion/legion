@@ -104,7 +104,7 @@ namespace Legion {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
       Internal::PhysicalManager *manager = impl->as_physical_manager();
-      return manager->get_memory(true/*from mapper*/);
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -114,7 +114,7 @@ namespace Legion {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
       Internal::PhysicalManager *manager = impl->as_physical_manager();
-      return manager->get_instance(true/*from mapper*/).id;
+      return manager->get_instance().id;
     }
 
     //--------------------------------------------------------------------------

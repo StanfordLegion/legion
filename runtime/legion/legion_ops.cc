@@ -13317,6 +13317,19 @@ namespace Legion {
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
+      restricted_region = launcher.physical_region;
+      if (restricted_region.impl != NULL)
+      {
+        const RegionRequirement &region_req =
+          restricted_region.impl->get_requirement();
+        if (region_req.privilege_fields != launcher.fields)
+          REPORT_LEGION_ERROR(ERROR_BAD_FIELD_PRIVILEGES,
+              "The privilege fields for release operation %lld in "
+              "task %s (UID %lld) do not match the fields for the "
+              "PhysicalRegion object being used for establishing "
+              "restricted coherence. The field sets must match exactly.",
+              get_unique_op_id(), ctx->get_task_name(), ctx->get_unique_id())
+      }
       parent_region = launcher.parent_region;
       fields = launcher.fields; 
       // Mark the requirement restricted
@@ -13387,6 +13400,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();  
+      restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       fields.clear();
@@ -13559,6 +13573,8 @@ namespace Legion {
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
+      if (restricted_region.impl != NULL)
+        restricted_region.impl->get_references(restricted_instances);
       ApEvent acquire_complete = 
         runtime->forest->acquire_restrictions(requirement, version_info,
                                               this, 0/*idx*/, completion_event,
@@ -21877,26 +21893,16 @@ namespace Legion {
       ApEvent attach_event = attached_event;
       if (!attach_event.exists() || (external_instances.size() > 1))
       {
-        InnerContext *context = find_physical_context(0/*index*/);
-        std::vector<InstanceView*> external_views;
-        std::vector<size_t> target_space_arrivals;
-        CollectiveMapping *analysis_mapping = NULL;
-        const bool first_local = context->convert_collective_views(this, 
-            0/*index*/, requirement.region, external_instances,
-            analysis_mapping, external_views, target_space_arrivals);
         attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_instances,
-                                                        external_views,
-                                                        target_space_arrivals,
                                                         mapping ?
                                                           termination_event :
                                                           completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
-                                                        analysis_mapping,
-                                                        restricted,first_local);
+                                                        restricted);
         // Signal to any other point tasks that we performed the attach for them
         if (attached_event.exists())
           Runtime::trigger_event(&trace_info, attached_event, attach_event);

@@ -2184,8 +2184,8 @@ namespace Legion {
             REALM_MEMORY_KINDS(MEM_NAMES) 
 #undef MEM_NAMES
           };
-        IndividualManager *manager =
-          view->as_individual_view()->get_manager()->as_individual_manager();
+        PhysicalManager *manager =
+          view->as_individual_view()->get_manager();
         FieldSpaceNode *field_space = manager->field_space_node;
         Memory memory = manager->memory_manager->memory;
 

@@ -3743,7 +3743,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -3787,7 +3787,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;

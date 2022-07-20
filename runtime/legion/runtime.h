@@ -975,7 +975,7 @@ namespace Legion {
       const OutputRequirement &get_requirement(void) const { return req; }
       DomainPoint get_extents(void) const { return extents; }
     protected:
-      IndividualManager *get_manager(FieldID field_id) const;
+      PhysicalManager *get_manager(FieldID field_id) const;
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -1700,8 +1700,6 @@ namespace Legion {
         std::vector<PhysicalManager*> small_holes, perfect_holes;
         std::map<size_t,std::vector<PhysicalManager*> > large_holes;
         std::map<uintptr_t,Range> ranges;
-        PhysicalManager *small_manager;
-        std::vector<uintptr_t> pointers;
         std::set<PhysicalManager*> deleted;
         GCPriority current_priority;
         bool sort_current_priority;

@@ -680,14 +680,11 @@ namespace Legion {
       ApEvent attach_external(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
                               const InstanceSet &external_instances,
-                              const std::vector<InstanceView*> &local_views,
-                              const std::vector<size_t> &target_space_arrivals,
                               const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
-                              CollectiveMapping *analysis_mapping,
-                              const bool restricted, const bool first_local);
+                              const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info,
                               const InstanceSet &target_instances,

@@ -8184,8 +8184,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_instances.size(); idx++)
       {
         result[idx] = new CopyAcrossHelper(src_mask, src_indexes, dst_indexes);
-        IndividualManager *manager = 
-          dst_instances[idx].get_manager()->as_individual_manager();
+        PhysicalManager *manager = dst_instances[idx].get_physical_manager();
         manager->initialize_across_helper(result[idx],
                               dst_mask, src_indexes, dst_indexes);
       }
