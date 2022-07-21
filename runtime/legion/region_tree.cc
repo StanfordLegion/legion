@@ -12377,7 +12377,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(shard_rects_ready.exists());
 #endif
-            Runtime::trigger_event(shard_rects_ready);
             if (children.empty())
               collective_mapping->get_children(owner_space, 
                                                local_space, children);
@@ -12389,6 +12388,9 @@ namespace Legion {
               rez.serialize<bool>(false); // sending down the tree now
               pack_shard_rects(rez, false/*clear*/);
             }
+            // Only trigger this after we've packed the shard rects since the
+            // local node is going to mutate it with its own values after this
+            Runtime::trigger_event(shard_rects_ready);
 
             for (std::vector<AddressSpaceID>::const_iterator it =
                   children.begin(); it != children.end(); it++)
