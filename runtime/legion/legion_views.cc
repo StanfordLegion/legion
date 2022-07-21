@@ -130,6 +130,11 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      DistributedID target_did;
+      derez.deserialize(target_did);
+      RtEvent target_ready;
+      PhysicalManager *target =
+        runtime->find_or_request_instance_manager(target_did, target_ready);
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -148,13 +153,8 @@ namespace Legion {
       derez.deserialize(term_event);
       RtEvent collect_event;
       derez.deserialize(collect_event);
-      DistributedID target_did;
-      derez.deserialize(target_did);
-      RtEvent target_ready;
-      PhysicalManager *target =
-        runtime->find_or_request_instance_manager(target_did, target_ready);
-      size_t target_space_arrivals;
-      derez.deserialize(target_space_arrivals);
+      size_t local_collective_arrivals;
+      derez.deserialize(local_collective_arrivals);
       ApUserEvent ready_event;
       derez.deserialize(ready_event);
       RtUserEvent applied_event;
@@ -174,9 +174,8 @@ namespace Legion {
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
                                              term_event, collect_event, 
-                                             target, target_space_arrivals,
-                                             applied_events, 
-                                             trace_info, source);
+                                             target, local_collective_arrivals,
+                                             applied_events, trace_info,source);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
       if (!applied_events.empty())
@@ -2175,6 +2174,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID IndividualView::get_analysis_space(
+                                                PhysicalManager *instance) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance == manager);
+#endif
+      return logical_owner;
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -2746,25 +2756,20 @@ namespace Legion {
                                          const unsigned index,
                                          ApEvent term_event,
                                          RtEvent collect_event,
+                                         PhysicalManager *target,
+                                         size_t local_collective_arrivals,
                                          std::set<RtEvent> &applied_events,
-                                         CollectiveMapping *collective_mapping,
-                                         Operation *local_collective_op,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
                                          const bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(target == manager);
+#endif
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
-      // If this is a collective analysis then we need to figure out which
-      // analysis is going to perform the traversal, do the parallel rendezvous
-      // through the instance manager which should be a collective instance
-      if (collective_mapping != NULL)
-        return manager->register_collective_user(this, usage, user_mask,
-            user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, local_collective_op,
-            trace_info, symbolic);
       if (!is_logical_owner())
       {
         ApUserEvent ready_event;
@@ -2782,6 +2787,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
+            rez.serialize(target->did);
             rez.serialize(usage);
             rez.serialize(user_mask);
             rez.serialize(user_expr->handle);
@@ -2790,6 +2796,7 @@ namespace Legion {
             rez.serialize(index);
             rez.serialize(term_event);
             rez.serialize(collect_event);
+            rez.serialize(local_collective_arrivals);
             rez.serialize(ready_event);
             rez.serialize(applied_event);
             trace_info.pack_trace_info(rez, applied_events);
@@ -2902,6 +2909,7 @@ namespace Legion {
               {
                 RezCheck z(rez);
                 rez.serialize(did);
+                rez.serialize(target->did);
                 rez.serialize(usage);
                 rez.serialize(overlap);
                 rez.serialize(user_expr->handle);
@@ -2910,6 +2918,7 @@ namespace Legion {
                 rez.serialize(index);
                 rez.serialize(term_event);
                 rez.serialize(collect_event);
+                rez.serialize(local_collective_arrivals);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
                 rez.serialize(applied_event);
                 trace_info.pack_trace_info(rez, applied_events);
@@ -4540,9 +4549,9 @@ namespace Legion {
                                          const unsigned index,
                                          ApEvent term_event,
                                          RtEvent collect_event,
+                                         PhysicalManager *target,
+                                         size_t local_collective_arrivals,
                                          std::set<RtEvent> &applied_events,
-                                         CollectiveMapping *collective_mapping,
-                                         Operation *local_collective_op,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
                                          const bool symbolic /*=false*/)
@@ -4550,18 +4559,11 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(usage.redop == manager->redop);
+      assert(target == manager);
 #endif
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
-      // If this is a collective analysis then we need to figure out which
-      // analysis is going to perform the traversal, do the parallel rendezvous
-      // through the instance manager which should be a collective instance
-      if (collective_mapping != NULL)
-        return manager->register_collective_user(this, usage, user_mask,
-            user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, local_collective_op,
-            trace_info, symbolic);
       if (!is_logical_owner())
       {
         // If we're not the logical owner send a message there 
@@ -4573,6 +4575,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(target->did);
           rez.serialize(usage);
           rez.serialize(user_mask);
           rez.serialize(user_expr->handle);
@@ -4581,6 +4584,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(term_event);
           rez.serialize(collect_event);
+          rez.serialize(local_collective_arrivals);
           rez.serialize(ready_event);
           rez.serialize(applied_event);
           trace_info.pack_trace_info(rez, applied_events);
@@ -5266,6 +5270,691 @@ namespace Legion {
                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CollectiveView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(RegionTreeForest *ctx, DistributedID id,
+                                   AddressSpaceID owner_proc, 
+                                   UniqueID owner_context, 
+                                   const std::vector<IndividualView*> &views,
+                                   bool register_now,CollectiveMapping *mapping)
+      : InstanceView(ctx, id, owner_proc, owner_context, register_now, mapping),
+        local_views(views) 
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<IndividualView*>::const_iterator it =
+            local_views.begin(); it != local_views.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        // For collective instances we always want the logical analysis 
+        // node for the view to be on the same node as the owner for actual
+        // physical instance to aid in our ability to do the analysis
+        // See the get_analysis_space function for why we check this
+        assert((*it)->logical_owner == (*it)->get_manager()->owner_space);
+#endif
+        (*it)->add_nested_resource_ref(did);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::~CollectiveView(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<IndividualView*>::const_iterator it =
+            local_views.begin(); it != local_views.end(); it++)
+        if ((*it)->remove_nested_resource_ref(did))
+          delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID CollectiveView::get_analysis_space(
+                                                PhysicalManager *instance) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(contains(instance));
+#endif
+      return instance->owner_space;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Propagate gc references to all the children
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (unsigned idx = 0; idx < children.size(); idx++)
+          send_remote_gc_increment(children[idx], mutator);
+      }
+      // Add valid references to our local views
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+        local_views[idx]->add_nested_valid_ref(did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Remove gc references from all the children
+      if ((collective_mapping != NULL) &&
+          collective_mapping->contains(local_space))
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (unsigned idx = 0; idx < children.size(); idx++)
+          send_remote_gc_decrement(children[idx], mutator);
+      }
+      // Remove valid references from our local views
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+        local_views[idx]->remove_nested_valid_ref(did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        // Send out gc references to all the children
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          for (unsigned idx = 0; idx < children.size(); idx++)
+            send_remote_gc_increment(children[idx], mutator);
+        }
+      }
+      else
+      {
+        // Propagate valid references down towards the owner
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_valid_increment(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_increment(owner_space, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        // Remove gc references on all the children
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          for (unsigned idx = 0; idx < children.size(); idx++)
+            send_remote_gc_decrement(children[idx], mutator);
+        }
+      }
+      else
+      {
+        // Remove valid references down towards the owner
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_valid_decrement(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CollectiveView::register_user(const RegionUsage &usage,
+                                          const FieldMask &user_mask,
+                                          IndexSpaceNode *user_expr,
+                                          const UniqueID op_id,
+                                          const size_t op_ctx_index,
+                                          const unsigned index,
+                                          ApEvent term_event,
+                                          RtEvent collect_event,
+                                          PhysicalManager *target,
+                                          size_t local_collective_arrivals,
+                                          std::set<RtEvent> &applied_events,
+                                          const PhysicalTraceInfo &trace_info,
+                                          const AddressSpaceID source,
+                                          const bool symbolic /*=false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (local_collective_arrivals > 0)
+      {
+        // Check to see if we're on the right node for this
+        if (!target->is_owner())
+        {
+          ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
+          RtUserEvent applied_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(target->did);
+            rez.serialize(usage);
+            rez.serialize(user_mask);
+            rez.serialize(user_expr->handle);
+            rez.serialize(op_id);
+            rez.serialize(op_ctx_index);
+            rez.serialize(index);
+            rez.serialize(term_event);
+            rez.serialize(collect_event);
+            rez.serialize(local_collective_arrivals);
+            rez.serialize(ready_event);
+            rez.serialize(applied_event);
+            trace_info.pack_trace_info(rez, applied_events);
+          }
+          runtime->send_view_register_user(target->owner_space, rez);
+          applied_events.insert(applied_event);
+          return ready_event;
+        }
+        else
+          return register_collective_user(usage, user_mask, user_expr,
+              op_id, op_ctx_index, index, term_event, collect_event,
+              target, local_collective_arrivals, applied_events,
+              trace_info, symbolic);
+      }
+#ifdef DEBUG_LEGION
+      assert(target->is_owner());
+#endif
+      // Iterate through our local views and find the view for the target
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+        if (local_views[idx]->get_manager() == target)
+          return local_views[idx]->register_user(usage, user_mask, 
+              user_expr, op_id, op_ctx_index, index, term_event,
+              collect_event, target, local_collective_arrivals,
+              applied_events, trace_info, source, symbolic);
+      // Should never get here
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CollectiveView::register_collective_user(const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *expr,
+                                         const UniqueID op_id,
+                                         const size_t op_ctx_index,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         RtEvent collect_event,
+                                         PhysicalManager *target,
+                                         size_t local_collective_arrivals,
+                                         std::set<RtEvent> &applied_events,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_views.empty());
+      assert(((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)) || is_owner());
+#endif
+      int target_index = -1;
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+      {
+        if (target != local_views[idx]->get_manager())
+          continue;
+        target_index = idx;
+        break;
+      }
+#ifdef DEBUG_LEGION
+      assert(target_index >= 0);
+#endif
+      // We performing a collective analysis, this function performs a 
+      // parallel rendezvous to ensure several important invariants.
+      // 1. SUBTLE!!! Make sure that all the participants have arrived
+      //    at this function before performing any view analysis. This
+      //    is required to ensure that any copies that need to be issued
+      //    have had a chance to record their view users first before we
+      //    attempt to look for preconditions for this user.
+      // 2. Similarly make sure that the applied events reflects the case
+      //    where all the users have been recorded across the views on 
+      //    each node to ensure that any downstream copies or users will
+      //    observe all the most recent users.
+      // 3. Deduplicate across all the participants on the same node since
+      //    there is always just a single view on each node. This function
+      //    call will always return the local user precondition for the
+      //    local instances. Make sure to merge together all the partcipant
+      //    postconditions for the local instances to reflect in the view
+      //    that the local instances are ready when they are all ready.
+      // 4. Do NOT block in this function call or you can risk deadlock because
+      //    we might be doing several of these calls for a region requirement
+      //    on different instances and the orders might vary on each node.
+      
+      // The unique tag for the rendezvous is our context ID which will be
+      // the same across all points and the index of our region requirement
+      PhysicalTraceInfo *result_info;
+      RtUserEvent local_registered, global_registered;
+      std::vector<RtEvent> remote_registered;
+      std::vector<ApUserEvent> local_ready_events;
+      std::vector<std::vector<ApEvent> > local_term_events;
+      std::vector<CollectiveCopyFillAnalysis*> analyses;
+      const RendezvousKey key(op_ctx_index, index);
+      {
+        AutoLock v_lock(view_lock);
+        // Check to see if we're the first one to arrive on this node
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
+        if (finder == rendezvous_users.end())
+        {
+          // If we are then make the record for knowing when we've seen
+          // all the expected arrivals
+          finder = rendezvous_users.insert(
+              std::make_pair(key,UserRendezvous())).first; 
+          UserRendezvous &rendezvous = finder->second;
+          // Count how many expected arrivals we have
+          // If we're doing collective per space 
+          rendezvous.remaining_local_arrivals = local_collective_arrivals;
+          rendezvous.local_initialized = true;
+          rendezvous.remaining_remote_arrivals =
+            (collective_mapping == NULL) ? 0 :
+            collective_mapping->count_children(owner_space, local_space);
+          rendezvous.local_term_events.resize(local_views.size());
+          rendezvous.ready_events.resize(local_views.size());
+          for (unsigned idx = 0; idx < local_views.size(); idx++)
+            rendezvous.ready_events[idx] =
+              Runtime::create_ap_user_event(&trace_info);
+          rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
+          rendezvous.local_registered = Runtime::create_rt_user_event();
+          rendezvous.global_registered = Runtime::create_rt_user_event();
+        }
+        else if (!finder->second.local_initialized)
+        {
+          // First local arrival, but rendezvous was made by a remote
+          // arrival so we need to make the ready event
+#ifdef DEBUG_LEGION
+          assert(finder->second.ready_events.empty());
+          assert(finder->second.local_term_events.empty());
+          assert(finder->second.trace_info == NULL);
+#endif
+          finder->second.local_term_events.resize(local_views.size());
+          finder->second.ready_events.resize(local_views.size());
+          for (unsigned idx = 0; idx < local_views.size(); idx++)
+            finder->second.ready_events[idx] =
+              Runtime::create_ap_user_event(&trace_info);
+          finder->second.trace_info = new PhysicalTraceInfo(trace_info);
+          finder->second.remaining_local_arrivals = local_collective_arrivals;
+          finder->second.local_initialized = true;
+        } 
+        if (term_event.exists())
+          finder->second.local_term_events[target_index].push_back(term_event);
+        // Record the applied events
+        applied_events.insert(finder->second.global_registered);
+        // The result will be the ready event
+        ApEvent result = finder->second.ready_events[target_index];
+        result_info = finder->second.trace_info;
+#ifdef DEBUG_LEGION
+        assert(finder->second.local_initialized);
+        assert(finder->second.remaining_local_arrivals > 0);
+#endif
+        // See if we've seen all the arrivals
+        if (--finder->second.remaining_local_arrivals == 0)
+        {
+          // If we're going to need to defer this then save
+          // all of our local state needed to perform registration
+          // for when it is safe to do so
+          if (!is_owner() || 
+              (finder->second.remaining_remote_arrivals > 0))
+          {
+            // Save the state that we need for finalization later
+            finder->second.usage = usage;
+            finder->second.mask = new FieldMask(user_mask);
+            finder->second.expr = expr;
+            WrapperReferenceMutator mutator(applied_events);
+            expr->add_nested_expression_reference(did, &mutator);
+            finder->second.op_id = op_id;
+            finder->second.collect_event = collect_event;
+            finder->second.symbolic = symbolic;
+          }
+          if (finder->second.remaining_remote_arrivals == 0)
+          {
+            if (!is_owner())
+            {
+              // Not the owner so send the message to the parent
+              RtEvent registered = finder->second.local_registered;
+              if (!finder->second.remote_registered.empty())
+              {
+                finder->second.remote_registered.push_back(registered);
+                registered =
+                  Runtime::merge_events(finder->second.remote_registered);
+              }
+              const AddressSpaceID parent = 
+                collective_mapping->get_parent(owner_space, local_space);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(op_ctx_index);
+                rez.serialize(index);
+                rez.serialize(registered);
+              }
+              runtime->send_collective_register_user_request(parent, rez);
+              return result;
+            }
+            else
+            {
+              // We're going to fall through so grab the state
+              // that we need to do the finalization now
+              remote_registered.swap(finder->second.remote_registered);
+              local_registered = finder->second.local_registered;
+              global_registered = finder->second.global_registered;
+              local_ready_events.swap(finder->second.ready_events);
+              local_term_events.swap(finder->second.local_term_events);
+              analyses.swap(finder->second.analyses);
+              // We can erase this from the data structure now
+              rendezvous_users.erase(finder);
+            }
+          }
+          else // Still waiting for remote arrivals
+            return result;
+        }
+        else // Not the last local arrival so we can just return the result
+          return result;
+      }
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      finalize_collective_user(usage, user_mask, expr, op_id, op_ctx_index, 
+          index, collect_event, local_registered, global_registered,
+          local_ready_events, local_term_events, result_info, 
+          analyses, symbolic);
+      RtEvent all_registered = local_registered;
+      if (!remote_registered.empty())
+      {
+        remote_registered.push_back(all_registered);
+        all_registered = Runtime::merge_events(remote_registered);
+      }
+      Runtime::trigger_event(global_registered, all_registered); 
+      return local_ready_events[target_index];
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::process_register_user_request(
+            const size_t op_ctx_index, const unsigned index, RtEvent registered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_views.empty());
+#endif
+      UserRendezvous to_perform;
+      const RendezvousKey key(op_ctx_index, index);
+      {
+        AutoLock v_lock(view_lock);
+        // Check to see if we're the first one to arrive on this node
+        std::map<RendezvousKey,UserRendezvous>::iterator
+          finder = rendezvous_users.find(key);
+        if (finder == rendezvous_users.end())
+        {
+          // If we are then make the record for knowing when we've seen
+          // all the expected arrivals
+          finder = rendezvous_users.insert(
+              std::make_pair(key,UserRendezvous())).first; 
+          UserRendezvous &rendezvous = finder->second;
+          rendezvous.local_initialized = false;
+          rendezvous.remaining_remote_arrivals =
+            collective_mapping->count_children(owner_space, local_space);
+          rendezvous.local_registered = Runtime::create_rt_user_event();
+          rendezvous.global_registered = Runtime::create_rt_user_event();
+        }
+        finder->second.remote_registered.push_back(registered);
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_remote_arrivals > 0);
+#endif
+        // If we're not the last arrival then we're done
+        if ((--finder->second.remaining_remote_arrivals > 0) ||
+            !finder->second.local_initialized ||
+            (finder->second.remaining_local_arrivals > 0))
+          return;
+        if (!is_owner())
+        {
+          // Continue sending the message up the tree to the parent
+          registered = finder->second.local_registered;
+          if (!finder->second.remote_registered.empty())
+          {
+            finder->second.remote_registered.push_back(registered);
+            registered =
+              Runtime::merge_events(finder->second.remote_registered);
+          }
+          const AddressSpaceID parent = 
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(op_ctx_index);
+            rez.serialize(index);
+            rez.serialize(registered);
+          }
+          runtime->send_collective_register_user_request(parent, rez);
+          return;
+        }
+        // We're the owner so we can start doing the user registration
+        // Grab everything we need to call finalize_collective_user
+        to_perform = std::move(finder->second);
+        // Then we can erase the entry
+        rendezvous_users.erase(finder);
+      }
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      finalize_collective_user(to_perform.usage, *(to_perform.mask),
+          to_perform.expr, to_perform.op_id, op_ctx_index, index, 
+          to_perform.collect_event, to_perform.local_registered,
+          to_perform.global_registered, to_perform.ready_events, 
+          to_perform.local_term_events, to_perform.trace_info,
+          to_perform.analyses, to_perform.symbolic);
+      RtEvent all_registered = to_perform.local_registered;
+      if (!to_perform.remote_registered.empty())
+      {
+        to_perform.remote_registered.push_back(all_registered);
+        all_registered = Runtime::merge_events(to_perform.remote_registered);
+      }
+      Runtime::trigger_event(to_perform.global_registered, all_registered);
+      if (to_perform.expr->remove_nested_expression_reference(did))
+        delete to_perform.expr;
+      delete to_perform.mask;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_register_user_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      CollectiveView *view = static_cast<CollectiveView*>(
+              runtime->find_or_request_logical_view(did, ready));
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
+      unsigned index;
+      derez.deserialize(index);
+      RtEvent registered;
+      derez.deserialize(registered);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      view->process_register_user_request(op_ctx_index, index, registered);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::process_register_user_response(
+            const size_t op_ctx_index, const unsigned index, RtEvent registered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(!local_views.empty());
+#endif
+      UserRendezvous to_perform;
+      const RendezvousKey key(op_ctx_index, index);
+      {
+        AutoLock v_lock(view_lock);
+        // Check to see if we're the first one to arrive on this node
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != rendezvous_users.end());
+#endif
+        to_perform = std::move(finder->second);
+        // Can now remove this from the data structure
+        rendezvous_users.erase(finder);
+      }
+      // Now we can perform the user registration
+      finalize_collective_user(to_perform.usage, *(to_perform.mask),
+          to_perform.expr, to_perform.op_id, op_ctx_index, index,
+          to_perform.collect_event, to_perform.local_registered, 
+          to_perform.global_registered, to_perform.ready_events,
+          to_perform.local_term_events, to_perform.trace_info,
+          to_perform.analyses, to_perform.symbolic);
+      Runtime::trigger_event(to_perform.global_registered, registered);
+      if (to_perform.expr->remove_nested_expression_reference(did))
+        delete to_perform.expr;
+      delete to_perform.mask;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_register_user_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      CollectiveView *view = static_cast<CollectiveView*>(
+              runtime->find_or_request_logical_view(did, ready));
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
+      unsigned index;
+      derez.deserialize(index);
+      RtEvent registered;
+      derez.deserialize(registered);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      view->process_register_user_response(op_ctx_index, index, registered);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::finalize_collective_user(
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask,
+                            IndexSpaceNode *expr,
+                            const UniqueID op_id,
+                            const size_t op_ctx_index,
+                            const unsigned index,
+                            RtEvent collect_event,
+                            RtUserEvent local_registered,
+                            RtEvent global_registered,
+                            std::vector<ApUserEvent> &ready_events,
+                            std::vector<std::vector<ApEvent> > &term_events,
+                            const PhysicalTraceInfo *trace_info,
+                            std::vector<CollectiveCopyFillAnalysis*> &analyses,
+                            const bool symbolic) const
+    //--------------------------------------------------------------------------
+    {
+      // First send out any messages to the children so they can start
+      // their own registrations
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(owner_space, local_space, children);
+      if (!children.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(op_ctx_index);
+          rez.serialize(index);
+          rez.serialize(global_registered);
+        }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          runtime->send_collective_register_user_response(*it, rez);
+      }
+#ifdef DEBUG_LEGION
+      assert(local_views.size() == term_events.size());
+      assert(local_views.size() == ready_events.size());
+#endif
+      // Perform the registration on the local views
+      std::set<RtEvent> registered_events;
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+      {
+        const ApEvent term_event = 
+          Runtime::merge_events(trace_info, term_events[idx]);
+        const ApEvent ready = local_views[idx]->register_user(usage, user_mask,
+            expr, op_id, op_ctx_index, index, term_event, collect_event,
+            local_views[idx]->get_manager(), 0/*no collective arrivals*/,
+            registered_events, *trace_info, runtime->address_space, symbolic);
+        Runtime::trigger_event(trace_info, ready_events[idx], ready);
+      }
+      if (!registered_events.empty())
+        Runtime::trigger_event(local_registered,
+            Runtime::merge_events(registered_events));
+      else
+        Runtime::trigger_event(local_registered);
+      // Remove any references on the analyses
+      for (std::vector<CollectiveCopyFillAnalysis*>::const_iterator it =
+            analyses.begin(); it != analyses.end(); it++)
+        if ((*it)->remove_reference())
+          delete (*it);
+      delete trace_info;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplicatedView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplicatedView::ReplicatedView(RegionTreeForest *ctx, DistributedID id,
+                                   AddressSpaceID owner_proc, 
+                                   UniqueID owner_context, 
+                                   const std::vector<IndividualView*> &views,
+                                   bool register_now,CollectiveMapping *mapping)
+      : CollectiveView(ctx, id, owner_proc, owner_context, views, 
+                       register_now, mapping)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplicatedView::~ReplicatedView(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AllreduceView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AllreduceView::AllreduceView(RegionTreeForest *ctx, DistributedID id,
+                                 AddressSpaceID owner_proc, 
+                                 UniqueID owner_context, 
+                                 const std::vector<IndividualView*> &views,
+                                 bool register_now, CollectiveMapping *mapping,
+                                 ReductionOpID redop_id)
+      : CollectiveView(ctx, id, owner_proc, owner_context, views, 
+                       register_now, mapping), redop(redop_id)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AllreduceView::~AllreduceView(void)
+    //--------------------------------------------------------------------------
+    {
     }
 
   }; // namespace Internal 

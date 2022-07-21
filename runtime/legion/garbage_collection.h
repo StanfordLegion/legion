@@ -70,7 +70,7 @@ namespace Legion {
       PENDING_REFINEMENT_REF = 10,
       FIELD_ALLOCATOR_REF = 11,
       REMOTE_CREATE_REF = 12,
-      INSTANCE_MAPPER_REF = 13,
+      MAPPER_REF = 13,
       APPLICATION_REF = 14,
       MAPPING_ACQUIRE_REF = 15,
       NEVER_GC_REF = 16,
@@ -115,7 +115,7 @@ namespace Legion {
       "Pending Refinement Reference",               \
       "Field Allocator Reference",                  \
       "Remote Creation Reference",                  \
-      "Instance Mapper Reference",                  \
+      "Mapper Reference",                           \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Never GC Reference",                         \

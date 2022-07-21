@@ -151,7 +151,7 @@ namespace Legion {
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
             PhysicalTraceInfo(info), analysis(ana), 
             map_applied_done(map_applied), targets(t), 
-            target_space_arrivals(arrivals), result(res), symbolic(sym)
+            view_collective_arrivals(arrivals), result(res), symbolic(sym)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -167,7 +167,7 @@ namespace Legion {
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
         InstanceSet &targets;
-        const std::vector<size_t> &target_space_arrivals;
+        const std::vector<size_t> &view_collective_arrivals;
         ApEvent &result;
         bool symbolic;
       };
@@ -521,7 +521,7 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &sources,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
-                                std::vector<size_t> &target_space_arrivals,
+                                std::vector<size_t> &view_collective_arrivals,
                                 UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                 const char *log_name,
@@ -535,7 +535,7 @@ namespace Legion {
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
                                InstanceSet &targets,
-                               const std::vector<size_t> &target_space_arrivals,
+                               const std::vector<size_t> &collective_arrivals,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
                                bool symbolic = false);
@@ -559,7 +559,7 @@ namespace Legion {
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                            UpdateAnalysis *analysis, InstanceSet &targets,
-                           std::vector<size_t> &target_space_arrivals,
+                           std::vector<size_t> &view_collective_arrivals,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result, const PhysicalTraceInfo &info,
                            bool symbolic = false);

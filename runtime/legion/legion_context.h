@@ -1494,7 +1494,7 @@ namespace Legion {
       // The analysis mapping gives collective mapping of all the address
       // spaces that called into this method collectively
       // Target views gives one view for each physical instance 
-      // The target space arrivals says how many different arrivals can be
+      // The view collective arrivals say how many different arrivals can be
       // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
       bool convert_collective_views(Operation *op, unsigned index,
@@ -1502,7 +1502,7 @@ namespace Legion {
                                     const InstanceSet &targets,
                                     CollectiveMapping *&analysis_mapping,
                                     std::vector<InstanceView*> &target_views,
-                                    std::vector<size_t> &target_space_arrivals);
+                                    std::vector<size_t> &collective_arrivals);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);

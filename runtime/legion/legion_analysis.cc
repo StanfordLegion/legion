@@ -286,16 +286,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UniqueInst::UniqueInst(InstanceView *view, PhysicalManager *manager)
-      : inst_did(manager->did), view_did(view->did)
+      : inst_did(manager->did), view_did(view->did),
+        analysis_space(view->get_analysis_space(manager))
     //--------------------------------------------------------------------------
     {
-      // If the view is an individual view then we can find its analysis
-      // space directly from it, otherwise we know that all individual views
-      // made for any other kind of view are made on the owner space
-      if (view->is_individual_view())
-        analysis_space = view->as_individual_view()->logical_owner;
-      else
-        analysis_space = manager->owner_space;
     }
 
     //--------------------------------------------------------------------------

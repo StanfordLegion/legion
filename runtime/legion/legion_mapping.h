@@ -43,9 +43,11 @@ namespace Legion {
     class PhysicalInstance {
     public:
       PhysicalInstance(void);
+      PhysicalInstance(PhysicalInstance &&rhs);
       PhysicalInstance(const PhysicalInstance &rhs);
       ~PhysicalInstance(void);
     public:
+      PhysicalInstance& operator=(PhysicalInstance &&rhs);
       PhysicalInstance& operator=(const PhysicalInstance &rhs); 
     public:
       bool operator<(const PhysicalInstance &rhs) const;
@@ -93,6 +95,7 @@ namespace Legion {
     public:
       static PhysicalInstance get_virtual_instance(void);
     private:
+      friend class CollectiveView;
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this
       PhysicalInstance(PhysicalInstanceImpl impl);
@@ -113,20 +116,23 @@ namespace Legion {
     class CollectiveView {
     public:
       CollectiveView(void);
-      CollectiveView(const CollectiveView&rhs);
+      CollectiveView(CollectiveView &&rhs);
+      CollectiveView(const CollectiveView &rhs);
       ~CollectiveView(void);
     public:
+      CollectiveView& operator=(CollectiveView &&rhs);
       CollectiveView& operator=(const CollectiveView&rhs); 
     public:
       bool operator<(const CollectiveView &rhs) const;
       bool operator==(const CollectiveView &rhs) const;
       bool operator!=(const CollectiveView &rhs) const;
     public:
-      PhysicalInstance find_in_memory(Memory memory) const;
-      PhysicalInstance find_nearest_memory(Memory memory) const;
-      void find_instance(std::vector<PhysicalInstance> &insts,
-                         Memory memory = Memory::NO_MEMORY,
-                         Memory::Kind kind = Memory::Kind::NO_MEMKIND) const;
+      void find_instances_in_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts) const;
+      void find_instances_nearest_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts) const;
+      void find_instances_by_kind(Memory::Kind kind,
+                                    std::vector<PhysicalInstance> &insts) const;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this

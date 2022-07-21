@@ -121,6 +121,26 @@ namespace Legion {
      */
     class InstanceView : public LogicalView {
     public:
+      // This structure acts as a key for performing rendezvous
+      // between collective user registrations
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void)
+          : op_context_index(0), index(0) { }
+        RendezvousKey(size_t ctx, unsigned idx)
+          : op_context_index(ctx), index(idx) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (op_context_index < rhs.op_context_index) return true;
+          if (op_context_index > rhs.op_context_index) return false;
+          return (index < rhs.index);
+        }
+      public:
+        size_t op_context_index; // unique name operation in context
+        unsigned index; // uniquely name analysis for op by region req index
+      };
+    public:
       typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
@@ -165,7 +185,7 @@ namespace Legion {
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     PhysicalManager *target,
-                                    size_t target_space_arrivals,
+                                    size_t local_collective_arrivals,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -188,6 +208,7 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       virtual ReductionOpID get_redop(void) const = 0;
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *man) const = 0;
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -202,30 +223,7 @@ namespace Legion {
      * This class provides an abstract base class for any kind of view 
      * that only represents an individual physical instance.
      */
-    class IndividualView : public InstanceView {
-    public:
-      // This structure acts as a key for performing rendezvous
-      // between collective user registrations
-      struct RendezvousKey {
-      public:
-        RendezvousKey(void)
-          : view_did(0), op_context_index(0), index(0) { }
-        RendezvousKey(DistributedID did, size_t ctx, unsigned idx)
-          : view_did(did), op_context_index(ctx), index(idx) { }
-      public:
-        inline bool operator<(const RendezvousKey &rhs) const
-        {
-          if (view_did < rhs.view_did) return true;
-          if (view_did > rhs.view_did) return false;
-          if (op_context_index < rhs.op_context_index) return true;
-          if (op_context_index > rhs.op_context_index) return false;
-          return (index < rhs.index);
-        }
-      public:
-        DistributedID view_did; // uniquely names context
-        size_t op_context_index; // unique name operation in context
-        unsigned index; // uniquely name analysis for op by region req index
-      };
+    class IndividualView : public InstanceView { 
     public:
       IndividualView(RegionTreeForest *ctx, DistributedID did,
                      PhysicalManager *man, AddressSpaceID owner_proc,
@@ -236,6 +234,8 @@ namespace Legion {
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner); } 
       inline PhysicalManager* get_manager(void) const { return manager; }
+    public:
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -365,16 +365,32 @@ namespace Legion {
     class CollectiveView : public InstanceView {
     public:
       CollectiveView(RegionTreeForest *ctx, DistributedID did,
-                     PhysicalManager *man, AddressSpaceID owner_proc,
-                     AddressSpaceID logical_owner, UniqueID owner_context,
+                     AddressSpaceID owner_proc, UniqueID owner_context, 
+                     const std::vector<IndividualView*> &views,
                      bool register_now, CollectiveMapping *mapping); 
       virtual ~CollectiveView(void);
+    public:
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    ApEvent term_event,
+                                    RtEvent collect_event,
+                                    PhysicalManager *target,
+                                    size_t local_collective_arrivals,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source,
+                                    const bool symbolic = false);
       virtual void find_last_users(PhysicalManager *manager,
                                    std::set<ApEvent> &events,
                                    const RegionUsage &usage,
@@ -388,6 +404,89 @@ namespace Legion {
       bool contains(PhysicalManager *manager) const;
       bool meets_region(LogicalRegion region) const;
       void register_collective_analysis(CollectiveCopyFillAnalysis *analysis); 
+      void find_instances_in_memory(Memory memory,
+                                    std::vector<PhysicalManager*> &instances);
+      void find_instances_nearest_memory(Memory memory,
+                                    std::vector<PhysicalManager*> &instances);
+      void find_instances_by_kind(Memory::Kind kind,
+                                    std::vector<PhysicalManager*> &instances);
+    protected:
+      ApEvent register_collective_user(const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       ApEvent term_event,
+                                       RtEvent collect_event,
+                                       PhysicalManager *target,
+                                       size_t local_collective_arrivals,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic);
+      void process_register_user_request(const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const RtEvent registered);
+      void process_register_user_response(const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const RtEvent registered);
+      void finalize_collective_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    RtEvent collect_event,
+                                    RtUserEvent local_registered,
+                                    RtEvent global_registered,
+                                    std::vector<ApUserEvent> &ready_events,
+                                    std::vector<std::vector<ApEvent> > &terms,
+                                    const PhysicalTraceInfo *trace_info,
+                                    std::vector<CollectiveCopyFillAnalysis*> &s,
+                                    const bool symbolic) const;
+    public:
+      static void handle_register_user_request(Runtime *runtime,
+                                    Deserializer &derez);
+      static void handle_register_user_response(Runtime *runtime,
+                                    Deserializer &derez);
+    protected:
+      const std::vector<IndividualView*> local_views;
+    protected:
+      struct UserRendezvous {
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            valid_analyses(0), trace_info(NULL), mask(NULL), expr(NULL),
+            op_id(0), symbolic(false), local_initialized(false) { }
+        // event for when local instances can be used
+        std::vector<ApUserEvent> ready_events;
+        // all the local term events for each view
+        std::vector<std::vector<ApEvent> > local_term_events;
+        // events from remote nodes indicating they are registered
+        std::vector<RtEvent> remote_registered;
+        // the local set of analyses
+        std::vector<CollectiveCopyFillAnalysis*> analyses;
+        // event for when the analyses are all registered
+        RtUserEvent analyses_ready;
+        // event to trigger when local registration is done
+        RtUserEvent local_registered; 
+        // event that marks when all registrations are done
+        RtUserEvent global_registered;
+        // Counts of remaining notficiations before registration
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+        unsigned valid_analyses;
+        // PhysicalTraceInfo that made the ready_event and should trigger it
+        PhysicalTraceInfo *trace_info;
+        // Arguments for performing the local registration
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        RtEvent collect_event;
+        bool symbolic;
+        bool local_initialized;
+      };
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
     };
 
     /**
@@ -760,7 +859,7 @@ namespace Legion {
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     PhysicalManager *target,
-                                    size_t target_space_arrivals,
+                                    size_t local_collective_arrivals,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -889,7 +988,15 @@ namespace Legion {
                            public LegionHeapify<ReplicatedView> {
     public:
       static const AllocationType alloc_type = REPLICATED_VIEW_ALLOC;
-
+    public:
+      ReplicatedView(RegionTreeForest *ctx, DistributedID did,
+                     AddressSpaceID owner_proc, UniqueID owner_context, 
+                     const std::vector<IndividualView*> &views,
+                     bool register_now, CollectiveMapping *mapping);
+      ReplicatedView(const ReplicatedView &rhs) = delete;
+      virtual ~ReplicatedView(void);
+    public:
+      ReplicatedView& operator=(const ReplicatedView &rhs) = delete;
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
       virtual ReductionOpID get_redop(void) const { return 0; }
@@ -917,22 +1024,7 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper,
                                 const bool manage_dst_events,
                                 const bool copy_restricted,
-                                const bool need_valid_return);
-      // Always want users to be full index space expressions
-      virtual ApEvent register_user(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    IndexSpaceNode *expr,
-                                    const UniqueID op_id,
-                                    const size_t op_ctx_index,
-                                    const unsigned index,
-                                    ApEvent term_event,
-                                    RtEvent collect_event,
-                                    PhysicalManager *target,
-                                    size_t target_space_arrivals,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source,
-                                    const bool symbolic = false);
+                                const bool need_valid_return); 
     };
 
     /**
@@ -1014,7 +1106,7 @@ namespace Legion {
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     PhysicalManager *target,
-                                    size_t target_space_arrivals,
+                                    size_t local_collective_arrivals,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -1107,10 +1199,19 @@ namespace Legion {
                           public LegionHeapify<AllreduceView> {
     public:
       static const AllocationType alloc_type = ALLREDUCE_VIEW_ALLOC;
-
+    public:
+      AllreduceView(RegionTreeForest *ctx, DistributedID did,
+                    AddressSpaceID owner_proc, UniqueID owner_context, 
+                    const std::vector<IndividualView*> &views,
+                    bool register_now, CollectiveMapping *mapping,
+                    ReductionOpID redop_id); 
+      AllreduceView(const AllreduceView &rhs) = delete;
+      virtual ~AllreduceView(void);
+    public:
+      AllreduceView& operator=(const AllreduceView &rhs) = delete;
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
-      virtual ReductionOpID get_redop(void) const;
+      virtual ReductionOpID get_redop(void) const { return redop; }
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -1136,21 +1237,8 @@ namespace Legion {
                                 const bool manage_dst_events,
                                 const bool copy_restricted,
                                 const bool need_valid_return);
-      // Always want users to be full index space expressions
-      virtual ApEvent register_user(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    IndexSpaceNode *expr,
-                                    const UniqueID op_id,
-                                    const size_t op_ctx_index,
-                                    const unsigned index,
-                                    ApEvent term_event,
-                                    RtEvent collect_event,
-                                    PhysicalManager *target,
-                                    size_t target_space_arrivals,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source,
-                                    const bool symbolic = false);
+    public:
+      const ReductionOpID redop;
     };
 
     /**

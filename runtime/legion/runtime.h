@@ -3204,8 +3204,6 @@ namespace Legion {
                                                   Serializer &rez);
       void send_collective_nearest_points_response(AddressSpaceID target,
                                                    Serializer &rez);
-      void send_collective_remote_registration(AddressSpaceID target,
-                                               Serializer &rez);
       void send_collective_deletion(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);

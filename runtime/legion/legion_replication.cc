@@ -14626,7 +14626,6 @@ namespace Legion {
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
             continue;
-          manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
           acquired[manager] = 1/*count*/; 
         }
@@ -14910,7 +14909,6 @@ namespace Legion {
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
             continue;
-          manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
           acquired[manager] = 1/*count*/;
         }
