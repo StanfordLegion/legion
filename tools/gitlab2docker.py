@@ -34,7 +34,7 @@ parser.add_argument('-t', '--tag', type=str,
                     help='tag to apply to built container')
 parser.add_argument('-N', '--network', type=str,
                     help='name of docker network to use during build')
-parser.add_argument('-e', '--env', type=str, action='append',
+parser.add_argument('-e', '--env', type=str, action='append', default=[],
                     help='environment variables (name=value) to override in container')
 parser.add_argument('cfgfile', type=str,
                     help='path to GitLab CI config file')
