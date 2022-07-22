@@ -148,7 +148,7 @@ namespace Realm {
       return e;
     }
 
-  bool MetadataBase::initiate_cleanup(ID::IDType id, bool local_only /*= false*/)
+    bool MetadataBase::initiate_cleanup(ID::IDType id)
     {
       NodeSet invals_to_send;
       {
@@ -162,14 +162,8 @@ namespace Realm {
 	if(remote_copies.empty()) {
 	  state = STATE_INVALID;
 	} else {
-          if(local_only) {
-            // ignore remote copies
-            remote_copies.clear();
-            state = STATE_INVALID;
-          } else {
-            state = STATE_CLEANUP;
-            invals_to_send = remote_copies;
-          }
+	  state = STATE_CLEANUP;
+	  invals_to_send = remote_copies;
 	}
       }
 

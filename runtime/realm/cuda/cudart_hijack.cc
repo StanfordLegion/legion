@@ -1182,7 +1182,6 @@ extern "C" {
     }
   }
 
-  REALM_PUBLIC_API
   cudaError_t cudaSetDeviceFlags(unsigned flags)
   {
     get_gpu_or_die("cudaSetDeviceFlags");
@@ -1192,7 +1191,6 @@ extern "C" {
     return cudaErrorSetOnActiveProcess;
   }
 
-  REALM_PUBLIC_API
   cudaError_t cudaGetDeviceFlags(unsigned *flags)
   {
     get_gpu_or_die("cudaGetDeviceFlags");
@@ -1206,139 +1204,6 @@ extern "C" {
            (cudaDeviceMapHost == CU_CTX_MAP_HOST) &&
            (cudaDeviceLmemResizeToMax == CU_CTX_LMEM_RESIZE_TO_MAX));
     return (cudaError_t)cuCtxGetFlags(flags);
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaMalloc3DArray(cudaArray_t *array,
-                                const cudaChannelFormatDesc *desc,
-                                cudaExtent extent, unsigned flags)
-  {
-    get_gpu_or_die("cudaMalloc3DArray");
-
-    CUarray handle;
-    CUDA_ARRAY3D_DESCRIPTOR d;
-    d.Width = extent.width;
-    d.Height = extent.height;
-    d.Depth = extent.depth;
-
-    // runtime and driver describe channel count/format very differently
-    int channel_count = 0;
-    int channel_width = 0;
-    if(desc->x != 0) {
-      channel_count++;
-      channel_width = desc->x;
-    }
-    if(desc->y != 0) {
-      channel_count++;
-      if(channel_width && (desc->y != channel_width))
-        return cudaErrorInvalidValue;
-      channel_width = desc->y;
-    }
-    if(desc->z != 0) {
-      channel_count++;
-      if(channel_width && (desc->z != channel_width))
-        return cudaErrorInvalidValue;
-      channel_width = desc->z;
-    }
-    if(desc->w != 0) {
-      channel_count++;
-      if(channel_width && (desc->w != channel_width))
-        return cudaErrorInvalidValue;
-      channel_width = desc->w;
-    }
-
-    switch(desc->f) {
-    case cudaChannelFormatKindSigned:
-      {
-        switch(channel_width) {
-        case 8 : { d.Format = CU_AD_FORMAT_SIGNED_INT8; break; }
-        case 16 : { d.Format = CU_AD_FORMAT_SIGNED_INT16; break; }
-        case 32 : { d.Format = CU_AD_FORMAT_SIGNED_INT32; break; }
-        default: return cudaErrorInvalidValue;
-        }
-        break;
-      }
-    case cudaChannelFormatKindUnsigned:
-      {
-        switch(channel_width) {
-        case 8 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT8; break; }
-        case 16 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT16; break; }
-        case 32 : { d.Format = CU_AD_FORMAT_UNSIGNED_INT32; break; }
-        default: return cudaErrorInvalidValue;
-        }
-        break;
-      }
-    case cudaChannelFormatKindFloat:
-      {
-        switch(channel_width) {
-        case 16 : { d.Format = CU_AD_FORMAT_HALF; break; }
-        case 32 : { d.Format = CU_AD_FORMAT_FLOAT; break; }
-        default: return cudaErrorInvalidValue;
-        }
-        break;
-      }
-    default: return cudaErrorInvalidValue;
-    }
-
-    d.NumChannels = channel_count;
-
-    d.Flags = 0;
-    if((flags & cudaArrayLayered) != 0)
-      d.Flags |= CUDA_ARRAY3D_LAYERED;
-    if((flags & cudaArrayCubemap) != 0)
-      d.Flags |= CUDA_ARRAY3D_CUBEMAP;
-    if((flags & cudaArraySurfaceLoadStore) != 0)
-      d.Flags |= CUDA_ARRAY3D_SURFACE_LDST;
-    if((flags & cudaArrayTextureGather) != 0)
-      d.Flags |= CUDA_ARRAY3D_TEXTURE_GATHER;
-    // ignore flags we don't understand and hope for the best
-
-    CUresult ret = cuArray3DCreate(&handle, &d);
-    if(ret == CUDA_SUCCESS) {
-      *array = (struct cudaArray *)handle;
-      return cudaSuccess;
-    } else
-      return (cudaError_t)ret;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaFreeArray(cudaArray_t array)
-  {
-    get_gpu_or_die("cudaFreeArray");
-
-    return (cudaError_t)cuArrayDestroy((CUarray)array);
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaCreateSurfaceObject(cudaSurfaceObject_t *object,
-                                      const cudaResourceDesc *desc)
-  {
-    get_gpu_or_die("cudaCreateSurfaceObject");
-
-    if(desc->resType != cudaResourceTypeArray)
-      return cudaErrorInvalidValue;
-
-    CUDA_RESOURCE_DESC d;
-    memset(&d, 0, sizeof(d));
-    d.resType = CU_RESOURCE_TYPE_ARRAY;
-    d.res.array.hArray = (CUarray)(desc->res.array.array);
-    d.flags = 0;
-
-    CUsurfObject surf;
-    CUresult ret = cuSurfObjectCreate(&surf, &d);
-    if(ret == CUDA_SUCCESS) {
-      *object = (cudaSurfaceObject_t)surf;
-      return cudaSuccess;
-    } else
-      return (cudaError_t)ret;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaDestroySurfaceObject(cudaSurfaceObject_t object)
-  {
-    get_gpu_or_die("cudaDestroySurfaceObject");
-
-    return (cudaError_t)cuSurfObjectDestroy((CUsurfObject)object);
   }
 
 }; // extern "C"

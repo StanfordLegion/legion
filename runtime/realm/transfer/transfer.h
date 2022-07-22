@@ -93,7 +93,6 @@ namespace Realm {
       //  strict ordering rules
       virtual int set_rect(const RegionInstanceImpl *inst,
                            const InstanceLayoutPieceBase *piece,
-                           size_t field_size, size_t field_offset,
                            int ndims,
                            const int64_t lo[/*ndims*/],
                            const int64_t hi[/*ndims*/],
@@ -110,8 +109,7 @@ namespace Realm {
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
 
-    virtual bool get_addresses(AddressList &addrlist,
-                               const InstanceLayoutPieceBase *&nonaffine) = 0;
+    virtual bool get_addresses(AddressList &addrlist) = 0;
   };
 
   class TransferDomain {
@@ -201,7 +199,6 @@ namespace Realm {
 	  struct {
 	    unsigned fill_start;
 	    unsigned fill_size;
-            size_t fill_total;
 	  } fill;
 	};
       };
@@ -211,8 +208,7 @@ namespace Realm {
 			    RegionInstance _inst,
 			    unsigned _fld_start, unsigned _fld_count);
       static IO mk_edge(unsigned _edge);
-      static IO mk_fill(unsigned _fill_start, unsigned _fill_size,
-                        size_t _fill_total);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size);
 
       std::vector<IO> inputs;  // TODO: short vectors
       std::vector<IO> outputs;

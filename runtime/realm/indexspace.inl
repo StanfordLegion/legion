@@ -205,7 +205,6 @@ namespace Realm {
   
   inline CopySrcDstField &CopySrcDstField::set_fill(const void *_data, size_t _size)
   {
-    field_id = -1;
     size = _size;
     if(size <= MAX_DIRECT_SIZE) {
       memcpy(&fill_data.direct, _data, size);

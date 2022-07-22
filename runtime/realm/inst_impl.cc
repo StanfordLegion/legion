@@ -743,9 +743,10 @@ namespace Realm {
 
     RegionInstanceImpl::~RegionInstanceImpl(void)
     {
-      // clean up metadata if needed, but it's too late to send messages
-      if(metadata.is_valid())
-        metadata.initiate_cleanup(me.id, true /*local only*/);
+      if(metadata.is_valid()) {
+	delete metadata.layout;
+	metadata.lookup_program.reset();
+      }
     }
 
     /*static*/ Event RegionInstanceImpl::create_instance(RegionInstance& inst,
@@ -911,33 +912,6 @@ namespace Realm {
       return ready_event;
     }
 
-    void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
-    {
-      log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-      Serialization::DynamicBufferSerializer dbs(4096);
-      metadata.serialize_msg(dbs);
-
-      // fragment serialized metadata if needed
-      size_t offset = 0;
-      size_t total_bytes = dbs.bytes_used();
-
-      while(offset < total_bytes) {
-        size_t to_send = std::min(total_bytes - offset,
-                                  ActiveMessage<MetadataResponseMessage>::recommended_max_payload(early_reqs,
-                                                                                                  false /*without congestion*/));
-
-        ActiveMessage<MetadataResponseMessage> amsg(early_reqs, to_send);
-        amsg->id = ID(me).id;
-        amsg->offset = offset;
-        amsg->total_bytes = total_bytes;
-        amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
-                         to_send);
-        amsg.commit();
-
-        offset += to_send;
-      }
-    }
-
     void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
 					       size_t offset, TimeLimit work_until)
     {
@@ -1061,14 +1035,6 @@ namespace Realm {
           measurements.clear();
 	}
 
-        // this looks weird, but we have to temporarily mark the metadata
-        //  valid in case any other nodes have already requested a copy - we'll
-        //  immediately turn around and invalidate it
-        NodeSet early_reqs;
-        metadata.mark_valid(early_reqs);
-        if(!early_reqs.empty())
-          send_metadata(early_reqs);
-
 	if(ready_event.exists())
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/, work_until);
 	return;
@@ -1154,8 +1120,31 @@ namespace Realm {
       // metadata is now valid and can be shared
       NodeSet early_reqs;
       metadata.mark_valid(early_reqs);
-      if(!early_reqs.empty())
-        send_metadata(early_reqs);
+      if(!early_reqs.empty()) {
+	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
+	Serialization::DynamicBufferSerializer dbs(4096);
+	metadata.serialize_msg(dbs);
+
+        // fragment serialized metadata if needed
+        size_t offset = 0;
+        size_t total_bytes = dbs.bytes_used();
+
+        while(offset < total_bytes) {
+          size_t to_send = std::min(total_bytes - offset,
+                                    ActiveMessage<MetadataResponseMessage>::recommended_max_payload(early_reqs,
+                                                                                                    false /*without congestion*/));
+
+          ActiveMessage<MetadataResponseMessage> amsg(early_reqs, to_send);
+          amsg->id = ID(me).id;
+          amsg->offset = offset;
+          amsg->total_bytes = total_bytes;
+          amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
+                           to_send);
+          amsg.commit();
+
+          offset += to_send;
+        }
+      }
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_ready_time();
@@ -1210,22 +1199,41 @@ namespace Realm {
 
 	// send any remaining incomplete profiling responses
 	measurements.send_responses(requests);
-      }
 
-      // flush the remote prefetch cache
-      {
-        AutoLock<> al(mutex);
-        prefetch_events.clear();
-      }
+	// flush the remote prefetch cache
+	{
+	  AutoLock<> al(mutex);
+	  prefetch_events.clear();
+	}
 
-      // send any required invalidation messages for metadata
-      bool recycle_now = metadata.initiate_cleanup(me.id);
-      if(recycle_now)
-        recycle_instance();
+	// send any required invalidation messages for metadata
+	bool recycle_now = metadata.initiate_cleanup(me.id);
+	if(recycle_now)
+	  recycle_instance();
+      } else {
+	// failed allocations never had valid metadata - recycle immediately
+	recycle_instance();
+      }
     }
 
     void RegionInstanceImpl::recycle_instance(void)
     {
+      // delete an existing layout, if present
+      if(metadata.layout) {
+	delete metadata.layout;
+	metadata.layout = 0;
+	metadata.lookup_program.reset();
+      }
+      if(metadata.ext_resource) {
+	delete metadata.ext_resource;
+	metadata.ext_resource = 0;
+      }
+      // memory should not have left anything behind
+      assert(metadata.mem_specific == 0);
+
+      // set the offset back to the "unallocated" value
+      metadata.inst_offset = INSTOFFSET_UNALLOCATED;
+
       measurements.clear();
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
@@ -1341,14 +1349,6 @@ namespace Realm {
       return true;
     }
 
-    RegionInstanceImpl::Metadata::Metadata()
-      : inst_offset(INSTOFFSET_UNALLOCATED)
-      , ready_event(Event::NO_EVENT)
-      , layout(0)
-      , ext_resource(0)
-      , mem_specific(0)
-    {}
-
     void *RegionInstanceImpl::Metadata::serialize(size_t& out_size) const
     {
       Serialization::DynamicBufferSerializer dbs(128);
@@ -1382,28 +1382,9 @@ namespace Realm {
 	lookup_program.reset();
       }
 
-      if(ext_resource) {
-	delete ext_resource;
-	ext_resource = 0;
-      }
-
-      // clean up chain of mem-specific info
-      while(mem_specific) {
-        MemSpecificInfo *next = mem_specific->next;
-        delete mem_specific;
-        mem_specific = next;
-      }
-
       // set the offset back to the "unallocated" value
       inst_offset = INSTOFFSET_UNALLOCATED;
     }
-
-    void RegionInstanceImpl::Metadata::add_mem_specific(MemSpecificInfo *info)
-    {
-      info->next = mem_specific;
-      mem_specific = info;
-    }
-
 
   ////////////////////////////////////////////////////////////////////////
   //

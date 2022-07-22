@@ -102,8 +102,7 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total);
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };
@@ -123,8 +122,7 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total);
+				       const void *fill_data, size_t fill_size);
 
       long submit(Request** requests, long nr);
     };

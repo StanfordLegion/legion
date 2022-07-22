@@ -55,7 +55,7 @@ namespace Realm {
       void handle_invalidate(void);
 
       // these return true once all remote copies have been invalidated
-      bool initiate_cleanup(ID::IDType id, bool local_only = false);
+      bool initiate_cleanup(ID::IDType id);
       bool handle_inval_ack(int sender);
 
     protected:

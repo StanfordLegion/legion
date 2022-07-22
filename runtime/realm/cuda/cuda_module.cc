@@ -15,7 +15,6 @@
 
 #include "realm/cuda/cuda_module.h"
 #include "realm/cuda/cuda_internal.h"
-#include "realm/cuda/cuda_access.h"
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
@@ -2344,9 +2343,6 @@ namespace Realm {
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
       , gpu(_gpu), base(_base)
     {
-      // mark what context we belong to
-      add_module_specific(new CudaDeviceMemoryInfo(gpu->context));
-
       // advertise for potential gpudirect support
       local_segment.assign(NetworkSegmentInfo::CudaDeviceMem,
 			   reinterpret_cast<void *>(base), size,
@@ -2380,44 +2376,6 @@ namespace Realm {
     void *GPUFBMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return (void *)(base + offset);
-    }
-
-    // GPUFBMemory supports ExternalCudaMemoryResource and
-    //  ExternalCudaArrayResource
-    bool GPUFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
-                                                         size_t& inst_offset)
-    {
-      {
-        ExternalCudaMemoryResource *res = dynamic_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base - base; // offset relative to our base
-          return true;
-        }
-      }
-
-      {
-        ExternalCudaArrayResource *res = dynamic_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = 0;
-          CUarray array = reinterpret_cast<CUarray>(res->array);
-          inst->metadata.add_mem_specific(new MemSpecificCudaArray(array));
-          return true;
-        }
-      }
-
-      // not a kind we recognize
-      return false;
-    }
-
-    void GPUFBMemory::unregister_external_resource(RegionInstanceImpl *inst)
-    {
-      // TODO: clean up surface/texture objects
-      MemSpecificCudaArray *ms = inst->metadata.find_mem_specific<MemSpecificCudaArray>();
-      if(ms) {
-        ms->array = 0;
-      }
     }
 
 
@@ -2524,13 +2482,6 @@ namespace Realm {
       if(poisoned)
         return;
 
-      // for external instances, all we have to do is ack the destruction
-      if(inst->metadata.ext_resource != 0) {
-        unregister_external_resource(inst);
-        inst->notify_deallocation();
-	return;
-      }
-
       CUdeviceptr base;
       {
         AutoLock<> al(mutex);
@@ -2578,44 +2529,6 @@ namespace Realm {
     {
       // offset 'is' the pointer for instances in this memory
       return reinterpret_cast<void *>(offset);
-    }
-
-    // GPUFBMemory supports ExternalCudaMemoryResource and
-    //  ExternalCudaArrayResource
-    bool GPUDynamicFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
-                                                                size_t& inst_offset)
-    {
-      {
-        ExternalCudaMemoryResource *res = dynamic_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base; // "offsets" are absolute in dynamic fbmem
-          return true;
-        }
-      }
-
-      {
-        ExternalCudaArrayResource *res = dynamic_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = 0;
-          CUarray array = reinterpret_cast<CUarray>(res->array);
-          inst->metadata.add_mem_specific(new MemSpecificCudaArray(array));
-          return true;
-        }
-      }
-
-      // not a kind we recognize
-      return false;
-    }
-
-    void GPUDynamicFBMemory::unregister_external_resource(RegionInstanceImpl *inst)
-    {
-      // TODO: clean up surface/texture objects
-      MemSpecificCudaArray *ms = inst->metadata.find_mem_specific<MemSpecificCudaArray>();
-      if(ms) {
-        ms->array = 0;
-      }
     }
 
 

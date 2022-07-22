@@ -953,7 +953,6 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/python/python_module.cc \
 endif
 ifeq ($(strip $(USE_CUDA)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
-                   $(LG_RT_DIR)/realm/cuda/cuda_access.cc \
                    $(LG_RT_DIR)/realm/cuda/cuda_internal.cc
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
@@ -1109,8 +1108,7 @@ INSTALL_HEADERS += legion.h \
 		   realm/utils.inl
 
 ifeq ($(strip $(USE_CUDA)),1)
-INSTALL_HEADERS += realm/cuda/cuda_redop.h \
-                   realm/cuda/cuda_access.h
+INSTALL_HEADERS += realm/cuda/cuda_redop.h
 endif
 ifeq ($(strip $(USE_HIP)),1)
 INSTALL_HEADERS += hip_cuda_compat/hip_cuda.h \

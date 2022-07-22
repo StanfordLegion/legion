@@ -784,11 +784,8 @@ namespace Realm {
     tentative_valid = false;
   }
 
-  bool WrappingFIFOIterator::get_addresses(AddressList &addrlist,
-                                           const InstanceLayoutPieceBase *&nonaffine)
+  bool WrappingFIFOIterator::get_addresses(AddressList &addrlist)
   {
-    nonaffine = 0;
-
     // add a very tall 2d "rectangle" that uses a stride of 0 for the
     //  line pitch (flow control will prevent any given copy from touching
     //  the same location twice)
