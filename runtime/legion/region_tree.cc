@@ -2112,7 +2112,7 @@ namespace Legion {
           assert(it->first->is_replicated_view());
 #endif
           ReplicatedView *view = it->first->as_replicated_view();
-          if (view->meets_region(req.region))
+          if (view->meets_regions(to_meet))
             collectives.insert(view, it->second);
         }
       }
@@ -2190,8 +2190,9 @@ namespace Legion {
         context->convert_source_views(sources, source_views);
       analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
                                     targets, target_views, source_views, 
-                                    trace_info, analysis_mapping,
-                                    precondition,term_event,check_initialized,
+                                    view_collective_arrivals, trace_info,
+                                    analysis_mapping, precondition,
+                                    term_event, check_initialized,
                                     record_valid, first_local);
       analysis->add_reference();
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -2540,8 +2541,8 @@ namespace Legion {
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       ReleaseAnalysis *analysis =
         new ReleaseAnalysis(runtime, op, index, precondition, local_expr, 
-            restricted_instances, target_views, source_views, trace_info,
-            analysis_mapping, first_local);
+            restricted_instances, target_views, source_views, 
+            view_collective_arrivals, trace_info, analysis_mapping,first_local);
       analysis->add_reference();
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)

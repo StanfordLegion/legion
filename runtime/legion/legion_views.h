@@ -282,6 +282,27 @@ namespace Legion {
                                         RtUserEvent::NO_RT_USER_EVENT);
       void update_field_reservations(const FieldMask &mask,
                                      const std::vector<Reservation> &rsrvs);
+    protected:
+      ApEvent register_collective_user(const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       ApEvent term_event,
+                                       RtEvent collect_event,
+                                       PhysicalManager *target,
+                                       size_t local_collective_arrivals,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic);
+      void process_collective_user_registration(const size_t op_ctx_index,
+                                            const unsigned index,
+                                            const AddressSpaceID origin,
+                                            const PhysicalTraceInfo &trace_info,
+                                            ApEvent remote_term_event,
+                                            ApUserEvent remote_ready_event,
+                                            RtUserEvent remote_registered);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -290,6 +311,8 @@ namespace Legion {
       static void handle_view_find_last_users_request(Deserializer &derz,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_last_users_response(Deserializer &derez);
+      static void handle_collective_user_registration(Runtime *runtime,
+                                                      Deserializer &derez);
     public:
       static void handle_atomic_reservation_request(Runtime *runtime,
                                                     Deserializer &derez);
@@ -326,7 +349,7 @@ namespace Legion {
       struct UserRendezvous {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
-            trace_info(NULL), view(NULL), mask(NULL), expr(NULL), op_id(0),
+            trace_info(NULL), mask(NULL), expr(NULL), op_id(0),
             symbolic(false), local_initialized(false) { }
         // event for when local instances can be used
         ApUserEvent ready_event; 
@@ -344,7 +367,6 @@ namespace Legion {
         // PhysicalTraceInfo that made the ready_event and should trigger it
         PhysicalTraceInfo *trace_info;
         // Arguments for performing the local registration
-        InstanceView *view;
         RegionUsage usage;
         FieldMask *mask;
         IndexSpaceNode *expr;
@@ -402,14 +424,23 @@ namespace Legion {
                                     const unsigned index, bool exclusive);
     public:
       bool contains(PhysicalManager *manager) const;
-      bool meets_region(LogicalRegion region) const;
-      void register_collective_analysis(CollectiveCopyFillAnalysis *analysis); 
+      bool meets_regions(const std::vector<LogicalRegion> &regions,
+                         bool tight_bounds = false) const;
       void find_instances_in_memory(Memory memory,
                                     std::vector<PhysicalManager*> &instances);
       void find_instances_nearest_memory(Memory memory,
-                                    std::vector<PhysicalManager*> &instances);
-      void find_instances_by_kind(Memory::Kind kind,
-                                    std::vector<PhysicalManager*> &instances);
+                                    std::vector<PhysicalManager*> &instances,
+                                    bool bandwidth);
+    protected:
+      void process_remote_instances_response(AddressSpaceID source,
+                      const std::vector<PhysicalManager*> &managers);
+    public:
+      unsigned find_local_index(PhysicalManager *target) const;
+      void register_collective_analysis(PhysicalManager *target,
+                                        CollectiveAnalysis *analysis,
+                                        size_t local_collective_arrivals);
+      RtEvent find_collective_analyses(size_t context_index, unsigned index,
+                          const std::vector<CollectiveAnalysis*> *&analyses);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,
@@ -442,20 +473,27 @@ namespace Legion {
                                     std::vector<ApUserEvent> &ready_events,
                                     std::vector<std::vector<ApEvent> > &terms,
                                     const PhysicalTraceInfo *trace_info,
-                                    std::vector<CollectiveCopyFillAnalysis*> &s,
+                                    std::vector<CollectiveAnalysis*> &s,
                                     const bool symbolic) const;
     public:
       static void handle_register_user_request(Runtime *runtime,
                                     Deserializer &derez);
       static void handle_register_user_response(Runtime *runtime,
                                     Deserializer &derez);
+      static void handle_remote_instances_request(Runtime *runtime,
+                                    Deserializer &derez, AddressSpaceID source);
+      static void handle_remote_instances_response(Runtime *runtime,
+                                    Deserializer &derez, AddressSpaceID source);
     protected:
       const std::vector<IndividualView*> local_views;
+    protected:
+      std::set<PhysicalManager*> remote_instances;
+      NodeSet remote_instance_responses;
     protected:
       struct UserRendezvous {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
-            valid_analyses(0), trace_info(NULL), mask(NULL), expr(NULL),
+            remaining_analyses(0), trace_info(NULL), mask(NULL), expr(NULL),
             op_id(0), symbolic(false), local_initialized(false) { }
         // event for when local instances can be used
         std::vector<ApUserEvent> ready_events;
@@ -464,7 +502,7 @@ namespace Legion {
         // events from remote nodes indicating they are registered
         std::vector<RtEvent> remote_registered;
         // the local set of analyses
-        std::vector<CollectiveCopyFillAnalysis*> analyses;
+        std::vector<CollectiveAnalysis*> analyses;
         // event for when the analyses are all registered
         RtUserEvent analyses_ready;
         // event to trigger when local registration is done
@@ -474,7 +512,7 @@ namespace Legion {
         // Counts of remaining notficiations before registration
         unsigned remaining_local_arrivals;
         unsigned remaining_remote_arrivals;
-        unsigned valid_analyses;
+        unsigned remaining_analyses;
         // PhysicalTraceInfo that made the ready_event and should trigger it
         PhysicalTraceInfo *trace_info;
         // Arguments for performing the local registration

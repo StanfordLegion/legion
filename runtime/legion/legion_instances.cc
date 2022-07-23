@@ -1495,7 +1495,6 @@ namespace Legion {
                                                   piece_list, piece_list_size);
     }
 
-
     //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -4048,11 +4047,7 @@ namespace Legion {
       if (mapping->remove_reference())
         delete mapping;
     }
-#endif // NO_EXPLICIT_COLLECTIVES
 
-     
-
-#ifdef NO_EXPLICIT_COLLECTIVES
     /////////////////////////////////////////////////////////////
     // Collective Manager
     /////////////////////////////////////////////////////////////

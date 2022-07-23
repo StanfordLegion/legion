@@ -2233,6 +2233,326 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent IndividualView::register_collective_user(const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *expr,
+                                         const UniqueID op_id,
+                                         const size_t op_ctx_index,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         RtEvent collect_event,
+                                         PhysicalManager *target,
+                                         size_t local_collective_arrivals,
+                                         std::set<RtEvent> &applied_events,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+      // Somewhat strangely we can still get calls to this method in cases
+      // with control replication for things like acquire/release on individual
+      // managers that represent file instances. In this case we'll just have
+      // a single node perform the view analysis and then we broadcast out the
+      // resulting event out to all the participants. 
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+      assert(collective_mapping->contains(local_space));
+#endif
+      // First we need to decide which node is going to be the owner node
+      // We'll prefer it to be the logical view owner since that is where
+      // the event will be produced, otherwise, we'll just pick whichever
+      // is closest to the logical view node
+      const AddressSpaceID origin = 
+        collective_mapping->contains(logical_owner) ? logical_owner : 
+        collective_mapping->find_nearest(logical_owner);
+      ApUserEvent result;
+      RtUserEvent registered;
+      std::vector<ApEvent> term_events;
+      PhysicalTraceInfo *result_info = NULL;
+      const RendezvousKey key(op_ctx_index, index);
+      {
+        AutoLock v_lock(view_lock);
+        // Check to see if we're the first one to arrive on this node
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
+        if (finder == rendezvous_users.end())
+        {
+          // If we are then make the record for knowing when we've seen
+          // all the expected arrivals
+          finder = rendezvous_users.insert(
+              std::make_pair(key,UserRendezvous())).first; 
+          UserRendezvous &rendezvous = finder->second;
+          rendezvous.remaining_local_arrivals = local_collective_arrivals;
+          rendezvous.local_initialized = true;
+          rendezvous.remaining_remote_arrivals =
+            collective_mapping->count_children(origin, local_space);
+          rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
+          rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
+          rendezvous.registered = Runtime::create_rt_user_event();
+        }
+        else if (!finder->second.local_initialized)
+        {
+#ifdef DEBUG_LEGION
+          assert(!finder->second.ready_event.exists());
+          assert(finder->second.trace_info == NULL);
+#endif
+          // First local arrival
+          finder->second.remaining_local_arrivals = local_collective_arrivals;
+          finder->second.ready_event =
+            Runtime::create_ap_user_event(&trace_info);
+          finder->second.trace_info = new PhysicalTraceInfo(trace_info);
+          if (!finder->second.remote_ready_events.empty())
+          {
+            for (std::map<ApUserEvent,PhysicalTraceInfo*>::const_iterator it =
+                  finder->second.remote_ready_events.begin(); it !=
+                  finder->second.remote_ready_events.end(); it++)
+            {
+              Runtime::trigger_event(it->second, it->first, 
+                                finder->second.ready_event);
+              delete it->second;
+            }
+            finder->second.remote_ready_events.clear();
+          }
+        }
+        result = finder->second.ready_event;
+        result_info = finder->second.trace_info;
+        registered = finder->second.registered;
+        applied_events.insert(registered);
+        if (term_event.exists())
+          finder->second.term_events.push_back(term_event);
+#ifdef DEBUG_LEGION
+        assert(finder->second.local_initialized);
+        assert(finder->second.remaining_local_arrivals > 0);
+#endif
+        // If we're still expecting arrivals then nothing to do yet
+        if ((--finder->second.remaining_local_arrivals > 0) ||
+            (finder->second.remaining_remote_arrivals > 0))
+        {
+          // We need to save the trace info no matter what
+          if (finder->second.mask == NULL)
+          {
+            if (local_space == origin)
+            {
+              // Save our state for performing the registration later
+              finder->second.usage = usage;
+              finder->second.mask = new FieldMask(user_mask);
+              finder->second.expr = expr;
+              WrapperReferenceMutator mutator(applied_events);
+              expr->add_nested_expression_reference(did, &mutator);
+              finder->second.op_id = op_id;
+              finder->second.collect_event = collect_event;
+              finder->second.symbolic = symbolic;
+            }
+            else
+            {
+              finder->second.applied = Runtime::create_rt_user_event();
+              applied_events.insert(finder->second.applied);
+            }
+          }
+          else if (local_space != origin)
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second.applied.exists());
+#endif
+            applied_events.insert(finder->second.applied);
+          }
+          return result;
+        }
+        term_events.swap(finder->second.term_events);
+#ifdef DEBUG_LEGION
+        assert(finder->second.remote_ready_events.empty());
+#endif
+        // We're done with our entry after this so no need to keep it
+        rendezvous_users.erase(finder);
+      }
+      if (!term_events.empty())
+        term_event = Runtime::merge_events(&trace_info, term_events);
+      if (local_space != origin)
+      {
+        const AddressSpaceID parent = 
+          collective_mapping->get_parent(origin, local_space);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(op_ctx_index);
+          rez.serialize(index);
+          rez.serialize(origin);
+          result_info->pack_trace_info(rez, applied_events);
+          rez.serialize(term_event);
+          rez.serialize(result);
+          rez.serialize(registered);
+        }
+        runtime->send_collective_individual_register_user(parent, rez);
+      }
+      else
+      {
+        std::set<RtEvent> registered_events; 
+        const ApEvent ready = register_user(usage, user_mask, expr, op_id,
+            op_ctx_index, index, term_event, collect_event, target, 
+            0/*no collective arrivals*/, registered_events, *result_info,
+            runtime->address_space, symbolic);
+        Runtime::trigger_event(result_info, result, ready);
+        if (!registered_events.empty())
+          Runtime::trigger_event(registered,
+              Runtime::merge_events(registered_events));
+        else
+          Runtime::trigger_event(registered);
+      }
+      delete result_info;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::process_collective_user_registration(
+                                            const size_t op_ctx_index,
+                                            const unsigned index,
+                                            const AddressSpaceID origin,
+                                            const PhysicalTraceInfo &trace_info,
+                                            ApEvent remote_term_event,
+                                            ApUserEvent remote_ready_event,
+                                            RtUserEvent remote_registered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      UserRendezvous to_perform;
+      const RendezvousKey key(op_ctx_index, index);
+      {
+        AutoLock v_lock(view_lock);
+        // Check to see if we're the first one to arrive on this node
+        std::map<RendezvousKey,UserRendezvous>::iterator finder =
+          rendezvous_users.find(key);
+        if (finder == rendezvous_users.end())
+        {
+          // If we are then make the record for knowing when we've seen
+          // all the expected arrivals
+          finder = rendezvous_users.insert(
+              std::make_pair(key,UserRendezvous())).first; 
+          UserRendezvous &rendezvous = finder->second;
+          rendezvous.local_initialized = false;
+          rendezvous.remaining_remote_arrivals =
+            collective_mapping->count_children(origin, local_space);
+          // Don't make the ready event, that needs to be done with a
+          // local trace_info
+          rendezvous.registered = Runtime::create_rt_user_event();
+        }
+        if (remote_term_event.exists())
+          finder->second.term_events.push_back(remote_term_event);
+        Runtime::trigger_event(remote_registered, finder->second.registered);
+        if (!finder->second.ready_event.exists())
+          finder->second.remote_ready_events[remote_ready_event] =
+            new PhysicalTraceInfo(trace_info);
+        else
+          Runtime::trigger_event(&trace_info, remote_ready_event, 
+                                 finder->second.ready_event);
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_remote_arrivals > 0);
+#endif
+        // Check to see if we've done all the arrivals
+        if ((--finder->second.remaining_remote_arrivals > 0) ||
+            !finder->second.local_initialized ||
+            (finder->second.remaining_local_arrivals > 0))
+          return;
+#ifdef DEBUG_LEGION
+        assert(finder->second.remote_ready_events.empty());
+        assert(finder->second.trace_info != NULL);
+#endif
+        // Last needed arrival, see if we're the origin or not
+        to_perform = std::move(finder->second);
+        rendezvous_users.erase(finder);
+      }
+      ApEvent term_event;
+      if (!to_perform.term_events.empty())
+        term_event =
+          Runtime::merge_events(to_perform.trace_info, to_perform.term_events);
+      if (local_space != origin)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_perform.applied.exists());
+#endif
+        // Send the message to the parent
+        const AddressSpaceID parent = 
+            collective_mapping->get_parent(origin, local_space);
+        std::set<RtEvent> applied_events;
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(op_ctx_index);
+          rez.serialize(index);
+          rez.serialize(origin);
+          to_perform.trace_info->pack_trace_info(rez, applied_events);
+          rez.serialize(term_event);
+          rez.serialize(to_perform.ready_event);
+          rez.serialize(to_perform.registered);
+        }
+        runtime->send_collective_individual_register_user(parent, rez);
+        if (!applied_events.empty())
+          Runtime::trigger_event(to_perform.applied,
+              Runtime::merge_events(applied_events));
+        else
+          Runtime::trigger_event(to_perform.applied);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!to_perform.applied.exists());
+#endif
+        std::set<RtEvent> registered_events;
+        const ApEvent ready = register_user(to_perform.usage,
+            *to_perform.mask, to_perform.expr, to_perform.op_id, op_ctx_index,
+            index, term_event, to_perform.collect_event, manager,
+            0/*no collective arrivals*/, registered_events,
+            *to_perform.trace_info, runtime->address_space,to_perform.symbolic);
+        Runtime::trigger_event(to_perform.trace_info, 
+                      to_perform.ready_event, ready);
+        if (!registered_events.empty())
+          Runtime::trigger_event(to_perform.registered,
+              Runtime::merge_events(registered_events));
+        else
+          Runtime::trigger_event(to_perform.registered);
+        if (to_perform.expr->remove_nested_expression_reference(did))
+          delete to_perform.expr;
+        delete to_perform.mask;
+      }
+      delete to_perform.trace_info;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualView::handle_collective_user_registration(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      IndividualView *view = static_cast<IndividualView*>(
+              runtime->find_or_request_logical_view(did, ready));
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
+      unsigned index;
+      derez.deserialize(index);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime); 
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      ApUserEvent ready_event;
+      derez.deserialize(ready_event);
+      RtUserEvent registered_event;
+      derez.deserialize(registered_event);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+
+      view->process_collective_user_registration(op_ctx_index, index, origin,
+                      trace_info, term_event, ready_event, registered_event);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualView::find_atomic_reservations(PhysicalManager *instance,
                 const FieldMask &mask, Operation *op, unsigned index, bool excl)
     //--------------------------------------------------------------------------
@@ -2242,8 +2562,6 @@ namespace Legion {
 #endif
       std::vector<Reservation> reservations;
       find_field_reservations(mask, reservations); 
-      
-      
       for (unsigned idx = 0; idx < reservations.size(); idx++)
         op->update_atomic_locks(index, reservations[idx], excl);
     } 
@@ -2767,6 +3085,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(target == manager);
 #endif
+      // Handle the collective rendezvous if necessary
+      if (local_collective_arrivals > 0)
+        return register_collective_user(usage, user_mask, user_expr,
+              op_id, op_ctx_index, index, term_event, collect_event,
+              target, local_collective_arrivals, applied_events,
+              trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -4561,6 +4885,12 @@ namespace Legion {
       assert(usage.redop == manager->redop);
       assert(target == manager);
 #endif
+      // Handle the collective rendezvous if necessary
+      if (local_collective_arrivals > 0)
+        return register_collective_user(usage, user_mask, user_expr,
+              op_id, op_ctx_index, index, term_event, collect_event,
+              target, local_collective_arrivals, applied_events,
+              trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -5308,6 +5638,10 @@ namespace Legion {
             local_views.begin(); it != local_views.end(); it++)
         if ((*it)->remove_nested_resource_ref(did))
           delete (*it);
+      for (std::set<PhysicalManager*>::const_iterator it =
+            remote_instances.begin(); it != remote_instances.end(); it++)
+        if ((*it)->remove_nested_resource_ref(did))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -5479,6 +5813,367 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CollectiveView::find_last_users(PhysicalManager *manager,
+                                         std::set<ApEvent> &events,
+                                         const RegionUsage &usage,
+                                         const FieldMask &mask,
+                                         IndexSpaceExpression *user_expr,
+                                         std::vector<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID analysis_space = get_analysis_space(manager);
+      if (analysis_space != local_space)
+      {
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(manager->did);
+          rez.serialize(&events);
+          rez.serialize(usage);
+          rez.serialize(mask);
+          user_expr->pack_expression(rez, analysis_space);
+          rez.serialize(ready);
+        }
+        runtime->send_view_find_last_users_request(analysis_space, rez);
+        applied.push_back(ready);
+      }
+      else
+      {
+        const unsigned local_index = find_local_index(manager);
+        local_views[local_index]->find_last_users(manager, events, usage,
+                                                  mask, user_expr, applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::contains(PhysicalManager *manager) const
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID manager_space = get_analysis_space(manager);
+      if (manager_space != local_space)
+      {
+        if ((collective_mapping == NULL) || 
+            !collective_mapping->contains(manager_space))
+          return false;
+        // Check all the current 
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          std::set<PhysicalManager*>::const_iterator finder = 
+            remote_instances.find(manager);
+          if (finder != remote_instances.end())
+            return true;
+          // If we already have all the managers from that node then
+          // we don't need to check again
+          if (remote_instance_responses.contains(manager_space))
+            return false;
+        }
+        // Send the request and wait for the result
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_remote_instances_request(manager_space, rez);
+        if (!ready_event.has_triggered())
+          ready_event.wait();
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        return (remote_instances.find(manager) != remote_instances.end());
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < local_views.size(); idx++)
+          if (local_views[idx]->get_manager() == manager)
+            return true;
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::meets_regions(
+             const std::vector<LogicalRegion> &regions, bool tight_bounds) const
+    //--------------------------------------------------------------------------
+    {
+      if (!local_views.empty())
+        return local_views.front()->get_manager()->meets_regions(regions,
+                                                                 tight_bounds);
+#ifdef DEBUG_LEGION
+      assert((collective_mapping == NULL) ||
+              !collective_mapping->contains(local_space));
+#endif
+      PhysicalManager *manager = NULL;
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        if (!remote_instances.empty())
+          manager = *remote_instances.begin();
+      }
+      if (manager == NULL)
+      {
+        const AddressSpaceID target_space = (collective_mapping == NULL) ?
+          owner_space : collective_mapping->find_nearest(local_space);
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_remote_instances_request(target_space, rez);
+        if (!ready_event.has_triggered())
+          ready_event.wait();
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(!remote_instances.empty());
+#endif
+        manager = *remote_instances.begin();
+      }
+      return manager->meets_regions(regions, tight_bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_in_memory(Memory memory,
+                                       std::vector<PhysicalManager*> &instances)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID memory_space = memory.address_space();
+      if (memory_space != local_space)
+      {
+        // No point checking if we know that it won't have it
+        if ((collective_mapping == NULL) ||
+            !collective_mapping->contains(memory_space))
+          return;
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          // See if we need the check
+          if (remote_instance_responses.contains(memory_space))
+          {
+            for (std::set<PhysicalManager*>::const_iterator it =
+                  remote_instances.begin(); it != remote_instances.end(); it++)
+              if ((*it)->memory_manager->memory == memory)
+                instances.push_back(*it);
+            return;
+          }
+        }
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_remote_instances_request(memory_space, rez);
+        if (!ready_event.has_triggered())
+          ready_event.wait();
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (std::set<PhysicalManager*>::const_iterator it =
+              remote_instances.begin(); it != remote_instances.end(); it++)
+          if ((*it)->memory_manager->memory == memory)
+            instances.push_back(*it);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < local_views.size(); idx++)
+        {
+          PhysicalManager *manager = local_views[idx]->get_manager();
+          if (manager->memory_manager->memory == memory)
+            instances.push_back(manager);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_remote_instances_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_or_request_logical_view(did, ready));
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(!view->local_views.empty());
+#endif
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did);
+        rez.serialize<size_t>(view->local_views.size());
+        for (unsigned idx = 0; idx < view->local_views.size(); idx++)
+          rez.serialize(view->local_views[idx]->get_manager()->did);
+        rez.serialize(done);
+      }
+      runtime->send_collective_remote_instances_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::process_remote_instances_response(AddressSpaceID src,
+                                  const std::vector<PhysicalManager*> &managers)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            managers.begin(); it != managers.end(); it++)
+        // Make sure to deduplicate across multiple requests returning
+        // the same manaagers in parallel
+        if (remote_instances.insert(*it).second)
+          (*it)->add_nested_resource_ref(did);
+      remote_instance_responses.add(src);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_remote_instances_response(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_or_request_logical_view(did, ready));
+      std::vector<RtEvent> ready_events;
+      if (ready.exists())
+        ready_events.push_back(ready);
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      std::vector<PhysicalManager*> instances(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+      {
+        derez.deserialize(did);
+        instances[idx] = runtime->find_or_request_instance_manager(did, ready);
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      if (ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      view->process_remote_instances_response(source, instances);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveView::find_local_index(PhysicalManager *target) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+        if (local_views[idx]->get_manager() == target)
+          return idx;
+      // We should always find it
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::register_collective_analysis(PhysicalManager *target,
+                 CollectiveAnalysis *analysis, size_t local_collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_collective_arrivals > 0);
+#endif
+      // First check to see if we are on the right node for this target
+      const AddressSpaceID analysis_space = get_analysis_space(target);
+      if (analysis_space != local_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target->did);
+          analysis->pack_collective_analysis(rez);
+          rez.serialize(local_collective_arrivals);
+        }
+        runtime->send_collective_remote_registration(analysis_space, rez);
+        return;
+      }
+      const unsigned local_index = find_local_index(target);
+      const RendezvousKey key(analysis->get_context_index(), 
+                              analysis->get_requirement_index());
+      AutoLock v_lock(view_lock);
+      std::map<RendezvousKey,UserRendezvous>::iterator finder =
+        rendezvous_users.find(key);
+      if (finder == rendezvous_users.end())
+      {
+        finder = rendezvous_users.insert(
+            std::make_pair(key,UserRendezvous())).first; 
+        UserRendezvous &rendezvous = finder->second;
+        // Count how many expected arrivals we have
+        rendezvous.local_initialized = false;
+        rendezvous.remaining_remote_arrivals =
+          collective_mapping->count_children(owner_space, local_space);
+        rendezvous.local_registered = Runtime::create_rt_user_event();
+        rendezvous.global_registered = Runtime::create_rt_user_event();
+      }
+      // Perform the registration
+      if (finder->second.analyses.empty())
+      {
+        finder->second.analyses.resize(local_views.size(), NULL);
+        finder->second.remaining_analyses = local_collective_arrivals;
+      }
+#ifdef DEBUG_LEGION
+      assert(local_index < finder->second.analyses.size());
+      assert(finder->second.remaining_analyses > 0);
+#endif
+      // Only need to save it if we're the first ones for this local view
+      if (finder->second.analyses[local_index] == NULL)
+      {
+        finder->second.analyses[local_index] = analysis;
+        analysis->add_analysis_reference();
+      }
+      if ((--finder->second.remaining_analyses == 0) &&
+          finder->second.analyses_ready.exists())
+        Runtime::trigger_event(finder->second.analyses_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveView::find_collective_analyses(size_t context_index,
+              unsigned index, const std::vector<CollectiveAnalysis*> *&analyses)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_views.empty());
+      assert(collective_mapping != NULL);
+#endif
+      const RendezvousKey key(context_index, index);
+      AutoLock v_lock(view_lock);
+      std::map<RendezvousKey,UserRendezvous>::iterator finder =
+        rendezvous_users.find(key);
+      if (finder == rendezvous_users.end())
+      {
+        finder = rendezvous_users.insert(
+            std::make_pair(key,UserRendezvous())).first; 
+        UserRendezvous &rendezvous = finder->second;
+        rendezvous.local_initialized = false;
+        rendezvous.remaining_remote_arrivals =
+          collective_mapping->count_children(owner_space, local_space);
+        rendezvous.local_registered = Runtime::create_rt_user_event();
+        rendezvous.global_registered = Runtime::create_rt_user_event();
+      }
+      analyses = &finder->second.analyses;
+      if ((finder->second.analyses.empty() || 
+            (finder->second.remaining_analyses > 0)) &&
+          !finder->second.analyses_ready.exists())
+        finder->second.analyses_ready = Runtime::create_rt_user_event();
+      return finder->second.analyses_ready;
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent CollectiveView::register_collective_user(const RegionUsage &usage,
                                          const FieldMask &user_mask,
                                          IndexSpaceNode *expr,
@@ -5499,17 +6194,7 @@ namespace Legion {
       assert(((collective_mapping != NULL) && 
             collective_mapping->contains(local_space)) || is_owner());
 #endif
-      int target_index = -1;
-      for (unsigned idx = 0; idx < local_views.size(); idx++)
-      {
-        if (target != local_views[idx]->get_manager())
-          continue;
-        target_index = idx;
-        break;
-      }
-#ifdef DEBUG_LEGION
-      assert(target_index >= 0);
-#endif
+      const unsigned target_index = find_local_index(target);
       // We performing a collective analysis, this function performs a 
       // parallel rendezvous to ensure several important invariants.
       // 1. SUBTLE!!! Make sure that all the participants have arrived
@@ -5538,7 +6223,7 @@ namespace Legion {
       std::vector<RtEvent> remote_registered;
       std::vector<ApUserEvent> local_ready_events;
       std::vector<std::vector<ApEvent> > local_term_events;
-      std::vector<CollectiveCopyFillAnalysis*> analyses;
+      std::vector<CollectiveAnalysis*> analyses;
       const RendezvousKey key(op_ctx_index, index);
       {
         AutoLock v_lock(view_lock);
@@ -5643,6 +6328,9 @@ namespace Legion {
             }
             else
             {
+#ifdef DEBUG_LEGION
+              assert(finder->second.remaining_analyses == 0);
+#endif
               // We're going to fall through so grab the state
               // that we need to do the finalization now
               remote_registered.swap(finder->second.remote_registered);
@@ -5738,6 +6426,9 @@ namespace Legion {
           runtime->send_collective_register_user_request(parent, rez);
           return;
         }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_analyses == 0);
+#endif
         // We're the owner so we can start doing the user registration
         // Grab everything we need to call finalize_collective_user
         to_perform = std::move(finder->second);
@@ -5806,6 +6497,7 @@ namespace Legion {
           rendezvous_users.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != rendezvous_users.end());
+        assert(finder->second.remaining_analyses == 0);
 #endif
         to_perform = std::move(finder->second);
         // Can now remove this from the data structure
@@ -5849,20 +6541,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveView::finalize_collective_user(
-                            const RegionUsage &usage,
-                            const FieldMask &user_mask,
-                            IndexSpaceNode *expr,
-                            const UniqueID op_id,
-                            const size_t op_ctx_index,
-                            const unsigned index,
-                            RtEvent collect_event,
-                            RtUserEvent local_registered,
-                            RtEvent global_registered,
-                            std::vector<ApUserEvent> &ready_events,
-                            std::vector<std::vector<ApEvent> > &term_events,
-                            const PhysicalTraceInfo *trace_info,
-                            std::vector<CollectiveCopyFillAnalysis*> &analyses,
-                            const bool symbolic) const
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                IndexSpaceNode *expr,
+                                const UniqueID op_id,
+                                const size_t op_ctx_index,
+                                const unsigned index,
+                                RtEvent collect_event,
+                                RtUserEvent local_registered,
+                                RtEvent global_registered,
+                                std::vector<ApUserEvent> &ready_events,
+                                std::vector<std::vector<ApEvent> > &term_events,
+                                const PhysicalTraceInfo *trace_info,
+                                std::vector<CollectiveAnalysis*> &analyses,
+                                const bool symbolic) const
     //--------------------------------------------------------------------------
     {
       // First send out any messages to the children so they can start
@@ -5905,9 +6597,9 @@ namespace Legion {
       else
         Runtime::trigger_event(local_registered);
       // Remove any references on the analyses
-      for (std::vector<CollectiveCopyFillAnalysis*>::const_iterator it =
+      for (std::vector<CollectiveAnalysis*>::const_iterator it =
             analyses.begin(); it != analyses.end(); it++)
-        if ((*it)->remove_reference())
+        if ((*it)->remove_analysis_reference())
           delete (*it);
       delete trace_info;
     }

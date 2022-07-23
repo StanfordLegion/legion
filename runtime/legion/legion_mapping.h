@@ -130,9 +130,8 @@ namespace Legion {
       void find_instances_in_memory(Memory memory,
                                     std::vector<PhysicalInstance> &insts) const;
       void find_instances_nearest_memory(Memory memory,
-                                    std::vector<PhysicalInstance> &insts) const;
-      void find_instances_by_kind(Memory::Kind kind,
-                                    std::vector<PhysicalInstance> &insts) const;
+                                    std::vector<PhysicalInstance> &insts,
+                                    bool bandwidth = true) const;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this

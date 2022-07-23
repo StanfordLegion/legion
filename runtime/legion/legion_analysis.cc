@@ -5848,6 +5848,7 @@ namespace Legion {
                                  const InstanceSet &target_insts,
                                  std::vector<InstanceView*> &target_vws,
                                  std::vector<InstanceView*> &source_vws,
+                                 std::vector<size_t> &view_collective_arrivals,
                                  const PhysicalTraceInfo &t_info,
                                  CollectiveMapping *mapping, bool first_local,
                                  bool exclusive)
@@ -5865,8 +5866,10 @@ namespace Legion {
       {
         if (!target_views[idx]->is_collective_view())
           continue;
+        PhysicalManager *manager = target_insts[idx].get_physical_manager();
         CollectiveView *collective = target_views[idx]->as_collective_view();
-        collective->register_collective_analysis(this);
+        collective->register_collective_analysis(manager, this,
+                                view_collective_arrivals[idx]);
       }
     }
 
@@ -5890,14 +5893,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(on_heap);
 #endif
-      // Record ourselves with any collective target views
-      for (unsigned idx = 0; idx < target_views.size(); idx++)
-      {
-        if (!target_views[idx]->is_collective_view())
-          continue;
-        CollectiveView *collective = target_views[idx]->as_collective_view();
-        collective->register_collective_analysis(this);
-      }
+      // Remote case so no registration to perform
     }
 
     /////////////////////////////////////////////////////////////
@@ -6679,14 +6675,15 @@ namespace Legion {
                      RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      std::vector<InstanceView*> &source_vws,
+                     std::vector<size_t> &arrivals,
                      const PhysicalTraceInfo &t_info,
                      CollectiveMapping *mapping,
                      const ApEvent pre, const ApEvent term,
                      const bool check, const bool record,
                      const bool first_local)
       : CollectiveCopyFillAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
-                                   target_insts, target_vws, source_vws, t_info,
-                                   mapping, first_local, IS_WRITE(req)),
+                                   target_insts, target_vws,source_vws,arrivals,
+                                   t_info, mapping, first_local, IS_WRITE(req)),
         usage(req), node(rn), precondition(pre), term_event(term),
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
         record_valid(record), output_aggregator(NULL)
@@ -7347,11 +7344,12 @@ namespace Legion {
                                      const InstanceSet &target_insts,
                                      std::vector<InstanceView*> &target_vws,
                                      std::vector<InstanceView*> &source_vws, 
+                                     std::vector<size_t> &arrivals,
                                      const PhysicalTraceInfo &t_info,
                                      CollectiveMapping *mapping,
                                      const bool first)
       : CollectiveCopyFillAnalysis(rt, o, idx, expr, true/*on heap*/,
-                                   target_insts, target_vws, source_vws,
+                                   target_insts, target_vws,source_vws,arrivals,
                                    t_info, mapping, first, true/*exclusive*/),
         precondition(pre), target_analysis(this), release_aggregator(NULL)
     //--------------------------------------------------------------------------

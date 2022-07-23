@@ -1800,6 +1800,44 @@ namespace Legion {
     };
 
     /**
+     * \class CollectiveAnalysis
+     * This base class provides a virtual interface for collective
+     * analyses. Collective analyses are registered with the collective
+     * views to help with performing collective copy operations since
+     * control for collective copy operations originates from just a
+     * single physical analysis. We don't want to attribute all those
+     * copies and trace recordings to a single analysis, so instead
+     * we register CollectiveAnalysis objects with collective views
+     * so that they can be used to help issue the copies.
+     */
+    class CollectiveAnalysis {
+    public:
+      virtual ~CollectiveAnalysis(void) = 0;
+      virtual size_t get_context_index(void) const = 0;
+      virtual unsigned get_requirement_index(void) const = 0;
+      virtual void pack_collective_analysis(Serializer &rez) const = 0;
+      virtual void add_analysis_reference(void) = 0;
+      virtual bool remove_analysis_reference(void) = 0;
+    };
+
+    /**
+     * \class RemoteCollectiveAnalysis
+     * This class contains the needed data structures for representing
+     * a physical analysis when registered on a remote collective view.
+     */
+    class RemoteCollectiveAnalysis : public CollectiveAnalysis,
+                                     public Collectable {
+    public:
+      virtual ~RemoteCollectiveAnalysis(void);
+      virtual size_t get_context_index(void) const;
+      virtual unsigned get_requirement_index(void) const;
+      virtual void pack_collective_analysis(Serializer &rez) const;
+      virtual void add_analysis_reference(void) { add_reference(); }
+      virtual bool remove_analysis_reference(void) 
+        { return remove_reference(); }
+    };
+
+    /**
      * \class CollectiveCopyFillAnalysis
      * This is an intermediate base class for analyses that helps support
      * performing collective copies and fills on a destination collective
@@ -1808,13 +1846,15 @@ namespace Legion {
      * attributed to the correct operation. After the analysis is done
      * then the analysis will unregister itself with the collecitve instance.
      */
-    class CollectiveCopyFillAnalysis : public PhysicalAnalysis {
+    class CollectiveCopyFillAnalysis : public PhysicalAnalysis,
+                                       public CollectiveAnalysis {
     public:
       CollectiveCopyFillAnalysis(Runtime *rt, Operation *op, unsigned index,
                                  IndexSpaceExpression *expr, bool on_heap,
                                  const InstanceSet &target_instances,
                                  std::vector<InstanceView*> &target_views,
                                  std::vector<InstanceView*> &source_views,
+                                 std::vector<size_t> &view_collective_arrivals,
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *mapping, bool first_local,
                                  bool exclusive);
@@ -1827,6 +1867,14 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *collective_mapping,
                                  bool first_local, bool exclusive);
+      virtual ~CollectiveCopyFillAnalysis(void) { }
+    public:
+      virtual size_t get_context_index(void) const { return context_index; }
+      virtual unsigned get_requirement_index(void) const { return index; }
+      virtual void pack_collective_analysis(Serializer &rez) const;
+      virtual void add_analysis_reference(void) { add_reference(); }
+      virtual bool remove_analysis_reference(void)
+        { return remove_reference(); }
     public:
       const size_t context_index;
       const InstanceSet target_instances;
@@ -1972,6 +2020,7 @@ namespace Legion {
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      std::vector<InstanceView*> &source_views,
+                     std::vector<size_t> &view_collective_arrivals,
                      const PhysicalTraceInfo &trace_info,
                      CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
@@ -2089,6 +2138,7 @@ namespace Legion {
                       const InstanceSet &target_instances,
                       std::vector<InstanceView*> &target_views,
                       std::vector<InstanceView*> &source_views,
+                      std::vector<size_t> &view_collective_arrivals,
                       const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
                       const bool first_local);

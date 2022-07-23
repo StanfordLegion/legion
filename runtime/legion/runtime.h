@@ -3196,14 +3196,16 @@ namespace Legion {
       void send_collective_point_request(AddressSpaceID target,Serializer &rez);
       void send_collective_point_response(AddressSpaceID target,
                                           Serializer &rez);
-      void send_collective_find_points_request(AddressSpaceID target,
-                                               Serializer &rez);
-      void send_collective_find_points_response(AddressSpaceID target,
-                                                Serializer &rez);
+      void send_collective_remote_instances_request(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_collective_remote_instances_response(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_collective_nearest_points_request(AddressSpaceID target,
                                                   Serializer &rez);
       void send_collective_nearest_points_response(AddressSpaceID target,
                                                    Serializer &rez);
+      void send_collective_remote_registration(AddressSpaceID target,
+                                               Serializer &rez);
       void send_collective_deletion(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
@@ -3543,9 +3545,10 @@ namespace Legion {
       void handle_collective_user_registration(Deserializer &derez);
       void handle_collective_point_request(Deserializer &derez);
       void handle_collective_point_response(Deserializer &derez);
-      void handle_collective_find_points_request(Deserializer &derez,
-                                                 AddressSpaceID source);
-      void handle_collective_find_points_response(Deserializer &derez);
+      void handle_collective_remote_instances_request(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_collective_remote_instances_response(Deserializer &derez,
+                                                    AddressSpaceID source);
       void handle_collective_nearest_points_request(Deserializer &derez);
       void handle_collective_nearest_points_response(Deserializer &derez);
       void handle_collective_remote_registration(Deserializer &derez);
@@ -5666,16 +5669,18 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_POINT_RESPONSE:
           break;
-        case SEND_COLLECTIVE_FIND_POINTS_REQUEST:
+        case SEND_COLLECTIVE_REMOTE_INSTANCES_REQUEST:
           break;
-        case SEND_COLLECTIVE_FIND_POINTS_RESPONSE:
+        case SEND_COLLECTIVE_REMOTE_INSTANCES_RESPONSE:
           break;
         case SEND_COLLECTIVE_NEAREST_POINTS_REQUEST:
           break;
         case SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE:
           break;
+          // These messages need to be ordered with respect to
+          // register_user messages so they go on the same VC
         case SEND_COLLECTIVE_REMOTE_REGISTRATION:
-          break;
+          return UPDATE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DELETION:
           return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_CREATE_TOP_VIEW_REQUEST:

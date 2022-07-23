@@ -413,27 +413,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveView::find_instances_nearest_memory(Memory memory,
-                                     std::vector<PhysicalInstance> &insts) const
+                     std::vector<PhysicalInstance> &insts, bool bandwidth) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         return;
       std::vector<Internal::PhysicalManager*> managers;
-      impl->find_instances_nearest_memory(memory, managers);
-      insts.reserve(insts.size() + managers.size());
-      for (unsigned idx = 0; idx < managers.size(); idx++)
-        insts.emplace_back(PhysicalInstance(managers[idx]));
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveView::find_instances_by_kind(Memory::Kind kind,
-                                     std::vector<PhysicalInstance> &insts) const
-    //--------------------------------------------------------------------------
-    {
-      if (impl == NULL)
-        return;
-      std::vector<Internal::PhysicalManager*> managers;
-      impl->find_instances_by_kind(kind, managers);
+      impl->find_instances_nearest_memory(memory, managers, bandwidth);
       insts.reserve(insts.size() + managers.size());
       for (unsigned idx = 0; idx < managers.size(); idx++)
         insts.emplace_back(PhysicalInstance(managers[idx]));
