@@ -1161,41 +1161,41 @@ gcc11_cxx20_release_regent_pretty:
 
 # GCC 12 with C++ 20
 gcc12_cxx20_debug_legion:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*gcc12, *terra14, *debug, *cxx20_normal, *legion]
 gcc12_cxx20_release_legion:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*gcc12, *terra14, *release, *cxx20_normal, *legion]
 gcc12_cxx20_debug_regent:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*gcc12, *terra14, *debug, *cxx20_normal, *regent]
 gcc12_cxx20_release_regent_pretty:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*gcc12, *terra14, *release, *cxx20_normal, *regent_pretty]
 
 # Clang 14 with C++ 17/20
 clang14_cxx17_debug_legion:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *debug, *cxx17_normal, *legion]
 clang14_cxx17_release_legion:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *release, *cxx17_normal, *legion]
 clang14_cxx17_debug_regent:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *debug, *cxx17_normal, *regent]
 clang14_cxx17_release_regent:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *release, *cxx17_normal, *regent]
 clang14_cxx20_debug_regent:
-  <<: [*linux, *image_2204, *tests]
+  <<: [*linux_compute, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
 
@@ -1270,7 +1270,7 @@ clang9_cxx17_debug_kokkos_openmp_legion:
   variables:
     <<: [*clang9, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
 # clang14_cxx17_debug_kokkos_openmp_legion:
-#   <<: [*linux, *image_2204, *tests]
+#   <<: [*linux_compute, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
 p100_cuda90_clang7_cxx14_debug_kokkos_cuda_legion:
