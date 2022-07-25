@@ -2228,6 +2228,7 @@ public:
   int num_pieces, num_colors;
 
   AffineTransform<N2, N1, T2> transform;
+  std::vector<AffineTransform<N2, N1, T2>> transforms;
 
   std::vector<IndexSpace<N2, T1>> ss_images;
   std::vector<IndexSpace<N2, T1>> ss_images1;
@@ -2266,17 +2267,60 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
   for(int i = 0; i < num_colors; i++)
     colors[i] = randval<FT>(rs);
 
-  Realm::Matrix<N2, N1, T2> matrix;
-  for (int i = 0; i < N2; i++) {
-    for (int j = 0; j < N1; j++) {
-      matrix[i][j] = (i == N1 - j - 1);
+  {
+    AffineTransform<N2, N1, T2> transpose;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        transpose.transform[i][j] = (i == N1 - j - 1);
+      }
     }
+    transpose.offset = Point<N2, T2>::ZEROES();
+    for (int i = 0; i < N2; i++) {
+      transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+    }
+    transforms.push_back(transpose);
   }
 
-  Point<N2, T2> offset = Point<N2, T2>::ZEROES();
-  for (int i = 0; i < N2; i++) offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-  transform.transform = matrix;
-  transform.offset = offset;
+  {
+    AffineTransform<N2, N1, T2> translate;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        translate.transform[i][j] = (i == j);
+      }
+    }
+    translate.offset = Point<N2, T2>::ZEROES();
+    for (int i = 0; i < N2; i++) {
+      translate.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+    }
+    transforms.push_back(translate);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> shear;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        shear.transform[i][j] = (i == j);
+      }
+      shear.transform[i][i + 1] = 2;
+    }
+    shear.offset = Point<N2, T2>::ZEROES();
+    transforms.push_back(shear);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> reflect;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        reflect.transform[i][j] = (i == j) ? -1 : 0;
+      }
+    }
+    reflect.offset = Point<N2, T2>::ZEROES();
+    transforms.push_back(reflect);
+  }
+
+  int transform_idx = rs.rand_int(transforms.size() + 1);
+  log_app.debug() << "transform_idx=" << transform_idx;
+  transform = transforms[transform_idx];
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
