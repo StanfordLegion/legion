@@ -976,18 +976,18 @@ class Channel(object):
         self.last_time = None
 
     def node_id(self):
-        if self.src is not None:
+        if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
             return (self.src.mem_id >> 40) & ((1 << 16) - 1)
-        elif self.dst is not None:
+        elif self.dst is not None and self.dst.mem_id != 0:
             return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
         else:
             return None
 
     def node_id_src(self):
-        if self.src is not None:
+        if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
@@ -997,10 +997,14 @@ class Channel(object):
     # mem_idx: 8
     def mem_idx_str(self, mem):
         if mem is not None:
+            if mem.mem_id == 0:
+                return "[all n]"
             return str(mem.mem_id & 0xff)
         return "none"
 
     def node_idx_str(self, mem_id):
+        if mem_id == 0:
+            return "[all n]"
         return str((mem_id >> 40) & ((1 << 16) - 1))
 
     def mem_str(self, mem):
@@ -1013,7 +1017,7 @@ class Channel(object):
         assert False
 
     def node_id_dst(self):
-        if self.dst is not None:
+        if self.dst is not None and self.dst.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
