@@ -262,6 +262,10 @@ variables:
 .asan: &asan
   SANITIZER_TYPE: "ASAN"
 
+.jupyter: &jupyter
+  TEST_JUPYTER: "1"
+  TEST_PY_ARGS: "--test=jupyter"
+
 ###
 ### Setup
 ###
@@ -443,6 +447,11 @@ before_script:
         export REALM_DEFAULT_ARGS="-cuda:nongpusync 0"
       fi
     fi
+  - |
+    if [[ "$TEST_JUPYTER" -eq 1 ]]; then
+      pip3 install notebook==6.4.10
+    fi
+
 
 ###
 ### Tags
@@ -741,7 +750,7 @@ gcc9_cxx11_debug_openmp_regent:
 gcc9_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion, *jupyter, *short]
 #   * LLVM
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
