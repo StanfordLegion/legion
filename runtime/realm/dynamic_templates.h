@@ -85,6 +85,20 @@ namespace Realm {
 	typedef _HEAD TYPE;
       };
 
+      // MaxSize support
+      struct MaxSize {
+        // Unforuntately std::max is not constexpr until c++14
+        static constexpr size_t value = sizeof(_HEAD) < _TAIL::MaxSize::value ?
+          _TAIL::MaxSize::value : sizeof(_HEAD);
+      };
+
+      // MaxSizeType support
+      template <size_t SIZE>
+      struct MaxSizeType {
+        typedef typename std::conditional<SIZE == sizeof(_HEAD),_HEAD,
+                  typename _TAIL::template MaxSizeType<SIZE> >::type TYPE;
+      };
+
       // demux support
       template <typename TARGET, int N>
       struct DemuxHelper {
@@ -136,6 +150,18 @@ namespace Realm {
       template <int N, typename ORIG>
       struct IndexToType {
 	static const int INDEX = ERROR_INDEX_NOT_IN_LIST<ORIG>::TYPE;
+      };
+
+      // MaxSize support
+      struct MaxSize {
+        static constexpr size_t value = 0;
+      };
+
+      struct ERROR_SIZE_NOT_IN_LIST { };
+
+      template <size_t SIZE>
+      struct MaxSizeType {
+        typedef ERROR_SIZE_NOT_IN_LIST TYPE;
       };
 
       // demux support

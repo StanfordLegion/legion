@@ -26,12 +26,12 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
   if(NOT LLVM_CONFIG_EXECUTABLE)
     # if an explicitly-versioned llvm-config (that we've tested with) is
     #  available, use that
-    find_program(LLVM_CONFIG_EXECUTABLE NAMES llvm-config-3.9
-                                              llvm-config-3.8
-                                              llvm-config-3.6
-                                              llvm-config-3.5
-                                              llvm-config-4.0
-                                              llvm-config-5.0
+    find_program(LLVM_CONFIG_EXECUTABLE NAMES llvm-config-9
+                                              llvm-config-10
+                                              llvm-config-11
+                                              llvm-config-12
+                                              llvm-config-13
+                                              llvm-config-14
                                               llvm-config)
   endif(NOT LLVM_CONFIG_EXECUTABLE)
   if(LLVM_CONFIG_EXECUTABLE)

@@ -56,6 +56,31 @@ end
 -- ## Legion Bindings
 -- #################
 
+local dlfcn
+local function dlopen_library(library_name)
+  local ffi = require("ffi")
+  if not dlfcn then
+    dlfcn = terralib.includec("dlfcn.h")
+  end
+
+  -- Right now we do this globally and do not attempt to unload
+  -- libraries (and really, there is no safe way to do so because
+  -- LuaJIT and LLVM will both get unloaded before we're ready)
+  local ok = dlfcn.dlopen(library_name, bit.bor(dlfcn.RTLD_LAZY, dlfcn.RTLD_GLOBAL))
+  if ffi.cast("intptr_t", ok) == 0LL then
+    assert(false, "dlopen failed: " .. tostring(dlfcn.dlerror()))
+  end
+end
+
+local function link_library(library_name)
+  local suffix = string.sub(library_name, "-3")
+  if suffix == ".ll" or suffix == ".bc" then
+    terralib.linklibrary(library_name)
+  else
+    dlopen_library(library_name)
+  end
+end
+
 do
 local linked_libraries = terralib.newlist()
 
@@ -63,14 +88,14 @@ function base.linklibrary(library_name)
   if base.config["offline"] then
     linked_libraries:insert(library_name)
   else
-    terralib.linklibrary(library_name)
+    link_library(library_name)
   end
 end
 
 function base.load_all_libraries()
   assert(data.is_luajit())
   linked_libraries:map(function(library)
-    terralib.linklibrary(library)
+    link_library(library)
   end)
 end
 
