@@ -79,6 +79,7 @@ namespace Realm {
 
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
     PyThreadState *(*PyThreadState_Get)(void);
+    int (*PyGILState_Check)(void);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 
