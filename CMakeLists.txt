@@ -760,6 +760,10 @@ write_basic_package_version_file(
   VERSION ${Legion_VERSION}
   COMPATIBILITY ExactVersion)
 
+install(FILES ${Legion_BINARY_DIR}/LegionConfig-version.cmake
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+)
+
 install(FILES cmake/LegionConfig-install.cmake
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   RENAME LegionConfig.cmake

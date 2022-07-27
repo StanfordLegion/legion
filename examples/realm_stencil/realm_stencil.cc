@@ -218,26 +218,6 @@ void dump(RegionInstance inst, FieldID fid, Rect2 bounds, const char *prefix)
   }
 }
 
-DTYPE *get_weights()
-{
-  static bool init = false;
-  static DTYPE weights[(2*RADIUS + 1) * (2*RADIUS + 1)] = {0};
-
-  if (!init) {
-#define WEIGHT(i, j) weights[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
-    for (coord_t i = 1; i <= RADIUS; i++) {
-      WEIGHT( 0,  i) =  1.0/(2.0*i*RADIUS);
-      WEIGHT( i,  0) =  1.0/(2.0*i*RADIUS);
-      WEIGHT( 0, -i) = -1.0/(2.0*i*RADIUS);
-      WEIGHT(-i,  0) = -1.0/(2.0*i*RADIUS);
-    }
-    init = true;
-#undef WEIGHT
-  }
-
-  return weights;
-}
-
 void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
                  Rect2 bounds)
 {
@@ -308,7 +288,7 @@ void stencil_task(const void *args, size_t arglen,
     inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2, coord_t>().bounds);
 
-  DTYPE *weights = get_weights();
+  DTYPE *weights = a.weights;
 
   stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
@@ -496,6 +476,20 @@ void shard_task(const void *args, size_t arglen,
     Event::merge_events(events).wait();
   }
 
+  // Init the weights
+  size_t weights_size = (2*RADIUS + 1) * (2*RADIUS + 1);
+  DTYPE *weights = (DTYPE*)malloc(sizeof(DTYPE) * weights_size);
+  memset(weights, 0, sizeof(DTYPE) * weights_size);
+
+#define WEIGHT(i, j) weights[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
+  for (coord_t i = 1; i <= RADIUS; i++) {
+    WEIGHT( 0,  i) =  1.0/(2.0*i*RADIUS);
+    WEIGHT( i,  0) =  1.0/(2.0*i*RADIUS);
+    WEIGHT( 0, -i) = -1.0/(2.0*i*RADIUS);
+    WEIGHT(-i,  0) = -1.0/(2.0*i*RADIUS);
+  }
+#undef WEIGHT
+
   // Barrier
   // Warning: If you're used to Legion barriers, please note that
   // Realm barriers DON'T WORK THE SAME WAY.
@@ -541,6 +535,7 @@ void shard_task(const void *args, size_t arglen,
       args.yp_inst = a.yp_inst_in;
       args.ym_inst = a.ym_inst_in;
       args.interior_bounds = a.interior_bounds;
+      args.weights = weights;
       Event precondition = Event::merge_events(
         increment_done,
         (xp_full_in.exists() ? xp_full_in.get_previous_phase() : Event::NO_EVENT),
@@ -640,6 +635,8 @@ void shard_task(const void *args, size_t arglen,
   // Make sure all operations are done before returning
   Event::merge_events(
     xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done).wait();
+
+  free(weights);
 }
 
 void top_level_task(const void *args, size_t arglen,
