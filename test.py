@@ -318,6 +318,27 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
+def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    # Hack: legion_python currently requires the module name to come first
+    flags = [] # ['-logfile', 'out_%.log']
+    python_dir = os.path.join(root_dir, 'bindings', 'python')
+    # Hack: Fix up the environment so that Python can find all the examples.
+    env = dict(list(env.items()) + [
+        ('PYTHONPATH', ':'.join([python_dir])),
+        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
+    ])
+    # Clean up around python because we are going to make shared objects
+    # which is not something that anyone else does
+    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+    cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
+    jupyter_dir = os.path.join(root_dir, 'jupyter_notebook')
+    jupyter_install_cmd = [sys.executable, './install.py', '--legion-prefix', python_dir, '--verbose']
+    cmd(jupyter_install_cmd, env=env, cwd=jupyter_dir)
+    jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'ci_test.py')
+    jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'legion_kernel_nocr', jupyter_test_file]
+    cmd(jupyter_test_cmd, env=env)
+    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1' or env['USE_HIP'] == '1':
@@ -823,7 +844,7 @@ class Stage(object):
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest, networks,
+                test_perf, test_ctest, test_jupyter, networks,
                 use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
@@ -849,6 +870,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Private:    %s' % test_private)
     print('###   * Perf:       %s' % test_perf)
     print('###   * CTest:      %s' % test_ctest)
+    print('###   * Jupyter:    %s' % test_jupyter)
     print('###')
     print('### Build Flags:')
     print('###   * Networks:   %s' % networks)
@@ -914,6 +936,7 @@ def run_tests(test_modules=None,
     test_private = module_enabled('private', False)
     test_perf = module_enabled('perf', False)
     test_ctest = module_enabled('ctest', False)
+    test_jupyter = module_enabled('jupyter', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True, prefix='USE_', **kwargs):
@@ -958,6 +981,9 @@ def run_tests(test_modules=None,
     if test_ctest and not use_cmake:
         raise Exception('CTest cannot be used without CMake')
 
+    if test_jupyter and not use_python:
+        raise Exception('Jupyter requires Python')
+
     if networks and launcher is None:
         raise Exception('Network(s) is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
@@ -971,7 +997,7 @@ def run_tests(test_modules=None,
     report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest,
+                test_perf, test_ctest, test_jupyter,
                 networks,
                 use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
@@ -1091,6 +1117,9 @@ def run_tests(test_modules=None,
         if test_ctest:
             with Stage('ctest'):
                 run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+        if test_jupyter:
+            with Stage('jupyter'):
+                run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -1142,7 +1171,7 @@ def driver():
         '--test', dest='test_modules', action=ExtendAction,
         choices=MultipleChoiceList('regent', 'legion_cxx', 'fuzzer',
                                    'realm', 'external1', 'external2',
-                                   'private', 'perf', 'ctest'),
+                                   'private', 'perf', 'ctest', 'jupyter'),
         type=lambda s: s.split(','),
         default=None,
         help='Test modules to run (also via TEST_*).')
