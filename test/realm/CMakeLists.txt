@@ -102,7 +102,7 @@ set_target_properties(scatter PROPERTIES CXX_STANDARD 11
                                          CXX_EXTENSIONS NO)
 
 # some tests need test-specific arguments
-set(TESTARGS_ctxswitch         -ll:io 1 -t 20 -i 10000)
+set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
