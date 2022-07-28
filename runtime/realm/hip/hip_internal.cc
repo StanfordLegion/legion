@@ -1539,7 +1539,8 @@ namespace Realm {
                                                  const std::vector<XferDesPortInfo>& outputs_info,
                                                  int priority,
                                                  XferDesRedopInfo redop_info,
-                                                 const void *fill_data, size_t fill_size)
+                                                 const void *fill_data, size_t fill_size,
+                                                 size_t fill_total)
       {
         assert(fill_size == 0);
         return new GPUreduceXferDes(dma_op, this, launch_node, guid,
