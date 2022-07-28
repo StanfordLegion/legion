@@ -983,7 +983,7 @@ namespace Realm {
                       copy3d.srcPtr = make_hipPitchedPtr((void*)srcDevice, lstride, bytes, pstride/lstride);
                       copy3d.srcPos = make_hipPos(0,0,0);
                       copy3d.dstPos = make_hipPos(0,0,0);
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
                       copy3d.kind = cudaMemcpyDeviceToDevice;
 #else
                       copy3d.kind = hipMemcpyDeviceToDevice;
@@ -1288,7 +1288,7 @@ namespace Realm {
                   
                   void *src_ptr = (void*)args->src_base;
                   void *src_device = src_ptr;
-#ifndef __HIP_PLATFORM_NVCC__
+#ifndef __HIP_PLATFORM_NVIDIA__
                   // this is for src=host memory registered via hipHostRegister
                   // if src is allocated by hipHostMalloc, then this is not necessary                  
                   hipPointerAttribute_t src_attr;
