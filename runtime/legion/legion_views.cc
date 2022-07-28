@@ -5638,10 +5638,10 @@ namespace Legion {
             local_views.begin(); it != local_views.end(); it++)
         if ((*it)->remove_nested_resource_ref(did))
           delete (*it);
-      for (std::set<PhysicalManager*>::const_iterator it =
+      for (std::map<PhysicalManager*,IndividualView*>::const_iterator it =
             remote_instances.begin(); it != remote_instances.end(); it++)
-        if ((*it)->remove_nested_resource_ref(did))
-          delete (*it);
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
     }
 
     //--------------------------------------------------------------------------
@@ -5848,6 +5848,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CollectiveView::find_atomic_reservations(PhysicalManager *manager,
+                                          const FieldMask &mask, Operation *op,
+                                          const unsigned index, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID manager_space = get_analysis_space(manager);
+      if (manager_space != local_space)
+      {
+        // Check to see if we already have it
+#ifdef DEBUG_LEGION
+        assert(collective_mapping != NULL);
+        assert(collective_mapping->contains(manager_space));
+#endif
+        IndividualView *view = NULL;
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          std::map<PhysicalManager*,IndividualView*>::const_iterator finder =
+            remote_instances.find(manager);
+          if (finder != remote_instances.end())
+            view = finder->second;
+#ifdef DEBUG_LEGION
+          assert((view != NULL) || 
+              !remote_instance_responses.contains(manager_space));
+#endif
+        }
+        if (view == NULL)
+        {
+          const RtUserEvent ready_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(ready_event);
+          }
+          runtime->send_collective_remote_instances_request(manager_space, rez);
+          if (!ready_event.has_triggered())
+            ready_event.wait();
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          std::map<PhysicalManager*,IndividualView*>::const_iterator finder =
+            remote_instances.find(manager);
+#ifdef DEBUG_LEGION
+          assert(finder != remote_instances.end());
+#endif
+          view = finder->second;
+        }
+        view->find_atomic_reservations(manager, mask, op, index, exclusive);
+      }
+      else
+      {
+        const unsigned local_index = find_local_index(manager);
+        local_views[local_index]->find_atomic_reservations(manager,
+                                        mask, op, index, exclusive);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool CollectiveView::contains(PhysicalManager *manager) const
     //--------------------------------------------------------------------------
     {
@@ -5860,7 +5916,7 @@ namespace Legion {
         // Check all the current 
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          std::set<PhysicalManager*>::const_iterator finder = 
+          std::map<PhysicalManager*,IndividualView*>::const_iterator finder =
             remote_instances.find(manager);
           if (finder != remote_instances.end())
             return true;
@@ -5908,7 +5964,7 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         if (!remote_instances.empty())
-          manager = *remote_instances.begin();
+          manager = remote_instances.begin()->first;
       }
       if (manager == NULL)
       {
@@ -5928,7 +5984,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!remote_instances.empty());
 #endif
-        manager = *remote_instances.begin();
+        manager = remote_instances.begin()->first;
       }
       return manager->meets_regions(regions, tight_bounds);
     }
@@ -5950,10 +6006,10 @@ namespace Legion {
           // See if we need the check
           if (remote_instance_responses.contains(memory_space))
           {
-            for (std::set<PhysicalManager*>::const_iterator it =
+            for (std::map<PhysicalManager*,IndividualView*>::const_iterator it =
                   remote_instances.begin(); it != remote_instances.end(); it++)
-              if ((*it)->memory_manager->memory == memory)
-                instances.push_back(*it);
+              if (it->first->memory_manager->memory == memory)
+                instances.push_back(it->first);
             return;
           }
         }
@@ -5968,10 +6024,10 @@ namespace Legion {
         if (!ready_event.has_triggered())
           ready_event.wait();
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        for (std::set<PhysicalManager*>::const_iterator it =
+        for (std::map<PhysicalManager*,IndividualView*>::const_iterator it =
               remote_instances.begin(); it != remote_instances.end(); it++)
-          if ((*it)->memory_manager->memory == memory)
-            instances.push_back(*it);
+          if (it->first->memory_manager->memory == memory)
+            instances.push_back(it->first);
       }
       else
       {
@@ -6009,7 +6065,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize<size_t>(view->local_views.size());
         for (unsigned idx = 0; idx < view->local_views.size(); idx++)
-          rez.serialize(view->local_views[idx]->get_manager()->did);
+          rez.serialize(view->local_views[idx]->did);
         rez.serialize(done);
       }
       runtime->send_collective_remote_instances_response(source, rez);
@@ -6017,16 +6073,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveView::process_remote_instances_response(AddressSpaceID src,
-                                  const std::vector<PhysicalManager*> &managers)
+                                      const std::vector<IndividualView*> &views)
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            managers.begin(); it != managers.end(); it++)
-        // Make sure to deduplicate across multiple requests returning
-        // the same manaagers in parallel
-        if (remote_instances.insert(*it).second)
-          (*it)->add_nested_resource_ref(did);
+      // Deduplicate cases where we already received this response
+      if (remote_instance_responses.contains(src))
+        return;
+      for (std::vector<IndividualView*>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+      {
+        PhysicalManager *manager = (*it)->get_manager();
+        remote_instances.insert(std::make_pair(manager, *it));
+        (*it)->add_nested_resource_ref(did);
+      }
       remote_instance_responses.add(src);
     }
 
@@ -6046,11 +6106,12 @@ namespace Legion {
         ready_events.push_back(ready);
       size_t num_instances;
       derez.deserialize(num_instances);
-      std::vector<PhysicalManager*> instances(num_instances);
+      std::vector<IndividualView*> instances(num_instances);
       for (unsigned idx = 0; idx < num_instances; idx++)
       {
         derez.deserialize(did);
-        instances[idx] = runtime->find_or_request_instance_manager(did, ready);
+        instances[idx] = static_cast<IndividualView*>(
+            runtime->find_or_request_logical_view(did, ready));
         if (ready.exists())
           ready_events.push_back(ready);
       }
@@ -6065,6 +6126,441 @@ namespace Legion {
       }
       view->process_remote_instances_response(source, instances);
       Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_nearest_memory(Memory memory,
+                       std::vector<PhysicalManager*> &instances, bool bandwidth)
+    //--------------------------------------------------------------------------
+    {
+      constexpr size_t size_max = std::numeric_limits<size_t>::max();
+      size_t best = bandwidth ? 0 : size_max;
+      if (collective_mapping != NULL)
+      {
+        std::atomic<size_t> atomic_best(best);
+        const AddressSpaceID origin = select_origin_space();
+        std::vector<DistributedID> best_instances;
+        RtEvent ready = find_instances_nearest_memory(memory, local_space,
+            &best_instances, &atomic_best, origin, best, bandwidth);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        std::vector<RtEvent> ready_events;
+        for (std::vector<DistributedID>::const_iterator it =
+              best_instances.begin(); it != best_instances.end(); it++)
+        {
+          instances.push_back(
+              runtime->find_or_request_instance_manager(*it, ready));
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+        if (!ready_events.empty())
+        {
+          ready = Runtime::merge_events(ready_events);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+        }
+      }
+      else
+      {
+        if (!is_owner())
+        {
+          const RtUserEvent ready_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(ready_event);
+          }
+          runtime->send_collective_remote_instances_request(owner_space, rez);
+          if (!ready_event.has_triggered())
+            ready_event.wait();
+          std::map<Memory,size_t> searches;
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          for (std::map<PhysicalManager*,IndividualView*>::const_iterator it =
+                remote_instances.begin(); it != remote_instances.end(); it++)
+          {
+            const Memory local = it->first->memory_manager->memory;
+            std::map<Memory,size_t>::const_iterator finder =
+              searches.find(local);
+            if (finder == searches.end())
+            {
+              Realm::Machine::AffinityDetails affinity;
+              if (runtime->machine.has_affinity(memory, local, &affinity))
+              {
+#ifdef DEBUG_LEGION
+                assert(0 < affinity.bandwidth);
+#ifndef __clang__ // clang's idea of size_max is off by one
+                assert(affinity.bandwidth < size_max);
+#endif
+#endif
+                if (bandwidth)
+                {
+                  searches[local] = affinity.bandwidth;
+                  if (affinity.bandwidth >= best)
+                  {
+                    if (affinity.bandwidth > best)
+                    {
+                      instances.clear();
+                      best = affinity.bandwidth;
+                    }
+                    instances.push_back(it->first);
+                  }
+                }
+                else
+                {
+#ifdef DEBUG_LEGION
+                  assert(0 < affinity.latency);
+#ifndef __clang__ // clang's idea of size_max is off by one
+                  assert(affinity.latency < size_max);
+#endif
+#endif
+                  searches[local] = affinity.latency;
+                  if (affinity.latency <= best)
+                  {
+                    if (affinity.latency < best)
+                    {
+                      instances.clear();
+                      best = affinity.latency;
+                    }
+                    instances.push_back(it->first);
+                  }
+                }
+              }
+              else
+                searches[local] = bandwidth ? 0 : size_max;
+            }
+            else if (finder->second == best)
+              instances.push_back(it->first);
+          }
+        }
+        else
+          find_nearest_local_instances(memory, best, instances, bandwidth);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveView::find_instances_nearest_memory(Memory memory,
+                  AddressSpaceID source, std::vector<DistributedID> *instances,
+                  std::atomic<size_t> *target, AddressSpaceID origin,
+                  size_t best, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      const AddressSpaceID space = memory.address_space();
+      if (space != local_space)
+      {
+        if (collective_mapping->contains(space))
+        {
+#ifdef DEBUG_LEGION
+          assert(source == local_space);
+#endif
+          // Assume that all memmories in the same space are always inherently
+          // closer to the target memory than any others, so we can send the
+          // request straight to that node and do the lookup
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(memory);
+            rez.serialize(source);
+            rez.serialize(instances);
+            rez.serialize(target);
+            rez.serialize(origin);
+            rez.serialize(best);
+            rez.serialize<bool>(bandwidth);
+            rez.serialize(done);
+          }
+          runtime->send_collective_nearest_instances_request(space, rez);
+          return done;
+        }
+        else
+        {
+          if (collective_mapping->contains(local_space))
+          {
+            // Do our local check and update the best
+            std::vector<PhysicalManager*> local_results;
+            find_nearest_local_instances(memory, best, local_results,bandwidth);
+            std::vector<RtEvent> done_events;
+            std::vector<AddressSpaceID> children;
+            collective_mapping->get_children(origin, local_space, children);
+            for (std::vector<AddressSpaceID>::const_iterator it = 
+                  children.begin(); it != children.end(); it++)
+            {
+              const RtUserEvent done = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(memory);
+                rez.serialize(source);
+                rez.serialize(instances);
+                rez.serialize(target);
+                rez.serialize(origin);
+                rez.serialize(best);
+                rez.serialize<bool>(bandwidth);
+                rez.serialize(done);
+              }
+              runtime->send_collective_nearest_instances_request(*it, rez);
+              done_events.push_back(done);
+            }
+            if (!local_results.empty())
+            {
+              const RtUserEvent done = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(instances);
+                rez.serialize(target);
+                rez.serialize(best);
+                rez.serialize<size_t>(local_results.size());
+                for (std::vector<PhysicalManager*>::const_iterator it =
+                      local_results.begin(); it != local_results.end(); it++)
+                  rez.serialize((*it)->did);
+                rez.serialize<bool>(bandwidth);
+                rez.serialize(done);
+              }
+              runtime->send_collective_nearest_instances_response(source, rez);
+              done_events.push_back(done);
+            }
+            if (!done_events.empty())
+              return Runtime::merge_events(done_events);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(source == local_space);
+#endif
+            // Send to the origin to start
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(memory);
+              rez.serialize(source);
+              rez.serialize(instances);
+              rez.serialize(target);
+              rez.serialize(origin);
+              rez.serialize(best);
+              rez.serialize<bool>(bandwidth);
+              rez.serialize(done);
+            }
+            runtime->send_collective_nearest_instances_request(origin, rez);
+            return done;
+          }
+        }
+      }
+      else
+      {
+        // Assume that all memories in the same space are always inherently
+        // closer to the target memory than any others
+        // See if we find the memory itself
+        std::vector<PhysicalManager*> results;
+        find_nearest_local_instances(memory, best, results, bandwidth);
+        if (source != local_space)
+        {
+          if (!results.empty())
+          {
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(instances);
+              rez.serialize(target);
+              rez.serialize(best);
+              rez.serialize<size_t>(results.size());
+              for (std::vector<PhysicalManager*>::const_iterator it =
+                    results.begin(); it != results.end(); it++)
+                rez.serialize((*it)->did);
+              rez.serialize<bool>(bandwidth);
+              rez.serialize(done);
+            }
+            runtime->send_collective_nearest_instances_response(source, rez);
+            return done;
+          }
+        }
+        else
+        {
+          // This is the local case, so there's no atomicity required
+          for (std::vector<PhysicalManager*>::const_iterator it =
+                results.begin(); it != results.end(); it++)
+            instances->push_back((*it)->did);
+          target->store(best);
+        }
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_nearest_local_instances(Memory memory,
+     size_t &best, std::vector<PhysicalManager*> &results, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+      {
+        PhysicalManager *manager = local_views[idx]->get_manager();
+        if (manager->memory_manager->memory == memory)
+          results.push_back(manager);
+      }
+      constexpr size_t size_max = std::numeric_limits<size_t>::max();
+      if (results.empty())
+      {
+        // Nothing in the memory itself, so see which of our memories
+        // are closer to anything else
+        std::map<Memory,size_t> searches;
+        for (unsigned idx = 0; idx < local_views.size(); idx++)
+        {
+          PhysicalManager *manager = local_views[idx]->get_manager();
+          const Memory local = manager->memory_manager->memory;
+          std::map<Memory,size_t>::const_iterator finder =
+            searches.find(local);
+          if (finder == searches.end())
+          {
+            Realm::Machine::AffinityDetails affinity;
+            if (runtime->machine.has_affinity(memory, local, &affinity))
+            {
+#ifdef DEBUG_LEGION
+              assert(0 < affinity.bandwidth);
+#ifndef __clang__ // clang's idea of size_max is off by one
+              assert(affinity.bandwidth < size_max);
+#endif
+#endif
+              if (bandwidth)
+              {
+                searches[local] = affinity.bandwidth;
+                if (affinity.bandwidth >= best)
+                {
+                  if (affinity.bandwidth > best)
+                  {
+                    results.clear();
+                    best = affinity.bandwidth;
+                  }
+                  results.push_back(manager);
+                }
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(0 < affinity.latency);
+#ifndef __clang__ // clang's idea of size_max is off by one
+                assert(affinity.latency < size_max);
+#endif
+#endif
+                searches[local] = affinity.latency;
+                if (affinity.latency <= best)
+                {
+                  if (affinity.latency < best)
+                  {
+                    results.clear();
+                    best = affinity.latency;
+                  }
+                  results.push_back(manager);
+                }
+              }
+            }
+            else
+              searches[local] = bandwidth ? 0 : size_max;
+          }
+          else if (finder->second == best)
+            results.push_back(manager);
+        }
+      }
+      else
+        best = bandwidth ? size_max-1 : 1;
+    } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_nearest_instances_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      Memory memory;
+      derez.deserialize(memory);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      std::vector<DistributedID> *instances;
+      derez.deserialize(instances);
+      std::atomic<size_t> *target;
+      derez.deserialize(target);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      size_t best;
+      derez.deserialize(best);
+      bool bandwidth;
+      derez.deserialize(bandwidth);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      CollectiveView *manager = static_cast<CollectiveView*>(
+          runtime->weak_find_distributed_collectable(did));
+      if (manager != NULL)     
+      {
+        Runtime::trigger_event(done, manager->find_instances_nearest_memory(
+              memory, source, instances, target, origin, best, bandwidth));
+        if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_nearest_instances_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::vector<DistributedID> *instances;
+      derez.deserialize(instances);
+      std::atomic<size_t> *target;
+      derez.deserialize(target);
+      size_t best;
+      derez.deserialize(best);
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      std::vector<DistributedID> results(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+        derez.deserialize(results[idx]);
+      bool bandwidth;
+      derez.deserialize(bandwidth);
+      // spin until we can get safely set the guard to add our entries
+      const size_t guard = 
+        bandwidth ? std::numeric_limits<size_t>::max() : 0;
+      size_t current = target->load();
+      while ((current == guard) ||
+             (bandwidth && (current <= best)) ||
+             (!bandwidth && (best <= current)))
+      {
+        if (!target->compare_exchange_weak(current, guard))
+          continue;
+        // If someone else still holds the guard then keep trying
+        if (current == guard)
+          continue;
+        if (bandwidth)
+        {
+          if (current < best)
+            instances->clear();
+          for (unsigned idx = 0; idx < results.size(); idx++)
+            instances->push_back(results[idx]);
+        }
+        else
+        {
+          if (best < current)
+            instances->clear();
+          for (unsigned idx = 0; idx < results.size(); idx++)
+            instances->push_back(results[idx]);
+        }
+        target->store(best);
+        break;
+      }
+      RtUserEvent done;
+      derez.deserialize(done);
     }
 
     //--------------------------------------------------------------------------

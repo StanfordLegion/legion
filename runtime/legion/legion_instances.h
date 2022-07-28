@@ -936,7 +936,7 @@ namespace Legion {
                                  bool bandwidth) const;
     public:
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
-      AddressSpaceID select_origin_space(void) const
+      inline AddressSpaceID select_origin_space(void) const
         { return (collective_mapping->contains(local_space) ? local_space :
                   collective_mapping->find_nearest(local_space)); }
       void register_collective_analysis(DistributedID view_did,

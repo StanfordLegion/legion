@@ -9994,11 +9994,10 @@ namespace Legion {
       TaskContext::report_leaks_and_duplicates(preconds);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void InnerContext::convert_source_views(
                                    const std::vector<PhysicalManager*> &sources,
-                                   std::vector<IndividualView*> &source_views,
+                                   std::vector<InstanceView*> &source_views,
                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -10029,8 +10028,10 @@ namespace Legion {
             create_instance_top_view(manager, local_space, mapping);
         }
       }
+      // No need to invalidate the collective views here, we know that
+      // source views are never going to be registered with the physical
+      // analysis state so we can safely give out the individual views
     }
-#endif
 
     //--------------------------------------------------------------------------
     void InnerContext::clear_instance_top_views(void)
@@ -10099,10 +10100,9 @@ namespace Legion {
       delete dargs->to_remove;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
-         std::vector<IndividualView*> &target_views, CollectiveMapping *mapping)
+                                       std::vector<InstanceView*> &target_views)
     //--------------------------------------------------------------------------
     {
       target_views.resize(targets.size());
@@ -10129,11 +10129,211 @@ namespace Legion {
         {
           PhysicalManager *manager = targets[*it].get_physical_manager();
           target_views[*it] =
-            create_instance_top_view(manager, local_space, mapping);
+            create_instance_top_view(manager, local_space);
         }
       }
+      invalidate_collective_mapping(target_views);
     }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::convert_collective_views(Operation *op, unsigned index,
+                                      LogicalRegion region,
+                                      const InstanceSet &targets,
+                                      CollectiveMapping *&analysis_mapping,
+                                      std::vector<InstanceView*> &target_views,
+                                      std::vector<size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      collective_arrivals.resize(targets.size());
+      size_t collective_tag = SIZE_MAX;
+      {
+        AutoLock c_lock(collective_lock,1,false/*exclusive*/);
+        // First check to see if we can do the fast matching path
+        std::map<LogicalRegion,
+                 std::vector<RendezvousResult*> >::const_iterator
+                   finder = collective_rendezvous.find(region);
+        if (finder != collective_rendezvous.end())
+        {
+          for (std::vector<RendezvousResult*>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if (!(*it)->matches(targets))
+              continue;
+            collective_tag = (*it)->collective_tag;
+            analysis_mapping = (*it)->analysis_mapping;
+            target_views = (*it)->target_views;
+            collective_arrivals = (*it)->collective_arrivals;
+            break;
+          }
+        }
+      }
+      // Always try to do the match first to see if it succeeds
+      bool first_local = false;
+      if (match_collective_mapping(op, index, region, 
+                                   collective_tag, first_local))
+        return first_local;
+      // Find or create a rendezvous result and record for this context
+      RendezvousResult *result = NULL;
+      const PendingRendezvousKey key(op->get_ctx_index(), index, region);
+      {
+        AutoLock c_lock(collective_lock);
+        std::vector<RendezvousResult*> &pending = pending_rendezvous[key];
+        for (std::vector<RendezvousResult*>::const_iterator it =
+              pending.begin(); it != pending.end(); it++)
+        {
+          if (!(*it)->matches(targets))
+            continue;
+          result = (*it);
+          break;
+        }
+        if (result == NULL)
+        {
+          result = new RendezvousResult(runtime->address_space,region,targets);
+          result->add_reference();
+          pending.push_back(result);
+        }
+      }
+      const RtEvent ready = rendezvous_collective_mapping(op, index, result);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      first_local = result->first_local;
+#ifdef DEBUG_LEGION
+      assert(result->collective_tag > 0);
 #endif
+      if (first_local)
+      {
+        AutoLock c_lock(collective_lock);
+        // Move the pending rendezvous over to the collective rendezvous
+        // Only the first one here needs to do this
+        std::map<PendingRendezvousKey,std::vector<RendezvousResult*> >::iterator
+          finder = pending_rendezvous.find(key);
+        if (finder != pending_rendezvous.end())
+        {
+          std::vector<RendezvousResult*> &results = 
+            collective_rendezvous[region];
+          if (!results.empty())
+            results.insert(results.end(), 
+                finder->second.begin(), finder->second.end());
+          else
+            results.swap(finder->second);
+          pending_rendezvous.erase(finder);
+        }
+      }
+      analysis_mapping = result->analysis_mapping;
+      target_views = result->target_views;
+      collective_arrivals = result->collective_arrivals;
+      return first_local;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::RendezvousResult::RendezvousResult(AddressSpaceID space,
+                                      LogicalRegion r, const InstanceSet &insts)
+      : origin(space), region(r), original(this), collective_tag(0),
+        analysis_mapping(NULL), first_local(false)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        instances.insert(ref.get_physical_manager(), ref.get_valid_fields());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::RendezvousResult::~RendezvousResult(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
+      for (unsigned idx = 0; idx < target_views.size(); idx++)
+        if (target_views[idx]->remove_base_resource_ref(CONTEXT_REF))
+          delete target_views[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::RendezvousResult::matches(const InstanceSet &insts) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        FieldMaskSet<PhysicalManager>::const_iterator finder = 
+          instances.find(ref.get_physical_manager());
+        if (finder == instances.end())
+          return false;
+        if (finder->second != ref.get_valid_fields())
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::CollectiveRendezvous::CollectiveRendezvous(size_t arrivals)
+      : ready(Runtime::create_rt_user_event()), remaining_arrivals(arrivals)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InnerContext::rendezvous_collective_mapping(Operation *op, 
+        unsigned requirement_index, RendezvousResult *result, RtUserEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      result->add_reference();
+      RtEvent result_ready;
+      CollectiveRendezvous *to_construct = NULL;
+      const RendezvousKey key(op->get_ctx_index(), requirement_index);
+      {
+        AutoLock c_lock(collective_lock);
+        std::map<RendezvousKey,CollectiveRendezvous*>::iterator finder =
+          pending_collectives.find(key);
+        if (finder == pending_collectives.end())
+          finder = pending_collectives.insert(
+              std::make_pair(key,
+                new CollectiveRendezvous(op->get_collective_points()))).first;
+        result_ready = finder->second->ready;
+        finder->second->rendezvous[result] = ready;
+        finder->second->participants.add(result->origin);
+        LegionMap<DistributedID,FieldMask> &group = 
+          finder->second->groups[result->region];
+        for (FieldMaskSet<PhysicalManager>::const_iterator it =
+              result->instances.begin(); it != result->instances.end(); it++)
+        {
+          LegionMap<DistributedID,FieldMask>::iterator inst_finder =
+            group.find(it->first->did);
+          if (inst_finder == group.end())
+            group[it->first->did] = it->second;
+          else
+            inst_finder->second |= it->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second->remaining_arrivals > 0);
+#endif
+        if (--finder->second->remaining_arrivals == 0)
+        {
+          to_construct = finder->second;
+          pending_collectives.erase(finder);
+        }
+      }
+      if (to_construct != NULL)
+        construct_collective_mapping(to_construct);
+      return result_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::construct_collective_mapping(
+                                               CollectiveRendezvous *rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      // Compute the field set groups for each region
+
+      // Now go through and find or create the collective views
+      // Split prior collective views if necessary
+      
+      // Send the resulting views back out to all the RendezvousResults
+       
+    }
 
     //--------------------------------------------------------------------------
     IndividualView* InnerContext::create_instance_top_view(

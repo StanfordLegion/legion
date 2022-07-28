@@ -3200,10 +3200,10 @@ namespace Legion {
                                                     Serializer &rez);
       void send_collective_remote_instances_response(AddressSpaceID target,
                                                      Serializer &rez);
-      void send_collective_nearest_points_request(AddressSpaceID target,
-                                                  Serializer &rez);
-      void send_collective_nearest_points_response(AddressSpaceID target,
-                                                   Serializer &rez);
+      void send_collective_nearest_instances_request(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_collective_nearest_instances_response(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_collective_remote_registration(AddressSpaceID target,
                                                Serializer &rez);
       void send_collective_deletion(AddressSpaceID target, Serializer &rez);
@@ -3549,8 +3549,8 @@ namespace Legion {
                                                     AddressSpaceID source);
       void handle_collective_remote_instances_response(Deserializer &derez,
                                                     AddressSpaceID source);
-      void handle_collective_nearest_points_request(Deserializer &derez);
-      void handle_collective_nearest_points_response(Deserializer &derez);
+      void handle_collective_nearest_instances_request(Deserializer &derez);
+      void handle_collective_nearest_instances_response(Deserializer &derez);
       void handle_collective_remote_registration(Deserializer &derez);
       void handle_collective_deletion(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
@@ -5673,9 +5673,9 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_REMOTE_INSTANCES_RESPONSE:
           break;
-        case SEND_COLLECTIVE_NEAREST_POINTS_REQUEST:
+        case SEND_COLLECTIVE_NEAREST_INSTANCES_REQUEST:
           break;
-        case SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE:
+        case SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE:
           break;
           // These messages need to be ordered with respect to
           // register_user messages so they go on the same VC

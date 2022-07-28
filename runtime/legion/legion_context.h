@@ -888,6 +888,89 @@ namespace Legion {
         const std::vector<IndexSpace> handles;
         const ProjectionID pid;
       };
+    protected:
+      // The hairy collective instance rendezvous data structures
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void) : context_index(0), region_index(0) { }
+        RendezvousKey(size_t ctx_index, unsigned index)
+          : context_index(ctx_index), region_index(index) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (context_index < rhs.context_index) return true;
+          if (context_index > rhs.context_index) return false;
+          return (region_index < rhs.region_index);
+        }
+        inline bool operator==(const RendezvousKey &rhs) const
+        {
+          if (context_index != rhs.context_index) return false;
+          return (region_index == rhs.region_index);
+        }
+      public:
+        size_t context_index;
+        unsigned region_index;
+      };
+      struct PendingRendezvousKey : public RendezvousKey {
+      public:
+        PendingRendezvousKey(void) 
+          : RendezvousKey(), region(LogicalRegion::NO_REGION) { }
+        PendingRendezvousKey(size_t ctx_index, unsigned index, LogicalRegion r)
+          : RendezvousKey(ctx_index, index), region(r) { }
+      public:
+        inline bool operator<(const PendingRendezvousKey &rhs) const
+        {
+          if (context_index < rhs.context_index) return true;
+          if (context_index > rhs.context_index) return false;
+          if (region_index < rhs.region_index) return true;
+          if (region_index > rhs.region_index) return false;
+          return (region < rhs.region);
+        }
+        inline bool operator==(const PendingRendezvousKey &rhs) const
+        {
+          if (context_index != rhs.context_index) return false;
+          if (region_index != rhs.region_index) return false;
+          return (region == rhs.region);
+        }
+      public:
+        LogicalRegion region;
+      };
+      struct RendezvousResult : public Collectable {
+      public:
+        RendezvousResult(AddressSpaceID space, LogicalRegion region,
+                         const InstanceSet &insts);
+        RendezvousResult(AddressSpaceID space, LogicalRegion region,
+                         RendezvousResult *orig, Deserializer &derez);
+        ~RendezvousResult(void);
+      public:
+        bool matches(const InstanceSet &insts) const;
+      public:
+        // These are the instances represented for this particular result
+        const AddressSpaceID origin;
+        const LogicalRegion region;
+        RendezvousResult *const original;
+        FieldMaskSet<PhysicalManager> instances;
+      public:
+        // These are the results of the rendezvous 
+        size_t collective_tag;
+        CollectiveMapping *analysis_mapping;
+        std::vector<InstanceView*> target_views;
+        std::vector<size_t> collective_arrivals;
+        bool first_local;
+      };
+      struct CollectiveRendezvous {
+      public:
+        CollectiveRendezvous(size_t arrivals);
+      public:
+        const RtUserEvent ready;
+      public:
+        // Note you can't count the participants because you can
+        // get duplicate arrivals from multiple operations
+        NodeSet participants;
+        std::map<RendezvousResult*,RtUserEvent> rendezvous;
+        std::map<LogicalRegion,LegionMap<DistributedID,FieldMask> > groups;
+        size_t remaining_arrivals;
+      };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
@@ -1507,6 +1590,24 @@ namespace Legion {
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
     protected:
+      // Check to see if all the participants are using the same arguments
+      // as a previous rendezvous collective mapping, in which case there
+      // is no need to do the full rendezvou call.
+      virtual bool match_collective_mapping(Operation *op,
+                                  unsigned requirement_index,
+                                  LogicalRegion region,
+                                  size_t collective_tag,
+                                  bool &first_local);
+      // Perform the actual rendezvous to group instances together
+      virtual RtEvent rendezvous_collective_mapping(Operation *op,
+                                  unsigned requirement_index,
+                                  RendezvousResult *result,
+                                  RtUserEvent result_ready = 
+                                    RtUserEvent::NO_RT_USER_EVENT);
+      virtual void construct_collective_mapping(CollectiveRendezvous *finalize);
+      virtual void invalidate_collective_mapping(
+                                  const std::vector<InstanceView*> &views);
+    protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
@@ -1681,6 +1782,14 @@ namespace Legion {
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC> context_locks;
       LegionDeque<ApBarrier,TASK_BARRIER_ALLOC> context_barriers;
+    protected:
+      // Collective instance rendezvous data structures
+      mutable LocalLock                                 collective_lock;
+      std::map<LogicalRegion,
+               std::vector<RendezvousResult*> >         collective_rendezvous;
+      std::map<PendingRendezvousKey,
+               std::vector<RendezvousResult*> >         pending_rendezvous;
+      std::map<RendezvousKey,CollectiveRendezvous*>     pending_collectives;
     };
 
     /**

@@ -951,6 +951,8 @@ namespace Legion {
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation
@@ -1235,6 +1237,8 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
     public:
+      virtual size_t get_collective_points(void) const;
+    public:
       // Make this a virtual method so for control replication we can 
       // create a different type of future map for the task
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
@@ -1463,6 +1467,8 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation

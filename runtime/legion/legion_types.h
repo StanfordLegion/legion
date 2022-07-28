@@ -815,8 +815,8 @@ namespace Legion {
       SEND_COLLECTIVE_POINT_RESPONSE,
       SEND_COLLECTIVE_REMOTE_INSTANCES_REQUEST,
       SEND_COLLECTIVE_REMOTE_INSTANCES_RESPONSE,
-      SEND_COLLECTIVE_NEAREST_POINTS_REQUEST,
-      SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE,
+      SEND_COLLECTIVE_NEAREST_INSTANCES_REQUEST,
+      SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE,
       SEND_COLLECTIVE_REMOTE_REGISTRATION,
       SEND_COLLECTIVE_DELETION,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -1056,8 +1056,8 @@ namespace Legion {
         "Send Collective Point Info Response",                        \
         "Send Collective Remote Instances Request",                   \
         "Send Collective Remote Instances Response",                  \
-        "Send Collective Nearest Points Request",                     \
-        "Send Collective Nearest Points Response",                    \
+        "Send Collective Nearest Instances Request",                  \
+        "Send Collective Nearest Instances Response",                 \
         "Send Collective Remote Registration",                        \
         "Send Collective Deletion",                                   \
         "Send Create Top View Request",                               \

@@ -1568,6 +1568,8 @@ namespace Legion {
                                                  RtEvent point_mapped);
     protected:
       virtual void finalize_output_regions(void);
+    public:
+      virtual size_t get_collective_points(void) const;
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -2449,7 +2451,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
-      virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
+      virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);

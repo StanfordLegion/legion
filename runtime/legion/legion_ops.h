@@ -482,6 +482,8 @@ namespace Legion {
                                   const std::vector<InstanceView*> &sources,
                                   std::vector<unsigned> &ranking,
                                   std::map<unsigned,PhysicalManager*> &points);
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // Collective instance support
@@ -1663,6 +1665,8 @@ namespace Legion {
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
+      virtual size_t get_collective_points(void) const;
+    public:
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
       void enumerate_points(bool replaying);
@@ -1728,6 +1732,8 @@ namespace Legion {
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
           std::vector<IndirectRecord> &records, const bool sources);
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -3610,6 +3616,8 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -3729,6 +3737,8 @@ namespace Legion {
                                     const PhysicalTraceInfo &trace_info);
       virtual void trigger_commit(void);
       virtual PartitionKind get_partition_kind(void) const;
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -3919,6 +3929,8 @@ namespace Legion {
       // From MemoizableOp
       virtual void trigger_replay(void);
     public:
+      virtual size_t get_collective_points(void) const;
+    public:
       void perform_base_dependence_analysis(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
@@ -3959,6 +3971,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
+    public:
+      virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances

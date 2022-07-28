@@ -423,6 +423,9 @@ namespace Legion {
                                     const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
     public:
+      inline AddressSpaceID select_origin_space(void) const
+        { return (collective_mapping->contains(local_space) ? local_space :
+                  collective_mapping->find_nearest(local_space)); }
       bool contains(PhysicalManager *manager) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
                          bool tight_bounds = false) const;
@@ -433,7 +436,16 @@ namespace Legion {
                                     bool bandwidth);
     protected:
       void process_remote_instances_response(AddressSpaceID source,
-                      const std::vector<PhysicalManager*> &managers);
+                          const std::vector<IndividualView*> &view);
+      RtEvent find_instances_nearest_memory(Memory memory, 
+                                    AddressSpaceID source,
+                                    std::vector<DistributedID> *instances,
+                                    std::atomic<size_t> *target,
+                                    AddressSpaceID origin, size_t best,
+                                    bool bandwidth) const;
+      void find_nearest_local_instances(Memory memory, size_t &best,
+                                    std::vector<PhysicalManager*> &results,
+                                    bool bandwidth) const;
     public:
       unsigned find_local_index(PhysicalManager *target) const;
       void register_collective_analysis(PhysicalManager *target,
@@ -484,10 +496,13 @@ namespace Legion {
                                     Deserializer &derez, AddressSpaceID source);
       static void handle_remote_instances_response(Runtime *runtime,
                                     Deserializer &derez, AddressSpaceID source);
+      static void handle_nearest_instances_request(Runtime *runtime,
+                                                   Deserializer &derez);
+      static void handle_nearest_instances_response(Deserializer &derez);
     protected:
       const std::vector<IndividualView*> local_views;
     protected:
-      std::set<PhysicalManager*> remote_instances;
+      std::map<PhysicalManager*,IndividualView*> remote_instances;
       NodeSet remote_instance_responses;
     protected:
       struct UserRendezvous {

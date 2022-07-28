@@ -1125,6 +1125,13 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    size_t Operation::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent Operation::acquire_collective_allocation_privileges(
@@ -8925,6 +8932,13 @@ namespace Legion {
       resolve_speculation();
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexCopyOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_shard_points()->get_volume();
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain IndexCopyOp::get_collective_dense_points(void) const
@@ -9714,6 +9728,13 @@ namespace Legion {
       commit_operation(false/*deactivate*/, profiling_reported);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointCopyOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -19242,6 +19263,13 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    size_t DependentPartitionOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_shard_points()->get_volume();
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain DependentPartitionOp::get_collective_dense_points(void) const
@@ -19714,6 +19742,13 @@ namespace Legion {
       commit_operation(false/*deactivate*/, profiling_reported);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointDepPartOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -20982,6 +21017,13 @@ namespace Legion {
       resolve_speculation();
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexFillOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_shard_points()->get_volume();
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     Domain IndexFillOp::get_collective_dense_points(void) const
@@ -21383,6 +21425,13 @@ namespace Legion {
       commit_operation(false/*deactivate*/);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointFillOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES

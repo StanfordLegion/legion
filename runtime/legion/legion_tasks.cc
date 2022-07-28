@@ -7735,6 +7735,13 @@ namespace Legion {
       return TraceLocalID(trace_local_id, get_domain_point());
     }
 
+    //--------------------------------------------------------------------------
+    size_t PointTask::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_collective_points();
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointTask::acquire_collective_allocation_privileges(
@@ -9430,6 +9437,13 @@ namespace Legion {
           enumerate_futures(index_domain);
         Operation::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexTask::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return launch_space->get_volume();
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -12393,6 +12407,16 @@ namespace Legion {
       }
       else
         index_owner->record_intra_space_dependence(point, next, point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t SliceTask::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return launch_space->get_volume();
+      else
+        return index_owner->get_collective_points();
     }
     
 #ifdef NO_EXPLICIT_COLLECTIVES

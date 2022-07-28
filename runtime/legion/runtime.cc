@@ -12113,14 +12113,14 @@ namespace Legion {
                                                     remote_address_space);
               break;
             }
-          case SEND_COLLECTIVE_NEAREST_POINTS_REQUEST:
+          case SEND_COLLECTIVE_NEAREST_INSTANCES_REQUEST:
             {
-              runtime->handle_collective_nearest_points_request(derez);
+              runtime->handle_collective_nearest_instances_request(derez);
               break;
             }
-          case SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE:
+          case SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE:
             {
-              runtime->handle_collective_nearest_points_response(derez);
+              runtime->handle_collective_nearest_instances_response(derez);
               break;
             }
           case SEND_COLLECTIVE_REMOTE_REGISTRATION:
@@ -22319,21 +22319,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_collective_nearest_points_request(AddressSpaceID target,
-                                                         Serializer &rez)
+    void Runtime::send_collective_nearest_instances_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-        SEND_COLLECTIVE_NEAREST_POINTS_REQUEST>(rez, true/*flush*/);
+        SEND_COLLECTIVE_NEAREST_INSTANCES_REQUEST>(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_collective_nearest_points_response(AddressSpaceID target,
-                                                          Serializer &rez)
+    void Runtime::send_collective_nearest_instances_response(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-        SEND_COLLECTIVE_NEAREST_POINTS_RESPONSE>(
+        SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE>(
             rez, true/*flush*/, true/*response*/);
     }
 
@@ -24516,17 +24516,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_collective_nearest_points_request(Deserializer &derez)
+    void Runtime::handle_collective_nearest_instances_request(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_nearest_points_request(this, derez);
+      CollectiveView::handle_nearest_instances_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_collective_nearest_points_response(Deserializer &derez)
+    void Runtime::handle_collective_nearest_instances_response(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_nearest_points_response(derez);
+      CollectiveView::handle_nearest_instances_response(derez);
     }
 
     //--------------------------------------------------------------------------
