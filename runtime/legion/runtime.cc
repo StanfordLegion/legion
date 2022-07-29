@@ -216,8 +216,7 @@ namespace Legion {
         }
         if (arg.get_size() > 0)
           finder->second = 
-            Future::from_untyped_pointer(runtime->external,
-                                         arg.get_ptr(), arg.get_size());
+            Future::from_untyped_pointer(arg.get_ptr(), arg.get_size());
         else
           finder->second = Future();
       }
@@ -225,8 +224,7 @@ namespace Legion {
       {
         if (arg.get_size() > 0)
           arguments[point] = 
-            Future::from_untyped_pointer(runtime->external,
-                                         arg.get_ptr(), arg.get_size());
+            Future::from_untyped_pointer(arg.get_ptr(), arg.get_size());
         else
           arguments[point] = Future();
         // Had to add a new point so the point set is no longer value
@@ -2623,8 +2621,8 @@ namespace Legion {
         memory(inst.exists() ? inst.get_location() : rt->runtime_system_memory),
         ready_event(r), resource(inst.exists() ? NULL : 
             new Realm::ExternalMemoryResource(reinterpret_cast<uintptr_t>(d),
-              s, false/*read only*/)),
-        freefunc(inst.exists() ? NULL : free_host_memory), freeproc(p),
+              s, false/*read only*/)), freefunc(inst.exists() || !p.exists() ? 
+              NULL : free_host_memory), freeproc(p),
         eager_allocation(eager), external_allocation(external),
         is_meta_visible(check_meta_visible(rt, memory, !external || !own)),
         own_allocation(own), instance(inst), use_event(use), own_instance(false)
