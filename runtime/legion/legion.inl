@@ -248,7 +248,7 @@ namespace Legion {
       }
 
       template<typename T>
-      static inline Future from_value(Runtime *rt, const T *value)
+      static inline Future from_value(const T *value)
       {
         return StructHandler<T,std::is_class<T>::value>::from_value(value);
       }

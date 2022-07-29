@@ -935,7 +935,7 @@ bool spmd_main_task(const Task *task,
       log_app.info() << "resold = " << resold;
   }
 
-  Future f_restarget = Future::from_value<double>(runtime, 1e-10);
+  Future f_restarget = Future::from_value<double>(1e-10);
 
   Predicate p_notdone = Predicate::TRUE_PRED;
 
