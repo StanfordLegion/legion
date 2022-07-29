@@ -3791,18 +3791,14 @@ end
 
 local projection_functors = terralib.newlist()
 
-do
-  local next_id = 1
-  function std.register_projection_functor(exclusive, functional, depth,
-                                           region_functor, partition_functor)
-    local id = next_id
-    next_id = next_id + 1
+function std.register_projection_functor(exclusive, functional, depth,
+                                         region_functor, partition_functor)
+  local id = terralib.global(c.legion_projection_id_t)
 
-    projection_functors:insert(terralib.newlist({id, exclusive, functional, depth,
-                                                 region_functor, partition_functor}))
+  projection_functors:insert(terralib.newlist({id, exclusive, functional, depth,
+                                               region_functor, partition_functor}))
 
-    return id
-  end
+  return id
 end
 
 local variants = terralib.newlist()
@@ -4149,14 +4145,20 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       region_functor = region_functor or `nil
       partition_functor = partition_functor or `nil
 
+      local actions = quote
+        [id] = c.legion_runtime_generate_static_projection_id()
+      end
+
       if functional then
         return quote
+          [actions]
           c.legion_runtime_preregister_projection_functor(
             id, exclusive, depth,
             region_functor, partition_functor)
         end
       else
         return quote
+          [actions]
           c.legion_runtime_preregister_projection_functor_mappable(
             id, exclusive, depth,
             region_functor, partition_functor)
