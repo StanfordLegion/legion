@@ -273,6 +273,8 @@ namespace Realm {
   public:
     virtual ~ExternalInstanceResource();
 
+    virtual Memory suggested_memory() const = 0;
+
     virtual ExternalInstanceResource *clone(void) const = 0;
 
     template <typename S>

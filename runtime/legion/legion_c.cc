@@ -3115,10 +3115,8 @@ legion_future_from_untyped_pointer(legion_runtime_t runtime_,
                                    const void *buffer,
                                    size_t size)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
   Future *result = new Future(
-    Future::from_untyped_pointer(runtime, buffer, size));
+    Future::from_untyped_pointer(buffer, size));
   return CObjectWrapper::wrap(result);
 }
 
@@ -8062,13 +8060,11 @@ legion_task_postamble(
   const void *retval,
   size_t retsize)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   CContext *cctx = CObjectWrapper::unwrap(ctx_);
   Context ctx = cctx->context();
   delete cctx;
 
-  Runtime::legion_task_postamble(runtime,
-				 ctx,
+  Runtime::legion_task_postamble(ctx,
 				 retval,
 				 retsize);
 }

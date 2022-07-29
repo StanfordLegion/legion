@@ -1801,18 +1801,25 @@ namespace Legion {
       assert(callback_functor != NULL);
       assert(subscription_event.exists());
 #endif
-      Memory::Kind mem_kind = Memory::SYSTEM_MEM;
       size_t result_size = 0;
       bool owned = false;
-      void (*freefunc)(void*,size_t) = NULL;
+      const Realm::ExternalInstanceResource *resource = NULL;
+      void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL;
       const void *metaptr = NULL;
-      void *result = callback_functor->callback_get_future(mem_kind,
-                    result_size, owned, freefunc, metaptr, metasize);
-      const Memory memory = runtime->find_local_memory(callback_proc, mem_kind);
-      FutureInstance *instance = new FutureInstance(result, result_size, memory,
-          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/,
-          false/*own allocation*/, PhysicalInstance::NO_INST, freefunc,
-          callback_proc);
+      const void *result = callback_functor->callback_get_future(
+                    result_size, owned, resource, freefunc, metaptr, metasize);
+      FutureInstance *instance;
+      if (resource == NULL)
+      {
+        const Realm::ExternalMemoryResource local(
+           reinterpret_cast<uintptr_t>(result), result_size, true/*read only*/);
+        instance = new FutureInstance(result, result_size, ApEvent::NO_AP_EVENT,
+            runtime, owned, local.clone(),
+            FutureInstance::free_host_memory, callback_proc);
+      }
+      else
+        instance = new FutureInstance(result, result_size, ApEvent::NO_AP_EVENT,
+            runtime, owned, resource->clone(), freefunc, callback_proc);
       // If we have any metadata, copy that now
       if (metasize > 0)
       {
@@ -2609,15 +2616,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
       
     //--------------------------------------------------------------------------
-    FutureInstance::FutureInstance(const void *d, size_t s, Memory m, ApEvent r,
-        Runtime *rt, bool eager, bool external, bool own, PhysicalInstance inst,
-        void (*func)(void*,size_t), Processor p, RtEvent use)
-      : runtime(rt), data(d), size(s), memory(m), ready_event(r),freefunc(func),
-        freeproc(p), eager_allocation(eager), external_allocation(external),
-        is_meta_visible(check_meta_visible(rt, m, 
-              // Be conservative with the definition of a freefunc
-              // Only helps in the case where the answer is 'false'
-              !external || !own || (func != NULL))),
+    FutureInstance::FutureInstance(const void *d, size_t s, ApEvent r,
+                              Runtime *rt, bool eager, bool external, bool own,
+                              PhysicalInstance inst, Processor p, RtEvent use)
+      : runtime(rt), data(d), size(s),
+        memory(inst.exists() ? inst.get_location() : rt->runtime_system_memory),
+        ready_event(r), resource(inst.exists() ? NULL : 
+            new Realm::ExternalMemoryResource(reinterpret_cast<uintptr_t>(d),
+              s, false/*read only*/)),
+        freefunc(inst.exists() ? NULL : free_host_memory), freeproc(p),
+        eager_allocation(eager), external_allocation(external),
+        is_meta_visible(check_meta_visible(rt, memory, !external || !own)),
         own_allocation(own), instance(inst), use_event(use), own_instance(false)
     //--------------------------------------------------------------------------
     {
@@ -2629,6 +2638,32 @@ namespace Legion {
       assert((freefunc == NULL) || external_allocation);
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.load().exists() || external_allocation);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance::FutureInstance(const void *d, size_t s, ApEvent r,
+                          Runtime *rt, bool own,
+                          const Realm::ExternalInstanceResource *allocation,
+                          void (*func)(const Realm::ExternalInstanceResource&),
+                          Processor proc, PhysicalInstance inst, RtEvent use)
+      : runtime(rt), data(d), size(s), memory(inst.exists() ?
+          inst.get_location() : allocation->suggested_memory()), ready_event(r),
+        resource(allocation), freefunc(func), freeproc(proc),
+        eager_allocation(false), external_allocation(true),
+        is_meta_visible(check_meta_visible(rt, memory, !own)), 
+        own_allocation(own), instance(inst), use_event(use), own_instance(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(data != NULL);
+      assert(memory.exists());
+      assert((freefunc == NULL) || freeproc.exists());
+      assert((freefunc == NULL) || external_allocation);
+      assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
+      assert(instance.load().exists() || external_allocation);
+      assert(resource != NULL);
 #endif
     }
 
@@ -2648,7 +2683,7 @@ namespace Legion {
           void *tofree = const_cast<void*>(data);
           // Check to see if we have a freefunc or not
           if (freefunc != NULL)
-            runtime->free_external_allocation(freeproc, tofree, size, freefunc);
+            runtime->free_external_allocation(freeproc, resource, freefunc);
           else if (memory.address_space() != runtime->address_space)
           {
             // Send this to the target node with a NO_PROC which will
@@ -2658,8 +2693,6 @@ namespace Legion {
               RezCheck z(rez);
               rez.serialize(Processor::NO_PROC);
               rez.serialize(tofree);
-              rez.serialize(size);
-              rez.serialize(freefunc);
             }
             runtime->send_free_external_allocation(memory.address_space(), rez);
           }
@@ -2682,6 +2715,9 @@ namespace Legion {
 #endif
         inst.destroy(ready_event);
       }
+      if ((resource != NULL) && 
+          (!own_allocation || !external_allocation || (freefunc == NULL)))
+        delete resource;
     }
 
     //--------------------------------------------------------------------------
@@ -2980,8 +3016,7 @@ namespace Legion {
       {
         rez.serialize<bool>(false); // by value
         rez.serialize(data);
-        rez.serialize(memory);
-        rez.serialize(instance);
+        rez.serialize(get_instance());
         if (other_ready)
           rez.serialize(ready);
         else
@@ -2999,6 +3034,7 @@ namespace Legion {
         if (external_allocation)
         {
           rez.serialize<bool>(true); // external allocation
+          rez.serialize(resource);
           rez.serialize(freefunc);
           rez.serialize(freeproc);
         }
@@ -3026,13 +3062,11 @@ namespace Legion {
       {
         void *data = malloc(size);
         derez.deserialize(data, size);
-        return new FutureInstance(data, size, runtime->runtime_system_memory,
-            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/);
+        return new FutureInstance(data, size, ApEvent::NO_AP_EVENT, 
+                                  runtime, false/*eager*/, true/*external*/);
       }
       void *data;
       derez.deserialize(data);
-      Memory memory;
-      derez.deserialize(memory);
       PhysicalInstance instance;
       derez.deserialize(instance);
       RtEvent use_event;
@@ -3046,21 +3080,22 @@ namespace Legion {
       derez.deserialize<bool>(external_allocation);
       if (external_allocation)
       {
-        void (*func)(void*,size_t);
-        derez.deserialize(func);
+        const Realm::ExternalInstanceResource *resource;
+        derez.deserialize(resource);
+        void (*freefunc)(const Realm::ExternalInstanceResource&);
+        derez.deserialize(freefunc);
         Processor proc;
         derez.deserialize(proc);
-        return new FutureInstance(data, size, memory, ready, runtime,
-                    false/*eager*/, true/*external*/, own_allocation,
-                    instance, func, proc, use_event);
+        return new FutureInstance(data, size, ready, runtime, own_allocation,
+                              resource, freefunc, proc, instance, use_event);
       }
       else
       {
         bool eager_alloc;
         derez.deserialize<bool>(eager_alloc);
-        return new FutureInstance(data, size, memory, ready, runtime,
+        return new FutureInstance(data, size, ready, runtime,
                     eager_alloc, false/*external*/, own_allocation,
-                    instance, NULL/*freefunc*/, Processor::NO_PROC, use_event);
+                    instance, Processor::NO_PROC, use_event);
       }
     }
 
@@ -3107,8 +3142,8 @@ namespace Legion {
         value = buffer;
         own = true;
       }
-      return new FutureInstance(value, size, runtime->runtime_system_memory,
-            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/);
+      return new FutureInstance(value, size, ApEvent::NO_AP_EVENT,
+                                runtime, false/*eager*/, true/*external*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3118,6 +3153,16 @@ namespace Legion {
       const DeferDeleteFutureInstanceArgs *dargs =
         (const DeferDeleteFutureInstanceArgs*)args;
       delete dargs->instance;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::free_host_memory(
+                                const Realm::ExternalInstanceResource &resource)
+    //--------------------------------------------------------------------------
+    {
+      const Realm::ExternalMemoryResource &allocation =
+        static_cast<const Realm::ExternalMemoryResource&>(resource);
+      free(reinterpret_cast<void*>(allocation.base));
     }
 
     /////////////////////////////////////////////////////////////
@@ -10282,7 +10327,7 @@ namespace Legion {
 #endif
 #endif
         // Special case where we can just allocate the buffer locally
-        return new FutureInstance(malloc(size), size, memory, ready_event,
+        return new FutureInstance(malloc(size), size, ready_event,
             runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
 #ifdef __GNUC__
 #if __GNUC__ >= 11
@@ -10444,9 +10489,9 @@ namespace Legion {
         }
       }
       const void *data = instance.pointer_untyped(0,size);
-      return new FutureInstance(data, size, memory, ready_event, runtime,
+      return new FutureInstance(data, size, ready_event, runtime,
               eager, false/*external*/, true/*own allocation*/, instance,
-              NULL/*free func*/, Processor::NO_PROC, use_event);
+              Processor::NO_PROC, use_event);
     }
 
     //--------------------------------------------------------------------------
@@ -13194,18 +13239,22 @@ namespace Legion {
       DerezCheck z(derez);
       Processor proc;
       derez.deserialize(proc);
-      void *data;
-      derez.deserialize(data);
-      size_t size;
-      derez.deserialize(size);
-      void (*func)(void*,size_t);
-      derez.deserialize(func);
       // handle the special case where the processor does not exist
       // which means we can just free this here now
       if (proc.exists())
-        free_external_allocation(proc, data, size, func);
+      {
+        const Realm::ExternalInstanceResource *resource;
+        derez.deserialize(resource);
+        void (*freefunc)(const Realm::ExternalInstanceResource&);
+        derez.deserialize(freefunc);
+        free_external_allocation(proc, resource, freefunc);
+      }
       else
+      {
+        void *data;
+        derez.deserialize(data);
         free(data);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20941,10 +20990,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_external_allocation(Processor proc, void *data, 
-                                        size_t size, void (*func)(void*,size_t))
+    void Runtime::free_external_allocation(Processor proc,
+                       const Realm::ExternalInstanceResource *resource,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&))
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(resource != NULL);
+      assert(freefunc != NULL);
+#endif
       // Check see if this is local, if not, send a message
       const AddressSpaceID target_space = proc.address_space();
       if (target_space != address_space)
@@ -20953,16 +21007,15 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(proc);
-          rez.serialize(data);
-          rez.serialize(size);
-          rez.serialize(func);
+          rez.serialize(resource);
+          rez.serialize(freefunc);
         }
         send_free_external_allocation(target_space, rez);
       }
       else
       {
         // Dispatch this on the target processor
-        FreeExternalArgs args(data, size, func);
+        FreeExternalArgs args(resource, freefunc);
         issue_application_processor_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, proc); 
       }
@@ -29903,7 +29956,7 @@ namespace Legion {
             ctx->get_task_name(), ctx->get_unique_id())
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
-          NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/,
+          NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/);
       implicit_context = NULL;
     }
@@ -32030,7 +32083,8 @@ namespace Legion {
         case LG_FREE_EXTERNAL_TASK_ID:
           {
             const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
-            (*(fargs->func))(fargs->data, fargs->size);
+            (*(fargs->freefunc))(*fargs->resource);
+            delete fargs->resource;
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

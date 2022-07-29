@@ -22200,8 +22200,7 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               return_type_size)
         // Copy the result into the instance
-        FutureInstance local(output.value, output.size,
-            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT,
+        FutureInstance local(output.value, output.size, ApEvent::NO_AP_EVENT,
             runtime, false/*eager*/, true/*external*/, output.take_ownership);
         const ApEvent done = instance->copy_from(&local, this);
         if (done.exists() && !request_early_complete(done))
@@ -22467,8 +22466,7 @@ namespace Legion {
                future_result_size, true/*read only*/),
               Realm::ProfilingRequestSet()));
         FutureInstance source(serdez_redop_buffer, future_result_size, 
-            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, 
-            runtime, false/*eager*/, false/*external*/,
+            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
             false/*own alloc*/, source_instance);
         std::set<ApEvent> done_events;
         for (std::vector<FutureInstance*>::const_iterator it =
