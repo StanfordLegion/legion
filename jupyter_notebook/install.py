@@ -108,7 +108,7 @@ def parse_json(legion_prefix,
 
 # This method is used to install the kernel for jupyter notebook support for single or
 # multiple nodes runs without control replication
-def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose):
+def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_dir):
     if verbose:
         print("cmd_dict is:\n" + str(cmd_dict))
 
@@ -224,10 +224,13 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose):
     _install_kernel(ksm, kernel_name, kernel_json, user, prefix, False)
 
     # copy legion_kernel_nocr.py into kernel dir
-    file_path = os.getcwd() + "/" + kernel_filename
+    if kernel_file_dir == None:
+        file_path = os.getcwd() + "/" + kernel_filename
+    else:
+        file_path = kernel_file_dir + "/" + kernel_filename
     shutil.copy(file_path, kernel_install_dir)
 
-def main(argv=None):
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Install Legion IPython Kernel"
     )
@@ -370,6 +373,9 @@ def main(argv=None):
     )
 
     args, opts = parser.parse_known_args()
+    return args, opts
+
+def driver(args, opts, kernel_file_dir=None):
     cmd_dict = parse_json(legion_prefix=args.legion_prefix,
                           cpus=args.cpus,
                           gpus=args.gpus,
@@ -392,9 +398,11 @@ def main(argv=None):
                             prefix=args.prefix, 
                             cmd_opts=opts,
                             cmd_dict=cmd_dict,
-                            verbose=args.verbose)
+                            verbose=args.verbose,
+                            kernel_file_dir=kernel_file_dir)
     else:
         assert 0, "Control replication is not supported yet"
 
 if __name__ == '__main__':
-    main()
+    args, opts = parse_args()
+    driver(args, opts)
