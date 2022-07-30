@@ -65,7 +65,7 @@ TESTS += sparse_construct
 TESTS += memmodel
 
 # can set arguments to be passed to a test when running
-TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
+TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4

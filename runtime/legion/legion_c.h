@@ -5505,6 +5505,12 @@ extern "C" {
     legion_processor_t proc);
 
   /**
+   * @see Legion::Runtime::generate_static_projection_id()
+   */
+  legion_projection_id_t
+  legion_runtime_generate_static_projection_id();
+
+  /**
    * @see Legion::Runtime::generate_library_projection_ids()
    */
   legion_projection_id_t
