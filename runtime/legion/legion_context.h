@@ -954,8 +954,8 @@ namespace Legion {
         // These are the results of the rendezvous 
         size_t collective_tag;
         CollectiveMapping *analysis_mapping;
-        std::vector<InstanceView*> target_views;
-        std::vector<size_t> collective_arrivals;
+        LegionVector<FieldMaskSet<InstanceView> > target_views;
+        std::map<CollectiveView*,size_t> collective_arrivals;
         bool first_local;
       };
       struct CollectiveRendezvous {
@@ -1562,11 +1562,13 @@ namespace Legion {
       // because we need to guarantee the invariant that for every given 
       // physical instance in a context it has at most one logical view
       // that represents its state in the physical analysis.
-      void convert_source_views(const std::vector<PhysicalManager*> &sources,
-                                std::vector<InstanceView*> &source_views,
-                                CollectiveMapping *mapping = NULL);
+      void convert_individual_views(const std::vector<PhysicalManager*> &srcs,
+                                    std::vector<IndividualView*> &views,
+                                    CollectiveMapping *mapping = NULL);
+      void convert_individual_views(const InstanceSet &sources,
+                                    std::vector<IndividualView*> &views);
       void convert_target_views(const InstanceSet &targets,
-                                std::vector<InstanceView*> &target_views);
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views);
       // Same as convert target views, but will also perform a check for 
       // any collective behavior across multiple points of the same index
       // space launch of the operation. Note that if the operation is not
@@ -1581,11 +1583,10 @@ namespace Legion {
       // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
       bool convert_collective_views(Operation *op, unsigned index,
-                                    LogicalRegion region,
-                                    const InstanceSet &targets,
-                                    CollectiveMapping *&analysis_mapping,
-                                    std::vector<InstanceView*> &target_views,
-                                    std::vector<size_t> &collective_arrivals);
+                       LogicalRegion region, const InstanceSet &targets,
+                       CollectiveMapping *&analysis_mapping,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<CollectiveView*,size_t> &collective_arrivals);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
@@ -1606,7 +1607,7 @@ namespace Legion {
                                     RtUserEvent::NO_RT_USER_EVENT);
       virtual void construct_collective_mapping(CollectiveRendezvous *finalize);
       virtual void invalidate_collective_mapping(
-                                  const std::vector<InstanceView*> &views);
+                        const LegionVector<FieldMaskSet<InstanceView> > &views);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 

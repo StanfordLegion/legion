@@ -4267,7 +4267,8 @@ namespace Legion {
             std::vector<UpdateAnalysis*> analyses(region_count, NULL);
             std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
             std::vector<RtEvent> reg_pre(region_count, RtEvent::NO_RT_EVENT);
-            std::vector<std::vector<size_t> > target_arrivals(region_count);
+            std::vector<
+              std::map<CollectiveView*,size_t> > target_arrivals(region_count);
             for (unsigned idx = 0; idx < logical_regions.size(); idx++)
             {
               if (no_access_regions[idx])

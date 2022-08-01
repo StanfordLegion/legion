@@ -190,15 +190,6 @@ namespace Legion {
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false) = 0;
-      virtual void find_last_users(PhysicalManager *manager,
-                                   std::set<ApEvent> &events,
-                                   const RegionUsage &usage,
-                                   const FieldMask &mask,
-                                   IndexSpaceExpression *user_expr,
-                                   std::vector<RtEvent> &applied) const = 0;
-      virtual void find_atomic_reservations(PhysicalManager *manager,
-                                    const FieldMask &mask, Operation *op, 
-                                    const unsigned index, bool exclusive) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -269,7 +260,8 @@ namespace Legion {
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
                                    std::vector<RtEvent> &applied) const = 0;
-      virtual void find_atomic_reservations(PhysicalManager *manager,
+    public:
+      void find_atomic_reservations(PhysicalManager *manager,
                                     const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
     protected:
@@ -413,15 +405,6 @@ namespace Legion {
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);
-      virtual void find_last_users(PhysicalManager *manager,
-                                   std::set<ApEvent> &events,
-                                   const RegionUsage &usage,
-                                   const FieldMask &mask,
-                                   IndexSpaceExpression *user_expr,
-                                   std::vector<RtEvent> &applied) const;
-      virtual void find_atomic_reservations(PhysicalManager *manager,
-                                    const FieldMask &mask, Operation *op, 
-                                    const unsigned index, bool exclusive);
     public:
       inline AddressSpaceID select_origin_space(void) const
         { return (collective_mapping->contains(local_space) ? local_space :

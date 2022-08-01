@@ -9995,9 +9995,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::convert_source_views(
+    void InnerContext::convert_individual_views(
                                    const std::vector<PhysicalManager*> &sources,
-                                   std::vector<InstanceView*> &source_views,
+                                   std::vector<IndividualView*> &source_views,
                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -10102,7 +10102,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
-                                       std::vector<InstanceView*> &target_views)
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views)
     //--------------------------------------------------------------------------
     {
       target_views.resize(targets.size());
@@ -10112,11 +10112,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           // See if we can find it
-          PhysicalManager *manager = targets[idx].get_physical_manager();
+          const InstanceRef &ref = targets[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
           std::map<PhysicalManager*,IndividualView*>::const_iterator finder =
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
-            target_views[idx] = finder->second;
+            target_views[idx].insert(finder->second, ref.get_valid_fields());
           else
             still_needed.push_back(idx);
         }
@@ -10127,9 +10128,10 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               still_needed.begin(); it != still_needed.end(); it++)
         {
-          PhysicalManager *manager = targets[*it].get_physical_manager();
-          target_views[*it] =
-            create_instance_top_view(manager, local_space);
+          const InstanceRef &ref = targets[*it];
+          PhysicalManager *manager = ref.get_physical_manager();
+          target_views[*it].insert(create_instance_top_view(manager,
+                                    local_space), ref.get_valid_fields());
         }
       }
       invalidate_collective_mapping(target_views);
@@ -10137,15 +10139,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InnerContext::convert_collective_views(Operation *op, unsigned index,
-                                      LogicalRegion region,
-                                      const InstanceSet &targets,
-                                      CollectiveMapping *&analysis_mapping,
-                                      std::vector<InstanceView*> &target_views,
-                                      std::vector<size_t> &collective_arrivals)
+                        LogicalRegion region, const InstanceSet &targets,
+                        CollectiveMapping *&analysis_mapping,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<CollectiveView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
       target_views.resize(targets.size());
-      collective_arrivals.resize(targets.size());
       size_t collective_tag = SIZE_MAX;
       {
         AutoLock c_lock(collective_lock,1,false/*exclusive*/);
@@ -10247,8 +10247,12 @@ namespace Legion {
       if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
         delete analysis_mapping;
       for (unsigned idx = 0; idx < target_views.size(); idx++)
-        if (target_views[idx]->remove_base_resource_ref(CONTEXT_REF))
-          delete target_views[idx];
+      {
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              target_views[idx].begin(); it != target_views[idx].end(); it++)
+          if (it->first->remove_base_resource_ref(CONTEXT_REF))
+            delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10321,19 +10325,44 @@ namespace Legion {
       return result_ready;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void InnerContext::construct_collective_mapping(
                                                CollectiveRendezvous *rendezvous)
     //--------------------------------------------------------------------------
     {
       // Compute the field set groups for each region
-
+      std::map<LogicalRegion,LegionList<FieldSet<DistributedID> > > field_insts;
+      for (std::map<LogicalRegion,LegionMap<DistributedID,FieldMask> >::
+            const_iterator it = rendezvous->groups.begin(); it !=
+            rendezvous->groups.end(); it++)
+        compute_field_sets(FieldMask(), it->second, field_insts[it->first]);
       // Now go through and find or create the collective views
       // Split prior collective views if necessary
+      {
+        AutoLock c_lock(collective_lock);
+        for (std::map<LogicalRegion,
+                      LegionList<FieldSet<DistributedID> > >::const_iterator
+              rit = field_insts.begin(); rit != field_insts.end(); rit++)
+        {
+          for (LegionList<FieldSet<DistributedID> >::const_iterator fit =
+                rit->second.begin(); fit != rit->second.end(); fit++)
+          {
+            // First check for any instances which cannot be a part of any
+            // collective views because they've already been invalidated
+
+            // For each one of these compare against all prior collective views
+            // and see if they overlap with any of them in instances used for
+            // those particular fields
+
+          }
+        }
+      }
       
       // Send the resulting views back out to all the RendezvousResults
        
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndividualView* InnerContext::create_instance_top_view(

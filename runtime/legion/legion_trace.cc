@@ -4306,7 +4306,7 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
-      for (std::map<DistributedID,InstanceView*>::const_iterator it =
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
         if (it->second->remove_base_valid_ref(TRACE_REF))
           delete it->second;
@@ -4362,7 +4362,7 @@ namespace Legion {
         {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
-          std::map<DistributedID,InstanceView*>::const_iterator finder =
+          std::map<DistributedID,IndividualView*>::const_iterator finder =
             recorded_views.find(uit->instance.view_did);
           RtEvent ready;
           PhysicalManager *manager = 
@@ -6494,7 +6494,7 @@ namespace Legion {
       if (recorded_views.find(instance.view_did) == recorded_views.end())
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(
                                 instance.view_did, ready));
         recorded_views[instance.view_did] = view;
@@ -6521,7 +6521,7 @@ namespace Legion {
           (recorded_views.find(inst.view_did) == recorded_views.end()))
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(inst.view_did, ready));
         recorded_views[inst.view_did] = view;
         WrapperReferenceMutator mutator(applied_events);
