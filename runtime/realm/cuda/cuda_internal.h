@@ -787,6 +787,13 @@ namespace Realm {
                                                       size_t& inst_offset);
       virtual void unregister_external_resource(RegionInstanceImpl *inst);
 
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
     public:
       GPU *gpu;
       CUdeviceptr base;
@@ -820,6 +827,13 @@ namespace Realm {
       virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
                                                       size_t& inst_offset);
       virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
 
     public:
       GPU *gpu;

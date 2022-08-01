@@ -34,6 +34,15 @@ namespace Realm {
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
 		       Event wait_on) const = 0;
+
+    // given an instance layout, attempts to provide bounds (start relative to
+    //  the base of the instance and relative limit - i.e. first nonaccessibly
+    //  offset) on affine accesses via elements in this index space - returns
+    //  true if successful, false if not
+    virtual bool compute_affine_bounds(const InstanceLayoutGeneric *ilg,
+                                       FieldID fid,
+                                       uintptr_t& rel_base,
+                                       uintptr_t& limit) const = 0;
   };
 
   template <int N, typename T>
@@ -49,6 +58,11 @@ namespace Realm {
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
 		       Event wait_on) const;
+
+    virtual bool compute_affine_bounds(const InstanceLayoutGeneric *ilg,
+                                       FieldID fid,
+                                       uintptr_t& rel_base,
+                                       uintptr_t& limit) const;
 
     IndexSpace<N,T> space;
   };

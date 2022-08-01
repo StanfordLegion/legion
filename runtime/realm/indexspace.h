@@ -584,9 +584,10 @@ namespace Realm {
 	       const ProfilingRequestSet &requests,
 	       Event wait_on = Event::NO_EVENT) const;
 
-  protected:
+    // "public" but not useful to application code
     IndexSpaceGenericImpl *impl;
 
+  protected:
     // would like to use sizeof(IndexSpace<REALM_MAX_DIM, size_t>) here,
     //  but that requires the specializations that are defined in the
     //  include of indexspace.inl below...
