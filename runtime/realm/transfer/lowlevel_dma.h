@@ -29,17 +29,78 @@
 
 namespace Realm {
 
+    namespace Config {
+      // the size of the LRU of the cache
+      extern size_t path_cache_lru_size;
+    };
+
     extern void init_dma_handler(void);
 
     extern void start_dma_system(BackgroundWorkManager *bgwork);
 
     extern void stop_dma_system(void);
 
+    extern void init_path_cache(void);
+
+    extern void finalize_path_cache(void);
+
     struct MemPathInfo {
       std::vector<Memory> path;
       std::vector<Channel *> xd_channels;
       //std::vector<XferDesKind> xd_kinds;
       //std::vector<NodeID> xd_target_nodes;
+      friend std::ostream& operator<<(std::ostream& out, const MemPathInfo& info);
+    };
+
+    // The LRU is implemented using a vector. Each item in the vector
+    //  has a atomic timestamp to track the last accessed's timestamp. 
+    //  In this case, we allow multiple threads calling hit with a rdlock.
+    class PathLRU {
+      // We use parameters of find_fastest_path function
+      //   except src_mem and dst_mem as the LRU key
+    public:
+      class LRUKey {
+      public:
+        // the timestamp is used to record when the item is accessed (miss/hit)
+        atomic<unsigned long> timestamp;
+      private:
+        CustomSerdezID serdez_id;
+        ReductionOpID redop_id;
+        size_t total_bytes;
+        std::vector<size_t> src_frags;
+        std::vector<size_t> dst_frags;
+      public:  
+        LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id, 
+               const size_t total_bytes, 
+               const std::vector<size_t> src_frags, 
+               const std::vector<size_t> dst_frags);
+
+        // 2 LRUKeys are equal only if all private members are the same
+        bool operator==(const LRUKey &rhs) const;
+        friend std::ostream& operator<<(std::ostream& out, const LRUKey& lru_key);
+      };
+
+      typedef std::vector< std::pair<LRUKey, MemPathInfo> >::iterator PathLRUIterator;
+
+    public:
+      RWLock rwlock;
+      size_t max_size;
+    private:
+      // It is used to record the current timestamp, 
+      //   which is increated by 1 in miss/hit.
+      atomic<unsigned long> timestamp;
+      std::vector< std::pair<LRUKey, MemPathInfo> > item_list;
+    public:
+      PathLRU(size_t size);
+
+      // assume key is NOT existed in the item_list
+      void miss(LRUKey &key, const MemPathInfo &path);
+
+      // assume key is existed in the item_list before calling hit
+      void hit(PathLRUIterator it);
+
+      PathLRUIterator find(const LRUKey &key);
+      PathLRUIterator end(void);
     };
     
     bool find_shortest_path(Memory src_mem, Memory dst_mem,
