@@ -10636,47 +10636,50 @@ namespace Legion {
       instance = PhysicalInstance::NO_INST;
       if (eager_allocator == NULL) 
         return wait_on;
-      AutoLock lock(manager_lock);
-      size_t allocation_id = next_allocation_id++;
+      const size_t allocation_id = next_allocation_id.fetch_add(1);
 
-      bool allocated = false;
       const size_t size = layout->bytes_used;
+      bool allocated = (size == 0);
       size_t offset = 0;
 
       GarbageCollector *collector = NULL;
       while (!allocated)
       {
-        allocated = eager_allocator->allocate(
-            allocation_id, size, layout->alignment_reqd, offset);
-        if (allocated)
-          break;
-        lock.release();
+        {
+          AutoLock m_lock(manager_lock);
+          allocated = eager_allocator->allocate(
+              allocation_id, size, layout->alignment_reqd, offset);
+          if (allocated)
+          {
+            eager_remaining_capacity -= size;
+            const uintptr_t ptr = eager_pool + offset;
+#ifdef DEBUG_LEGION
+            assert(eager_allocations.find(ptr) == eager_allocations.end());
+#endif
+            eager_allocations[ptr] = allocation_id;
+            break;
+          }
+        }
         if (collector == NULL)
           collector = new GarbageCollector(collection_lock, manager_lock, 
               runtime->address_space, memory, size, 
               collectable_instances, current_instances);
+        else if (collector->collection_complete())
+          break;
         RtEvent ready = collector->perform_collection();
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        lock.reacquire();
-        if (collector->collection_complete())
-          break;
       }
-      
 
       if (allocated)
       {
-        eager_remaining_capacity -= size;
         uintptr_t ptr = size > 0 ? eager_pool + offset : 0;
         Realm::ProfilingRequestSet no_requests;
         const Realm::ExternalMemoryResource resource(ptr, 
                     layout->bytes_used, false/*read only*/);
         wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
                         instance, memory, layout, resource, no_requests));
-#ifdef DEBUG_LEGION
-        assert(ptr == 0 || eager_allocations.find(ptr) == eager_allocations.end());
-#endif
-        if (ptr != 0) eager_allocations[ptr] = allocation_id;
+
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
@@ -10692,14 +10695,14 @@ namespace Legion {
                         IDFMT " (%zd bytes left)",
                         size, memory.id, eager_remaining_capacity);
         if (runtime->dump_free_ranges)
+        {
+          AutoLock m_lock(manager_lock);
           eager_allocator->dump_all_free_ranges(log_eager);
+        }
       }
 
       if (collector != NULL)
-      {
-        lock.release();
         delete collector;
-      }
 
       return wait_on;
     }

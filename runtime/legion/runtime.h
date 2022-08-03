@@ -1628,7 +1628,7 @@ namespace Legion {
       EagerAllocator *eager_allocator;
       size_t eager_remaining_capacity;
       // Allocation counter
-      size_t next_allocation_id;
+      std::atomic<size_t> next_allocation_id;
       // Mapping from pointers to their allocation ids
       std::map<uintptr_t,size_t> eager_allocations;
     protected:
