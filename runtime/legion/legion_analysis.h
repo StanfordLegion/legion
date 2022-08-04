@@ -1855,7 +1855,7 @@ namespace Legion {
                                  const LegionVector<
                                      FieldMaskSet<InstanceView> > &target_views,
                                  const std::vector<IndividualView*> &src_views,
-                                 const std::map<CollectiveView*,size_t> &arrive,
+                                 const std::map<InstanceView*,size_t> &arrive,
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *mapping, bool first_local,
                                  bool exclusive);
@@ -2027,7 +2027,7 @@ namespace Legion {
                      const LegionVector<
                               FieldMaskSet<InstanceView> > &target_views,
                      const std::vector<IndividualView*> &source_views,
-                     const std::map<CollectiveView*,size_t> &arrivals,
+                     const std::map<InstanceView*,size_t> &arrivals,
                      const PhysicalTraceInfo &trace_info,
                      CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
@@ -2146,7 +2146,7 @@ namespace Legion {
                       const LegionVector<
                               FieldMaskSet<InstanceView> > &target_views,
                       const std::vector<IndividualView*> &source_views,
-                      const std::map<CollectiveView*,size_t> &view_arrivals,
+                      const std::map<InstanceView*,size_t> &view_arrivals,
                       const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
                       const bool first_local);

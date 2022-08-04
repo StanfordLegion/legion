@@ -2128,7 +2128,7 @@ namespace Legion {
                                const std::vector<PhysicalManager*> &sources,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
-                               std::map<CollectiveView*,
+                               std::map<InstanceView*,
                                         size_t> &view_collective_arrivals,
                                UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
@@ -2179,12 +2179,13 @@ namespace Legion {
       std::vector<IndividualView*> source_views;
       LegionVector<FieldMaskSet<InstanceView> > target_views;
       CollectiveMapping *analysis_mapping = NULL;
+      RtEvent collective_precondition;
       if (!collective_rendezvous)
-        context->convert_target_views(targets, target_views);
+        context->convert_analysis_views(targets, target_views);
       else
         first_local = context->convert_collective_views(op, index,
-            req.region, targets, analysis_mapping,
-            target_views, view_collective_arrivals);
+            req.region, targets, analysis_mapping, target_views,
+            view_collective_arrivals, collective_precondition);
       if (!sources.empty())
         context->convert_individual_views(sources, source_views);
       analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
@@ -2197,13 +2198,16 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
+                           map_applied_events, collective_precondition);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
+      if (!view_collective_arrivals.empty())
+        CollectiveView::release_collective_traversals(op->get_ctx_index(),
+            index, view_collective_arrivals, remote_ready);
       // Then perform the updates
       const RtEvent updates_ready = 
         analysis->perform_updates(traversal_done, map_applied_events);
@@ -2213,7 +2217,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_registration(
                            UpdateAnalysis *analysis, InstanceSet &targets,
-                           const std::map<CollectiveView*,
+                           const std::map<InstanceView*,
                                           size_t> &collective_arrivals,
                            const PhysicalTraceInfo &trace_info,
                            std::set<RtEvent> &map_applied_events,
@@ -2245,9 +2249,9 @@ namespace Legion {
                   analysis->target_views[idx].end(); it++)
             {
               size_t view_collective_arrivals = 0;
-              if (it->first->is_collective_view())
+              if (!collective_arrivals.empty())
               {
-                std::map<CollectiveView*,size_t>::const_iterator finder =
+                std::map<InstanceView*,size_t>::const_iterator finder =
                   collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
                 assert(finder != collective_arrivals.end()); 
@@ -2273,9 +2277,9 @@ namespace Legion {
             FieldMaskSet<InstanceView>::const_iterator it =
               analysis->target_views[idx].begin();
             size_t view_collective_arrivals = 0;
-            if (it->first->is_collective_view())
+            if (!collective_arrivals.empty())
             {
-              std::map<CollectiveView*,size_t>::const_iterator finder =
+              std::map<InstanceView*,size_t>::const_iterator finder =
                 collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
               assert(finder != collective_arrivals.end()); 
@@ -2375,7 +2379,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       UpdateAnalysis *analysis = NULL;
-      std::map<CollectiveView*,size_t> view_collective_arrivals;
+      std::map<InstanceView*,size_t> view_collective_arrivals;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
          trace_info, map_applied_events, view_collective_arrivals, analysis,
@@ -2394,7 +2398,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
-                         std::map<CollectiveView*,size_t> &collective_arrivals,
+                         std::map<InstanceView*,size_t> &collective_arrivals,
                          std::set<RtEvent> &map_applied_events,
                          ApEvent &result, const PhysicalTraceInfo &info,
                          bool symbolic)
@@ -2454,13 +2458,14 @@ namespace Legion {
       LegionVector<FieldMaskSet<InstanceView> > restricted_views;
       bool first_local = true;
       CollectiveMapping *analysis_mapping = NULL;
-      std::map<CollectiveView*,size_t> collective_arrivals;
+      std::map<InstanceView*,size_t> collective_arrivals;
+      RtEvent collective_precondition;
       if (known_targets)
       {
         InnerContext *context = op->find_physical_context(index);
         first_local = context->convert_collective_views(op, index, req.region,
-            restricted_instances, analysis_mapping, 
-            restricted_views, collective_arrivals);
+            restricted_instances, analysis_mapping, restricted_views,
+            collective_arrivals, collective_precondition);
       }
       // Iterate through the equivalence classes and find all the restrictions
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -2472,16 +2477,19 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events);
+                          map_applied_events, collective_precondition);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         remote_ready = 
           analysis.perform_remote(traversal_done, map_applied_events);
+      const size_t op_ctx_index = op->get_ctx_index();
+      if (!collective_arrivals.empty())
+        CollectiveView::release_collective_traversals(op_ctx_index, index,
+            collective_arrivals, remote_ready);
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> acquired_events;
       if (remote_ready.exists() && !remote_ready.has_triggered())
@@ -2522,9 +2530,9 @@ namespace Legion {
               restricted_views[idx].end(); it++)
         {
           size_t view_collective_arrivals = 0;
-          if (it->first->is_collective_view())
+          if (!collective_arrivals.empty())
           {
-            std::map<CollectiveView*,size_t>::const_iterator finder =
+            std::map<InstanceView*,size_t>::const_iterator finder =
               collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
             assert(finder != collective_arrivals.end()); 
@@ -2572,13 +2580,14 @@ namespace Legion {
       LegionVector<FieldMaskSet<InstanceView> > target_views;
       bool first_local = true;
       CollectiveMapping *analysis_mapping = NULL;
-      std::map<CollectiveView*,size_t> collective_arrivals;
+      std::map<InstanceView*,size_t> collective_arrivals;
+      RtEvent collective_precondition;
       if (known_targets)
       {
         InnerContext *context = op->find_physical_context(index);
         first_local = context->convert_collective_views(op, index, req.region,
-            restricted_instances, analysis_mapping, 
-            target_views, collective_arrivals);
+            restricted_instances, analysis_mapping, target_views,
+            collective_arrivals, collective_precondition);
         if (!sources.empty())
           context->convert_individual_views(sources, source_views,
                                             analysis_mapping);
@@ -2601,13 +2610,17 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
+                           map_applied_events, collective_precondition);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
+      const size_t op_ctx_index = op->get_ctx_index();
+      if (!collective_arrivals.empty())
+        CollectiveView::release_collective_traversals(op_ctx_index, index,
+            collective_arrivals, remote_ready);
       // Issue any release copies/fills that need to be done
       const RtEvent updates_done = 
         analysis->perform_updates(traversal_done, map_applied_events);
@@ -2617,7 +2630,6 @@ namespace Legion {
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> released_events;
       if (remote_ready.exists() && !remote_ready.has_triggered())
@@ -2662,9 +2674,9 @@ namespace Legion {
               target_views[idx].end(); it++)
         {
           size_t view_collective_arrivals = 0;
-          if (it->first->is_collective_view())
+          if (!collective_arrivals.empty())
           {
-            std::map<CollectiveView*,size_t>::const_iterator finder =
+            std::map<InstanceView*,size_t>::const_iterator finder =
               collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
             assert(finder != collective_arrivals.end()); 
@@ -2719,7 +2731,7 @@ namespace Legion {
       // Perform the copies/reductions across
       InnerContext *context = op->find_physical_context(dst_index);
       LegionVector<FieldMaskSet<InstanceView> > target_views;
-      context->convert_target_views(dst_targets, target_views);
+      context->convert_analysis_views(dst_targets, target_views);
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
@@ -3447,11 +3459,12 @@ namespace Legion {
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
       InnerContext *context = attach_op->find_physical_context(index);
       LegionVector<FieldMaskSet<InstanceView> > external_views;
-      std::map<CollectiveView*,size_t> collective_arrivals;
+      std::map<InstanceView*,size_t> collective_arrivals;
       CollectiveMapping *analysis_mapping = NULL;
+      RtEvent collective_precondition;
       const bool first_local = context->convert_collective_views(attach_op,
           index, req.region, external_instances, analysis_mapping,
-          external_views, collective_arrivals);
+          external_views, collective_arrivals, collective_precondition);
       // Perform the registration first since we might need it in case
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
@@ -3470,9 +3483,9 @@ namespace Legion {
         {
           registration_views.insert(it->first, it->second);
           size_t view_collective_arrivals = 0;
-          if (it->first->is_collective_view())
+          if (!collective_arrivals.empty())
           {
-            std::map<CollectiveView*,size_t>::const_iterator finder =
+            std::map<InstanceView*,size_t>::const_iterator finder =
               collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
             assert(finder != collective_arrivals.end()); 
@@ -3507,11 +3520,15 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
+                           map_applied_events, collective_precondition);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      RtEvent traversed;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        analysis->perform_remote(traversal_done, map_applied_events);
+        traversed = analysis->perform_remote(traversal_done,map_applied_events);
+      if (!collective_arrivals.empty())
+        CollectiveView::release_collective_traversals(op_ctx_index, index,
+            collective_arrivals, traversed);
       if (analysis->remove_reference())
         delete analysis;
       if (!ready_events.empty())
@@ -3544,11 +3561,12 @@ namespace Legion {
       const RegionUsage usage(req);
       InnerContext *context = detach_op->find_physical_context(index);
       LegionVector<FieldMaskSet<InstanceView> > external_views;
-      std::map<CollectiveView*,size_t> collective_arrivals;
+      std::map<InstanceView*,size_t> collective_arrivals;
       CollectiveMapping *analysis_mapping = NULL;
+      RtEvent collective_precondition;
       const bool first_local = context->convert_collective_views(detach_op,
-          index, req.region, instances, analysis_mapping, 
-          external_views, collective_arrivals);
+          index, req.region, instances, analysis_mapping, external_views,
+          collective_arrivals, collective_precondition);
 #ifdef DEBUG_LEGION
       assert(external_views.size() == 1);
 #endif
@@ -3559,9 +3577,9 @@ namespace Legion {
             external_views.front().end(); it++)
       {
         size_t view_collective_arrivals = 0;
-        if (it->first->is_collective_view())
+        if (!collective_arrivals.empty())
         {
-          std::map<CollectiveView*,size_t>::const_iterator finder =
+          std::map<InstanceView*,size_t>::const_iterator finder =
             collective_arrivals.find(it->first->as_collective_view());
 #ifdef DEBUG_LEGION
           assert(finder != collective_arrivals.end()); 
@@ -3590,11 +3608,15 @@ namespace Legion {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
+                           map_applied_events, collective_precondition);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      RtEvent traversed;
       if (traversal_done.exists() || analysis->has_remote_sets())     
-        analysis->perform_remote(traversal_done, map_applied_events);
+        traversed = analysis->perform_remote(traversal_done,map_applied_events);
+      if (!collective_arrivals.empty())
+        CollectiveView::release_collective_traversals(op_ctx_index, index,
+            collective_arrivals, traversed);
       if (analysis->remove_reference())
         delete analysis;
       if (done_events.empty())

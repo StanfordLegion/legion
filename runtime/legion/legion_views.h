@@ -431,11 +431,28 @@ namespace Legion {
                                     bool bandwidth) const;
     public:
       unsigned find_local_index(PhysicalManager *target) const;
+      RtEvent register_pending_analyses(PhysicalManager *target,
+                                        size_t op_context_index,
+                                        unsigned region_index,
+                                        size_t local_arrivals);
+      void unregister_pending_analyses(PhysicalManager *target,
+                                       size_t op_context_index,
+                                       unsigned region_index);
       void register_collective_analysis(PhysicalManager *target,
                                         CollectiveAnalysis *analysis,
                                         size_t local_collective_arrivals);
       RtEvent find_collective_analyses(size_t context_index, unsigned index,
                           const std::vector<CollectiveAnalysis*> *&analyses);
+    public:
+      void record_pending_traversal(size_t op_context_index,
+                                    unsigned region_index);
+      void release_pending_traversal(size_t op_context_index,
+                                    unsigned region_index,
+                                    RtEvent traversed);
+      static void release_collective_traversals(size_t op_context_index,
+                                    unsigned region_index,
+                                    const std::map<InstanceView*,size_t> &views,
+                                    RtEvent traversed);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,

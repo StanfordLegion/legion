@@ -5849,7 +5849,7 @@ namespace Legion {
                                const LegionVector<
                                     FieldMaskSet<InstanceView> > &target_vws,
                                const std::vector<IndividualView*> &source_vws,
-                               const std::map<CollectiveView*,size_t> &arrivals,
+                               const std::map<InstanceView*,size_t> &arrivals,
                                const PhysicalTraceInfo &t_info,
                                CollectiveMapping *mapping, bool first_local,
                                bool exclusive)
@@ -5878,7 +5878,7 @@ namespace Legion {
           if (!it->first->is_collective_view())
             continue;
           CollectiveView *collective = it->first->as_collective_view();
-          std::map<CollectiveView*,size_t>::const_iterator finder =
+          std::map<InstanceView*,size_t>::const_iterator finder =
             arrivals.find(collective);
 #ifdef DEBUG_LEGION
           assert(finder != arrivals.end());
@@ -6703,7 +6703,7 @@ namespace Legion {
                     RegionNode *rn, const InstanceSet &target_insts,
                     const LegionVector<FieldMaskSet<InstanceView> > &target_vws,
                     const std::vector<IndividualView*> &source_vws,
-                    const std::map<CollectiveView*,size_t> &arrivals,
+                    const std::map<InstanceView*,size_t> &arrivals,
                     const PhysicalTraceInfo &t_info,
                     CollectiveMapping *mapping,
                     const ApEvent pre, const ApEvent term,
@@ -7363,7 +7363,7 @@ namespace Legion {
                                const LegionVector<
                                    FieldMaskSet<InstanceView> > &target_vws,
                                const std::vector<IndividualView*> &source_vws, 
-                               const std::map<CollectiveView*,size_t> &arrivals,
+                               const std::map<InstanceView*,size_t> &arrivals,
                                const PhysicalTraceInfo &t_info,
                                CollectiveMapping *mapping, const bool first)
       : CollectiveCopyFillAnalysis(rt, o, idx, expr, true/*on heap*/,

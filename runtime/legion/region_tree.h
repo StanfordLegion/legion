@@ -146,7 +146,7 @@ namespace Legion {
       public:
         DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
                   InstanceSet &t, RtUserEvent map_applied, ApEvent &res,
-                  const std::map<CollectiveView*,size_t> &arrivals,
+                  const std::map<InstanceView*,size_t> &arrivals,
                   const PhysicalTraceInfo &info, bool sym)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
             PhysicalTraceInfo(info), analysis(ana), 
@@ -167,7 +167,7 @@ namespace Legion {
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
         InstanceSet &targets;
-        const std::map<CollectiveView*,size_t> &view_collective_arrivals;
+        const std::map<InstanceView*,size_t> &view_collective_arrivals;
         ApEvent &result;
         bool symbolic;
       };
@@ -521,7 +521,7 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &sources,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
-                                std::map<CollectiveView*,
+                                std::map<InstanceView*,
                                          size_t> &view_collective_arrivals,
                                 UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
@@ -536,7 +536,7 @@ namespace Legion {
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
                                InstanceSet &targets,
-                               const std::map<CollectiveView*,
+                               const std::map<InstanceView*,
                                               size_t> &collective_arrivals,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
@@ -561,7 +561,7 @@ namespace Legion {
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                            UpdateAnalysis *analysis, InstanceSet &targets,
-                           std::map<CollectiveView*,
+                           std::map<InstanceView*,
                                     size_t> &view_collective_arrivals,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result, const PhysicalTraceInfo &info,

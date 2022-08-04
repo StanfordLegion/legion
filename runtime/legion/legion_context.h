@@ -955,7 +955,8 @@ namespace Legion {
         size_t collective_tag;
         CollectiveMapping *analysis_mapping;
         LegionVector<FieldMaskSet<InstanceView> > target_views;
-        std::map<CollectiveView*,size_t> collective_arrivals;
+        std::map<InstanceView*,size_t> collective_arrivals;
+        RtEvent collective_views_ready;
         bool first_local;
       };
       struct CollectiveRendezvous {
@@ -970,6 +971,25 @@ namespace Legion {
         std::map<RendezvousResult*,RtUserEvent> rendezvous;
         std::map<LogicalRegion,LegionMap<DistributedID,FieldMask> > groups;
         size_t remaining_arrivals;
+      };
+      struct CollectiveResult : public Collectable {
+      public:
+        CollectiveResult(const std::set<DistributedID> &dids,
+                         DistributedID collective_did);
+        CollectiveResult(std::vector<DistributedID> &&dids,
+                         DistributedID collective_did);
+      public:
+        bool matches(const std::set<DistributedID> &dids) const;
+        bool overlaps(const CollectiveResult *other) const;
+        bool interferes(const std::set<DistributedID> &dids, 
+                        const FieldMask &mask, Runtime *runtime,
+                        bool &dominated, FieldMaskSet<CollectiveResult> &to_add,
+                        LegionList<FieldSet<DistributedID> > &remainders) const;
+      public:
+        const DistributedID collective_did;
+        const std::vector<DistributedID> individual_dids;
+        RtEvent ready_event;
+        LegionMap<RtEvent,FieldMask> matched_events;
       };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
@@ -1566,15 +1586,16 @@ namespace Legion {
                                     std::vector<IndividualView*> &views,
                                     CollectiveMapping *mapping = NULL);
       void convert_individual_views(const InstanceSet &sources,
-                                    std::vector<IndividualView*> &views);
-      void convert_target_views(const InstanceSet &targets,
+                                    std::vector<IndividualView*> &views,
+                                    CollectiveMapping *mapping = NULL);
+      void convert_analysis_views(const InstanceSet &targets,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views);
       // Same as convert target views, but will also perform a check for 
       // any collective behavior across multiple points of the same index
       // space launch of the operation. Note that if the operation is not
       // an index space operation or a singular operation in a control
       // replicated context then there the behavior will be the same as 
-      // convert_target_views.
+      // convert_analysis_views.
       // This method does not guarantee that there will be any collective views
       // The analysis mapping gives collective mapping of all the address
       // spaces that called into this method collectively
@@ -1586,7 +1607,8 @@ namespace Legion {
                        LogicalRegion region, const InstanceSet &targets,
                        CollectiveMapping *&analysis_mapping,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
-                       std::map<CollectiveView*,size_t> &collective_arrivals);
+                       std::map<InstanceView*,size_t> &collective_arrivals,
+                       RtEvent &collective_views_ready);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
@@ -1608,6 +1630,13 @@ namespace Legion {
       virtual void construct_collective_mapping(CollectiveRendezvous *finalize);
       virtual void invalidate_collective_mapping(
                         const LegionVector<FieldMaskSet<InstanceView> > &views);
+    protected:
+      RtEvent dispatch_collective_invalidation(
+          const CollectiveResult *collective, const FieldMask &invalid_mask,
+          const FieldMaskSet<CollectiveResult> &replacements);
+      static RtEvent create_collective_view(Runtime *runtime, 
+          DistributedID collective_did, CollectiveMapping *mapping,
+          const std::vector<DistributedID> &individual_dids);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1791,6 +1820,9 @@ namespace Legion {
       std::map<PendingRendezvousKey,
                std::vector<RendezvousResult*> >         pending_rendezvous;
       std::map<RendezvousKey,CollectiveRendezvous*>     pending_collectives;
+      LegionMap<RegionTreeID,
+                FieldMaskSet<CollectiveResult> >        collective_results;
+      LegionMap<RegionTreeID,FieldMask>                 invalidated_collectives;
     };
 
     /**
