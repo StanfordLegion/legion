@@ -833,10 +833,10 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   template <typename BM>
-  void StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::
-      intersect_sparse_transform(
-          std::map<int, BM *> &bitmasks, const Rect<N, T> &parent_bbox,
-          const std::vector<Rect<N, T>> &parent_rects) {
+  void
+  StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>::intersect_sparse_transform(
+      std::map<int, BM *> &bitmasks, const Rect<N, T> &parent_bbox,
+      const std::vector<Rect<N, T>> &parent_rects) {
     for (size_t i = 0; i < sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
         for (PointInRectIterator<N2, T2> point(it2.rect); point.valid;
@@ -858,76 +858,74 @@ namespace Realm {
     }
   }
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class StructuredImageOperation<N,T,N2,T2>
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class StructuredImageOperation<N,T,N2,T2>
 
-    template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-    StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
-        const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
-        const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
-        EventImpl::gen_t _finish_gen)
-        : PartitioningOperation(reqs, _finish_event, _finish_gen),
-          parent(_parent),
-          transform(_transform) {}
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
+      const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
+      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      EventImpl::gen_t _finish_gen)
+      : PartitioningOperation(reqs, _finish_event, _finish_gen),
+        parent(_parent),
+        transform(_transform) {}
 
-    template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-    StructuredImageOperation<N, T, N2, T2,
-                             TRANSFORM>::~StructuredImageOperation() {}
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  StructuredImageOperation<N, T, N2, T2,
+                           TRANSFORM>::~StructuredImageOperation() {}
 
-    template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-    IndexSpace<N, T>
-    StructuredImageOperation<N, T, N2, T2, TRANSFORM>::add_source(
-        const IndexSpace<N2, T2> &source) {
-      // try to filter out obviously empty sources
-      if (parent.empty() || source.empty()) {
-        return IndexSpace<N, T>::make_empty();
-      }
-
-      // otherwise it'll be something smaller than the current parent
-      IndexSpace<N, T> image;
-      image.bounds = parent.bounds;
-
-      int target_node = 0;
-      if (!source.dense()) {
-        target_node = ID(source.sparsity).sparsity_creator_node();
-      }
-
-      SparsityMap<N, T> sparsity =
-          get_runtime()
-              ->get_available_sparsity_impl(target_node)
-              ->me.convert<SparsityMap<N, T>>();
-      image.sparsity = sparsity;
-
-      sources.push_back(source);
-      images.push_back(sparsity);
-
-      return image;
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  IndexSpace<N, T>
+  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::add_source(
+      const IndexSpace<N2, T2> &source) {
+    // try to filter out obviously empty sources
+    if (parent.empty() || source.empty()) {
+      return IndexSpace<N, T>::make_empty();
     }
 
-    template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-    void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::execute(void) {
-      for (size_t i = 0; i < sources.size(); i++) {
-        SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
-      }
+    // otherwise it'll be something smaller than the current parent
+    IndexSpace<N, T> image;
+    image.bounds = parent.bounds;
 
-      StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
-          new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(parent,
-                                                              transform);
-
-      for (size_t j = 0; j < sources.size(); j++) {
-        micro_op->add_sparsity_output(sources[j], images[j]);
-      }
-
-      micro_op->dispatch(this, /*inline_ok=*/true);
+    int target_node = 0;
+    if (!source.dense()) {
+      target_node = ID(source.sparsity).sparsity_creator_node();
     }
 
-    template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-    void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::print(std::ostream &
-                                                                  os) const {
-      os << "StructuredImageOperation(" << parent << ")";
+    SparsityMap<N, T> sparsity = get_runtime()
+                                     ->get_available_sparsity_impl(target_node)
+                                     ->me.convert<SparsityMap<N, T>>();
+    image.sparsity = sparsity;
+
+    sources.push_back(source);
+    images.push_back(sparsity);
+
+    return image;
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::execute(void) {
+    for (size_t i = 0; i < sources.size(); i++) {
+      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
     }
 
-    // instantiations of templates handled in image_tmpl.cc
+    StructuredImageMicroOp<N, T, N2, T2, TRANSFORM> *micro_op =
+        new StructuredImageMicroOp<N, T, N2, T2, TRANSFORM>(parent, transform);
+
+    for (size_t j = 0; j < sources.size(); j++) {
+      micro_op->add_sparsity_output(sources[j], images[j]);
+    }
+
+    micro_op->dispatch(this, /*inline_ok=*/true);
+  }
+
+  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::print(
+      std::ostream &os) const {
+    os << "StructuredImageOperation(" << parent << ")";
+  }
+
+  // instantiations of templates handled in image_tmpl.cc
 
   };  // namespace Realm
