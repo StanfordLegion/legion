@@ -789,18 +789,27 @@ namespace Realm {
         parent_rects.push_back(parent_it.rect);
       }
     }
+
+    assert(!parent_rects.empty());
+    Rect<N, T> parent_bbox = parent_rects[0];
+    for (size_t i = 1; i < parent_rects.size(); i++) {
+      parent_bbox = parent_bbox.union_bbox(parent_rects[i]);
+    }
+
     for (size_t i = 0; i < sources.size(); i++) {
       for (IndexSpaceIterator<N2, T2> it2(sources[i]); it2.valid; it2.step()) {
-        BM **bmpp = 0;
         Rect<N, T> source_bbox;
         source_bbox.lo = transform[it2.rect.lo];
         source_bbox.hi = transform[it2.rect.hi];
+        if (parent_bbox.intersection(source_bbox).empty()) continue;
+        BM **bmpp = 0;
         if (!bmpp) bmpp = &bitmasks[i];
         if (!*bmpp) *bmpp = new BM;
         for (const auto &parent_rect : parent_rects) {
-          Rect<N, T> isect = parent_rect.intersection(source_bbox);
-          if (!isect.empty()) {
-            (*bmpp)->add_rect(isect);
+          Rect<N, T> source_parent_isect =
+              parent_rect.intersection(source_bbox);
+          if (!source_parent_isect.empty()) {
+            (*bmpp)->add_rect(source_parent_isect);
           }
         }
       }
