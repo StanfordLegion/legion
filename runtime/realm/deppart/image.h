@@ -134,6 +134,17 @@ namespace Realm {
     void dispatch(PartitioningOperation* op, bool inline_ok);
 
    protected:
+    template <typename BM>
+    void intersect_dense_transform(std::map<int, BM*>& bitmasks,
+                                   const Rect<N, T>& parent_bbox,
+                                   const std::vector<Rect<N, T>>& parent_rects);
+
+    template <typename BM>
+    void intersect_sparse_transform(
+        std::map<int, BM*>& bitmasks, const Rect<N, T>& parent_bbox,
+        const std::vector<Rect<N, T>>& parent_rects);
+
+   protected:
     IndexSpace<N,T> parent_space;
     std::vector<IndexSpace<N2,T2> > sources;
     std::vector<SparsityMap<N,T> > sparsity_outputs;

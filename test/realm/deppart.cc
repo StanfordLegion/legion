@@ -2250,7 +2250,7 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
   , base2_min(0), base2_max(0), extent2_min(4), extent2_max(6)
   , num_pieces(2), num_colors(4)
 {
-  RandStream<> rs(random_seed+0);
+  RandStream<> rs(random_seed+2);
 
   for(int i = 0; i < N1; i++) {
     bounds1.lo[i] = base1_min + rs.rand_int(base1_max - base1_min + 1);
@@ -2301,9 +2301,10 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
       for (int j = 0; j < N1; j++) {
         shear.transform[i][j] = (i == j);
       }
-      shear.transform[i][i + 1] = 2;
+      shear.transform[i][i + 1] = 1;
     }
     shear.offset = Point<N2, T2>::ZEROES();
+    shear.is_dense = false;
     transforms.push_back(shear);
   }
 
@@ -2489,12 +2490,13 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
           bool found = false;
           for (const auto image : images) {
             if (image.contains(target_point)) {
-              found = true;
               image_points--;
               break;
             }
           }
-          if (!found) return 1;
+          if (!found) {
+            return 1;
+          }
         }
       }
     }
@@ -2564,7 +2566,7 @@ int main(int argc, char **argv) {
 
     if (!strcmp(argv[i], "affine")) {
       // TODO(apriakhin): Add tests with more dimensions.
-      testcfg = new RandomAffineTest<1, int, 2, int, int>(
+      testcfg = new RandomAffineTest<2, int, 2, int, int>(
           argc, const_cast<const char **>(argv));
       break;
     }
