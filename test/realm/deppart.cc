@@ -2220,6 +2220,7 @@ public:
   void fill_instance_data(IndexSpace<N1,T1> ibounds, RegionInstance inst);
 
   int verify_results(const IndexSpace<N2, T2> &root,
+                     const AffineTransform<N2, N1, T2> &transform,
                      const std::vector<IndexSpace<N2, T1>> &images);
 
  protected:
@@ -2227,11 +2228,11 @@ public:
   T2 base2_min, base2_max, extent2_min, extent2_max;
   int num_pieces, num_colors;
 
-  AffineTransform<N2, N1, T2> transform;
   std::vector<AffineTransform<N2, N1, T2>> transforms;
 
-  std::vector<IndexSpace<N2, T1>> ss_images;
-  std::vector<IndexSpace<N2, T1>> ss_images1;
+  std::vector<std::vector<IndexSpace<N2, T1>>> dense_images;
+  std::vector<std::vector<IndexSpace<N2, T1>>> sparse_images;
+
   std::vector<IndexSpace<N1,T1> > ss_by_color;
 
   Rect<N1,T1> bounds1;
@@ -2246,8 +2247,8 @@ public:
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
 RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
-  : base1_min(0), base1_max(0), extent1_min(4), extent1_max(6)
-  , base2_min(0), base2_max(0), extent2_min(4), extent2_max(6)
+  : base1_min(0), base1_max(0), extent1_min(16), extent1_max(32)
+  , base2_min(0), base2_max(0), extent2_min(16), extent2_max(32)
   , num_pieces(2), num_colors(4)
 {
   RandStream<> rs(random_seed+2);
@@ -2319,9 +2320,8 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
     transforms.push_back(reflect);
   }
 
-  int transform_idx = rs.rand_int(transforms.size() + 1);
-  log_app.debug() << "transform_idx=" << transform_idx;
-  transform = transforms[transform_idx];
+  dense_images.resize(transforms.size());
+  sparse_images.resize(transforms.size());
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
@@ -2420,47 +2420,51 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
-Event RandomAffineTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
-{
+Event RandomAffineTest<N1, T1, N2, T2, FT>::perform_partitioning(void) {
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
 
-  Event e1 = root1.create_subspaces_by_field(fd_vals1,
-					     piece_colors,
-					     ss_by_color,
-					     ProfilingRequestSet());
+  Event e1 = root1.create_subspaces_by_field(
+      fd_vals1, piece_colors, ss_by_color, ProfilingRequestSet());
   e1.wait();
 
-  for(int i = 0; i < num_pieces; i++) {
-    log_app.debug() << "bycolor[" << i << "] (" << colors[i] << ") = " << ss_by_color[i];
+  for (int i = 0; i < num_pieces; i++) {
+    log_app.debug() << "bycolor[" << i << "] (" << colors[i]
+                    << ") = " << ss_by_color[i];
     dump_sparse_index_space("", ss_by_color[i]);
   }
 
-  // images
-  Event e2 = root2.create_subspaces_by_image(transform,
-					     ss_by_color,
-					     ss_images,
-					     ProfilingRequestSet(),
-					     e1);
+  for (size_t idx = 0; idx < transforms.size(); idx++) {
+    log_app.debug() << "Compute images for transform idx=" << idx;
 
-  e2.wait();
+    unsigned long long start_time = Clock::current_time_in_nanoseconds();
+    // images
+    Event e2 = root2.create_subspaces_by_image(transforms[idx], ss_by_color,
+                                               dense_images[idx],
+                                               ProfilingRequestSet(), e1);
+    e2.wait();
 
-  for(int i = 0; i < num_pieces; i++) {
-    log_app.debug() << "image[" << i << "] = " << ss_images[i];
-    dump_sparse_index_space("", ss_images[i]);
-  }
+    log_app.debug() << "affine image time="
+                    << (Clock::current_time_in_nanoseconds() - start_time);
 
-  Event e3 = root2_sparse.create_subspaces_by_image(transform,
-					     ss_by_color,
-					     ss_images1,
-					     ProfilingRequestSet(),
-					     e2);
+    for (int i = 0; i < num_pieces; i++) {
+      log_app.debug() << "image[" << i << "] = " << dense_images[idx][i];
+      dump_sparse_index_space("", dense_images[idx][i]);
+    }
 
-  e3.wait();
+    start_time = Clock::current_time_in_nanoseconds();
+    Event e3 = root2_sparse.create_subspaces_by_image(
+        transforms[idx], ss_by_color, sparse_images[idx], ProfilingRequestSet(),
+        e2);
 
-  for(int i = 0; i < num_pieces; i++) {
-    log_app.debug() << "image1[" << i << "] = " << ss_images1[i];
-    dump_sparse_index_space("", ss_images1[i]);
+    e3.wait();
+    log_app.debug() << "affine sparse image time="
+                    << (Clock::current_time_in_nanoseconds() - start_time);
+
+    for (int i = 0; i < num_pieces; i++) {
+      log_app.debug() << "image1[" << i << "] = " << sparse_images[idx][i];
+      dump_sparse_index_space("", sparse_images[idx][i]);
+    }
   }
 
   return Event::NO_EVENT;
@@ -2475,6 +2479,7 @@ int RandomAffineTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
 template <int N1, typename T1, int N2, typename T2, typename FT>
 int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
     const IndexSpace<N2, T2> &root,
+    const AffineTransform<N2, N1, T2>& transform,
     const std::vector<IndexSpace<N2, T1>> &images) {
   int image_points = 0;
   for (const auto &image : images) {
@@ -2491,6 +2496,7 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
           for (const auto image : images) {
             if (image.contains(target_point)) {
               image_points--;
+              found = true;
               break;
             }
           }
@@ -2506,8 +2512,13 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
 int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
-  return (verify_results(root2, ss_images) ||
-          verify_results(root2_sparse, ss_images1));
+  for (size_t i = 0; i < transforms.size(); i++) {
+    if (verify_results(root2, transforms[i], dense_images[i]) ||
+        verify_results(root2_sparse, transforms[i], sparse_images[i])) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 int main(int argc, char **argv) {

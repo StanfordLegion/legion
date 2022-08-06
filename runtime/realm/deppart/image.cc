@@ -799,7 +799,7 @@ namespace Realm {
     if (!transform.dense()) {
       intersect_sparse_transform(bitmasks, parent_bbox, parent_rects);
     } else {
-      intersect_sparse_transform(bitmasks, parent_bbox, parent_rects);
+      intersect_dense_transform(bitmasks, parent_bbox, parent_rects);
     }
   }
 
