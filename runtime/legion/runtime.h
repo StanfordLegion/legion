@@ -3207,6 +3207,8 @@ namespace Legion {
       void send_collective_remote_registration(AddressSpaceID target,
                                                Serializer &rez);
       void send_collective_deletion(AddressSpaceID target, Serializer &rez);
+      void send_collective_finalize_mapping(AddressSpaceID target,
+                                            Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -3553,6 +3555,7 @@ namespace Legion {
       void handle_collective_nearest_instances_response(Deserializer &derez);
       void handle_collective_remote_registration(Deserializer &derez);
       void handle_collective_deletion(Deserializer &derez);
+      void handle_collective_finalize_mapping(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -5683,6 +5686,8 @@ namespace Legion {
           return UPDATE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DELETION:
           return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_FINALIZE_MAPPING:
+          break;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;
         case SEND_CREATE_TOP_VIEW_RESPONSE:

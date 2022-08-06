@@ -12133,6 +12133,11 @@ namespace Legion {
               runtime->handle_collective_deletion(derez);
               break;
             }
+          case SEND_COLLECTIVE_FINALIZE_MAPPING:
+            {
+              runtime->handle_collective_finalize_mapping(derez);
+              break;
+            }
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -22356,6 +22361,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_finalize_mapping(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_FINALIZE_MAPPING>(
+                                          rez, true/*flush*/, true/*return*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24545,6 +24559,13 @@ namespace Legion {
       CollectiveManager::handle_deletion(this, derez);
     }
 #endif // NO_EXPLICIT_COLLECTIVES
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_finalize_mapping(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::handle_finalize_collective_mapping(derez, this);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_request(Deserializer &derez,

@@ -819,6 +819,7 @@ namespace Legion {
       SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE,
       SEND_COLLECTIVE_REMOTE_REGISTRATION,
       SEND_COLLECTIVE_DELETION,
+      SEND_COLLECTIVE_FINALIZE_MAPPING,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -1060,6 +1061,7 @@ namespace Legion {
         "Send Collective Nearest Instances Response",                 \
         "Send Collective Remote Registration",                        \
         "Send Collective Deletion",                                   \
+        "Send Collective Finalize Mapping",                           \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
