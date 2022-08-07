@@ -556,6 +556,8 @@ namespace Realm {
 
     template <int N, typename T>
     IndexSpaceGeneric(const IndexSpace<N,T>& copy_from);
+    template <int N, typename T>
+    IndexSpaceGeneric(const Rect<N,T>& copy_from);
 
     ~IndexSpaceGeneric();
 
@@ -563,6 +565,8 @@ namespace Realm {
 
     template <int N, typename T>
     IndexSpaceGeneric& operator=(const IndexSpace<N,T>& copy_from);
+    template <int N, typename T>
+    IndexSpaceGeneric& operator=(const Rect<N,T>& copy_from);
 
     template <int N, typename T>
     const IndexSpace<N,T>& as_index_space() const;

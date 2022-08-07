@@ -83,6 +83,13 @@ namespace Realm {
     impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
   }
 
+  template <int N, typename T>
+  IndexSpaceGeneric::IndexSpaceGeneric(const Rect<N,T>& copy_from)
+  {
+    assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
+    impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
+  }
+
   IndexSpaceGeneric::~IndexSpaceGeneric()
   {
     if(impl)
@@ -104,6 +111,16 @@ namespace Realm {
 
   template <int N, typename T>
   IndexSpaceGeneric& IndexSpaceGeneric::operator=(const IndexSpace<N,T>& copy_from)
+  {
+    assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
+    if(impl)
+      impl->~IndexSpaceGenericImpl();
+    impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
+    return *this;
+  }
+
+  template <int N, typename T>
+  IndexSpaceGeneric& IndexSpaceGeneric::operator=(const Rect<N,T>& copy_from)
   {
     assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
     if(impl)
@@ -185,7 +202,9 @@ namespace Realm {
 
 #define DOIT(N,T) \
   template IndexSpaceGeneric::IndexSpaceGeneric(const IndexSpace<N,T>& copy_from); \
+  template IndexSpaceGeneric::IndexSpaceGeneric(const Rect<N,T>& copy_from); \
   template IndexSpaceGeneric& IndexSpaceGeneric::operator=<N,T>(const IndexSpace<N,T>&); \
+  template IndexSpaceGeneric& IndexSpaceGeneric::operator=<N,T>(const Rect<N,T>&); \
   template const IndexSpace<N,T>& IndexSpaceGeneric::as_index_space<N,T>() const; \
   template Event IndexSpaceGeneric::copy<N,T>(const std::vector<CopySrcDstField>&, \
                                               const std::vector<CopySrcDstField>&, \
