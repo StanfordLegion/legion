@@ -48,6 +48,7 @@ list(APPEND REALM_TESTS
   simple_reduce
   realm_reinit
   sparse_construct
+  extres_alias
   )
 
 if(Legion_USE_CUDA)
