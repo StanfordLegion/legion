@@ -994,6 +994,18 @@ namespace Legion {
         RtEvent registered_event;
         RtEvent ready_event;
       };
+      struct PendingMatch {
+      public:
+        PendingMatch(size_t total, size_t tag) : total_arrivals(total),
+          collective_tag(tag), ready(Runtime::create_rt_user_event()),
+          arrivals(0), success(true) { }
+      public:
+        const size_t total_arrivals;
+        const size_t collective_tag;
+        const  RtUserEvent ready;
+        size_t arrivals;
+        bool success;
+      };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
@@ -1631,8 +1643,8 @@ namespace Legion {
                                   const LegionVector<
                                    std::pair<DistributedID,FieldMask> > &insts);
       // Now we can construct the collective mapping
-      virtual void construct_collective_mapping(const RendezvousKey &key,
-          std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      virtual void construct_collective_mapping(
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       virtual void invalidate_collective_mapping(
                         const LegionVector<FieldMaskSet<InstanceView> > &views);
       virtual size_t generate_collective_tag(void);
@@ -1645,16 +1657,18 @@ namespace Legion {
           std::map<DistributedID,size_t> &counts,
           // The collective views that describes the results for this region
           FieldMaskSet<CollectiveResult> &views);
-    public:
-      static void handle_finalize_collective_mapping(Deserializer &derez,
-                                                     Runtime *runtime);
     protected:
       RtEvent dispatch_collective_invalidation(
           const CollectiveResult *collective, const FieldMask &invalid_mask,
           const FieldMaskSet<CollectiveResult> &replacements);
-      static RtEvent create_collective_view(Runtime *runtime, 
+      RtEvent create_collective_view(
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
+    public:
+      static void handle_finalize_collective_mapping(Deserializer &derez,
+                                                     Runtime *runtime);
+      static void handle_create_collective_view(Deserializer &derez,
+                                                Runtime *runtime);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1837,13 +1851,15 @@ namespace Legion {
                std::vector<RendezvousResult*> >         collective_rendezvous;
       std::map<PendingRendezvousKey,
                std::vector<RendezvousResult*> >         pending_rendezvous;
+      std::map<RendezvousKey,PendingMatch>              pending_matches;
       std::map<RendezvousKey,PendingCollective>         pending_collectives;
     protected:
       // Only valid on the onwer context node
       LegionMap<RegionTreeID,
                 FieldMaskSet<CollectiveResult> >        collective_results;
-
-      LegionMap<RegionTreeID,FieldMask>                 invalidated_collectives;
+      // Instance distributed IDs to the invalid fields
+      LegionMap<DistributedID,FieldMask>                invalidated_collectives;
+      std::atomic<size_t>                               next_collective_tag;
     };
 
     /**
