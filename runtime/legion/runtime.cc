@@ -10716,13 +10716,17 @@ namespace Legion {
 
       if (allocated)
       {
-        uintptr_t ptr = size > 0 ? eager_pool + offset : 0;
+        const Point<1> start(eager_pool + offset);
+        const Point<1> stop(start[0] + size - 1);
+        const Rect<1> bounds(start, stop);
+        Realm::ExternalInstanceResource *external_resource = 
+          eager_pool_instance.generate_resource_info(DomainT<1>(bounds),
+              0/*fid*/, false/*read only*/);
         Realm::ProfilingRequestSet no_requests;
-        const Realm::ExternalMemoryResource resource(ptr, 
-                    layout->bytes_used, false/*read only*/);
         wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
-                        instance, memory, layout, resource, no_requests));
-
+              instance, external_resource->suggested_memory(),
+              layout, *external_resource, no_requests));
+        delete external_resource;
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
