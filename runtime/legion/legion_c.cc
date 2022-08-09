@@ -7672,6 +7672,12 @@ private:
 };
 
 legion_projection_id_t
+legion_runtime_generate_static_projection_id()
+{
+  return Runtime::generate_static_projection_id();
+}
+
+legion_projection_id_t
 legion_runtime_generate_library_projection_ids(
     legion_runtime_t runtime_,
     const char *library_name,

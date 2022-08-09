@@ -18,6 +18,7 @@
 #include "realm/proc_impl.h"
 #include "realm/logging.h"
 #include "realm/serialize.h"
+#include "realm/idx_impl.h"
 #include "realm/inst_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/profiling.h"
@@ -208,6 +209,18 @@ namespace Realm {
     void MemoryImpl::unregister_external_resource(RegionInstanceImpl *inst)
     {
       // nothing to do
+    }
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    ExternalInstanceResource *MemoryImpl::generate_resource_info(RegionInstanceImpl *inst,
+								 const IndexSpaceGeneric *subspace,
+								 span<const FieldID> fields,
+								 bool read_only)
+    {
+      // we don't know about any specific types of external resources in
+      //  the base class
+      return 0;
     }
 
 #if 0
@@ -1319,6 +1332,53 @@ namespace Realm {
   void LocalCPUMemory::unregister_external_resource(RegionInstanceImpl *inst)
   {
     // nothing actually to clean up
+  }
+
+  // for re-registration purposes, generate an ExternalInstanceResource *
+  //  (if possible) for a given instance, or a subset of one
+  ExternalInstanceResource *LocalCPUMemory::generate_resource_info(RegionInstanceImpl *inst,
+								   const IndexSpaceGeneric *subspace,
+								   span<const FieldID> fields,
+								   bool read_only)
+  {
+    // TODO: handle subspaces
+    //assert(subspace == 0);
+
+    // compute the bounds of the instance relative to our base
+    assert(inst->metadata.is_valid() &&
+	   "instance metadata must be valid before accesses are performed");
+    assert(inst->metadata.layout);
+    InstanceLayoutGeneric *ilg = inst->metadata.layout;
+    uintptr_t rel_base, extent;
+    if(subspace == 0) {
+      // want full instance
+      rel_base = 0;
+      extent = ilg->bytes_used;
+    } else {
+      assert(!fields.empty());
+      uintptr_t limit;
+      for(size_t i = 0; i < fields.size(); i++) {
+        uintptr_t f_base, f_limit;
+        if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+          return 0;
+        if(i == 0) {
+          rel_base = f_base;
+          limit = f_limit;
+        } else {
+          rel_base = std::min(rel_base, f_base);
+          limit = std::max(limit, f_limit);
+        }
+      }
+      extent = limit - rel_base;
+    }
+
+    void *mem_base = get_direct_ptr(inst->metadata.inst_offset + rel_base,
+                                    extent); // only our subclasses know this
+    if(!mem_base)
+      return 0;
+
+    return new ExternalMemoryResource(reinterpret_cast<uintptr_t>(mem_base),
+                                      extent, read_only);
   }
 
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)

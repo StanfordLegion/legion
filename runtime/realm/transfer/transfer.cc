@@ -33,6 +33,12 @@ namespace Realm {
   extern Logger log_ib_alloc;
   Logger log_xplan("xplan");
   Logger log_xpath("xpath");
+  Logger log_xpath_cache("xpath_cache");
+
+  namespace Config {
+    // the size of the cache
+    size_t path_cache_lru_size = 0;
+  };
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -2507,6 +2513,184 @@ namespace Realm {
     return (best_cost != 0);
   }
 
+// #define PATH_CACHE_EARLY_INIT
+
+  // a map to cache the path from src memory to dst memory. 
+  //  the key is the pair of src and dst memory id. 
+  //  the value is a LRU. 
+  //  The LRU is indexed by LRUKey, the value is MemPathInfo
+  static std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *> path_cache;
+
+  // a RWLock to control the access to the path_cache
+  static RWLock path_cache_rwlock;
+  static bool path_cache_inited = false;
+
+  // counters for calculating cache misses and hits
+  atomic<unsigned int> nb_cache_miss(0);
+  atomic<unsigned int> nb_cache_hit(0);
+
+  // The path cache initialization function, which is called by 
+  //   RuntimeImpl::configure_from_command_line
+  void init_path_cache(void)
+  {
+    assert(path_cache_inited == false);
+#ifdef PATH_CACHE_EARLY_INIT
+    std::vector<Memory> memories;
+    Machine machine = Machine::get_machine();
+    for(Machine::MemoryQuery::iterator it = Machine::MemoryQuery(machine).begin(); it; ++it) {
+      Memory m = *it;
+      memories.push_back(m);
+    }
+    for(std::vector<Memory>::const_iterator src_it = memories.begin(); src_it != memories.end(); ++src_it) {
+      for(std::vector<Memory>::const_iterator dst_it = memories.begin(); dst_it != memories.end(); ++dst_it) {
+        std::pair<realm_id_t, realm_id_t> key((*src_it).id, (*dst_it).id);
+        if (path_cache.find(key) != path_cache.end()) {
+          assert(0);
+        }
+        PathLRU *lru = new PathLRU(Config::path_cache_lru_size);
+        path_cache[key] = lru;
+      }
+    }
+#endif
+    path_cache_inited = true;
+    nb_cache_miss.store_release(0);
+    nb_cache_hit.store_release(0);
+  }
+
+  // The path cache finalize function, which is called by
+  //   RuntimeImpl::wait_for_shutdown
+  void finalize_path_cache(void)
+  {
+    assert(path_cache_inited == true);
+    log_xpath_cache.info() << "Cache Miss: " << nb_cache_miss.load_fenced() << " Cache Hit: " << nb_cache_hit.load_fenced();
+    std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *>::iterator it;
+    for (it = path_cache.begin(); it != path_cache.end(); it++) {
+      delete it->second;
+    }
+    path_cache.clear();
+    path_cache_inited = false;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PathLRU::LRUKey
+
+  PathLRU::LRUKey::LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id, 
+                          const size_t total_bytes, 
+                          const std::vector<size_t> src_frags, 
+                          const std::vector<size_t> dst_frags)
+  : timestamp(0), serdez_id(serdez_id), redop_id(redop_id), total_bytes(total_bytes), 
+    src_frags(src_frags), dst_frags(dst_frags)
+  {
+  }
+
+  bool PathLRU::LRUKey::operator==(const LRUKey &rhs) const 
+  {
+    if ( (serdez_id == rhs.serdez_id) && (redop_id == rhs.redop_id) && 
+         (total_bytes == rhs.total_bytes) && 
+         (src_frags == rhs.src_frags) && (dst_frags == rhs.dst_frags)) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  std::ostream& operator<<(std::ostream& out, const PathLRU::LRUKey& lru_key)
+  {
+    out << "LRUKey:{";
+    out << " serdez_id: " << lru_key.serdez_id;
+    out << " redop_id: " << lru_key.redop_id;
+    out << " size: " << lru_key.total_bytes;
+    out << " src_frags:(";
+    for (size_t i = 0; i < lru_key.src_frags.size(); i++) {
+      out << lru_key.src_frags[i] << ",";
+    }
+    out << ")";
+    out << " dst_frags:(";
+    for (size_t i = 0; i < lru_key.dst_frags.size(); i++) {
+      out << lru_key.dst_frags[i] << ",";
+    }
+    out << ") }";
+    return out;
+  }
+
+  std::ostream& operator<<(std::ostream& out, const MemPathInfo& info)
+  {
+    out << "MemPathInfo:{ ";
+    for (size_t i = 0; i < info.path.size(); i++) {
+      out << "Mem:" << info.path[i] << " kind:" << info.path[i].kind() << " ";
+    }
+    for (size_t i = 0; i < info.xd_channels.size(); i++) {
+      out << "Channel:" << info.xd_channels[i]->kind << " ";
+    }
+    out << "}";
+    return out;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PathLRU
+
+  PathLRU::PathLRU(size_t size)
+  : max_size(size), timestamp(0)
+  {
+  }
+
+  void PathLRU::miss(LRUKey &key, const MemPathInfo &path)
+  {
+    unsigned long current_timestamp = timestamp.fetch_add_acqrel(1);
+    assert(current_timestamp <= ULONG_MAX);
+    // get the current timestamp and assign it to the lru key
+    key.timestamp.store_release(current_timestamp);
+    std::pair<LRUKey,MemPathInfo> item = std::make_pair(key, path);
+    if (item_list.size() < max_size) {
+      // if the LRU not full, we just insert the item
+      item_list.push_back(item);
+    } else {
+      // if the LRU is full, we need to iterate the LRU to find 
+      //   the item that has the earliest timestamp, and replace 
+      //   it with the new item
+      assert(item_list.size() == max_size);
+      size_t earliest_idx = 0;
+      unsigned long earliest_timestamp = item_list[earliest_idx].first.timestamp.load(); 
+      for (size_t i = 0; i < item_list.size(); i++) {
+        unsigned long t = item_list[i].first.timestamp.load();
+        if (t < earliest_timestamp) {
+        earliest_timestamp = t;
+        earliest_idx = i;
+        }
+      }
+      // log_xpath_cache.debug() << "Cache full, remove LRUKey: " << item_list[earliest_idx].first;
+      item_list[earliest_idx] = item;
+    }
+  }
+
+  void PathLRU::hit(PathLRU::PathLRUIterator it)
+  {
+    unsigned long current_timestamp = timestamp.fetch_add_acqrel(1);
+    assert(current_timestamp <= ULONG_MAX);
+    // update the timestamp of the lru key with the newest one.   
+    //   When 2 threads calls the hit, even though we can not guarantee that
+    //   it->first.timestamp gets the latest timestamp, but it is fine
+    //   because it->first.timestamp > timestamps of other items in the LRU,
+    //   which guarantees the correctness of LRU.
+    it->first.timestamp.store_release(current_timestamp);
+  }
+
+  PathLRU::PathLRUIterator PathLRU::find(const PathLRU::LRUKey &key)
+  {
+    PathLRUIterator it;
+    for (it = item_list.begin(); it != item_list.end(); it++) {
+      if (it->first == key) break;
+    }
+    return it;
+  }
+
+  PathLRU::PathLRUIterator PathLRU::end(void)
+  {
+    return item_list.end();
+  }
+
   static bool find_fastest_path(Memory src_mem, Memory dst_mem,
                                 CustomSerdezID serdez_id,
                                 ReductionOpID redop_id,
@@ -2523,6 +2707,48 @@ namespace Realm {
                      << " bytes=" << total_bytes
                      << " frags=" << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec))
                      << "/" << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
+
+    if (path_cache_inited) {
+      std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
+      PathLRU *lru = nullptr;
+#ifdef PATH_CACHE_EARLY_INIT
+      std::map<std::pair<realm_id_t, realm_id_t>, PathLRU *>::iterator path_cache_it;
+      path_cache_it = path_cache.find(key);
+      assert(path_cache_it != path_cache.end());
+      lru = path_cache_it->second;
+#else
+      {
+        // first check if the key is existed, if not create a PathLRU for the given key
+        RWLock::AutoReaderLock arl(path_cache_rwlock);
+        if (path_cache.find(key) == path_cache.end()) {
+          // drop reader lock and take writer lock
+          arl.release();
+          RWLock::AutoWriterLock awl(path_cache_rwlock);
+          // double check if the key is existed because it could be created by 
+          //   another thread before we get the wrlock. 
+          if (path_cache.find(key) == path_cache.end()) {
+            path_cache[key] = new PathLRU(Config::path_cache_lru_size);
+          }
+        }
+        lru = path_cache.find(key)->second;
+      }
+#endif
+      assert(lru != nullptr);
+      // check if we can find the LRU key inside the LRU. If yes, we call the hit
+      {
+        PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+        RWLock::AutoReaderLock arl(lru->rwlock);
+        PathLRU::PathLRUIterator lru_it = lru->find(lru_key);
+        if (lru_it != lru->end()) {
+          info = lru_it->second;
+          lru->hit(lru_it);
+          nb_cache_hit.fetch_add(1);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Hit";
+          arl.release();
+          return true;
+        }
+      }
+    }
 
     // baseline - is a direct path possible?
     uint64_t best_cost = 0;
@@ -2663,6 +2889,26 @@ namespace Realm {
             info.xd_channels.push_back(channel);
           }
         }
+      }
+    }
+
+    if (path_cache_inited) {
+      std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
+      PathLRU *lru = path_cache.find(key)->second;
+      PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+      // the LRU key is not in the LRU, now we cache it
+      {
+        RWLock::AutoWriterLock awl(lru->rwlock);
+        // double check if lru key is already put in the LRU by another thread
+        PathLRU::PathLRUIterator lru_it = lru->find(lru_key);
+        if (lru_it != lru->end()) {
+          lru->hit(lru_it);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Miss-Hit";
+        } else {
+          lru->miss(lru_key, info);
+          log_xpath_cache.debug() << "src:" << src_mem << ", dst:" << dst_mem << ", " << info << ", " << lru_key << ", Miss";
+        }
+        nb_cache_miss.fetch_add(1);
       }
     }
 

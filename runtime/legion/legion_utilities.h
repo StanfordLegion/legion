@@ -194,12 +194,6 @@ namespace Legion {
       template<unsigned int MAX>
       inline void deserialize(PPCTLBitMask<MAX> &mask);
 #endif
-#ifdef __ALTIVEC__
-      template<unsigned int MAX>
-      inline void deserialize(PPCBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(PPCTLBitMask<MAX> &mask);
-#endif
 #ifdef __ARM_NEON
       template<unsigned int MAX>
       inline void deserialize(NeonBitMask<MAX> &mask);

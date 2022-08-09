@@ -496,7 +496,7 @@ namespace Realm {
       hip_Memcpy2D copy_info;
 
       // peer memory counts as DEVICE here
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
       copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
         CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
       copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ?
@@ -584,7 +584,7 @@ namespace Realm {
       //  consider specialized kernels in the future
 
       if(((src_pstride % src_stride) == 0) && ((dst_pstride % dst_stride) == 0)) {
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
         cudaMemcpyKind copy_type;
         if (kind == GPU_MEMCPY_PEER_TO_PEER) {
           // If we're doing peer to peer, just let unified memory it deal with it
@@ -998,7 +998,7 @@ namespace Realm {
         copy_info.srcPtr = make_hipPitchedPtr((void*)dst, dst_stride, bytes, dst_pstride / dst_stride);
         copy_info.srcPos = make_hipPos(0,0,0);
         copy_info.dstPos = make_hipPos(0,0,0);
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
         copy_info.kind = cudaMemcpyDeviceToDevice;
 #else
         copy_info.kind = hipMemcpyDeviceToDevice;

@@ -21,6 +21,7 @@
 #include "realm/logging.h"
 #include "realm/cmdline.h"
 #include "realm/event_impl.h"
+#include "realm/idx_impl.h"
 
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
@@ -2420,6 +2421,47 @@ namespace Realm {
       }
     }
 
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    ExternalInstanceResource *GPUFBMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                                                  const IndexSpaceGeneric *subspace,
+                                                                  span<const FieldID> fields,
+                                                                  bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base, extent;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+        extent = ilg->bytes_used;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+        extent = limit - rel_base;
+      }
+
+      uintptr_t abs_base = (this->base + inst->metadata.inst_offset + rel_base);
+
+      return new ExternalCudaMemoryResource(gpu->info->index,
+                                            abs_base, extent, read_only);
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -2616,6 +2658,47 @@ namespace Realm {
       if(ms) {
         ms->array = 0;
       }
+    }
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    ExternalInstanceResource *GPUDynamicFBMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                                                         const IndexSpaceGeneric *subspace,
+                                                                         span<const FieldID> fields,
+                                                                         bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base, extent;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+        extent = ilg->bytes_used;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+        extent = limit - rel_base;
+      }
+
+      uintptr_t abs_base = (inst->metadata.inst_offset + rel_base);
+
+      return new ExternalCudaMemoryResource(gpu->info->index,
+                                            abs_base, extent, read_only);
     }
 
 

@@ -476,6 +476,32 @@ namespace Realm {
       destroy(wait_on);
     }
 
+    // it is sometimes useful to re-register an existing instance (in whole or
+    //  in part) as an "external" instance (e.g. to provide a different view
+    //  on the same bits) - this hopefully gives an ExternalInstanceResource *
+    //  (which must be deleted by the caller) that corresponds to this instance
+    //  but may return a null pointer for instances that do not support
+    //  re-registration
+    ExternalInstanceResource *RegionInstance::generate_resource_info(bool read_only) const
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return mem_impl->generate_resource_info(inst_impl,
+					      0, span<const FieldID>(),
+					      read_only);
+    }
+
+    ExternalInstanceResource *RegionInstance::generate_resource_info(const IndexSpaceGeneric& space,
+								     span<const FieldID> fields,
+								     bool read_only) const
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return mem_impl->generate_resource_info(inst_impl,
+					      &space, fields,
+					      read_only);
+    }
+
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
 
     // before you can get an instance's index space or construct an accessor for
