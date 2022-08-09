@@ -7826,8 +7826,10 @@ namespace Legion {
       log_eager.info("create an eager pool of size %lld on memory " IDFMT,
                      eager_pool_size, memory.id);
       const DomainT<1,coord_t> bounds(Rect<1>(0,Point<1>(eager_pool_size - 1)));
+      const std::vector<Realm::FieldID> field_ids(1,0/*fid*/);
       const std::vector<size_t> field_sizes(1,sizeof(char));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes, 
+                                                   0/*blocking*/);
       int dim_order[] = {0};
       Realm::InstanceLayoutGeneric *layout =
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
@@ -10716,16 +10718,15 @@ namespace Legion {
 
       if (allocated)
       {
-        const Point<1> start(eager_pool + offset);
+        const Point<1> start(offset);
         const Point<1> stop(start[0] + size - 1);
         const Rect<1> bounds(start, stop);
         Realm::ExternalInstanceResource *external_resource = 
-          eager_pool_instance.generate_resource_info(DomainT<1>(bounds),
-              0/*fid*/, false/*read only*/);
+          eager_pool_instance.generate_resource_info(
+              Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
         Realm::ProfilingRequestSet no_requests;
         wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
-              instance, external_resource->suggested_memory(),
-              layout, *external_resource, no_requests));
+              instance, memory, layout, *external_resource, no_requests));
         delete external_resource;
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
