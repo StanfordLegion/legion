@@ -4382,7 +4382,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
@@ -4396,7 +4396,7 @@ namespace Legion {
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -8210,7 +8210,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
@@ -8224,7 +8224,7 @@ namespace Legion {
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
