@@ -5828,12 +5828,16 @@ namespace Legion {
         }
       }
       else
+#else
+      const unsigned offset = indirections.size();
 #endif
       {
         // Now that we have the non-empty indexes we can go through and make
         // the indirections for each of the fields. We'll try to share 
         // indirections as much as possible wherever we can
+#ifndef LEGION_SPY
         const unsigned offset = indirections.size(); 
+#endif
         for (unsigned fidx = 0; fidx < fields.size(); fidx++)
         {
           // Compute our physical instances for this field
