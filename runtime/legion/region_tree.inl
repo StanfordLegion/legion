@@ -5305,6 +5305,7 @@ namespace Legion {
                 indirections.begin(); it != indirections.end(); it++)
             delete (*it);
           indirections.clear();
+          individual_field_indexes.clear();
         }
         has_empty_preimages = false;
         // Prune preimages if necessary
@@ -5415,10 +5416,13 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
+      const unsigned total_copies =
+        individual_field_indexes.empty() ? 1 : individual_field_indexes.size();
       if (op != NULL)
-        op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
+        op->add_copy_profiling_request(trace_info, requests,
+                                       false/*fill*/, total_copies);
       if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, op);
+        runtime->profiler->add_copy_request(requests, op, total_copies);
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations
@@ -5450,8 +5454,14 @@ namespace Legion {
                           realm_dst_fields, requests, pred_pre));
 #else
         if (!indirections.empty())
-          last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields, 
-                            dst_fields, indirections, requests, pred_pre));
+        {
+          if (!individual_field_indexes.empty())
+            last_copy = Runtime::ignorefaults(
+                issue_individual_copies(pred_pre, requests));
+          else
+            last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields, 
+                              dst_fields, indirections, requests, pred_pre));
+        }
         else
           last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields,
                             dst_fields, requests, pred_pre));
@@ -5473,8 +5483,13 @@ namespace Legion {
                 realm_dst_fields, requests, copy_precondition));
 #else
         if (!indirections.empty())
-          last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
-                indirections, requests, copy_precondition));
+        {
+          if (!individual_field_indexes.empty())
+            last_copy = issue_individual_copies(copy_precondition, requests);
+          else
+            last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
+                  indirections, requests, copy_precondition));
+        }
         else
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
                 requests, copy_precondition));
@@ -5535,6 +5550,49 @@ namespace Legion {
         src_indirect_immutable_for_tracing = true;
       else
         dst_indirect_immutable_for_tracing = true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent CopyAcrossUnstructuredT<DIM,T>::issue_individual_copies(
+                                     const ApEvent precondition,
+                                     const Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(compute_preimages);
+#endif
+      // This is the case of separate gather/scatter copies for each 
+      // of the individual preimages
+      const bool gather = current_dst_preimages.empty();
+#ifdef DEBUG_LEGION
+      // Should be either a gather or a scatter, but not both
+      assert(current_src_preimages.empty() != gather);
+#endif
+      // Issue separate copies for each preimage
+      std::vector<DomainT<DIM,T> > &preimages = 
+        gather ? current_src_preimages : current_dst_preimages;
+      std::vector<CopySrcDstField> &fields = gather ? src_fields : dst_fields;
+#ifdef DEBUG_LEGION
+      assert(preimages.size() == individual_field_indexes.size());
+#endif
+      std::vector<ApEvent> postconditions;
+      for (unsigned idx = 0; idx < preimages.size(); idx++)
+      {
+#ifdef DEBUG_LEGION
+        assert(fields.size() == individual_field_indexes[idx].size());
+#endif
+        // Setup the indirect field indexes
+        for (unsigned fidx = 0; fidx < fields.size(); fidx++)
+          fields[fidx].indirect_index = individual_field_indexes[idx][fidx];
+        const ApEvent post(preimages[idx].copy(src_fields, dst_fields, 
+                                indirections, requests, precondition));
+        if (post.exists())
+          postconditions.push_back(post);
+      }
+      if (postconditions.empty())
+        return ApEvent::NO_AP_EVENT;
+      return Runtime::merge_events(NULL, postconditions);
     }
 #endif // defined(DEFINE_NT_TEMPLATES)
 
@@ -5693,98 +5751,171 @@ namespace Legion {
         for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
           nonempty_indexes[idx] = idx;
       }
+      typedef typename Realm::CopyIndirection<D1,T1>::template 
+                Unstructured<D2,T2> UnstructuredIndirection;
       // Legion Spy doesn't understand preimages, so go through and build
       // indirections for everything even if we are empty
 #ifndef LEGION_SPY
       if (nonempty_indexes.empty())
         return true;
-#endif
-      // Now that we have the non-empty indexes we can go through and make
-      // the indirections for each of the fields. We'll try to share 
-      // indirections as much as possible wherever we can
-      const unsigned offset = indirections.size();
-      typedef typename Realm::CopyIndirection<D1,T1>::template 
-            Unstructured<D2,T2> UnstructuredIndirection;
-      for (unsigned fidx = 0; fidx < fields.size(); fidx++)
+      if (compute_preimages && 
+          (source ? dst_indirections.empty() : src_indirections.empty()))
       {
-        // Compute our physical instances for this field
-#ifdef LEGION_SPY
-        std::vector<PhysicalInstance> instances(indirect_records.size());
-        for (unsigned idx = 0; idx < indirect_records.size(); idx++)
-          instances[idx] = indirect_records[idx].instances[fidx];
-#else
-        std::vector<PhysicalInstance> instances(nonempty_indexes.size());
+        // In the case that we've computed preimages, and we know we're just
+        // doing a gather or a scatter (no full-indirections), then we 
+        // instead want to compute separate indirections for each 
+        // non-empty preimage because Realm's performance is better when
+        // you have a single source or destination target for an indirection
+        // Note we don't bother doing this with legion spy since it doesn't
+        // know how to analyze these anyway
+        individual_field_indexes.resize(nonempty_indexes.size());
+        // Iterate over the non empty indexes and get instances for each field
         for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
-          instances[idx] =
-            indirect_records[nonempty_indexes[idx]].instances[fidx];
-#endif
-        // See if there is an unstructured index which already does what we want
-        int indirect_index = -1;
-        // Search through all the existing copy indirections starting from
-        // the offset and check to see if we can reuse them
-        for (unsigned index = offset; index < indirections.size(); index++)
         {
-          // It's safe to cast here because we know that the same types
-          // made all these indirections as well
-          const UnstructuredIndirection *unstructured = 
-            static_cast<const UnstructuredIndirection*>(indirections[index]);
-#ifdef DEBUG_LEGION
-          assert(unstructured->inst == 
-              (source ? src_indirect_instance : dst_indirect_instance));
-          assert(unsigned(unstructured->field_id) == 
-              (source ? src_indirect_field : dst_indirect_field));
-          assert(unstructured->insts.size() == instances.size());
-#endif
-          bool instances_match = true;
-          for (unsigned idx = 0; idx < instances.size(); idx++)
+          const unsigned nonempty_index = nonempty_indexes[idx];
+          std::vector<unsigned> &field_indexes = individual_field_indexes[idx];
+          field_indexes.resize(fields.size());
+          const unsigned offset = indirections.size();
+          for (unsigned fidx = 0; fidx < fields.size(); fidx++)
           {
-            if (unstructured->insts[idx] == instances[idx])
+            const PhysicalInstance instance =
+              indirect_records[nonempty_index].instances[fidx];
+            // See if there is an unstructured index for this instance
+            int indirect_index = -1;
+            for (unsigned index = offset; index < indirections.size(); index++)
+            {
+              // It's safe to cast here because we know that the same types
+              // made all these indirections as well
+              const UnstructuredIndirection *unstructured = 
+               static_cast<const UnstructuredIndirection*>(indirections[index]);
+#ifdef DEBUG_LEGION
+              assert(unstructured->inst == 
+                  (source ? src_indirect_instance : dst_indirect_instance));
+              assert(unsigned(unstructured->field_id) == 
+                  (source ? src_indirect_field : dst_indirect_field));
+              assert(unstructured->insts.size() == 1);
+#endif
+              if (unstructured->insts.back() != instance)
+                continue;
+              indirect_index = index;
+              break;
+            }
+            if (indirect_index < 0)
+            {
+              // If we didn't make it then make it now
+              UnstructuredIndirection *unstructured =
+                new UnstructuredIndirection();
+              unstructured->field_id = 
+                source ? src_indirect_field : dst_indirect_field;
+              unstructured->inst = 
+                source ? src_indirect_instance : dst_indirect_instance;
+              unstructured->is_ranges = both_are_range;
+              unstructured->oor_possible = false; 
+              unstructured->aliasing_possible =
+                source ? false/*no aliasing*/ : possible_dst_aliasing;
+              unstructured->subfield_offset = 0;
+              unstructured->insts.push_back(instance);
+              unstructured->spaces.resize(1);
+              unstructured->spaces.back() =
+                indirect_records[nonempty_index].domain;
+              // No next indirections yet...
+              unstructured->next_indirection = NULL;
+              indirect_index = indirections.size();
+              indirections.push_back(unstructured);
+            }
+            field_indexes[fidx] = indirect_index;
+          }
+        }
+      }
+      else
+#endif
+      {
+        // Now that we have the non-empty indexes we can go through and make
+        // the indirections for each of the fields. We'll try to share 
+        // indirections as much as possible wherever we can
+        const unsigned offset = indirections.size(); 
+        for (unsigned fidx = 0; fidx < fields.size(); fidx++)
+        {
+          // Compute our physical instances for this field
+#ifdef LEGION_SPY
+          std::vector<PhysicalInstance> instances(indirect_records.size());
+          for (unsigned idx = 0; idx < indirect_records.size(); idx++)
+            instances[idx] = indirect_records[idx].instances[fidx];
+#else
+          std::vector<PhysicalInstance> instances(nonempty_indexes.size());
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+            instances[idx] =
+              indirect_records[nonempty_indexes[idx]].instances[fidx];
+#endif
+          // See if there is an unstructured index which already is what we want
+          int indirect_index = -1;
+          // Search through all the existing copy indirections starting from
+          // the offset and check to see if we can reuse them
+          for (unsigned index = offset; index < indirections.size(); index++)
+          {
+            // It's safe to cast here because we know that the same types
+            // made all these indirections as well
+            const UnstructuredIndirection *unstructured = 
+              static_cast<const UnstructuredIndirection*>(indirections[index]);
+#ifdef DEBUG_LEGION
+            assert(unstructured->inst == 
+                (source ? src_indirect_instance : dst_indirect_instance));
+            assert(unsigned(unstructured->field_id) == 
+                (source ? src_indirect_field : dst_indirect_field));
+            assert(unstructured->insts.size() == instances.size());
+#endif
+            bool instances_match = true;
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              if (unstructured->insts[idx] == instances[idx])
+                continue;
+              instances_match = false;
+              break;
+            }
+            if (!instances_match)
               continue;
-            instances_match = false;
+            // If we made it here we can reuse this indirection
+            indirect_index = index;
             break;
           }
-          if (!instances_match)
-            continue;
-          // If we made it here we can reuse this indirection
-          indirect_index = index;
-          break;
-        }
-        if (indirect_index < 0)
-        {
-          // If we didn't make it then make it now
-          UnstructuredIndirection *unstructured = new UnstructuredIndirection();
-          unstructured->field_id = 
-            source ? src_indirect_field : dst_indirect_field;
-          unstructured->inst = 
-            source ? src_indirect_instance : dst_indirect_instance;
-          unstructured->is_ranges = both_are_range;
-          unstructured->oor_possible = 
-            source ? possible_src_out_of_range : possible_dst_out_of_range;
-          unstructured->aliasing_possible = 
-            source ? false/*no aliasing*/ : possible_dst_aliasing;
-          unstructured->subfield_offset = 0;
-          unstructured->insts.swap(instances);
-          unstructured->spaces.resize(nonempty_indexes.size());
-          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
-            unstructured->spaces[idx] =
-              indirect_records[nonempty_indexes[idx]].domain;
-          // No next indirections yet...
-          unstructured->next_indirection = NULL;
-          indirect_index = indirections.size();
-          indirections.push_back(unstructured);
+          if (indirect_index < 0)
+          {
+            // If we didn't make it then make it now
+            UnstructuredIndirection *unstructured =
+              new UnstructuredIndirection();
+            unstructured->field_id = 
+              source ? src_indirect_field : dst_indirect_field;
+            unstructured->inst = 
+              source ? src_indirect_instance : dst_indirect_instance;
+            unstructured->is_ranges = both_are_range;
+            unstructured->oor_possible = compute_preimages ? false :
+              source ? possible_src_out_of_range : possible_dst_out_of_range;
+            unstructured->aliasing_possible =
+              source ? false/*no aliasing*/ : possible_dst_aliasing;
+            unstructured->subfield_offset = 0;
+            unstructured->insts.swap(instances);
+            unstructured->spaces.resize(nonempty_indexes.size());
+            for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+              unstructured->spaces[idx] =
+                indirect_records[nonempty_indexes[idx]].domain;
+            // No next indirections yet...
+            unstructured->next_indirection = NULL;
+            indirect_index = indirections.size();
+            indirections.push_back(unstructured);
 #ifdef LEGION_SPY
-          // If we made a new indirection then log it with Legion Spy
-          LegionSpy::log_indirect_instance(unique_indirections_identifier,
-              indirect_index, source ? src_indirect_instance_event :
-              dst_indirect_instance_event, unstructured->field_id);
-          for (std::vector<IndirectRecord>::const_iterator it =
-                indirect_records.begin(); it != indirect_records.end(); it++)
-            LegionSpy::log_indirect_group(unique_indirections_identifier,
-                indirect_index, it->instance_events[fidx], 
-                it->index_space.get_id());
+            // If we made a new indirection then log it with Legion Spy
+            LegionSpy::log_indirect_instance(unique_indirections_identifier,
+                indirect_index, source ? src_indirect_instance_event :
+                dst_indirect_instance_event, unstructured->field_id);
+            for (std::vector<IndirectRecord>::const_iterator it =
+                  indirect_records.begin(); it != indirect_records.end(); it++)
+              LegionSpy::log_indirect_group(unique_indirections_identifier,
+                  indirect_index, it->instance_events[fidx], 
+                  it->index_space.get_id());
 #endif
+          }
+          fields[fidx].indirect_index = indirect_index;
         }
-        fields[fidx].indirect_index = indirect_index;
       }
 #ifdef LEGION_SPY
       if (compute_preimages)
