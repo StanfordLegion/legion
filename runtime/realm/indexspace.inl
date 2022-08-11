@@ -49,6 +49,25 @@ namespace Realm {
     return (transform * point) + offset;
   }
 
+  template <int M, int N, typename T>
+  inline bool AffineTransform<M, N, T>::dense() const {
+    if (M != N) return false;
+
+    for (int i = 0; i < M; i++) {
+      int count = 0;
+      for (int j = 0; j < N; j++)
+        if (transform[i][j] == 1) count++;
+      for (int j = 0; j < N; j++) {
+        if (i == j) {
+          if (transform[i][j] != 1 && count != 1) return false;
+        } else {
+          if (transform[i][j] != 0 && count != 1) return false;
+        }
+      }
+    }
+    return true;
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class Rect<N,T>

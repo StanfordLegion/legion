@@ -2275,6 +2275,7 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
         transpose.transform[i][j] = (i == N1 - j - 1);
       }
     }
+
     transpose.offset = Point<N2, T2>::ZEROES();
     for (int i = 0; i < N2; i++) {
       transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
@@ -2304,7 +2305,7 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
       }
     }
     scale.offset = Point<N2, T2>::ZEROES();
-    scale.is_dense = false;
+    //scale.is_dense = false;
     transforms.push_back(scale);
   }
 
@@ -2317,7 +2318,7 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
       shear.transform[i][i + 1] = 1;
     }
     shear.offset = Point<N2, T2>::ZEROES();
-    shear.is_dense = false;
+   // shear.is_dense = false;
     transforms.push_back(shear);
   }
 

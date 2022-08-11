@@ -97,7 +97,7 @@ namespace Realm {
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
 
-    bool dense() const { return is_dense; }
+    bool dense() const;
 
     bool is_dense = true;
     Realm::Matrix<M, N, T> transform;
