@@ -139,8 +139,9 @@ namespace Realm {
 
   void ExternalCudaMemoryResource::print(std::ostream& os) const
   {
-    os << "cudamem(base=" << std::hex << base << std::dec;
-    os << ", size=" << size_in_bytes;
+    os << "cudamem(dev=" << cuda_device_id
+       << ", base=" << std::hex << base << std::dec
+       << ", size=" << size_in_bytes;
     if(read_only)
       os << ", readonly";
     os << ")";
@@ -190,6 +191,67 @@ namespace Realm {
   }
 
   /*static*/ Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalCudaArrayResource> ExternalCudaArrayResource::serdez_subclass;
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalCudaPinnedHostResource
+  //
+
+  ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource()
+  {}
+
+  ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(uintptr_t _base,
+                                                                 size_t _size_in_bytes,
+                                                                 bool _read_only)
+    : ExternalMemoryResource(_base, _size_in_bytes, _read_only)
+  {}
+
+  ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(void *_base,
+                                                                 size_t _size_in_bytes)
+    : ExternalMemoryResource(_base, _size_in_bytes)
+  {}
+
+  ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(const void *_base,
+                                                                 size_t _size_in_bytes)
+    : ExternalMemoryResource(_base, _size_in_bytes)
+  {}
+
+  // returns the suggested memory in which this resource should be created
+  Memory ExternalCudaPinnedHostResource::suggested_memory() const
+  {
+    // do we have a cuda module and does it have a zcmem?
+    Cuda::CudaModule *mod = get_runtime()->get_module<Cuda::CudaModule>("cuda");
+    if(mod && mod->zcmem) {
+      // can't use the zcmem if it's registered and we aren't in the segment
+      if(mod->zcmem->segment && mod->zcmem->segment->is_registered() &&
+         !mod->zcmem->segment->in_segment(base, size_in_bytes)) {
+        log_gpu.info() << "memory " << mod->zcmem->me << " is unsuitable for external instances because it is registered with one or more networks";
+      } else {
+        return mod->zcmem->me;
+      }
+    }
+
+    // fall through to ExternalMemoryResource, which should suggest a normal
+    //  sysmem (i.e. one with no affinity to gpu procs)
+    return ExternalMemoryResource::suggested_memory();
+  }
+
+  ExternalInstanceResource *ExternalCudaPinnedHostResource::clone(void) const
+  {
+    return new ExternalCudaPinnedHostResource(base, size_in_bytes, read_only);
+  }
+
+  void ExternalCudaPinnedHostResource::print(std::ostream& os) const
+  {
+    os << "cudahost(base=" << std::hex << base << std::dec;
+    os << ", size=" << size_in_bytes;
+    if(read_only)
+      os << ", readonly";
+    os << ")";
+  }
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalCudaPinnedHostResource> ExternalCudaPinnedHostResource::serdez_subclass;
 
 
 }; // namespace Realm

@@ -192,4 +192,31 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ExternalCudaPinnedHostResource
+
+  template <typename S>
+  bool ExternalCudaPinnedHostResource::serialize(S& s) const
+  {
+    return ((s << base) &&
+            (s << size_in_bytes) &&
+	    (s << read_only));
+  }
+
+  template <typename S>
+  /*static*/ ExternalInstanceResource *ExternalCudaPinnedHostResource::deserialize_new(S& s)
+  {
+    uintptr_t base;
+    size_t size_in_bytes;
+    bool read_only;
+    if((s >> base) &&
+       (s >> size_in_bytes) &&
+       (s >> read_only))
+      return new ExternalCudaPinnedHostResource(base, size_in_bytes, read_only);
+    else
+      return 0;
+  }
+
+
 }; // namespace Realm
