@@ -2623,6 +2623,21 @@ namespace Legion {
         std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
       };
     public:
+      struct PendingCollective {
+      public:
+        PendingCollective(CollectiveView *refined, CollectiveView *refining);
+        PendingCollective(CollectiveView *refined, CollectiveView *refining,
+                          const std::set<IndividualView*> &excluded);
+        PendingCollective(CollectiveView *refining,
+                          const std::vector<DistributedID> &refined_instances);
+      public:
+        // The new collective view we're refining for (can be NULL)
+        CollectiveView *refined;
+        // The old collective view we're refining (can be NULL)
+        CollectiveView *refining;
+        std::vector<DistributedID> instances;
+      };
+    public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
@@ -2779,12 +2794,14 @@ namespace Legion {
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                                  ReferenceMutator &mutator,
+                            const bool check_collectives = true);
       template<typename T>
       void record_unrestricted_instances(IndexSpaceExpression *expr,
                             const bool expr_covers, FieldMask record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                                  ReferenceMutator &mutator,
+                            const bool check_collectives = true);
       bool record_partial_valid_instance(LogicalView *instance,
                                          IndexSpaceExpression *expr,
                                          FieldMask valid_mask,
@@ -2924,6 +2941,21 @@ namespace Legion {
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     protected:
+      template<typename T>
+      bool refine_collective_views(const FieldMaskSet<T> &views,
+                                   FieldMaskSet<T> &refined_views);
+      template<typename T>
+      bool find_collective_interfering(CollectiveView *collective,
+          const std::vector<DistributedID> &instances,
+          const FieldMask &overlap, bool &dominated, bool &refined, 
+          FieldMaskSet<PendingCollective> &overlapping_refinements,
+          FieldMaskSet<PendingCollective> &independent_refinements,
+          FieldMaskSet<PendingCollective> &new_remainders,
+          FieldMaskSet<T> &overlapping_views) const;
+      void find_individual_interfering(const FieldMask &mask,
+          const std::vector<DistributedID> &instances,
+          FieldMaskSet<IndividualView> &interfering) const;
+    protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
                                std::set<RtEvent> &applied_events, bool covers);
@@ -3048,6 +3080,21 @@ namespace Legion {
       FieldMask                                         restricted_fields;
       // List of instances that were restricted, but have been acquired
       ExprViewMaskSets                                  released_instances;
+      // The names of any collective views we have resident
+      // The crucial invariant here is that each actual physical instance
+      // can appear in at most a single view (collective or otherwise) for
+      // each field in order to avoid aliasing and duplication which can 
+      // result in unsoundness (in the case of reductions) or imprecision
+      // Note that this data structure must be sound in that it must contain
+      // all the collective views currently referenced by the equivalence set
+      // but it can also overapproximate. Periodically we will check to the
+      // set to prune out any collective views not currently in use. We do
+      // this infrequently though to ensure that we can get some reuse of
+      // collective view checks across uses. The pruning though also allows
+      // for coarsening of instances back into coarser views.
+      FieldMaskSet<CollectiveView>                      collective_instances;
+      unsigned                                          collective_timeout;
+      static constexpr unsigned COLLECTIVE_CACHE_TIMEOUT = 1024; 
     protected:
       // Tracing state for this equivalence set
       TraceViewSet                                      *tracing_preconditions;
@@ -3081,9 +3128,9 @@ namespace Legion {
       // are only used be a small number of nodes that is less than
       // the samples per migration count, if it ever exceeds this 
       // then we'll issue a warning
-      static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      static constexpr unsigned SAMPLES_PER_MIGRATION_TEST = 64;
       // How many total epochs we want to remember
-      static const unsigned MIGRATION_EPOCHS = 2;
+      static constexpr unsigned MIGRATION_EPOCHS = 2;
       std::vector<std::pair<AddressSpaceID,unsigned> > 
         user_samples[MIGRATION_EPOCHS];
       unsigned migration_index;

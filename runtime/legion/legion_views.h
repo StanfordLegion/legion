@@ -381,6 +381,7 @@ namespace Legion {
       CollectiveView(RegionTreeForest *ctx, DistributedID did,
                      AddressSpaceID owner_proc, UniqueID owner_context, 
                      const std::vector<IndividualView*> &views,
+                     const std::vector<DistributedID> &instances,
                      bool register_now, CollectiveMapping *mapping); 
       virtual ~CollectiveView(void);
     public:
@@ -499,6 +500,8 @@ namespace Legion {
       static void handle_nearest_instances_request(Runtime *runtime,
                                                    Deserializer &derez);
       static void handle_nearest_instances_response(Deserializer &derez);
+    public:
+      const std::vector<DistributedID> instances;
     protected:
       const std::vector<IndividualView*> local_views;
     protected:
@@ -1045,6 +1048,7 @@ namespace Legion {
       ReplicatedView(RegionTreeForest *ctx, DistributedID did,
                      AddressSpaceID owner_proc, UniqueID owner_context, 
                      const std::vector<IndividualView*> &views,
+                     const std::vector<DistributedID> &instances,
                      bool register_now, CollectiveMapping *mapping);
       ReplicatedView(const ReplicatedView &rhs) = delete;
       virtual ~ReplicatedView(void);
@@ -1256,6 +1260,7 @@ namespace Legion {
       AllreduceView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, UniqueID owner_context, 
                     const std::vector<IndividualView*> &views,
+                    const std::vector<DistributedID> &instances,
                     bool register_now, CollectiveMapping *mapping,
                     ReductionOpID redop_id); 
       AllreduceView(const AllreduceView &rhs) = delete;

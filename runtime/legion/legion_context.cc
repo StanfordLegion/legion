@@ -11308,12 +11308,12 @@ namespace Legion {
         CollectiveView *view = NULL;
         if (redop > 0)
           view = new AllreduceView(runtime->forest, collective_did,
-              owner_space, ctx_uid, local_views, false/*register now*/,
-              mapping, redop);
+              owner_space, ctx_uid, local_views, individual_dids,
+              false/*register now*/, mapping, redop);
         else
           view = new ReplicatedView(runtime->forest, collective_did,
-              owner_space, ctx_uid, local_views, false/*register now*/,
-              mapping);
+              owner_space, ctx_uid, local_views, individual_dids,
+              false/*register now*/, mapping);
         runtime->register_distributed_collectable(collective_did, view);
         if (!done_events.empty())
           return Runtime::merge_events(done_events);

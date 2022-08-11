@@ -5611,9 +5611,10 @@ namespace Legion {
                                    AddressSpaceID owner_proc, 
                                    UniqueID owner_context, 
                                    const std::vector<IndividualView*> &views,
+                                   const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
       : InstanceView(ctx, id, owner_proc, owner_context, register_now, mapping),
-        local_views(views) 
+        instances(insts), local_views(views) 
     //--------------------------------------------------------------------------
     {
       for (std::vector<IndividualView*>::const_iterator it =
@@ -7018,8 +7019,9 @@ namespace Legion {
                                    AddressSpaceID owner_proc, 
                                    UniqueID owner_context, 
                                    const std::vector<IndividualView*> &views,
+                                   const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
-      : CollectiveView(ctx, id, owner_proc, owner_context, views, 
+      : CollectiveView(ctx, id, owner_proc, owner_context, views, insts,
                        register_now, mapping)
     //--------------------------------------------------------------------------
     {
@@ -7040,12 +7042,17 @@ namespace Legion {
                                  AddressSpaceID owner_proc, 
                                  UniqueID owner_context, 
                                  const std::vector<IndividualView*> &views,
+                                 const std::vector<DistributedID> &insts,
                                  bool register_now, CollectiveMapping *mapping,
                                  ReductionOpID redop_id)
-      : CollectiveView(ctx, id, owner_proc, owner_context, views, 
+      : CollectiveView(ctx, id, owner_proc, owner_context, views, insts,
                        register_now, mapping), redop(redop_id)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < local_views.size(); idx++)
+        assert(local_views[idx]->get_redop() == redop);
+#endif
     }
 
     //--------------------------------------------------------------------------
