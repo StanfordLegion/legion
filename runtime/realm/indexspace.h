@@ -97,9 +97,10 @@ namespace Realm {
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
 
-    bool dense() const;
+    bool is_dense() const;
+    bool compute_if_dense() const;
 
-    bool is_dense = true;
+    bool dense;
     Realm::Matrix<M, N, T> transform;
     Point<M, T> offset;
   };

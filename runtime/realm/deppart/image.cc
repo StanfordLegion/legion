@@ -796,7 +796,7 @@ namespace Realm {
       parent_bbox = parent_bbox.union_bbox(parent_rects[i]);
     }
 
-    if (!transform.dense()) {
+    if (!transform.is_dense()) {
       intersect_sparse_transform(bitmasks, parent_bbox, parent_rects);
     } else {
       intersect_dense_transform(bitmasks, parent_bbox, parent_rects);

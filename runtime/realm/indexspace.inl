@@ -40,7 +40,7 @@ namespace Realm {
   template <typename T2, typename T3>
   inline AffineTransform<M, N, T>::AffineTransform(
       const Realm::Matrix<M, N, T2>& _transform, const Point<M, T3>& _offset)
-      : transform(_transform), offset(_offset) {}
+      : transform(_transform), offset(_offset), dense(compute_if_dense()) {}
 
   template <int M, int N, typename T>
   template <typename T2>
@@ -50,7 +50,12 @@ namespace Realm {
   }
 
   template <int M, int N, typename T>
-  inline bool AffineTransform<M, N, T>::dense() const {
+  inline bool AffineTransform<M, N, T>::is_dense() const {
+    return dense;
+  }
+
+  template <int M, int N, typename T>
+  inline bool AffineTransform<M, N, T>::compute_if_dense() const {
     if (M != N) return false;
 
     for (int i = 0; i < M; i++) {
