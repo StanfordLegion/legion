@@ -556,6 +556,8 @@ namespace Realm {
 
     template <int N, typename T>
     IndexSpaceGeneric(const IndexSpace<N,T>& copy_from);
+    template <int N, typename T>
+    IndexSpaceGeneric(const Rect<N,T>& copy_from);
 
     ~IndexSpaceGeneric();
 
@@ -563,6 +565,8 @@ namespace Realm {
 
     template <int N, typename T>
     IndexSpaceGeneric& operator=(const IndexSpace<N,T>& copy_from);
+    template <int N, typename T>
+    IndexSpaceGeneric& operator=(const Rect<N,T>& copy_from);
 
     template <int N, typename T>
     const IndexSpace<N,T>& as_index_space() const;
@@ -580,15 +584,17 @@ namespace Realm {
 	       const ProfilingRequestSet &requests,
 	       Event wait_on = Event::NO_EVENT) const;
 
-  protected:
+    // "public" but not useful to application code
     IndexSpaceGenericImpl *impl;
 
+  protected:
     // would like to use sizeof(IndexSpace<REALM_MAX_DIM, size_t>) here,
     //  but that requires the specializations that are defined in the
     //  include of indexspace.inl below...
-    static const size_t STORAGE_BYTES = (2*REALM_MAX_DIM + 2) * sizeof(size_t);
+    static constexpr size_t MAX_TYPE_SIZE = DIMTYPES::MaxSize::value;
+    static constexpr size_t STORAGE_BYTES = (2*REALM_MAX_DIM + 2) * MAX_TYPE_SIZE;
     typedef char Storage_unaligned[STORAGE_BYTES];
-    REALM_ALIGNED_TYPE_SAMEAS(Storage_aligned, Storage_unaligned, size_t);
+    REALM_ALIGNED_TYPE_SAMEAS(Storage_aligned, Storage_unaligned, DIMTYPES::MaxSizeType<MAX_TYPE_SIZE>::TYPE);
     Storage_aligned raw_storage;
 
   };

@@ -83,6 +83,13 @@ namespace Realm {
     impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
   }
 
+  template <int N, typename T>
+  IndexSpaceGeneric::IndexSpaceGeneric(const Rect<N,T>& copy_from)
+  {
+    assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
+    impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
+  }
+
   IndexSpaceGeneric::~IndexSpaceGeneric()
   {
     if(impl)
@@ -104,6 +111,16 @@ namespace Realm {
 
   template <int N, typename T>
   IndexSpaceGeneric& IndexSpaceGeneric::operator=(const IndexSpace<N,T>& copy_from)
+  {
+    assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
+    if(impl)
+      impl->~IndexSpaceGenericImpl();
+    impl = new(raw_storage) IndexSpaceGenericImplTyped<N,T>(copy_from);
+    return *this;
+  }
+
+  template <int N, typename T>
+  IndexSpaceGeneric& IndexSpaceGeneric::operator=(const Rect<N,T>& copy_from)
   {
     assert(STORAGE_BYTES >= sizeof(IndexSpaceGenericImplTyped<N,T>));
     if(impl)
@@ -180,12 +197,90 @@ namespace Realm {
     return space.copy(srcs, dsts, requests, wait_on);
   }
 
+  template <int N, typename T>
+  bool IndexSpaceGenericImplTyped<N,T>::compute_affine_bounds(const InstanceLayoutGeneric *ilg,
+                                                              FieldID fid,
+                                                              uintptr_t& rel_base,
+                                                              uintptr_t& limit) const
+  {
+    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(ilg);
+    if(!layout) return false;  // dimension mismatch
+
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(fid);
+    if(it == layout->fields.end()) return false;  // invalid field ID
+
+    const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
+
+    // need a precise set of bounds, so have to do each component rectangle of
+    //  this instance space separately
+    bool first = true;
+    for(IndexSpaceIterator<N,T> isr(this->space); isr.valid; isr.step()) {
+      for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = ipl.pieces.begin();
+          it2 != ipl.pieces.end();
+          ++it2) {
+        Rect<N,T> isect = (*it2)->bounds.intersection(isr.rect);
+
+        // skip pieces that we don't overlap with
+        if(isect.empty()) continue;
+
+        // touching non-affine pieces is fatal
+        if((*it2)->layout_type != PieceLayoutTypes::AffineLayoutType)
+          return false;
+
+        // compute bounds for this rect, coping with negative strides and the
+        //  like
+        const AffineLayoutPiece<N,T> *alp = checked_cast<const AffineLayoutPiece<N,T> *>(*it2);
+        uintptr_t lo_ofs = alp->offset + it->second.rel_offset;
+        for(int i = 0; i < N; i++)
+          lo_ofs += isect.lo[i] * alp->strides[i];
+        uintptr_t p_base = lo_ofs;
+        uintptr_t p_limit = p_base + it->second.size_in_bytes;
+        // for each non-trivial dimension, compute the offset of the element at
+        //  the hi end of the range and use that to determine whether the stride
+        //  was "positive" or "negative", and adjust base or limit appropriately
+        for(int i = 0; i < N; i++) {
+          if(isect.lo[i] == isect.hi[i]) continue;  // trivial
+
+          // not safe to directly substract isect.hi-isect.lo
+          uintptr_t hi_ofs = (lo_ofs -
+                              (alp->strides[i] * isect.lo[i]) +
+                              (alp->strides[i] * isect.hi[i]));
+          if(hi_ofs > lo_ofs) {
+            // growing "up"
+            p_limit += (hi_ofs - lo_ofs);
+          } else {
+            // growing "down"
+            p_base = hi_ofs;
+          }
+        }
+
+        if(first) {
+          rel_base = p_base;
+          limit = p_limit;
+          first = false;
+        } else {
+          rel_base = std::min(rel_base, p_base);
+          limit = std::max(limit, p_limit);
+        }
+
+        // if we were fully contained, we can stop
+        if(!(*it2)->bounds.contains(isr.rect)) break;
+      }
+    }
+    // if we didn't find any pieces, that's bad
+    if(first)
+      return false;
+
+    return true;
+  }
 
   // explicit template instantiation
 
 #define DOIT(N,T) \
   template IndexSpaceGeneric::IndexSpaceGeneric(const IndexSpace<N,T>& copy_from); \
+  template IndexSpaceGeneric::IndexSpaceGeneric(const Rect<N,T>& copy_from); \
   template IndexSpaceGeneric& IndexSpaceGeneric::operator=<N,T>(const IndexSpace<N,T>&); \
+  template IndexSpaceGeneric& IndexSpaceGeneric::operator=<N,T>(const Rect<N,T>&); \
   template const IndexSpace<N,T>& IndexSpaceGeneric::as_index_space<N,T>() const; \
   template Event IndexSpaceGeneric::copy<N,T>(const std::vector<CopySrcDstField>&, \
                                               const std::vector<CopySrcDstField>&, \

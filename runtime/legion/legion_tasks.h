@@ -481,7 +481,8 @@ namespace Legion {
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
-                               Realm::ProfilingRequestSet &requests, bool fill);
+                               Realm::ProfilingRequestSet &requests,
+                               bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &respone,
                                       const void *orig, size_t orig_length);
@@ -1208,7 +1209,8 @@ namespace Legion {
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
-                               Realm::ProfilingRequestSet &requests, bool fill);
+                               Realm::ProfilingRequestSet &requests,
+                               bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &respone,
                                       const void *orig, size_t orig_length);

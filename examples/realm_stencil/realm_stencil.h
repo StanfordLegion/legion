@@ -73,6 +73,7 @@ struct StencilArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
   Rect2 interior_bounds;
+  DTYPE *weights;
 };
 
 struct IncrementArgs {

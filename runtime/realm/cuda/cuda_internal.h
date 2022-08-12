@@ -781,6 +781,19 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUFBMemory supports ExternalCudaMemoryResource and
+      //  ExternalCudaArrayResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
     public:
       GPU *gpu;
       CUdeviceptr base;
@@ -809,6 +822,19 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUDynamicFBMemory supports ExternalCudaMemoryResource and
+      //  ExternalCudaArrayResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
     public:
       GPU *gpu;
       Mutex mutex;
@@ -829,6 +855,18 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      // GPUZCMemory supports ExternalCudaPinnedHostResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
 
     public:
       CUdeviceptr gpu_base;
@@ -881,6 +919,30 @@ namespace Realm {
       size_t write_offset, write_size;
     };
 
+    class MemSpecificCudaArray : public MemSpecificInfo {
+    public:
+      MemSpecificCudaArray(CUarray _array);
+      virtual ~MemSpecificCudaArray();
+
+      CUarray array;
+    };
+
+    class AddressInfoCudaArray : public TransferIterator::AddressInfoCustom {
+    public:
+      virtual int set_rect(const RegionInstanceImpl *inst,
+                           const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
+                           int ndims,
+                           const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/],
+                           const int order[/*ndims*/]);
+
+      CUarray array;
+      int dim;
+      size_t pos[3];
+      size_t width_in_bytes, height, depth;
+    };
+
     class GPUChannel;
 
     class GPUXferDes : public XferDes {
@@ -917,7 +979,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 
@@ -935,7 +998,8 @@ namespace Realm {
 		     const std::vector<XferDesPortInfo>& inputs_info,
 		     const std::vector<XferDesPortInfo>& outputs_info,
 		     int _priority,
-		     const void *_fill_data, size_t _fill_size);
+		     const void *_fill_data, size_t _fill_size,
+                     size_t _fill_total);
 
       long get_requests(Request** requests, long nr);
 
@@ -959,7 +1023,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 
@@ -1027,7 +1092,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 

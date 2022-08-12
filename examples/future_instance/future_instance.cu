@@ -1,4 +1,5 @@
-#include <legion.h>
+#include "legion.h"
+#include "realm/cuda/cuda_access.h" // ExternalCudaMemoryResource
 #include <cuda_runtime.h>
 
 using namespace Legion;
@@ -25,9 +26,11 @@ void write_result(int *ptr, int offset)
 }
 
 __host__
-void freedevice(void* ptr, size_t size)
+void freedevice(const Realm::ExternalInstanceResource &allocation)
 {
-  CUDA_CHECK( cudaFree(ptr) );
+  const Realm::ExternalCudaMemoryResource *resource =
+    static_cast<const Realm::ExternalCudaMemoryResource*>(&allocation);
+  CUDA_CHECK( cudaFree((void*)resource->base) );
 }
 
 __host__
@@ -43,8 +46,11 @@ void make_future(const void *args, size_t arglen,
   CUDA_CHECK( cudaMalloc((void**)&result_d, sizeof(int)) );
   write_result<<<1,1>>>(result_d, task->index_point[0]);
 
-  Runtime::legion_task_postamble(runtime, ctx, result_d, sizeof(int), true/*owned*/,
-      Realm::RegionInstance::NO_INST, Memory::GPU_FB_MEM, freedevice);
+  int device;
+  CUDA_CHECK( cudaGetDevice(&device) );
+  const Realm::ExternalCudaMemoryResource resource(device, result_d, sizeof(int));
+  Runtime::legion_task_postamble(ctx, result_d, sizeof(int), true/*owned*/,
+      resource, freedevice);
 }
 
 __host__

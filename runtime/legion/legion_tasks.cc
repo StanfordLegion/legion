@@ -4845,7 +4845,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
@@ -4859,7 +4859,7 @@ namespace Legion {
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -9737,7 +9737,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
@@ -9751,7 +9751,7 @@ namespace Legion {
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -10080,8 +10080,8 @@ namespace Legion {
         }
         // Make a wrapper future instance for the serdez buffer for copies
         FutureInstance src_inst(serdez_redop_state, serdez_redop_state_size,
-            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, runtime,
-            false/*eager*/, true/*external*/, false/*own allocation*/);
+            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/,
+            false/*own allocation*/);
         // Just need to copy into the first one, broadcast will be done later
         reduction_instance = reduction_instances.front();
         const ApEvent done = reduction_instance->copy_from(&src_inst, this);
@@ -10201,9 +10201,8 @@ namespace Legion {
             size_t reduc_size;
             derez.deserialize(reduc_size);
             const void *reduc_ptr = derez.get_current_pointer();
-            FutureInstance instance(reduc_ptr, reduc_size, 
-              runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, runtime,
-              false/*eager*/, true/*external*/, false/*own allocation*/);
+            FutureInstance instance(reduc_ptr, reduc_size, ApEvent::NO_AP_EVENT,
+               runtime,false/*eager*/,true/*external*/,false/*own allocation*/);
             fold_reduction_future(&instance, reduction_effects, false/*excl*/);
             // Advance the pointer on the deserializer
             derez.advance_pointer(reduc_size);

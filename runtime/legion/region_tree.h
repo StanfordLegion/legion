@@ -1259,6 +1259,8 @@ namespace Legion {
                               const unsigned stage = 0); 
       virtual void record_trace_immutable_indirection(bool source);
     public:
+      ApEvent issue_individual_copies(const ApEvent precondition,
+                              const Realm::ProfilingRequestSet &requests);
       template<int D2, typename T2>
       ApEvent perform_compute_preimages(std::vector<DomainT<DIM,T> > &preimages,
                 Operation *op, ApEvent precondition, const bool source); 
@@ -1273,6 +1275,14 @@ namespace Legion {
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
+      // Realm performs better if you can issue a separate copy for each of the
+      // preimages so it doesn't have to do address splitting. Therefore when
+      // we compute preimages and we only have a gather or a scatter copy then
+      // we will attempt to issue individual copies for such cases. Note that
+      // we don't bother doing this for full-indirection copies though as then
+      // we would need to do the full quadratic intersection between each of
+      // the source and destination preimages.
+      std::vector<std::vector<unsigned> > individual_field_indexes;
       ApEvent src_indirect_spaces_precondition,dst_indirect_spaces_precondition;
 #ifdef LEGION_SPY
       std::deque<ApEvent> src_preimage_preconditions;

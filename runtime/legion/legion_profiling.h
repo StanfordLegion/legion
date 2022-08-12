@@ -560,7 +560,7 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            Operation *op);
+                            Operation *op, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
@@ -581,7 +581,7 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            UniqueID uid);
+                            UniqueID uid, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,

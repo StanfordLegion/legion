@@ -370,7 +370,11 @@ namespace Realm {
   template <int N, typename T>
   void AffineLayoutPiece<N,T>::print(std::ostream& os) const
   {
-    os << this->bounds << "->affine(" << strides << "+" << offset << ")";
+    // even though we do unsigned math with 'offset', it's more intuitive to
+    //  humans to display it as a signed value
+    os << this->bounds << "->affine(" << strides
+       << std::showpos << static_cast<int64_t>(offset) << std::noshowpos
+       << ")";
   }
 
   template <int N, typename T>
