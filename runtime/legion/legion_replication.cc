@@ -10524,17 +10524,9 @@ namespace Legion {
       callback_barrier = 
         RtBarrier(Realm::Barrier::create_barrier(shard_groups.size()));
       // Make initial equivalence sets for each of the mapped regions
-      mapped_equivalence_sets.resize(virtual_mapped.size(), NULL);
-      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
-      {
-        // Make an equivalence set to contain the initial data
-        const RegionRequirement &req = original_task->regions[idx];
-        RegionNode *node = runtime->forest->get_node(req.region);
-        mapped_equivalence_sets[idx] =
-          new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-              runtime->address_space, runtime->address_space, node,
-              true/*reg now*/, collective_mapping);
-      }
+      mapped_equivalence_dids.resize(virtual_mapped.size());
+      for (unsigned idx = 0; idx < mapped_equivalence_dids.size(); idx++)
+        mapped_equivalence_dids[idx] = runtime->get_available_distributed_id();
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
             it = shard_groups.begin(); it != shard_groups.end(); it++)
@@ -10549,10 +10541,6 @@ namespace Legion {
         else
           local_shards = it->second;
       }
-      // This adds a CONTEXT_REF for each local shard
-      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
-        mapped_equivalence_sets[idx]->initialize_collective_references(
-                                                    local_shards.size());
       if (!local_shards.empty())
       {
         for (std::vector<ShardTask*>::const_iterator it = 
@@ -10642,17 +10630,11 @@ namespace Legion {
             rez.serialize(*it);
         }
         rez.serialize<size_t>(shards.size());
-        rez.serialize<size_t>(mapped_equivalence_sets.size());
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              mapped_equivalence_sets.begin(); it != 
-              mapped_equivalence_sets.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert((*it) != NULL);
-#endif
-          rez.serialize((*it)->did);
-          rez.serialize((*it)->region_node->handle);
-        }
+        rez.serialize<size_t>(mapped_equivalence_dids.size());
+        for (std::vector<DistributedID>::const_iterator it = 
+              mapped_equivalence_dids.begin(); it != 
+              mapped_equivalence_dids.end(); it++)
+          rez.serialize(*it);
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
         {
@@ -10720,23 +10702,11 @@ namespace Legion {
       }
       size_t num_shards;
       derez.deserialize(num_shards);
-      size_t num_equivalence_sets;
-      derez.deserialize(num_equivalence_sets);
-      mapped_equivalence_sets.resize(num_equivalence_sets);
-      for (unsigned idx = 0; idx < num_equivalence_sets; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionNode *region_node = runtime->forest->get_node(handle);
-        mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
-            owner_space, owner_space, region_node, true/*register now*/,
-            collective_mapping);
-        // This adds a CONTEXT_REF for each local shard
-        mapped_equivalence_sets[idx]->initialize_collective_references(
-                                                            num_shards);
-      }
+      size_t num_equivalence_dids;
+      derez.deserialize(num_equivalence_dids);
+      mapped_equivalence_dids.resize(num_equivalence_dids);
+      for (unsigned idx = 0; idx < num_equivalence_dids; idx++)
+        derez.deserialize(mapped_equivalence_dids[idx]);
       local_shards.resize(num_shards);
       for (unsigned idx = 0; idx < num_shards; idx++)
       {
@@ -10765,14 +10735,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx)const
+    EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
+                                                           LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(idx < mapped_equivalence_sets.size());
-      assert(mapped_equivalence_sets[idx] != NULL);
+      assert(idx < mapped_equivalence_dids.size());
 #endif
-      return mapped_equivalence_sets[idx];
+      RegionNode *region = runtime->forest->get_node(handle);
+      bool dummy_first;
+      return deduplicate_equivalence_set_creation(region, 
+              mapped_equivalence_dids[idx], dummy_first);
     }
 
     //--------------------------------------------------------------------------
@@ -10803,8 +10776,9 @@ namespace Legion {
           return result;
         }
         // Didn't find it so make it
+        InnerContext *context = find_local_context();
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-              region_node, true/*register now*/, collective_mapping);
+              region_node, context, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(local_shards.size());
         // Record it for the shards that come later
@@ -10815,8 +10789,9 @@ namespace Legion {
       }
       else // Only one shard here on this node so just make it
       {
+        InnerContext *context = find_local_context();
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-              region_node, true/*register now*/, collective_mapping);
+              region_node, context, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(1/*local shard count*/);
       }

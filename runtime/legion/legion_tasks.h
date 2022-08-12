@@ -549,7 +549,6 @@ namespace Legion {
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
-      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     public:
       static void handle_deferred_task_complete(const void *args);
     protected:
@@ -1076,7 +1075,6 @@ namespace Legion {
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
                                                             bool inline_task);
-      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx);
     public:
       virtual InnerContext* create_implicit_context(void);
     public:

@@ -2835,7 +2835,8 @@ namespace Legion {
       void unpack_shards_and_launch(Deserializer &derez);
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
-      EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
+      EquivalenceSet* get_initial_equivalence_set(unsigned idx,
+                                                  LogicalRegion region);
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
                                             DistributedID did, bool &first);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
@@ -2980,7 +2981,7 @@ namespace Legion {
       ShardMapping*                    address_spaces;
       CollectiveMapping*               collective_mapping;
       std::vector<ShardTask*>          local_shards;
-      std::vector<EquivalenceSet*>     mapped_equivalence_sets;
+      std::vector<DistributedID>       mapped_equivalence_dids;
     protected:
       // There are four kinds of signals that come back from 
       // the execution of the shards:

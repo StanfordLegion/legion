@@ -517,7 +517,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events) = 0;
@@ -1399,10 +1398,11 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events);
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
+                                                  const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       void invalidate_created_requirement_contexts(const bool is_top_level_task,
@@ -2019,6 +2019,8 @@ namespace Legion {
           const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
+      virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
+                                                  const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -3211,7 +3213,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &applied_events, 
           std::set<RtEvent> &execution_events);

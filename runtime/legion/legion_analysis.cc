@@ -9023,17 +9023,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
                                    AddressSpaceID owner, AddressSpaceID logical,
-                                   RegionNode *node, bool reg_now,
+                                   RegionNode *node, InnerContext *ctx,
+                                   bool reg_now,
                                    CollectiveMapping *mapping /*= NULL*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
-          owner, reg_now, mapping), region_node(node), 
+          owner, reg_now, mapping), context(ctx), region_node(node), 
         set_expr(node->row_source), tracing_preconditions(NULL),
         tracing_anticonditions(NULL), tracing_postconditions(NULL), 
         logical_owner_space(logical), replicated_owner_state(NULL), 
         migration_index(0), sample_count(0), init_collective_refs(false)
     //--------------------------------------------------------------------------
     {
+      context->add_reference();
       set_expr->add_nested_expression_reference(did);
       region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
@@ -9059,15 +9061,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
-      : DistributedCollectable(rhs), region_node(NULL), set_expr(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     EquivalenceSet::~EquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
@@ -9087,19 +9080,12 @@ namespace Legion {
 #endif
       if (replicated_owner_state != NULL)
         delete replicated_owner_state;
+      if (context->remove_reference())
+        delete context;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
       if (region_node->remove_nested_resource_ref(did))
         delete region_node;
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet& EquivalenceSet::operator=(const EquivalenceSet &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -15143,6 +15129,8 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(region_node->handle);
+        rez.serialize(context->get_replication_id());
+        rez.serialize(context->get_context_uid());
         // There be dragons here!
         // In the case where we first make a new equivalence set on a
         // remote node that is about to be the owner, we can't mark it
@@ -15205,18 +15193,33 @@ namespace Legion {
       derez.deserialize(did);
       LogicalRegion handle;
       derez.deserialize(handle);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
       RegionNode *node = runtime->forest->get_node(handle);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-
+      
+      InnerContext *context = NULL;
+      if (repl_id > 0)
+      {
+        // See if there is a local shard manager
+        ShardManager *manager = 
+          runtime->find_shard_manager(repl_id, true/*can fail*/);
+        if (manager != NULL)
+          context = manager->find_local_context();
+      }
+      if (context == NULL)
+        context = runtime->find_context(ctx_uid);
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
-                                           node, false/*register now*/);
+                                           node, context,false/*register now*/);
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
-                                 node, false/*register now*/);
+                                 node, context, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime();
     }
@@ -16959,15 +16962,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet* PendingEquivalenceSet::compute_refinement(
-                              AddressSpaceID suggested_owner, Runtime *runtime,
-                              std::set<RtEvent> &ready_events)
+                                        AddressSpaceID suggested_owner, 
+                                        InnerContext *context, Runtime *runtime,
+                                        std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       if (new_set == NULL)
       {
         new_set = new EquivalenceSet(runtime, 
             runtime->get_available_distributed_id(), runtime->address_space,
-            suggested_owner, region_node, true/*register now*/);
+            suggested_owner, region_node, context, true/*register now*/);
         new_set->add_base_valid_ref(PENDING_REFINEMENT_REF);
         std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =

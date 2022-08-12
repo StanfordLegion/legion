@@ -3836,7 +3836,7 @@ namespace Legion {
         if (!overlap)
           continue;
         EquivalenceSet *new_set = 
-          it->first->compute_refinement(source, runtime, applied_events);
+          it->first->compute_refinement(source, this, runtime, applied_events);
         FieldMask dummy_parent;
         target->record_refinement(new_set,overlap,dummy_parent,applied_events);
         it.filter(overlap);
@@ -9694,7 +9694,6 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const LegionVector<VersionInfo> &version_infos,
-                      const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
                       std::set<RtEvent> &applied_events,
                       std::set<RtEvent> &execution_events)
@@ -9732,20 +9731,27 @@ namespace Legion {
         // If this is a NO_ACCESS or had no privilege fields we can skip this
         if (no_access_regions[idx1])
           continue;
-        EquivalenceSet *eq_set = equivalence_sets[idx1];
         const RegionRequirement &req = clone_requirements[idx1];
         const RegionUsage usage(req);
 #ifdef DEBUG_LEGION
         assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-        if (eq_set == NULL)
+        // For virtual mappings, there are two approaches here
+        // 1. For read-write privileges we can do copy-in/copy-out
+        // on the equivalence sets since we know that we're the 
+        // only one that is going to be mutating them, this will
+        // allow us to do things like refinements for them
+        // 2. For any other kind of privilege, we need to make sure
+        // that we see updates from other tasks potentially running
+        // and mapping in parallel on the same equivalence sets, so
+        // we aren't going to make our own equivalence set
+        if (virtual_mapped[idx1] && !IS_WRITE(usage))
         {
           // Handle the case where we have a virtual mapping for a
           // non-write privilege and therefore we're just going to
           // seed our state with the equivalence sets and not allow
           // them to ever be refined in this context
 #ifdef DEBUG_LEGION
-          assert(virtual_mapped[idx1] && !IS_WRITE(usage));
           assert(idx1 < version_infos.size());
 #endif
           RegionNode *region_node = runtime->forest->get_node(req.region);
@@ -9758,6 +9764,7 @@ namespace Legion {
                                                       eq_sets, applied_events);
           continue;
         }
+        EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req);
 #ifdef DEBUG_LEGION
         assert(eq_set->region_node->handle == req.region);
 #endif
@@ -9879,6 +9886,22 @@ namespace Legion {
         if (eq_set->remove_base_valid_ref(CONTEXT_REF))
           assert(false); // should never hit this
       }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* InnerContext::create_initial_equivalence_set(unsigned idx,
+                                                   const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      // This is the normal equivalence set creation pathway for single tasks
+      RegionNode *node = runtime->forest->get_node(req.region);
+      EquivalenceSet *result =
+        new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
+            runtime->address_space, runtime->address_space, node, this,
+            true/*register now*/);
+      // Add a context ref that will be removed after this is registered
+      result->add_base_valid_ref(CONTEXT_REF);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -12217,6 +12240,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       f.impl->set_local(result, result_size, own);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ReplicateContext::create_initial_equivalence_set(
+                                     unsigned idx, const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->get_initial_equivalence_set(idx, req.region);
     }
 
     //--------------------------------------------------------------------------
@@ -23202,7 +23233,6 @@ namespace Legion {
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
                        const LegionVector<VersionInfo> &version_infos,
-                       const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events,
                        std::set<RtEvent> &execution_events)

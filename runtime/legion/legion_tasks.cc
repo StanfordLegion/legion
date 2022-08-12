@@ -4734,7 +4734,6 @@ namespace Legion {
         execution_context->add_reference();
         std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
-        std::vector<EquivalenceSet*> equivalence_sets(regions.size(), NULL);
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -4749,18 +4748,6 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                 false/*mapped*/, map_id, tag, unmap_events[idx],
                 true/*virtual mapped*/, physical_instances[idx], index_point);
-            // For virtual mappings, there are two approaches here
-            // 1. For read-write privileges we can do copy-in/copy-out
-            // on the equivalence sets since we know that we're the 
-            // only one that is going to be mutating them, this will
-            // allow us to do things like refinements for them
-            // 2. For any other kind of privilege, we need to make sure
-            // that we see updates from other tasks potentially running
-            // and mapping in parallel on the same equivalence sets, so
-            // we aren't going to make our own equivalence set
-            if (virtual_mapped[idx] && !no_access_regions[idx] &&
-                IS_WRITE(clone_requirements[idx]))
-              equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else if (do_inner_task_optimization)
           {
@@ -4787,7 +4774,6 @@ namespace Legion {
             physical_instances[idx].update_wait_on_events(ready_events);
             ApEvent precondition = Runtime::merge_events(NULL, ready_events);
             Runtime::trigger_event(NULL, unmap_events[idx], precondition);
-            equivalence_sets[idx] = create_initial_equivalence_set(idx);
           }
           else
           { 
@@ -4800,8 +4786,6 @@ namespace Legion {
             execution_context->add_physical_region(clone_requirements[idx],
                 true/*mapped*/, map_id, tag, unmap_events[idx],
                 false/*virtual mapped*/, physical_instances[idx], index_point);
-            if (!is_leaf_variant)
-              equivalence_sets[idx] = create_initial_equivalence_set(idx);
             // We reset the reference below after we've
             // initialized the local contexts and received
             // back the local instance references
@@ -4816,8 +4800,8 @@ namespace Legion {
         // Initialize any region tree contexts
         std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                                version_infos, equivalence_sets, unmap_events,
-                                map_applied_conditions, execution_events);
+                                      version_infos, unmap_events,
+                                      map_applied_conditions, execution_events);
         // Execution events come from copying over virtual mapping state
         // which needs to be done before the child task starts
         if (!execution_events.empty())
@@ -5266,24 +5250,6 @@ namespace Legion {
       }
       TaskOp::trigger_children_complete();
     }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet* SingleTask::create_initial_equivalence_set(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < regions.size());
-#endif
-      // This is the normal equivalence set creation pathway for single tasks
-      RegionNode *node = runtime->forest->get_node(regions[idx].region);
-      EquivalenceSet *result =
-        new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, runtime->address_space, node,
-            true/*register now*/);
-      // Add a context ref that will be removed after this is registered
-      result->add_base_valid_ref(CONTEXT_REF);
-      return result;
-    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void SingleTask::handle_deferred_task_complete(const void *args)
@@ -8231,14 +8197,6 @@ namespace Legion {
       }
       else // No control replication so do the normal thing
         return SingleTask::initialize_inner_execution_context(v, inline_task);
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet* ShardTask::create_initial_equivalence_set(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // No need to add a context ref here, the shard manager does that
-      return shard_manager->get_initial_equivalence_set(idx);
     }
 
     //--------------------------------------------------------------------------
