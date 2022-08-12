@@ -44,6 +44,7 @@ namespace Realm {
 
   template <int N, typename T> struct Rect;
   template <int N, typename T> struct IndexSpace;
+  class IndexSpaceGeneric;
   class LinearizedIndexSpaceIntfc;
   class InstanceLayoutGeneric;
   class ProfilingRequestSet;
@@ -237,6 +238,21 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     bool decrement_accessor_count(void);
 
+    // it is sometimes useful to re-register an existing instance (in whole or
+    //  in part) as an "external" instance (e.g. to provide a different view
+    //  on the same bits) - this hopefully gives an ExternalInstanceResource *
+    //  (which must be deleted by the caller) that corresponds to this instance
+    //  but may return a null pointer for instances that do not support
+    //  re-registration
+    ExternalInstanceResource *generate_resource_info(bool read_only) const;
+
+    // a version of the above that allows limiting the described memory to just
+    //  a subset of the original instance (NOTE: this will accept any
+    //  IndexSpace<N,T> at compile-time, but N,T must match the instance layout)
+    ExternalInstanceResource *generate_resource_info(const IndexSpaceGeneric& space,
+						     span<const FieldID> fields,
+						     bool read_only) const;
+
     struct DestroyedField {
     public:
       DestroyedField(void);
@@ -272,6 +288,9 @@ namespace Realm {
     
   public:
     virtual ~ExternalInstanceResource();
+
+    // returns the suggested memory in which this resource should be created
+    virtual Memory suggested_memory() const = 0;
 
     virtual ExternalInstanceResource *clone(void) const = 0;
 

@@ -2437,47 +2437,42 @@ namespace Legion {
       impl->report_incompatible_accessor(accessor_kind, instance);
     }
 
-    /////////////////////////////////////////////////////////////
-    // Future Functor
-    /////////////////////////////////////////////////////////////
-
     //--------------------------------------------------------------------------
-    FutureFunctor::~FutureFunctor(void)
+    /*static*/ Future Future::from_untyped_pointer(Runtime *rt,
+                               const void *value, size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      return Internal::implicit_context->from_value(value, value_size, owned);
     }
 
     //--------------------------------------------------------------------------
-    void* FutureFunctor::callback_get_future(Memory::Kind &kind, size_t &size,
-                                  bool &owned, void (*&freefunc)(void*,size_t),
-                                  const void *&metadata, size_t &metasize)
+    /*static*/ Future Future::from_untyped_pointer(
+                               const void *value, size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      kind = Memory::SYSTEM_MEM;
-      size = callback_get_future_size();
-      owned = true;
-      freefunc = NULL;
-      metadata = NULL;
-      metasize = 0;
-      if (size == 0)
-        return NULL;
-      void *result = malloc(size);
-      callback_pack_future(result, size);
-      return result;
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      return Internal::implicit_context->from_value(value, value_size, owned);
     }
 
     //--------------------------------------------------------------------------
-    size_t FutureFunctor::callback_get_future_size(void)
+    /*static*/ Future Future::from_value(const void *buffer, size_t size,
+        bool owned, const Realm::ExternalInstanceResource &resource,
+        void (*freefunc)(const Realm::ExternalInstanceResource&))
     //--------------------------------------------------------------------------
     {
-      return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureFunctor::callback_pack_future(void *buffer, size_t size)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
+      return Internal::implicit_context->from_value(buffer, size, owned,
+                                                    resource, freefunc);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2931,12 +2926,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UntypedDeferredValue::finalize(Runtime *runtime, Context ctx) const
+    void UntypedDeferredValue::finalize(Context ctx) const
     //--------------------------------------------------------------------------
     {
-      Runtime::legion_task_postamble(runtime, ctx, 
-                    instance.pointer_untyped(0, field_size), field_size,
-                    true/*owner*/, instance, instance.get_location().kind());
+      Runtime::legion_task_postamble(ctx,instance.pointer_untyped(0,field_size),
+                                     field_size, true/*owner*/, instance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7418,19 +7412,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::from_value(const void *value, size_t value_size, bool owned,
-                       Memory::Kind memory_kind, void (*freefunc)(void*,size_t))
-    //--------------------------------------------------------------------------
-    {
-      if (Internal::implicit_context == NULL)
-        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
-            "Creating Legion Future objects from a buffer is only permitted "
-            "to be performed inside of Legion tasks.")
-      return Internal::implicit_context->from_value(value, value_size, owned,
-                                                    memory_kind, freefunc); 
-    }
-
-    //--------------------------------------------------------------------------
     Realm::RegionInstance Runtime::create_task_local_instance(Memory memory,
                                            Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
@@ -7854,27 +7835,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
                                                  const void *retvalptr,
                                                  size_t retvalsize, bool owned,
                                                  Realm::RegionInstance inst,
-                                                 Memory::Kind memory,
-                                                 void (*freefunc)(void*,size_t),
                                                  const void *metadataptr,
                                                  size_t metadatasize)
     //--------------------------------------------------------------------------
     {
       ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/,
-                    memory, freefunc, metadataptr, metadatasize);
+          NULL/*resource*/, NULL/*freefunc*/, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
                                     FutureFunctor *callback_functor, bool owned)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST, 
-                    callback_functor, Memory::SYSTEM_MEM, NULL, NULL, 0);
+      ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST,
+          callback_functor, NULL/*resource*/, NULL/*freefunc*/, NULL, 0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
+        const void *ptr, size_t size, bool owned,
+        const Realm::ExternalInstanceResource &resource,
+        void (*freefunc)(const Realm::ExternalInstanceResource&),
+        const void *metadataptr, size_t metadatasize)
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
+          NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------

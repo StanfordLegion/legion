@@ -101,8 +101,10 @@ namespace Legion {
 #endif
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
-      virtual Future from_value(const void *value, size_t value_size,
-          bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
+      virtual Future from_value(const void *value,size_t value_size,bool owned);
+      virtual Future from_value(const void *value, size_t size, bool owned,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&));
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size);
     public:
@@ -534,9 +536,10 @@ namespace Legion {
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                    PhysicalInstance inst, FutureFunctor *callback_functor,
-                    Memory::Kind memory, void (*freefunc)(void*,size_t),
-                    const void *metadataptr, size_t metadatasize);
+                      PhysicalInstance inst, FutureFunctor *callback_functor,
+                      const Realm::ExternalInstanceResource *resource,
+                      void (*freefunc)(const Realm::ExternalInstanceResource&),
+                      const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
@@ -544,7 +547,7 @@ namespace Legion {
       bool is_task_local_instance(PhysicalInstance instance);
       uintptr_t escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size,
-                                          Memory memory, RtEvent &done);
+                                          RtEvent &done);
       FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
       void begin_misspeculation(void);
       void end_misspeculation(FutureInstance *instance,
@@ -1422,9 +1425,10 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                        PhysicalInstance inst, FutureFunctor *callback_functor,
-                        Memory::Kind memory, void (*freefunc)(void*,size_t),
-                        const void *metadataptr, size_t metadatasize);
+                      PhysicalInstance inst, FutureFunctor *callback_functor,
+                      const Realm::ExternalInstanceResource *resource,
+                      void (*freefunc)(const Realm::ExternalInstanceResource&),
+                      const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
@@ -1988,8 +1992,10 @@ namespace Legion {
 #endif
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
-      virtual Future from_value(const void *value, size_t value_size,
-          bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
+      virtual Future from_value(const void *value,size_t value_size,bool owned);
+      virtual Future from_value(const void *buffer, size_t size, bool owned,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&));
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size); 
     public:
@@ -2313,7 +2319,8 @@ namespace Legion {
       virtual void end_trace(TraceID tid, bool deprecated);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future,
-                      Memory::Kind memory, void (*freefunc)(void*,size_t),
+                      const Realm::ExternalInstanceResource *resource,
+                      void (*freefunc)(const Realm::ExternalInstanceResource&),
                       const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
@@ -3216,9 +3223,10 @@ namespace Legion {
       virtual void free_region_tree_context(void);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                        PhysicalInstance inst, FutureFunctor *callback_functor,
-                        Memory::Kind memory, void (*freefunc)(void*,size_t),
-                        const void *metadataptr, size_t metadatasize);
+                      PhysicalInstance inst, FutureFunctor *callback_functor,
+                      const Realm::ExternalInstanceResource *resource,
+                      void (*freefunc)(const Realm::ExternalInstanceResource&),
+                      const void *metadataptr, size_t metadatasize);
       virtual void post_end_task(FutureInstance *instance,
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,

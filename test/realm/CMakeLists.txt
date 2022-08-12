@@ -48,6 +48,7 @@ list(APPEND REALM_TESTS
   simple_reduce
   realm_reinit
   sparse_construct
+  extres_alias
   )
 
 if(Legion_USE_CUDA)
@@ -56,20 +57,22 @@ if(Legion_USE_CUDA)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
+
+  list(APPEND REALM_TESTS cuda_arrays)
+  set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
 endif()
 
 if(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-
-    # some tests have CUDA source files too
-    set(CUDASRC_memspeed memspeed_gpu.cu)
-    set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
-  elseif (Legion_HIP_TARGET STREQUAL "ROCM")
-    # some tests have HIP source files too
-    set(HIPSRC_memspeed memspeed_gpu.cu)
-    set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
   endif()
+
+  # some tests have HIP source files too
+  set(HIPSRC_memspeed memspeed_gpu.cu)
+  set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
+
+  list(APPEND REALM_TESTS cuda_arrays)
+  set(HIPSRC_cuda_arrays cuda_arrays_gpu.cu)
 endif()
 
 foreach(test IN LISTS REALM_TESTS)
@@ -99,7 +102,7 @@ set_target_properties(scatter PROPERTIES CXX_STANDARD 11
                                          CXX_EXTENSIONS NO)
 
 # some tests need test-specific arguments
-set(TESTARGS_ctxswitch         -ll:io 1 -t 20 -i 10000)
+set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
@@ -107,6 +110,7 @@ set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
 set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
+set(TESTARGS_cuda_arrays       -ll:gpu 1)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)

@@ -647,7 +647,9 @@ namespace Realm {
                                          const std::vector<XferDesPortInfo>& outputs_info,
                                          int priority,
                                          XferDesRedopInfo redop_info,
-                                         const void *fill_data, size_t fill_size)
+                                         const void *fill_data,
+                                         size_t fill_size,
+                                         size_t fill_total)
     {
       assert(redop_info.id == 0);
       assert(fill_size == 0);
@@ -718,16 +720,20 @@ namespace Realm {
                                      const std::vector<XferDesPortInfo>& inputs_info,
                                      const std::vector<XferDesPortInfo>& outputs_info,
                                      int _priority,
-                                     const void *_fill_data, size_t _fill_size)
+                                     const void *_fill_data, size_t _fill_size,
+                                     size_t _fill_total)
         : XferDes(_dma_op, _channel, _launch_node, _guid,
                   inputs_info, outputs_info,
                   _priority, _fill_data, _fill_size)
       {
         kind = XFER_GPU_IN_FB;
 
-        // no direct input data for us
-        assert(input_control.control_port_idx == -1);
-        input_control.current_io_port = -1;
+	// no direct input data for us, but we know how much data to produce
+        //  (in case the output is an intermediate buffer)
+	assert(input_control.control_port_idx == -1);
+	input_control.current_io_port = -1;
+        input_control.remaining_count = _fill_total;
+        input_control.eos_received = true;
 
         // cuda memsets are ideally 8/16/32 bits, so try to _reduce_ the fill
         //  size if there's duplication
@@ -950,7 +956,6 @@ namespace Realm {
                 } else {
                   size_t lines = out_alc.remaining(1);
                   size_t lstride = out_alc.get_stride(1);
-                  printf("memset memcpy2d\n");
 
                   void *srcDevice = (void*)(out_base + out_offset);
 
@@ -973,13 +978,12 @@ namespace Realm {
                     // logarithmic version requires that pstride be a multiple of
                     //  lstride
                     if((pstride % lstride) == 0) {
-                      printf("memset memcpy3d\n");
                       hipMemcpy3DParms copy3d = {0};
                       void *srcDevice = (void*)(out_base + out_offset);
                       copy3d.srcPtr = make_hipPitchedPtr((void*)srcDevice, lstride, bytes, pstride/lstride);
                       copy3d.srcPos = make_hipPos(0,0,0);
                       copy3d.dstPos = make_hipPos(0,0,0);
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
                       copy3d.kind = cudaMemcpyDeviceToDevice;
 #else
                       copy3d.kind = hipMemcpyDeviceToDevice;
@@ -1086,13 +1090,15 @@ namespace Realm {
                                                const std::vector<XferDesPortInfo>& outputs_info,
                                                int priority,
                                                XferDesRedopInfo redop_info,
-                                               const void *fill_data, size_t fill_size)
+                                               const void *fill_data,
+                                               size_t fill_size,
+                                               size_t fill_total)
       {
         assert(redop_info.id == 0);
         return new GPUfillXferDes(dma_op, this, launch_node, guid,
                                   inputs_info, outputs_info,
                                   priority,
-                                  fill_data, fill_size);
+                                  fill_data, fill_size, fill_total);
       }
 
       long GPUfillChannel::submit(Request** requests, long nr)
@@ -1282,7 +1288,7 @@ namespace Realm {
                   
                   void *src_ptr = (void*)args->src_base;
                   void *src_device = src_ptr;
-#ifndef __HIP_PLATFORM_NVCC__
+#ifndef __HIP_PLATFORM_NVIDIA__
                   // this is for src=host memory registered via hipHostRegister
                   // if src is allocated by hipHostMalloc, then this is not necessary                  
                   hipPointerAttribute_t src_attr;
@@ -1317,7 +1323,6 @@ namespace Realm {
                                            0 /*sharedmem*/,
                                            stream->get_stream()) );
                   CHECK_HIP( hipSetDevice(orig_device) );
-                  printf("origin %d new %d\n", orig_device, channel->gpu->info->index);
 #endif            
 
                   // insert fence to track completion of reduction kernel
@@ -1534,7 +1539,8 @@ namespace Realm {
                                                  const std::vector<XferDesPortInfo>& outputs_info,
                                                  int priority,
                                                  XferDesRedopInfo redop_info,
-                                                 const void *fill_data, size_t fill_size)
+                                                 const void *fill_data, size_t fill_size,
+                                                 size_t fill_total)
       {
         assert(fill_size == 0);
         return new GPUreduceXferDes(dma_op, this, launch_node, guid,

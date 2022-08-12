@@ -277,7 +277,9 @@ namespace Realm {
 					  const std::vector<XferDesPortInfo>& outputs_info,
 					  int priority,
 					  XferDesRedopInfo redop_info,
-					  const void *fill_data, size_t fill_size)
+					  const void *fill_data,
+                                          size_t fill_size,
+                                          size_t fill_total)
     {
       assert(redop_info.id == 0);
       assert(fill_size == 0);
@@ -343,7 +345,9 @@ namespace Realm {
 					  const std::vector<XferDesPortInfo>& outputs_info,
 					  int priority,
 					  XferDesRedopInfo redop_info,
-					  const void *fill_data, size_t fill_size)
+					  const void *fill_data,
+                                          size_t fill_size,
+                                          size_t fill_total)
     {
       assert(redop_info.id == 0);
       assert(fill_size == 0);

@@ -1300,7 +1300,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -5397,7 +5397,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -5410,7 +5410,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -8165,7 +8165,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -8178,7 +8178,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -11977,7 +11977,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -11990,7 +11990,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -13936,7 +13936,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AcquireOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -13949,7 +13949,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -14897,7 +14897,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReleaseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -14910,7 +14910,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -19069,7 +19069,7 @@ namespace Legion {
     void DependentPartitionOp::add_copy_profiling_request(
                                            const PhysicalTraceInfo &info,
                                            Realm::ProfilingRequestSet &requests,
-                                           bool fill)
+                                           bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -19082,7 +19082,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -20061,7 +20061,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FillOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &reqeusts, bool fill)
+                Realm::ProfilingRequestSet &reqeusts, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do for the moment
@@ -23419,7 +23419,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DetachOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &reqeusts, bool fill)
+                Realm::ProfilingRequestSet &reqeusts, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -24299,8 +24299,7 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               return_type_size)
         // Copy the result into the instance
-        FutureInstance local(output.value, output.size,
-            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT,
+        FutureInstance local(output.value, output.size, ApEvent::NO_AP_EVENT,
             runtime, false/*eager*/, true/*external*/, output.take_ownership);
         const ApEvent done = instance->copy_from(&local, this);
         if (done.exists() && !request_early_complete(done))
@@ -24566,8 +24565,7 @@ namespace Legion {
                future_result_size, true/*read only*/),
               Realm::ProfilingRequestSet()));
         FutureInstance source(serdez_redop_buffer, future_result_size, 
-            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, 
-            runtime, false/*eager*/, false/*external*/,
+            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
             false/*own alloc*/, source_instance);
         std::set<ApEvent> done_events;
         for (std::vector<FutureInstance*>::const_iterator it =
@@ -24942,7 +24940,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -24956,7 +24954,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      profiling_reports.fetch_add(1);
+      profiling_reports.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------

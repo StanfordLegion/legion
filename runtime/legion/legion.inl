@@ -49,17 +49,15 @@ namespace Legion {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
-      static inline void end_helper(Runtime *rt, Context ctx,
+      static inline void end_helper(Context ctx,
           const void *result, size_t result_size, bool owned)
       {
-        Runtime::legion_task_postamble(rt, ctx, result, result_size, owned);
+        Runtime::legion_task_postamble(ctx, result, result_size, owned);
       }
-      static inline Future from_value_helper(Runtime *rt, 
-          const void *value, size_t value_size, bool owned,
-          Memory::Kind memkind = Memory::SYSTEM_MEM,
-          void (*freefunc)(void*,size_t) = NULL)
+      static inline Future from_value_helper(
+          const void *value, size_t value_size, bool owned)
       {
-        return rt->from_value(value, value_size, owned, memkind, freefunc);
+        return Future::from_untyped_pointer(value, value_size, owned);
       }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
@@ -71,26 +69,25 @@ namespace Legion {
       
       template<typename T, bool HAS_SERIALIZE>
       struct NonPODSerializer {
-        static inline void end_task(Runtime *rt, Context ctx,
-                                    T *result)
+        static inline void end_task(Context ctx, T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
           if (buffer_size > 0)
           {
             void *buffer = malloc(buffer_size);
             result->legion_serialize(buffer);
-            end_helper(rt, ctx, buffer, buffer_size, true/*owned*/);
+            end_helper(ctx, buffer, buffer_size, true/*owned*/);
             // No need to free the buffer, the Legion runtime owns it now
           }
           else
-            end_helper(rt, ctx, NULL, 0, false/*owned*/);
+            end_helper(ctx, NULL, 0, false/*owned*/);
         }
-        static inline Future from_value(Runtime *rt, const T *value)
+        static inline Future from_value(const T *value)
         {
           size_t buffer_size = value->legion_buffer_size();
           void *buffer = malloc(buffer_size);
           value->legion_serialize(buffer);
-          return from_value_helper(rt, buffer, buffer_size, true/*owned*/);
+          return from_value_helper(buffer, buffer_size, true/*owned*/);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -107,20 +104,20 @@ namespace Legion {
       // Further specialization for deferred reductions
       template<typename REDOP, bool EXCLUSIVE>
       struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false> {
-        static inline void end_task(Runtime *rt, Context ctx,
+        static inline void end_task(Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
           static_assert(!IsSerdezType<typename REDOP::RHS>::value, 
               "Legion does not currently support serialize/deserialize "
               "methods on types in DefrredReductions");
-          result->finalize(rt, ctx);
+          result->finalize(ctx);
         }
-        static inline Future from_value(Runtime *rt, 
+        static inline Future from_value(
             const DeferredReduction<REDOP,EXCLUSIVE> *value)
         {
           // Should never be called
           assert(false);
-          return from_value_helper(rt, (const void*)value,
+          return from_value_helper((const void*)value,
             sizeof(DeferredReduction<REDOP,EXCLUSIVE>), false/*owned*/);
         }
         static inline DeferredReduction<REDOP,EXCLUSIVE> 
@@ -138,19 +135,19 @@ namespace Legion {
       // Further specialization to see if this a deferred value
       template<typename T>
       struct NonPODSerializer<DeferredValue<T>,false> {
-        static inline void end_task(Runtime *rt, Context ctx,
+        static inline void end_task(Context ctx,
                                     DeferredValue<T> *result)
         {
           static_assert(!IsSerdezType<T>::value,
               "Legion does not currently support serialize/deserialize "
               "methods on types in DeferredValues");
-          result->finalize(rt, ctx);
+          result->finalize(ctx);
         }
-        static inline Future from_value(Runtime *rt, const DeferredValue<T> *value)
+        static inline Future from_value(const DeferredValue<T> *value)
         {
           // Should never be called
           assert(false);
-          return from_value_helper(rt, (const void*)value,
+          return from_value_helper((const void*)value,
                                    sizeof(DeferredValue<T>), false/*owned*/);
         }
         static inline DeferredValue<T> unpack(const Future &f,
@@ -167,13 +164,13 @@ namespace Legion {
       
       template<typename T>
       struct NonPODSerializer<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, T *result)
+        static inline void end_task(Context ctx, T *result)
         {
-          end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
         }
-        static inline Future from_value(Runtime *rt, const T *value)
+        static inline Future from_value(const T *value)
         {
-          return from_value_helper(rt, (const void*)value,
+          return from_value_helper((const void*)value,
                                    sizeof(T), false/*owned*/);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
@@ -203,15 +200,14 @@ namespace Legion {
 
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
-        static inline void end_task(Runtime *rt, Context ctx, T *result)
+        static inline void end_task(Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods
-          NonPODSerializer<T,IsSerdezType<T>::value>::end_task(rt, ctx, result);
+          NonPODSerializer<T,IsSerdezType<T>::value>::end_task(ctx, result);
         }
-        static inline Future from_value(Runtime *rt, const T *value)
+        static inline Future from_value(const T *value)
         {
-          return NonPODSerializer<T,IsSerdezType<T>::value>::from_value(
-                                                                  rt, value);
+          return NonPODSerializer<T,IsSerdezType<T>::value>::from_value(value);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
@@ -223,13 +219,13 @@ namespace Legion {
       // False case of template specialization
       template<typename T>
       struct StructHandler<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, T *result)
+        static inline void end_task(Context ctx, T *result)
         {
-          end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper(ctx, (void*)result, sizeof(T), false/*owned*/);
         }
-        static inline Future from_value(Runtime *rt, const T *value)
+        static inline Future from_value(const T *value)
         {
-          return from_value_helper(rt, (const void*)value, 
+          return from_value_helper((const void*)value, 
                                    sizeof(T), false/*owned*/);
         }
         static inline T unpack(const Future &f, bool silence_warnings,
@@ -246,15 +242,15 @@ namespace Legion {
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
       template<typename T>
-      static inline void end_task(Runtime *rt, Context ctx, T *result)
+      static inline void end_task(Context ctx, T *result)
       {
-        StructHandler<T,std::is_class<T>::value>::end_task(rt, ctx, result);
+        StructHandler<T,std::is_class<T>::value>::end_task(ctx, result);
       }
 
       template<typename T>
-      static inline Future from_value(Runtime *rt, const T *value)
+      static inline Future from_value(const T *value)
       {
-        return StructHandler<T,std::is_class<T>::value>::from_value(rt, value);
+        return StructHandler<T,std::is_class<T>::value>::from_value(value);
       }
 
       template<typename T>
@@ -16838,12 +16834,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void DeferredValue<T>::finalize(Runtime *runtime, Context ctx) const
+    inline void DeferredValue<T>::finalize(Context ctx) const
     //--------------------------------------------------------------------------
     {
-      Runtime::legion_task_postamble(runtime, ctx,
-                    accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
-                    true/*owner*/, instance, instance.get_location().kind());
+      Runtime::legion_task_postamble(ctx, accessor.ptr(Point<1,coord_t>(0)),
+                                     sizeof(T), true/*owner*/, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -17350,12 +17345,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+                                                     0/*fid*/,
+                                                     bounds.bounds);
 #endif
       assert(is_compatible);
 #endif
       // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      accessor = Realm::AffineAccessor<FT,N,T>(instance,
+                                               0/*field id*/,
+                                               bounds.bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -17850,12 +17849,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+                                                     0/*fid*/,
+                                                     bounds.bounds);
 #endif
       assert(is_compatible);
 #endif
       // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      accessor = Realm::AffineAccessor<FT,N,T>(instance,
+                                               0/*field id*/,
+                                               bounds.bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -20367,17 +20370,15 @@ namespace Legion {
     /*static*/ inline Future Future::from_value(Runtime *rt, const T &value)
     //--------------------------------------------------------------------------
     {
-      return LegionSerialization::from_value(rt, &value);
-    }
+      return LegionSerialization::from_value(&value);
+    } 
 
     //--------------------------------------------------------------------------
-    /*static*/ inline Future Future::from_untyped_pointer(Runtime *rt,
-                           const void *buffer, size_t bytes, bool owned,
-                           Memory::Kind memkind, void (*freefunc)(void*,size_t))
+    template<typename T>
+    /*static*/ inline Future Future::from_value(const T &value)
     //--------------------------------------------------------------------------
     {
-      return LegionSerialization::from_value_helper(rt, buffer, bytes, owned,
-                                                    memkind, freefunc);
+      return LegionSerialization::from_value(&value);
     }
 
     //--------------------------------------------------------------------------
@@ -21985,7 +21986,7 @@ namespace Legion {
 				       const std::vector<PhysicalRegion> *& ptr,
 				       Context& ctx,
 				       Runtime *& runtime);
-      static void legion_task_postamble(Runtime *runtime, Context ctx,
+      static void legion_task_postamble(Context ctx,
 					const void *retvalptr = NULL,
 					size_t retvalsize = 0);
     };
@@ -22014,7 +22015,7 @@ namespace Legion {
       T return_value = (*TASK_PTR)(task, *regions, ctx, rt);
 
       // Send the return value back
-      LegionSerialization::end_task<T>(rt, ctx, &return_value);
+      LegionSerialization::end_task<T>(ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
@@ -22034,7 +22035,7 @@ namespace Legion {
 
       (*TASK_PTR)(task, *regions, ctx, rt);
 
-      Runtime::legion_task_postamble(rt, ctx);
+      Runtime::legion_task_postamble(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -22066,7 +22067,7 @@ namespace Legion {
       T return_value = (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
       // Send the return value back
-      LegionSerialization::end_task<T>(rt, ctx, &return_value);
+      LegionSerialization::end_task<T>(ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
@@ -22091,7 +22092,7 @@ namespace Legion {
       (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
       // Send an empty return value back
-      Runtime::legion_task_postamble(rt, ctx);
+      Runtime::legion_task_postamble(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -22111,12 +22112,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void LegionTaskWrapper::legion_task_postamble(
-                  Runtime *runtime, Context ctx,
+                  Context ctx,
 		  const void *retvalptr /*= NULL*/,
 		  size_t retvalsize /*= 0*/)
     //--------------------------------------------------------------------------
     {
-      Runtime::legion_task_postamble(runtime, ctx, retvalptr, retvalsize);
+      Runtime::legion_task_postamble(ctx, retvalptr, retvalsize);
     }
 
     //--------------------------------------------------------------------------

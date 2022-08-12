@@ -463,12 +463,19 @@ namespace Legion {
         FutureInstance *const instance;
       };
     public:
-      FutureInstance(const void *data, size_t size, Memory memory, 
+      FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
                      bool external, bool own_allocation = true,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
-                     void (*freefunc)(void*,size_t) = NULL,
                      Processor free_proc = Processor::NO_PROC,
+                     RtEvent use_event = RtEvent::NO_RT_EVENT);
+      FutureInstance(const void *data, size_t size,
+                     ApEvent ready_event, Runtime *runtime, bool own,
+                     const Realm::ExternalInstanceResource *allocation,
+                     void (*freefunc)(
+                       const Realm::ExternalInstanceResource&) = NULL,
+                     Processor free_proc = Processor::NO_PROC,
+                     PhysicalInstance inst = PhysicalInstance::NO_INST,
                      RtEvent use_event = RtEvent::NO_RT_EVENT);
       FutureInstance(const FutureInstance &rhs) = delete;
       ~FutureInstance(void);
@@ -500,13 +507,15 @@ namespace Legion {
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
       static void handle_deferred_delete(const void *args);
+      static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
       Runtime *const runtime;
       const void *const data;
       const size_t size;
       const Memory memory;
       const ApEvent ready_event;
-      void (*const freefunc)(void*,size_t);
+      const Realm::ExternalInstanceResource *const resource;
+      void (*const freefunc)(const Realm::ExternalInstanceResource&);
       const Processor freeproc;
       const bool eager_allocation;
       const bool external_allocation;
@@ -1666,7 +1675,7 @@ namespace Legion {
       EagerAllocator *eager_allocator;
       size_t eager_remaining_capacity;
       // Allocation counter
-      size_t next_allocation_id;
+      std::atomic<size_t> next_allocation_id;
       // Mapping from pointers to their allocation ids
       std::map<uintptr_t,size_t> eager_allocations;
     protected:
@@ -2615,13 +2624,13 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
       public:
-        FreeExternalArgs(void *d, size_t s, void (*f)(void*,size_t))
+        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
+            void (*func)(const Realm::ExternalInstanceResource&))
           : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
-            data(d), size(s), func(f) { }
+            resource(r), freefunc(func) { }
       public:
-        void *const data;
-        const size_t size;
-        void (*const func)(void*,size_t);
+        const Realm::ExternalInstanceResource *const resource;
+        void (*const freefunc)(const Realm::ExternalInstanceResource&);
       };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
@@ -3078,8 +3087,9 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
-      void free_external_allocation(Processor proc, void *data, size_t size,
-                                    void (*freefunc)(void*,size_t));
+      void free_external_allocation(Processor proc,
+          const Realm::ExternalInstanceResource *resource, 
+          void (*freefunc)(const Realm::ExternalInstanceResource&));
       void acquire_collective_allocation_privileges(
           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
       void release_collective_allocation_privileges(Memory target);

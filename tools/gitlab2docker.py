@@ -34,6 +34,8 @@ parser.add_argument('-t', '--tag', type=str,
                     help='tag to apply to built container')
 parser.add_argument('-N', '--network', type=str,
                     help='name of docker network to use during build')
+parser.add_argument('-e', '--env', type=str, action='append', default=[],
+                    help='environment variables (name=value) to override in container')
 parser.add_argument('cfgfile', type=str,
                     help='path to GitLab CI config file')
 parser.add_argument('jobname', type=str,
@@ -72,10 +74,21 @@ def generate_dockerfile(args, cfg, job, script=None):
     s = ''
     s += 'FROM {}\n'.format(args.image or job['image'])
     s += 'SHELL [ "/bin/bash", "-c" ]\n'
+
+    # do all ENV's in a single line to reduce intermediate images
+    envs = []
     for k, v in cfg['variables'].items():
-        s += 'ENV {}="{}"\n'.format(k, v)
+        envs.append('{}="{}"'.format(k, v))
     for k, v in job.get('variables', {}).items():
-        s += 'ENV {}="{}"\n'.format(k, v)
+        envs.append('{}="{}"'.format(k, v))
+    for e in args.env:
+        if '=' in e:
+            k, v = e.split('=', 1)
+            envs.append('{}="{}"'.format(k, v))
+        else:
+            envs.append('{}=1'.format(e))
+    if envs:
+        s += 'ENV ' + '\\\n    '.join(envs) + '\n'
 
     if args.localtree:
         reclone = False

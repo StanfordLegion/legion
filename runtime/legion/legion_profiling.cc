@@ -1936,13 +1936,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
-                                          Operation *op)
+                                          Operation *op, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      increment_total_outstanding_requests(LEGION_PROF_COPY);
+      increment_total_outstanding_requests(LEGION_PROF_COPY, count);
 #else
-      increment_total_outstanding_requests();
+      increment_total_outstanding_requests(count);
 #endif
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
@@ -2096,13 +2096,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
-                                          UniqueID uid)
+                                          UniqueID uid, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      increment_total_outstanding_requests(LEGION_PROF_COPY);
+      increment_total_outstanding_requests(LEGION_PROF_COPY, count);
 #else
-      increment_total_outstanding_requests();
+      increment_total_outstanding_requests(count);
 #endif
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here

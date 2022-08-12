@@ -65,6 +65,12 @@ extern "C" {
   }
 
   REALM_PUBLIC_API
+  int omp_get_num_procs(void)
+  {
+    return omp_get_max_threads();
+  }
+
+  REALM_PUBLIC_API
   int omp_get_thread_num(void)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);

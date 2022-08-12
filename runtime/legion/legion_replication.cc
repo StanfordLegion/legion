@@ -15815,7 +15815,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UnorderedExchange::UnorderedExchange(ReplicateContext *ctx, 
                                          CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx), current_stage(-1)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }

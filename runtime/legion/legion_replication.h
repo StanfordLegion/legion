@@ -991,8 +991,6 @@ namespace Legion {
           const std::map<T,unsigned> &final_counts,
           const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops);
     protected:
-      int current_stage;
-    protected:
       std::map<IndexSpace,unsigned> index_space_counts;
       std::map<IndexPartition,unsigned> index_partition_counts;
       std::map<FieldSpace,unsigned> field_space_counts;
