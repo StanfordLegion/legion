@@ -9588,8 +9588,10 @@ namespace Legion {
       if (overlap.empty())
         return false;
 #ifdef DEBUG_LEGION
-      assert((collective->instances.size() != overlap.size()) ||
-              (instances.size() != overlap.size()));
+      // They shouldn't both be congruent, if they are then they are
+      // the same and we should have caught that much earlier
+      assert((collective->instances.size() < overlap.size()) ||
+              (instances.size() < overlap.size()));
 #endif
       // Yes they interfere, now figure out how
       if (overlap.size() < instances.size())
@@ -9604,7 +9606,7 @@ namespace Legion {
           std::vector<DistributedID>::const_iterator first = instances.begin();
           std::vector<DistributedID>::const_iterator second = 
             collective->instances.begin();
-          while ((first != instances.begin()) && 
+          while ((first != instances.end()) && 
                  (second != collective->instances.end()))
           {
             if (*first < *second)
@@ -9639,8 +9641,7 @@ namespace Legion {
           std::vector<DistributedID>::const_iterator first = 
             collective->instances.begin();
           std::vector<DistributedID>::const_iterator second = instances.begin();
-          
-          while ((first != collective->instances.begin()) && 
+          while ((first != collective->instances.end()) && 
                  (second != instances.end()))
           {
             if (*first < *second)
@@ -9671,9 +9672,190 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::find_individual_interfering(const FieldMask &mask,
+                                const std::vector<DistributedID> &instances,
+                                FieldMaskSet<IndividualView> &interfering) const
+    //--------------------------------------------------------------------------
+    {
+      if (!(mask * total_valid_instances.get_valid_mask()))
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              total_valid_instances.begin(); it != 
+              total_valid_instances.end(); it++)
+        {
+          if (!it->first->is_individual_view())
+            continue;
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          IndividualView *view = it->first->as_individual_view();
+          if (!std::binary_search(instances.begin(), instances.end(),
+                                  view->get_manager()->did))
+            continue;
+          interfering.insert(view, overlap);
+        }
+      }
+      if (!(mask * partial_valid_fields))
+      {
+        for (ViewExprMaskSets::const_iterator it =
+              partial_valid_instances.begin(); it !=
+              partial_valid_instances.end(); it++)
+        {
+          if (!it->first->is_individual_view())
+            continue;
+          const FieldMask overlap = mask & it->second.get_valid_mask();
+          if (!overlap)
+            continue;
+          IndividualView *view = it->first->as_individual_view();
+          if (!std::binary_search(instances.begin(), instances.end(),
+                                  view->get_manager()->did))
+            continue;
+          interfering.insert(view, overlap);
+        }
+      }
+      if (!(mask * reduction_fields))
+      {
+        for (std::map<unsigned,std::list<std::pair<
+              InstanceView*,IndexSpaceExpression*> > >::const_iterator rit =
+              reduction_instances.begin(); rit != 
+              reduction_instances.end(); rit++)
+        {
+          if (!mask.is_set(rit->first))
+            continue;
+          FieldMask bit_mask;
+          bit_mask.set_bit(rit->first);
+          for (std::list<std::pair<InstanceView*,
+                IndexSpaceExpression*> >::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            if (!it->first->is_individual_view())
+              continue;
+            IndividualView *view = it->first->as_individual_view();
+            if (!std::binary_search(instances.begin(), instances.end(),
+                                    view->get_manager()->did))
+              continue;
+            interfering.insert(view, bit_mask);
+          }
+        }
+      }
+      if (!(mask * restricted_fields))
+      {
+        for (ExprViewMaskSets::const_iterator rit =
+              restricted_instances.begin(); rit != 
+              restricted_instances.end(); rit++)
+        {
+          if (mask * rit->second.get_valid_mask())
+            continue;
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            if (!it->first->is_individual_view())
+              continue;
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            IndividualView *view = it->first->as_individual_view();
+            if (!std::binary_search(instances.begin(), instances.end(),
+                                    view->get_manager()->did))
+              continue;
+            interfering.insert(view, overlap);
+          }
+        }
+      }
+      if (!released_instances.empty())
+      {
+        for (ExprViewMaskSets::const_iterator rit =
+              released_instances.begin(); rit != 
+              released_instances.end(); rit++)
+        {
+          if (mask * rit->second.get_valid_mask())
+            continue;
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            if (!it->first->is_individual_view())
+              continue;
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            IndividualView *view = it->first->as_individual_view();
+            if (!std::binary_search(instances.begin(), instances.end(),
+                                    view->get_manager()->did))
+              continue;
+            interfering.insert(view, overlap);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::PendingCollective::PendingCollective(CollectiveView *ed,
+                                                         CollectiveView *ing)
+      : refined(ed), refining(ing), instances(refined->instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refined != NULL);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::PendingCollective::PendingCollective(CollectiveView *ing, 
+                                      const std::set<IndividualView*> &excluded)
+      : refined(NULL), refining(ing)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refining != NULL);
+#endif
+      std::vector<DistributedID> to_exclude;
+      to_exclude.reserve(excluded.size());
+      for (std::set<IndividualView*>::const_iterator it =
+            excluded.begin(); it != excluded.end(); it++)
+        to_exclude.push_back((*it)->get_manager()->did);
+      std::sort(to_exclude.begin(), to_exclude.end());
+      instances.reserve(refining->instances.size() - excluded.size());
+      // Compute the difference
+      std::vector<DistributedID>::const_iterator first = 
+        refining->instances.begin();
+      std::vector<DistributedID>::const_iterator second = to_exclude.begin(); 
+      while ((first != refining->instances.end()) && 
+             (second != to_exclude.end()))
+      {
+        if (*first < *second)
+          instances.push_back(*first++);
+        else if (*second < *first)
+          second++;
+        else
+        {
+          first++;
+          second++;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::PendingCollective::PendingCollective(CollectiveView *ing,
+                                        const std::vector<DistributedID> &insts)
+      : refined(NULL), refining(ing), instances(insts)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     bool EquivalenceSet::refine_collective_views(const FieldMaskSet<T> &views,
-                                                 FieldMaskSet<T> &refined_views)
+              FieldMaskSet<T> &refined_views, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      WrapperReferenceMutator mutator(applied_events);
+      return refine_collective_views(views, refined_views, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    bool EquivalenceSet::refine_collective_views(const FieldMaskSet<T> &views,
+                      FieldMaskSet<T> &refined_views, ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       if (collective_instances.empty())
@@ -9904,7 +10086,7 @@ namespace Legion {
               for (LegionList<FieldSet<IndividualView*> >::const_iterator it =
                     field_sets.begin(); it != field_sets.end(); it++)
                 overlapping_refinements.insert(new PendingCollective(
-                  collective, NULL/*invalidate*/, it->elements), it->set_mask);
+                  collective, it->elements), it->set_mask);
               remaining -= interfering.get_valid_mask();
             }
             if (!!remaining)
@@ -9961,8 +10143,7 @@ namespace Legion {
                   for (LegionList<FieldSet<IndividualView*> >::const_iterator 
                         it = field_sets.begin(); it != field_sets.end(); it++)
                     overlapping_refinements.insert(new PendingCollective(
-                          collective, NULL/*invalidate*/, it->elements),
-                        it->set_mask);
+                          collective, it->elements), it->set_mask);
                   rit.filter(interfering.get_valid_mask());
                 }
                 if (!!rit->second)
@@ -9980,20 +10161,380 @@ namespace Legion {
       if (overlapping_refinements.empty() &&
           independent_refinements.empty() && to_subtract.empty())
         return false;
+      LegionMap<CollectiveView*,FieldMaskSet<InstanceView> > to_invalidate;
+      // Create the new collective views for the overlapping views to get
+      // them in flight while we do other things
+      std::vector<RtEvent> pending_ready;
+      for (FieldMaskSet<PendingCollective>::iterator it =
+            overlapping_refinements.begin(); it != 
+            overlapping_refinements.end(); it++)
+      {
+        // Make a new collective view if we don't have a name for it yet
+        if (it->first->refined == NULL)
+        {
+          RtEvent ready;
+          it->first->refined = 
+            create_collective_view(it->first->instances, ready);
+          if (ready.exists())
+            pending_ready.push_back(ready);
+        }
+        // If views were refined then record it
+        if (views_refined)
+          refined_views.insert(it->first->refined, it->second);
+        // Record the invalidations if necessary
+        if (it->first->refining != NULL)
+          to_invalidate[it->first->refining].insert(it->first->refined,
+                                                    it->second);
+      }
       // Convert the subtractions into pending collectives
-
-      // Create the new collective views
-
+      if (!to_subtract.empty())
+      {
+        for (LegionMap<CollectiveView*,
+                       FieldMaskSet<IndividualView> >::const_iterator cit =
+              to_subtract.begin(); cit != to_subtract.end(); cit++)
+        {
+          // Filter out the fields from the collective view
+          FieldMaskSet<CollectiveView>::iterator finder =
+            collective_instances.find(cit->first);
+#ifdef DEBUG_LEGION
+          assert(finder != collective_instances.end());
+#endif
+          finder.filter(cit->second.get_valid_mask());
+          if (!finder->second)
+            to_delete.push_back(cit->first);
+          // Record that we'll be replacing this collective with these views
+          FieldMaskSet<InstanceView> &invalidate = to_invalidate[cit->first];
+          for (FieldMaskSet<IndividualView>::const_iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+            invalidate.insert(it->first, it->second);
+          // Record independent refinements for the remainders
+          LegionList<FieldSet<IndividualView*> > field_sets;
+          cit->second.compute_field_sets(FieldMask(), field_sets);
+          for (LegionList<FieldSet<IndividualView*> >::const_iterator it =
+                field_sets.begin(); it != field_sets.end(); it++)
+            independent_refinements.insert(
+                new PendingCollective(cit->first, it->elements), it->set_mask);
+        }
+      }
+      // Create new collective views for the independent refinements
+      for (FieldMaskSet<PendingCollective>::iterator it =
+            independent_refinements.begin(); it != 
+            independent_refinements.end(); it++)
+      {
+        // Make a new collective view if we don't have a name for it yet
+        if (it->first->refined == NULL)
+        {
+          RtEvent ready;
+          it->first->refined = 
+            create_collective_view(it->first->instances, ready);
+          if (ready.exists())
+            pending_ready.push_back(ready);
+        }
+        // Record the invalidations if necessary
+        if (it->first->refining != NULL)
+          to_invalidate[it->first->refining].insert(it->first->refined,
+                                                    it->second);
+      }
+      // Wait for any of the new collective views to be ready
+      if (!pending_ready.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(pending_ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Perform the invalidations
-
+      if (!to_invalidate.empty())
+        invalidate_collective_views(mutator, to_invalidate);
+      // Delete all the collectives that are no longer valid
+      for (std::vector<CollectiveView*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        collective_instances.erase(*it);
+        if ((*it)->remove_nested_resource_ref(did))
+          delete (*it);
+      }
+      // Record all the new refinements
+      for (FieldMaskSet<PendingCollective>::iterator it =
+            overlapping_refinements.begin(); it != 
+            overlapping_refinements.end(); it++)
+      {
+        if (collective_instances.insert(it->first->refined, it->second))
+          it->first->refined->add_nested_resource_ref(did);
+        delete it->first;
+      }
+      for (FieldMaskSet<PendingCollective>::iterator it =
+            independent_refinements.begin(); it != 
+            independent_refinements.end(); it++)
+      {
+        if (collective_instances.insert(it->first->refined, it->second))
+          it->first->refined->add_nested_resource_ref(did);
+        delete it->first;
+      }
       if (views_refined)
       {
-
+        // Still need to copy over any collective views that were not
+        // refined at all or any individual views from the original set
+        for (typename FieldMaskSet<T>::const_iterator it =
+              views.begin(); it != views.end(); it++)
+        {
+          if (!it->first->is_collective_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(it->second * refined_views.get_valid_mask());
+#endif
+            refined_views.insert(it->first, it->second);
+          }
+          else
+          {
+            const FieldMask notrefined = 
+              it->second - refined_views.get_valid_mask();
+            if (!notrefined)
+              continue;
+            refined_views.insert(it->first, notrefined);
+          }
+        }
         return true;
       }
       else
         return false;
     } 
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::invalidate_collective_views(ReferenceMutator &mutator,
+    const LegionMap<CollectiveView*,FieldMaskSet<InstanceView> > &to_invalidate)
+    //--------------------------------------------------------------------------
+    {
+      typedef LegionMap<CollectiveView*,FieldMaskSet<InstanceView> >
+        CollectiveInvalidateSets;
+      bool has_redop = false;
+      FieldMask invalidate_mask;
+      for (CollectiveInvalidateSets::const_iterator it =
+            to_invalidate.begin(); it != to_invalidate.end(); it++)
+      {
+        invalidate_mask |= it->second.get_valid_mask();
+        if (!has_redop && (it->first->get_redop() > 0))
+          has_redop = true;
+      }
+      if (!(invalidate_mask * total_valid_instances.get_valid_mask()))
+      {
+        for (CollectiveInvalidateSets::const_iterator cit =
+              to_invalidate.begin(); cit != to_invalidate.end(); cit++)
+        {
+          FieldMaskSet<LogicalView>::iterator finder = 
+            total_valid_instances.find(cit->first);
+          if (finder == total_valid_instances.end())
+            continue;
+          const FieldMask inst_overlap = 
+            cit->second.get_valid_mask() & finder->second;
+          if (!inst_overlap)
+            continue;
+          // Remove the old entry
+          finder.filter(inst_overlap);
+          if (!finder->second)
+          {
+            if (finder->first->remove_nested_valid_ref(did))
+              assert(false); // should never actually get deleted now
+            total_valid_instances.erase(finder);
+          }
+          // Insert the new entries
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & inst_overlap;
+            if (!overlap)
+              continue;
+            if (total_valid_instances.insert(it->first, overlap))
+              it->first->add_nested_valid_ref(did, &mutator);
+          }
+        }
+      }
+      if (!(invalidate_mask * partial_valid_fields))
+      {
+        for (CollectiveInvalidateSets::const_iterator cit =
+              to_invalidate.begin(); cit != to_invalidate.end(); cit++)
+        {
+          ViewExprMaskSets::iterator finder =
+            partial_valid_instances.find(cit->first);
+          if (finder == partial_valid_instances.end())
+            continue;
+          const FieldMask inst_overlap = 
+            cit->second.get_valid_mask() & finder->second.get_valid_mask();
+          if (!inst_overlap)
+            continue;
+          // Duplcate any expressions for the new instances
+          for (FieldMaskSet<InstanceView>::const_iterator vit =
+                cit->second.begin(); vit != cit->second.end(); vit++)
+          {
+            const FieldMask view_overlap = inst_overlap & vit->second;
+            if (!view_overlap)
+              continue;
+            ViewExprMaskSets::iterator expr_finder =
+              partial_valid_instances.find(vit->first);
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              const FieldMask overlap = view_overlap & it->second;
+              if (!overlap)
+                continue;
+              if (expr_finder == partial_valid_instances.end())
+              {
+                expr_finder = partial_valid_instances.insert(
+                    std::make_pair(vit->first,
+                      FieldMaskSet<IndexSpaceExpression>())).first;
+                vit->first->add_nested_valid_ref(did, &mutator);
+              }
+              if (expr_finder->second.insert(it->first, overlap))
+                it->first->add_nested_expression_reference(did, &mutator);
+            }
+          }
+          // Now remove any expressions from the old view
+          std::vector<IndexSpaceExpression*> to_delete;
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            it.filter(inst_overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            finder->second.erase(*it);
+            if ((*it)->remove_nested_expression_reference(did))
+              assert(false); // references should have been added by replacement
+          }
+          if (finder->second.empty())
+          {
+            if (finder->first->remove_nested_valid_ref(did))
+              assert(false); // should still be holding resource ref
+            partial_valid_instances.erase(finder);
+          }
+          else
+            finder->second.tighten_valid_mask();
+        }
+      }
+      if (has_redop && !(invalidate_mask * reduction_fields))
+      {
+        for (CollectiveInvalidateSets::const_iterator cit =
+              to_invalidate.begin(); cit != to_invalidate.end(); cit++)
+        {
+          const FieldMask reduce_mask = 
+            reduction_fields & cit->second.get_valid_mask();
+          if (!reduce_mask)
+            continue;
+          int fidx = reduce_mask.find_first_set();
+          while (fidx >= 0)
+          {
+            std::list<std::pair<InstanceView*,IndexSpaceExpression*> > 
+              &reductions = reduction_instances[fidx];
+            for (std::list<std::pair<InstanceView*,IndexSpaceExpression*> >::
+                  iterator rit = reductions.begin(); 
+                  rit != reductions.end(); /*nothing*/)
+            {
+              if (rit->first == cit->first)
+              {
+                // Insert all the relevant views ahead in the list
+                for (FieldMaskSet<InstanceView>::const_iterator it =
+                      cit->second.begin(); it != cit->second.end(); it++)
+                {
+                  if (!it->second.is_set(fidx))
+                    continue;
+                  it->first->add_nested_valid_ref(did, &mutator);
+                  rit->second->add_nested_expression_reference(did, &mutator);
+                  reductions.insert(rit, std::make_pair(it->first,rit->second));
+                }
+                if (rit->first->remove_nested_valid_ref(did))
+                  assert(false); // should have other references
+                if (rit->second->remove_nested_expression_reference(did))
+                  assert(false); // should have other references
+                rit = reductions.erase(rit);
+              }
+              else
+                rit++;
+            }
+            fidx = reduce_mask.find_next_set(fidx+1);
+          }
+        }
+      }
+      if (!(invalidate_mask * restricted_fields))
+      {
+        for (ExprViewMaskSets::iterator rit =
+              restricted_instances.begin(); rit != 
+              restricted_instances.end(); rit++)
+        {
+          if (invalidate_mask * rit->second.get_valid_mask())
+            continue;
+          for (CollectiveInvalidateSets::const_iterator cit =
+                to_invalidate.begin(); cit != to_invalidate.end(); cit++)
+          {
+            FieldMaskSet<InstanceView>::iterator finder =
+              rit->second.find(cit->first);
+            if (finder == rit->second.end())
+              continue;
+            const FieldMask view_overlap = 
+              finder->second & cit->second.get_valid_mask();
+            if (!view_overlap)
+              continue;
+            finder.filter(view_overlap);
+            if (!finder->second)
+            {
+              if (finder->first->remove_nested_valid_ref(did))
+                assert(false); // should have other references
+              rit->second.erase(finder);
+            }
+            // Now insert all the replacement views here
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  cit->second.begin(); it != cit->second.end(); it++)
+            {
+              const FieldMask overlap = view_overlap & it->second;
+              if (!overlap)
+                continue;
+              if (rit->second.insert(it->first, overlap))
+                it->first->add_nested_valid_ref(did, &mutator);
+            }
+          }
+        }
+      }
+      if (!released_instances.empty())
+      {
+        for (ExprViewMaskSets::iterator rit =
+              released_instances.begin(); rit != 
+              released_instances.end(); rit++)
+        {
+          if (invalidate_mask * rit->second.get_valid_mask())
+            continue;
+          for (CollectiveInvalidateSets::const_iterator cit =
+                to_invalidate.begin(); cit != to_invalidate.end(); cit++)
+          {
+            FieldMaskSet<InstanceView>::iterator finder =
+              rit->second.find(cit->first);
+            if (finder == rit->second.end())
+              continue;
+            const FieldMask view_overlap = 
+              finder->second & cit->second.get_valid_mask();
+            if (!view_overlap)
+              continue;
+            finder.filter(view_overlap);
+            if (!finder->second)
+            {
+              if (finder->first->remove_nested_valid_ref(did))
+                assert(false); // should have other references
+              rit->second.erase(finder);
+            }
+            // Now insert all the replacement views here
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  cit->second.begin(); it != cit->second.end(); it++)
+            {
+              const FieldMask overlap = view_overlap & it->second;
+              if (!overlap)
+                continue;
+              if (rit->second.insert(it->first, overlap))
+                it->first->add_nested_valid_ref(did, &mutator);
+            }
+          }
+        }
+      }
+    }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::find_invalid_instances(InvalidInstAnalysis &analysis,
@@ -10010,7 +10551,8 @@ namespace Legion {
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
       const FieldMaskSet<LogicalView> &valid_instances = 
-        refine_collective_views(analysis.valid_instances, refined_instances)
+        refine_collective_views(analysis.valid_instances,
+                                refined_instances, applied_events)
         ? refined_instances : analysis.valid_instances;
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             valid_instances.begin(); it != valid_instances.end(); it++)
@@ -10144,7 +10686,8 @@ namespace Legion {
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
       const FieldMaskSet<LogicalView> &antivalid_instances = 
-        refine_collective_views(analysis.antivalid_instances, refined_instances)
+        refine_collective_views(analysis.antivalid_instances,
+                                refined_instances, applied_events)
         ? refined_instances : analysis.antivalid_instances;
       for (FieldMaskSet<LogicalView>::const_iterator ait =
             antivalid_instances.begin(); ait !=
@@ -10279,7 +10822,8 @@ namespace Legion {
           {
             FieldMaskSet<InstanceView> refined_views;
             const FieldMaskSet<InstanceView> &red_views =
-              refine_collective_views(analysis.target_views[idx], refined_views)
+              refine_collective_views(analysis.target_views[idx],
+                                      refined_views, applied_events)
               ? refined_views : analysis.target_views[idx];
             for (FieldMaskSet<InstanceView>::const_iterator rit =
                   red_views.begin(); rit != red_views.end(); rit++)
@@ -11542,7 +12086,7 @@ namespace Legion {
       if (check_collectives)
       {
         FieldMaskSet<T> refined_instances;
-        if (refine_collective_views(target_insts, refined_instances))
+        if (refine_collective_views(target_insts, refined_instances, mutator))
         {
           record_instances(expr, expr_covers, record_mask, refined_instances,
                            mutator, false/*check collectives*/);
@@ -11724,7 +12268,7 @@ namespace Legion {
       if (check_collectives)
       {
         FieldMaskSet<T> refined_instances;
-        if (refine_collective_views(target_insts, refined_instances))
+        if (refine_collective_views(target_insts, refined_instances, mutator))
         {
           record_unrestricted_instances(expr, expr_covers, record_mask,
                 refined_instances, mutator, false/*check collectives*/);
@@ -12617,7 +13161,8 @@ namespace Legion {
           continue;
         FieldMaskSet<InstanceView> refined_targets;
         const FieldMaskSet<InstanceView> &targets = !skip_check &&
-          refine_collective_views(target_views[idx], refined_targets) 
+          refine_collective_views(target_views[idx],
+                                  refined_targets, applied_events) 
           ? refined_targets : target_views[idx];
         for (FieldMaskSet<InstanceView>::const_iterator it =
               targets.begin(); it != targets.end(); it++)
@@ -13775,7 +14320,8 @@ namespace Legion {
         {
           FieldMaskSet<InstanceView> refined_views;
           const FieldMaskSet<InstanceView> &target_views = 
-            refine_collective_views(analysis.target_views[idx], refined_views)
+            refine_collective_views(analysis.target_views[idx],
+                                    refined_views, applied_events)
             ? refined_views : analysis.target_views[idx];
           for (FieldMaskSet<InstanceView>::const_iterator it =
                 target_views.begin(); it != target_views.end(); it++)
@@ -13803,7 +14349,8 @@ namespace Legion {
         {
           FieldMaskSet<InstanceView> refined_views;
           const FieldMaskSet<InstanceView> &target_views = 
-            refine_collective_views(analysis.target_views[idx], refined_views)
+            refine_collective_views(analysis.target_views[idx],
+                                    refined_views, applied_events)
             ? refined_views : analysis.target_views[idx];
           for (FieldMaskSet<InstanceView>::const_iterator it =
                 target_views.begin(); it != target_views.end(); it++)
@@ -14927,7 +15474,8 @@ namespace Legion {
           WrapperReferenceMutator mutator(applied_events);
           FieldMaskSet<InstanceView> refined_views;
           const FieldMaskSet<InstanceView> &reduction_views =
-            refine_collective_views(analysis.reduction_views, refined_views)
+            refine_collective_views(analysis.reduction_views,
+                                    refined_views, applied_events)
             ? refined_views : analysis.reduction_views;
           for (FieldMaskSet<InstanceView>::const_iterator it =
                 reduction_views.begin(); it != reduction_views.end(); it++)
@@ -14948,7 +15496,8 @@ namespace Legion {
         {
           FieldMaskSet<LogicalView> refined_views;
           const FieldMaskSet<LogicalView> &views = 
-            refine_collective_views(analysis.views, refined_views)
+            refine_collective_views(analysis.views,
+                                    refined_views, applied_events)
             ? refined_views : analysis.views;
 #ifdef DEBUG_LEGION
           assert(views.size() == 1);
@@ -14996,7 +15545,8 @@ namespace Legion {
       WrapperReferenceMutator mutator(applied_events);
       FieldMaskSet<InstanceView> refined_views;
       const FieldMaskSet<InstanceView> &filter_views =
-        refine_collective_views(analysis.filter_views, refined_views)
+        refine_collective_views(analysis.filter_views,
+                                refined_views, applied_events)
         ? refined_views : analysis.filter_views;
       // Filter partial first since total could flow back here
       for (FieldMaskSet<InstanceView>::const_iterator fit =

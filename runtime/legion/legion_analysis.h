@@ -2626,7 +2626,7 @@ namespace Legion {
       struct PendingCollective {
       public:
         PendingCollective(CollectiveView *refined, CollectiveView *refining);
-        PendingCollective(CollectiveView *refined, CollectiveView *refining,
+        PendingCollective(CollectiveView *refining,
                           const std::set<IndividualView*> &excluded);
         PendingCollective(CollectiveView *refining,
                           const std::vector<DistributedID> &refined_instances);
@@ -2634,7 +2634,7 @@ namespace Legion {
         // The new collective view we're refining for (can be NULL)
         CollectiveView *refined;
         // The old collective view we're refining (can be NULL)
-        CollectiveView *refining;
+        CollectiveView *const refining;
         std::vector<DistributedID> instances;
       };
     public:
@@ -2943,7 +2943,10 @@ namespace Legion {
     protected:
       template<typename T>
       bool refine_collective_views(const FieldMaskSet<T> &views,
-                                   FieldMaskSet<T> &refined_views);
+          FieldMaskSet<T> &refined_views, std::set<RtEvent> &applied_events);
+      template<typename T>
+      bool refine_collective_views(const FieldMaskSet<T> &views,
+          FieldMaskSet<T> &refined_views, ReferenceMutator &mutator);
       template<typename T>
       bool find_collective_interfering(CollectiveView *collective,
           const std::vector<DistributedID> &instances,
@@ -2955,6 +2958,11 @@ namespace Legion {
       void find_individual_interfering(const FieldMask &mask,
           const std::vector<DistributedID> &instances,
           FieldMaskSet<IndividualView> &interfering) const;
+      CollectiveView* create_collective_view(
+          const std::vector<DistributedID> &instances, RtEvent &ready);
+      void invalidate_collective_views(ReferenceMutator &mutator,
+          const LegionMap<CollectiveView*,
+                          FieldMaskSet<InstanceView> > &to_invalidate);
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
