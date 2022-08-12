@@ -149,6 +149,31 @@ namespace Realm {
     uintptr_t array;
   };
 
+  class REALM_PUBLIC_API ExternalCudaPinnedHostResource : public ExternalMemoryResource {
+  public:
+    ExternalCudaPinnedHostResource(uintptr_t _base, size_t _size_in_bytes, bool _read_only);
+    ExternalCudaPinnedHostResource(void *_base, size_t _size_in_bytes);
+    ExternalCudaPinnedHostResource(const void *_base, size_t _size_in_bytes);
+
+    // returns the suggested memory in which this resource should be created
+    Memory suggested_memory() const;
+
+    virtual ExternalInstanceResource *clone(void) const;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static ExternalInstanceResource *deserialize_new(S& deserializer);
+
+  protected:
+    ExternalCudaPinnedHostResource();
+
+    static Serialization::PolymorphicSerdezSubclass<ExternalInstanceResource, ExternalCudaPinnedHostResource> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+  };
+
 }; // namespace Realm
 
 #include "realm/cuda/cuda_access.inl"

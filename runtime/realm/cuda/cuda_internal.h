@@ -856,6 +856,18 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUZCMemory supports ExternalCudaPinnedHostResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;

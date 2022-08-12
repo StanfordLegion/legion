@@ -1245,7 +1245,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -3956,7 +3956,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -3969,7 +3969,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -6602,7 +6602,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -6615,7 +6615,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -10326,7 +10326,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -10339,7 +10339,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -12271,7 +12271,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AcquireOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -12284,7 +12284,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -13215,7 +13215,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReleaseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -13228,7 +13228,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -17274,7 +17274,7 @@ namespace Legion {
     void DependentPartitionOp::add_copy_profiling_request(
                                            const PhysicalTraceInfo &info,
                                            Realm::ProfilingRequestSet &requests,
-                                           bool fill)
+                                           bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -17287,7 +17287,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      handle_profiling_update(1/*count*/);
+      handle_profiling_update(count);
     }
 
     //--------------------------------------------------------------------------
@@ -18085,7 +18085,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FillOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &reqeusts, bool fill)
+                Realm::ProfilingRequestSet &reqeusts, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do for the moment
@@ -21320,7 +21320,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DetachOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &reqeusts, bool fill)
+                Realm::ProfilingRequestSet &reqeusts, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -22841,7 +22841,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
-                                Realm::ProfilingRequestSet &requests, bool fill)
+                Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
@@ -22855,7 +22855,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      profiling_reports.fetch_add(1);
+      profiling_reports.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------

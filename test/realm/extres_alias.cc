@@ -176,7 +176,10 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
 
     // TODO: get rid of these exceptions by supporting generate_resource_info
     //  in the corresponding Realm memory implementations
-    if((tgt_mem.kind() == Memory::Kind::Z_COPY_MEM)) {
+    if((tgt_mem.kind() == Memory::Kind::DISK_MEM) ||
+       (tgt_mem.kind() == Memory::Kind::HDF_MEM) ||
+       (tgt_mem.kind() == Memory::Kind::FILE_MEM) ||
+       (tgt_mem.kind() == Memory::Kind::GPU_MANAGED_MEM)) {
       log_app.info() << "skipping " << tgt_mem;
       continue;
     }

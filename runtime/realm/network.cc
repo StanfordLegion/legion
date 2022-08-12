@@ -477,8 +477,50 @@ namespace Realm {
       return 0;
     }
   }
-  
-  
+
+  bool NetworkSegment::is_registered() const
+  {
+    // first part - need rdma info
+    if(single_network && single_network_data)
+      return true;
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+    // TODO: how do we know if a network is missing?
+    return false;
+#endif
+
+    return false;
+  }
+
+  bool NetworkSegment::is_registered(NetworkModule *network) const
+  {
+    if(single_network) {
+      return ((single_network == network) && single_network_data);
+    }
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+    if(networks.find(network) != networks.end())
+      return true;
+#endif
+
+    return false;
+  }
+
+  bool NetworkSegment::in_segment(uintptr_t range_base, size_t range_bytes) const
+  {
+    uintptr_t reg_lo = reinterpret_cast<uintptr_t>(base);
+    uintptr_t reg_hi = reg_lo + (bytes - 1);
+    if((range_base < reg_lo) || ((bytes > 0) &&
+                                 ((range_base + range_bytes - 1) > reg_hi)))
+      return false;
+
+    return true;
+  }
+
+  bool NetworkSegment::in_segment(const void *range_base, size_t range_bytes) const
+  {
+    return in_segment(reinterpret_cast<uintptr_t>(range_base), range_bytes);
+  }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class ModuleRegistrar
