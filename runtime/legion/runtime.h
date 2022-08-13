@@ -491,6 +491,7 @@ namespace Legion {
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
+      const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
       ApEvent get_ready(bool check_ready_event = true);
       PhysicalInstance get_instance(void);
@@ -510,7 +511,7 @@ namespace Legion {
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
       Runtime *const runtime;
-      const void *const data;
+    public:
       const size_t size;
       const Memory memory;
       const ApEvent ready_event;
@@ -522,6 +523,7 @@ namespace Legion {
       const bool is_meta_visible;
     protected:
       bool own_allocation;
+      std::atomic<const void*> data;
       std::atomic<PhysicalInstance> instance;
       std::atomic<RtEvent> use_event;
       std::atomic<bool> own_instance;

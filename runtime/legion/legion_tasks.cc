@@ -5708,7 +5708,7 @@ namespace Legion {
             (*(serdez_redop_fns->init_fn))(reduction_op, serdez_redop_state,
                                            serdez_redop_state_size);
           (*(serdez_redop_fns->fold_fn))(reduction_op, serdez_redop_state,
-                                   serdez_redop_state_size, instance->data);
+                             serdez_redop_state_size, instance->get_data());
         }
         if (bounce_instance != NULL)
           delete bounce_instance;

@@ -2362,7 +2362,7 @@ namespace Legion {
       {
         // Make a simple memory copy here now
         void *buffer = malloc(source->size);
-        memcpy(buffer, source->data, source->size);
+        memcpy(buffer, source->get_data(), source->size);
         return new FutureInstance(buffer, source->size, ApEvent::NO_AP_EVENT,
             runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
       }

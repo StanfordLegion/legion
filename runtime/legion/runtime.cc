@@ -886,7 +886,7 @@ namespace Legion {
       }
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
-      return instance->data;
+      return instance->get_data();
     }
 
     //--------------------------------------------------------------------------
@@ -1317,7 +1317,7 @@ namespace Legion {
         if (poisoned)
           ctx->raise_poison_exception();
       }
-      return instance->data;
+      return instance->get_data();
     }
 
     //--------------------------------------------------------------------------
@@ -2617,7 +2617,7 @@ namespace Legion {
     FutureInstance::FutureInstance(const void *d, size_t s, ApEvent r,
                               Runtime *rt, bool eager, bool external, bool own,
                               PhysicalInstance inst, Processor p, RtEvent use)
-      : runtime(rt), data(d), size(s),
+      : runtime(rt), size(s),
         memory(inst.exists() ? inst.get_location() : rt->runtime_system_memory),
         ready_event(r), resource(inst.exists() ? NULL : 
             new Realm::ExternalMemoryResource(reinterpret_cast<uintptr_t>(d),
@@ -2625,17 +2625,18 @@ namespace Legion {
               NULL : free_host_memory), freeproc(p),
         eager_allocation(eager), external_allocation(external),
         is_meta_visible(check_meta_visible(rt, memory, !external || !own)),
-        own_allocation(own), instance(inst), use_event(use), own_instance(false)
+        own_allocation(own), data(d), instance(inst), use_event(use),
+        own_instance(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(size > 0);
-      assert(data != NULL);
       assert(memory.exists());
       assert((freefunc == NULL) || freeproc.exists());
       assert((freefunc == NULL) || external_allocation);
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.load().exists() || external_allocation);
+      assert((data.load() != NULL) || instance.load().exists());
 #endif
     }
 
@@ -2645,22 +2646,23 @@ namespace Legion {
                           const Realm::ExternalInstanceResource *allocation,
                           void (*func)(const Realm::ExternalInstanceResource&),
                           Processor proc, PhysicalInstance inst, RtEvent use)
-      : runtime(rt), data(d), size(s), memory(inst.exists() ?
+      : runtime(rt), size(s), memory(inst.exists() ?
           inst.get_location() : allocation->suggested_memory()), ready_event(r),
         resource(allocation), freefunc(func), freeproc(proc),
         eager_allocation(false), external_allocation(true),
         is_meta_visible(check_meta_visible(rt, memory, !own)), 
-        own_allocation(own), instance(inst), use_event(use), own_instance(false)
+        own_allocation(own), data(d), instance(inst), use_event(use),
+        own_instance(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(size > 0);
-      assert(data != NULL);
       assert(memory.exists());
       assert((freefunc == NULL) || freeproc.exists());
       assert((freefunc == NULL) || external_allocation);
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.load().exists() || external_allocation);
+      assert((data.load() != NULL) || instance.load().exists());
       assert(resource != NULL);
 #endif
     }
@@ -2678,7 +2680,7 @@ namespace Legion {
           const PhysicalInstance inst = instance.load();
           if (inst.exists())
             inst.destroy(ready_event);
-          void *tofree = const_cast<void*>(data);
+          void *tofree = const_cast<void*>(data.load());
           // Check to see if we have a freefunc or not
           if (freefunc != NULL)
             runtime->free_external_allocation(freeproc, resource, freefunc);
@@ -2747,7 +2749,7 @@ namespace Legion {
       }
       else
       {
-        memcpy(const_cast<void*>(data), redop->identity, redop->sizeof_rhs);
+        memcpy(const_cast<void*>(get_data()),redop->identity,redop->sizeof_rhs);
         return ApEvent::NO_AP_EVENT;
       }
     }
@@ -2793,7 +2795,7 @@ namespace Legion {
       else
       {
         // We can do this as a straight memcpy, no need to offload to realm
-        memcpy(const_cast<void*>(data), source->data, source->size);
+        memcpy(const_cast<void*>(get_data()), source->get_data(), source->size);
         return ApEvent::NO_AP_EVENT;
       }
     } 
@@ -2844,19 +2846,41 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(redop->cpu_fold_excl_fn);
 #endif
-          (redop->cpu_fold_excl_fn)(const_cast<void*>(data), 0/*stride*/,
-                  source->data, 0/*stride*/, 1/*count*/, redop->userdata);
+          (redop->cpu_fold_excl_fn)(const_cast<void*>(get_data()), 0/*stride*/,
+                  source->get_data(), 0/*stride*/, 1/*count*/, redop->userdata);
         }
         else
         {
 #ifdef DEBUG_LEGION
           assert(redop->cpu_fold_nonexcl_fn);
 #endif
-          (redop->cpu_fold_nonexcl_fn)(const_cast<void*>(data), 0/*stride*/,
-              source->data, 0/*stride*/, 1/*count*/, redop->userdata);
+          (redop->cpu_fold_nonexcl_fn)(const_cast<void*>(get_data()), 
+              0/*stride*/, source->get_data(), 0/*stride*/,
+              1/*count*/, redop->userdata);
         }
         return ApEvent::NO_AP_EVENT;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    const void* FutureInstance::get_data(void)
+    //--------------------------------------------------------------------------
+    {
+      if (size == 0)
+        return NULL;
+      const void *result = data.load();
+      if (result != NULL)
+        return result;
+      RtEvent ready = use_event.load();
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      PhysicalInstance inst = instance.load();
+#ifdef DEBUG_LEGION
+      assert(inst.exists());
+#endif
+      result = inst.pointer_untyped(0, size);
+      data.store(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2920,8 +2944,8 @@ namespace Legion {
           PhysicalInstance result;
           RtEvent inst_ready(PhysicalInstance::create_external_instance(
                 result, memory, ilg, Realm::ExternalMemoryResource(
-                  reinterpret_cast<uintptr_t>(data), size, false/*read only*/),
-                Realm::ProfilingRequestSet()));
+                  reinterpret_cast<uintptr_t>(get_data()), size,
+                  false/*read only*/), Realm::ProfilingRequestSet()));
           instance.store(result);
           own_instance.store(true);
           Runtime::trigger_event(ready_event, inst_ready);
@@ -10488,8 +10512,7 @@ namespace Legion {
           return NULL;
         }
       }
-      const void *data = instance.pointer_untyped(0,size);
-      return new FutureInstance(data, size, ready_event, runtime,
+      return new FutureInstance(NULL/*data*/, size, ready_event, runtime,
               eager, false/*external*/, true/*own allocation*/, instance,
               Processor::NO_PROC, use_event);
     }
