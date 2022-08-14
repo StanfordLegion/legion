@@ -968,11 +968,16 @@ impl State {
         for (chan_id, chan) in &self.chans {
             if !chan.time_points.is_empty() {
                 if chan_id.node_id().is_some() {
-                    let mut nodes = vec![
-                        None,
-                        chan_id.src.map(|src| src.node_id()),
-                        chan_id.dst.map(|dst| dst.node_id()),
-                    ];
+                    // gathers/scatters
+                    let mut nodes  = vec![None];
+                    if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0)
+                        {
+                              nodes.push(chan_id.dst.map(|dst| dst.node_id()));
+                        }
+                    if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0)
+                        {
+                              nodes.push(chan_id.src.map(|src| src.node_id()));
+                        }
                     &nodes.dedup();
                     for node in nodes {
                         result

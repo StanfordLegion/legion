@@ -115,6 +115,19 @@ namespace Realm {
 					   bool poisoned,
 					   TimeLimit work_until) = 0;
 
+    // helpers used by the above when an instance being allocated or released
+    //  is using an external resource
+    virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                    size_t& inst_offset);
+    virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							     const IndexSpaceGeneric *subspace,
+							     span<const FieldID> fields,
+							     bool read_only);
+
     // TODO: try to rip these out?
     virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
     virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
@@ -162,6 +175,14 @@ namespace Realm {
     std::map<NodeID, InstanceList *> instances_by_creator;
     Mutex instance_map_mutex;
     InstanceList local_instances;
+  };
+
+  class MemSpecificInfo {
+  public:
+    MemSpecificInfo();
+    virtual ~MemSpecificInfo() {}
+
+    MemSpecificInfo *next;
   };
 
   class PendingIBRequests {
@@ -308,6 +329,18 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
+      // LocalCPUMemory supports ExternalMemoryResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+							       const IndexSpaceGeneric *subspace,
+							       span<const FieldID> fields,
+							       bool read_only);
+
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
@@ -361,8 +394,14 @@ namespace Realm {
 					     bool poisoned,
 					     TimeLimit work_until);
 
+      // FileMemory supports ExternalFileResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
       // the 'mem_specific' data for a file instance contains OpenFileInfo
-      struct OpenFileInfo {
+      class OpenFileInfo : public MemSpecificInfo {
+      public:
 	int fd;
 	size_t offset;
       };

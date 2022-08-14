@@ -60,6 +60,7 @@ namespace Realm {
 #ifdef USE_PYGILSTATE_CALLS
     get_symbol(this->PyGILState_Ensure, "PyGILState_Ensure");
     get_symbol(this->PyGILState_Release, "PyGILState_Release");
+    get_symbol(this->PyGILState_Check, "PyGILState_Check");
 #else
     get_symbol(this->PyThreadState_New, "PyThreadState_New");
     get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
@@ -580,23 +581,20 @@ namespace Realm {
     }
 
     // if we got here through a cffi call, the GIL has already been released,
-    //  so try to handle that case here - a call PyEval_SaveThread
-    //  if the GIL is not held will assert-fail, and while a call to
-    //  PyThreadState_Swap is technically illegal (and unsafe if python-created
-    //  threads exist), it does what we want for now
+    //  so try to handle that case here - first, we need to check if the GIL
+    //  is still held, if yes, we call PyEval_SaveThread to save the thread
+    //  and release the GIL; if not, the GIL has been released by cffi. 
     // NOTE: we use PyEval_{Save,Restore}Thread here even if USE_PYGILSTATE_CALLS
     //  is defined, as a call to PyGILState_Release will destroy a thread
     //  context - the Save/Restore take care of the actual lock, and since we
     //  restore each python thread on the OS thread that owned it intially, the
     //  PyGILState TLS stuff should remain consistent
-    PyThreadState *saved = (pyproc->interpreter->api->PyThreadState_Swap)(0);
-    if(saved != 0) {
+    PyThreadState *saved = 0;
+    if((pyproc->interpreter->api->PyGILState_Check)() == 1) {
       log_py.info() << "python worker sleeping - releasing GIL";
-      // put it back so we can save it properly
-      (pyproc->interpreter->api->PyThreadState_Swap)(saved);
       // would like to sanity-check that this returns the expected thread state,
       //  but that would require taking the PythonThreadTaskScheduler's lock
-      (pyproc->interpreter->api->PyEval_SaveThread)();
+      saved = (pyproc->interpreter->api->PyEval_SaveThread)();
       log_py.debug() << "SaveThread -> " << saved;
     } else
       log_py.info() << "python worker sleeping - GIL already released";
@@ -606,6 +604,7 @@ namespace Realm {
     if(saved) {
       log_py.info() << "python worker awake - acquiring GIL";
       log_py.debug() << "RestoreThread <- " << saved;
+      assert( (pyproc->interpreter->api->PyGILState_Check)() == 0 );
       (pyproc->interpreter->api->PyEval_RestoreThread)(saved);
     } else
       log_py.info() << "python worker awake - not acquiring GIL";
@@ -749,6 +748,7 @@ namespace Realm {
     interpreter = new PythonInterpreter;
     // the call to PyEval_InitThreads in the PythonInterpreter constructor
     //  acquired the GIL on our behalf already
+    assert( (interpreter->api->PyGILState_Check)() == 1 );
     master_thread = (interpreter->api->PyThreadState_Get)();
 
     // always need the python threading module

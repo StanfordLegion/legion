@@ -105,6 +105,12 @@ namespace Legion {
       template<unsigned int MAX>
       inline void serialize(const PPCTLBitMask<MAX> &mask);
 #endif
+#ifdef __ARM_NEON
+      template<unsigned int MAX>
+      inline void serialize(const NeonBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const NeonTLBitMask<MAX> &mask);
+#endif
       template<typename DT, unsigned BLOAT, bool BIDIR>
       inline void serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void serialize(const Domain &domain);
@@ -183,6 +189,12 @@ namespace Legion {
       inline void deserialize(PPCBitMask<MAX> &mask);
       template<unsigned int MAX>
       inline void deserialize(PPCTLBitMask<MAX> &mask);
+#endif
+#ifdef __ARM_NEON
+      template<unsigned int MAX>
+      inline void deserialize(NeonBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(NeonTLBitMask<MAX> &mask);
 #endif
       template<typename DT, unsigned BLOAT, bool BIDIR>
       inline void deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask);
@@ -703,6 +715,24 @@ namespace Legion {
     }
 #endif
 
+#ifdef __ARM_NEON
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const NeonBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const NeonTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<typename DT, unsigned BLOAT, bool BIDIR>
     inline void Serializer::serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &m)
@@ -920,6 +950,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<unsigned int MAX>
     inline void Deserializer::deserialize(PPCTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+#endif
+
+#ifdef __ARM_NEON
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(NeonBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(NeonTLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);

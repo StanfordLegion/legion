@@ -32,6 +32,9 @@ variables:
 .cmake: &cmake
   USE_CMAKE: "1"
 
+.ctest: &ctest
+  TEST_CTEST: "1"
+
 .tests: &tests
   script:
     - .gitlab/test_script.sh
@@ -70,7 +73,7 @@ legion_cmake:
     - slurm
     - crusher
   variables:
-    <<: [*legion, *cmake]
+    <<: [*legion, *cmake, *ctest]
 
 regent:
   <<: [*tests]

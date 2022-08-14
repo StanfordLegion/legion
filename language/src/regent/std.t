@@ -1813,13 +1813,13 @@ end
 -- ## Types
 -- #################
 
-local arithmetic_combinators = {
-  ["__add"] = function(a, b) return `([a] + [b]) end,
-  ["__sub"] = function(a, b) return `([a] - [b]) end,
-  ["__mul"] = function(a, b) return `([a] * [b]) end,
-  ["__div"] = function(a, b) return `([a] / [b]) end,
-  ["__mod"] = function(a, b) return `([a] % [b]) end,
-}
+local arithmetic_combinators = data.dict({
+  {"__add", function(a, b) return `([a] + [b]) end},
+  {"__sub", function(a, b) return `([a] - [b]) end},
+  {"__mul", function(a, b) return `([a] * [b]) end},
+  {"__div", function(a, b) return `([a] / [b]) end},
+  {"__mod", function(a, b) return `([a] % [b]) end},
+})
 
 local function generate_arithmetic_metamethod_body(ty, method, e1, e2)
   local combinator = arithmetic_combinators[method]
@@ -1856,8 +1856,8 @@ function std.generate_arithmetic_metamethod(ty, method)
 end
 
 function std.generate_arithmetic_metamethods(ty)
-  local methods = {}
-  for method, _ in pairs(arithmetic_combinators) do
+  local methods = data.newmap()
+  for _, method in arithmetic_combinators:keys() do
     local f =  std.generate_arithmetic_metamethod(ty, method)
     f:setname(method .. "_" .. tostring(ty))
     methods[method] = f
@@ -1867,8 +1867,8 @@ function std.generate_arithmetic_metamethods(ty)
 end
 
 function std.generate_arithmetic_metamethods_for_bounded_type(ty)
-  local methods = {}
-  for method, _ in pairs(arithmetic_combinators) do
+  local methods = data.newmap()
+  for _, method in arithmetic_combinators:keys() do
     local prefix = method .. "_" .. tostring(ty)
     local overload1 =
       terra(a : ty, b : ty) : ty.index_type
@@ -1900,20 +1900,26 @@ end
 
 local and_combinator = function(a, b) return `(([a]) and ([b])) end
 local or_combinator = function(a, b) return `(([a]) or ([b])) end
-local conditional_combinators = {
-  ["__eq"] = { elem_comb = function(a, b) return `([a] == [b]) end,
-               res_comb = and_combinator, },
-  ["__ne"] = { elem_comb = function(a, b) return `([a] ~= [b]) end,
-               res_comb = or_combinator, },
-  ["__le"] = { elem_comb = function(a, b) return `([a] <= [b]) end,
-               res_comb = and_combinator, },
-  ["__lt"] = { elem_comb = function(a, b) return `([a] < [b]) end,
-               res_comb = and_combinator, },
-  ["__ge"] = { elem_comb = function(a, b) return `([a] >= [b]) end,
-               res_comb = and_combinator, },
-  ["__gt"] = { elem_comb = function(a, b) return `([a] > [b]) end,
-               res_comb = and_combinator, },
-}
+local conditional_combinators = data.dict({
+  {"__eq", { elem_comb = function(a, b) return `([a] == [b]) end,
+             res_comb = and_combinator, }
+  },
+  {"__ne", { elem_comb = function(a, b) return `([a] ~= [b]) end,
+               res_comb = or_combinator, }
+  },
+  {"__le", { elem_comb = function(a, b) return `([a] <= [b]) end,
+               res_comb = and_combinator, }
+  },
+  {"__lt", { elem_comb = function(a, b) return `([a] < [b]) end,
+               res_comb = and_combinator, }
+  },
+  {"__ge", { elem_comb = function(a, b) return `([a] >= [b]) end,
+               res_comb = and_combinator, }
+  },
+  {"__gt", { elem_comb = function(a, b) return `([a] > [b]) end,
+               res_comb = and_combinator, }
+  },
+})
 
 local function generate_conditional_metamethod_body(ty, method, e1, e2)
   local combinators = conditional_combinators[method]
@@ -1960,8 +1966,8 @@ function std.generate_conditional_metamethod(ty, method)
 end
 
 function std.generate_conditional_metamethods(ty)
-  local methods = {}
-  for method, _ in pairs(conditional_combinators) do
+  local methods = data.newmap()
+  for _, method in conditional_combinators:keys() do
     methods[method] = std.generate_conditional_metamethod(ty, method)
   end
   return methods
@@ -1985,8 +1991,8 @@ function std.generate_conditional_metamethod_for_bounded_type(ty, method)
 end
 
 function std.generate_conditional_metamethods_for_bounded_type(ty)
-  local methods = {}
-  for method, _ in pairs(conditional_combinators) do
+  local methods = data.newmap()
+  for _, method in conditional_combinators:keys() do
     methods[method] = std.generate_conditional_metamethod_for_bounded_type(ty, method)
   end
   return methods
@@ -2180,10 +2186,10 @@ local bounded_type = data.weak_memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
+  for method_name, method in std.generate_arithmetic_metamethods_for_bounded_type(st):items() do
     st.metamethods[method_name] = method
   end
-  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
+  for method_name, method in std.generate_conditional_metamethods_for_bounded_type(st):items() do
     st.metamethods[method_name] = method
   end
 
@@ -2316,7 +2322,7 @@ std.rect_type = data.weak_memoize(function(index_type)
     assert(false)
   end
 
-  for method, combinator in pairs(arithmetic_combinators) do
+  for method, combinator in arithmetic_combinators:items() do
     st.metamethods[method] = terra(a : st, b : st.index_type)
       return [st]{ lo = [combinator(`(a.lo), b)], hi = [combinator(`(a.hi), b)] }
     end
@@ -2496,10 +2502,10 @@ function std.index_type(base_type, displayname)
     [make_from_domain_point(pt)]
   end
 
-  for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
+  for method_name, method in std.generate_arithmetic_metamethods(st):items() do
     st.metamethods[method_name] = method
   end
-  for method_name, method in pairs(std.generate_conditional_metamethods(st)) do
+  for method_name, method in std.generate_conditional_metamethods(st):items() do
     st.metamethods[method_name] = method
   end
   if not st:is_opaque() then
@@ -3088,7 +3094,7 @@ std.sov = data.weak_memoize(function(struct_type, width)
 
   local st = terralib.types.newstruct("sov")
   st.entries = terralib.newlist()
-  for _, entry in pairs(struct_type:getentries()) do
+  for _, entry in ipairs(struct_type:getentries()) do
     local entry_field = entry[1] or entry.field
     local entry_type = entry[2] or entry.type
     if entry_type:isprimitive() then
@@ -3814,7 +3820,7 @@ local function make_ordering_constraint(layout, dim)
   -- SOA, Fortran array order
   local dims = terralib.newsymbol(c.legion_dimension_kind_t[dim+1], "dims")
   result:insert(quote var [dims] end)
-  for k, dim in pairs(data.take(dim, std.layout.spatial_dims)) do
+  for k, dim in ipairs(data.take(dim, std.layout.spatial_dims)) do
     result:insert(quote dims[ [k-1] ] = [dim.index] end)
   end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
@@ -4790,7 +4796,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
 end
 
 local function generate_task_interfaces(task_whitelist, need_launcher)
-  local tasks = {}
+  local tasks = data.newmap()
   for _, variant in ipairs(variants) do
     if task_whitelist and data.find_key(task_whitelist, variant.task) then
       tasks[variant.task] = true
@@ -4801,8 +4807,8 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
 
   local task_c_iface = terralib.newlist()
   local task_cxx_iface = terralib.newlist()
-  local task_impl = {}
-  for task, _ in pairs(tasks) do
+  local task_impl = data.newmap()
+  for _, task in tasks:keys() do
     if need_launcher then
       task_c_iface:insert(header_helper.generate_task_c_interface(task))
       task_cxx_iface:insert(header_helper.generate_task_cxx_interface(task))
@@ -4901,7 +4907,7 @@ function std.save_tasks(header_filename, filename, filetype, link_flags, registr
   end
 
   -- Export task interface implementations
-  for k, v in pairs(task_impl) do
+  for k, v in task_impl:items() do
     names[k] = v
   end
 
@@ -4951,7 +4957,7 @@ do
   end
 
   local supported_math_binary_ops = { "min", "max", }
-  for _, fname in pairs(supported_math_binary_ops) do
+  for _, fname in ipairs(supported_math_binary_ops) do
     std["v" .. fname] = math_binary_op_factory(fname)
   end
 end

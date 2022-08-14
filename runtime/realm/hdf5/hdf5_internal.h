@@ -79,6 +79,12 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      // HDF5Memory supports ExternalHDF5Resource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
     };
 
     class HDF5Request : public Request {
@@ -93,6 +99,7 @@ namespace Realm {
     public:
       virtual int set_rect(const RegionInstanceImpl *inst,
                            const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
                            int ndims,
                            const int64_t lo[/*ndims*/],
                            const int64_t hi[/*ndims*/],
@@ -153,7 +160,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
     };

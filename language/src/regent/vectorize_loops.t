@@ -44,6 +44,8 @@ if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
     SIMD_REG_SIZE = 32
   elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
+  elseif os.execute("sysctl -a | grep hw.optional.neon > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
   else
     error("Unable to determine CPU architecture")
   end

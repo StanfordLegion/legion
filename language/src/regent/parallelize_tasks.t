@@ -3270,12 +3270,12 @@ function parallelize_tasks.top_task(global_cx, node)
   --end)
   privileges:insertall(orig_privileges)
   -- FIXME: Workaround for the current limitation in SPMD transformation
-  local field_set = {}
+  local field_set = data.newmap()
   for idx = 1, #task_cx.stencils do
                 task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
   end
   local fields = terralib.newlist()
-  for field, _ in pairs(field_set) do fields:insert(field) end
+  for _, field in field_set:keys() do fields:insert(field) end
 
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]
