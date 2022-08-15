@@ -287,13 +287,13 @@ namespace Legion {
     public:
       class UnregisterFunctor {
       public:
-        UnregisterFunctor(Runtime *rt, Serializer &r)
-          : runtime(rt), rez(r) { }
+        UnregisterFunctor(Runtime *rt, const DistributedCollectable *d)
+          : runtime(rt), dc(d) { }
       public:
         void apply(AddressSpaceID target);
       protected:
         Runtime *const runtime;
-        Serializer &rez;
+        const DistributedCollectable *const dc;
       };
       struct DeferRemoteReferenceUpdateArgs : 
         public LgTaskArgs<DeferRemoteReferenceUpdateArgs> {
@@ -318,10 +318,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REMOTE_UNREGISTER_TASK_ID;
       public:
-        DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &nodes);
+        DeferRemoteUnregisterArgs(DistributedID id, AddressSpaceID t)
+          : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
+            did(id), target(t) { }
       public:
         const DistributedID did;
-        NodeSet *const nodes;
+        const AddressSpaceID target;
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
@@ -415,6 +417,10 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator) = 0;
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
+      // Get the precondition for unregistration (if any)
+      virtual RtEvent find_unregister_precondition(AddressSpaceID space) const 
+        { return RtEvent::NO_RT_EVENT; }
+    public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
@@ -503,14 +509,6 @@ namespace Legion {
     private: // derived users can't see the state information
       State current_state;
       RtUserEvent transition_event;
-    protected:
-      // We make a special exception here for the reentrant event
-      // because we're going to give this a dual purpose: if dervied
-      // types want to delay the issuing of unregister operations in
-      // the destructor of a DistributedCollectable then they can set
-      // this event as a precondition. This is hacky, but it saves space
-      // on distributed collectables of which there are regularly many
-      // so we want to save space on this structure as much as possible
       RtEvent reentrant_event;
     private:
       bool has_gc_references;

@@ -2642,12 +2642,13 @@ namespace Legion {
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
+                     InnerContext *context,
                      bool register_now, 
                      CollectiveMapping *mapping = NULL);
-      EquivalenceSet(const EquivalenceSet &rhs);
+      EquivalenceSet(const EquivalenceSet &rhs) = delete;
       virtual ~EquivalenceSet(void);
     public:
-      EquivalenceSet& operator=(const EquivalenceSet &rhs);
+      EquivalenceSet& operator=(const EquivalenceSet &rhs) = delete;
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
@@ -3063,6 +3064,7 @@ namespace Legion {
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
     public:
+      InnerContext *const context;
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
     protected:
@@ -3184,7 +3186,7 @@ namespace Legion {
                       std::set<RtEvent> &applied_events);
     public:
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
-                      Runtime *runtime, std::set<RtEvent> &ready_events);
+          InnerContext *ctx, Runtime *runtime, std::set<RtEvent> &ready_events);
       bool finalize(void);
       static void handle_defer_finalize(const void *args);
     public:

@@ -1093,7 +1093,7 @@ function value:unpack(cx, value_type, field_name, field_type)
     local static_region_type = static_region_types[1]
 
     local region_field_name
-    for _, entry in pairs(value_type:getentries()) do
+    for _, entry in ipairs(value_type:getentries()) do
       local entry_type = entry[2] or entry.type
       if entry_type == static_region_type then
         region_field_name = entry[1] or entry.field

@@ -217,10 +217,10 @@ namespace Realm {
 
       void set_addrlist(AddressList *_addrlist);
 
-      int get_dim();
-      uintptr_t get_offset();
-      uintptr_t get_stride(int dim);
-      size_t remaining(int dim);
+      int get_dim() const;
+      uintptr_t get_offset() const;
+      uintptr_t get_stride(int dim) const;
+      size_t remaining(int dim) const;
       void advance(int dim, size_t amount);
 
       void skip_bytes(size_t bytes);
@@ -235,6 +235,8 @@ namespace Realm {
       int partial_dim;
       size_t pos[MAX_DIM];
     };
+
+    std::ostream& operator<<(std::ostream& os, const AddressListCursor& alc);
 
     // a control port is used to steer inputs/outputs of transfer descriptors -
     //   the information is encoded into 32b packets which may be read/written
@@ -515,6 +517,9 @@ namespace Realm {
       // as a side effect, the input/output control information is updated - the
       //  actual input/output ports involved in the next transfer are stored there
       size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
+      size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache,
+                           const InstanceLayoutPieceBase *&in_nonaffine,
+                           const InstanceLayoutPieceBase *&out_nonaffine);
 
       // after a call to 'get_addresses', this call updates the various data
       //  structures to record that transfers for 'total_{read,write}_bytes' bytes
@@ -564,7 +569,8 @@ namespace Realm {
 		     const std::vector<XferDesPortInfo>& inputs_info,
 		     const std::vector<XferDesPortInfo>& outputs_info,
 		     int _priority,
-		     const void *_fill_data, size_t _fill_size);
+		     const void *_fill_data, size_t _fill_size,
+                     size_t _fill_total);
 
       long get_requests(Request** requests, long nr);
 
@@ -685,7 +691,8 @@ namespace Realm {
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   int priority,
 				   XferDesRedopInfo redop_info,
-				   const void *fill_data, size_t fill_size) = 0;
+				   const void *fill_data, size_t fill_size,
+                                   size_t fill_total) = 0;
     };
 
     struct XferDesCreateMessageBase {
@@ -719,7 +726,8 @@ namespace Realm {
 				   const std::vector<XferDesPortInfo>& outputs_info,
 				   int priority,
 				   XferDesRedopInfo redop_info,
-				   const void *fill_data, size_t fill_size);
+				   const void *fill_data, size_t fill_size,
+                                   size_t fill_total);
 
     protected:
       uintptr_t channel;
@@ -886,7 +894,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size) = 0;
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total) = 0;
 
       virtual XferDesFactory *get_factory();
 
@@ -1052,7 +1061,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1075,7 +1085,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1108,7 +1119,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       virtual long submit(Request** requests, long nr);
 
@@ -1130,7 +1142,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
     };
@@ -1150,7 +1163,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
     };
@@ -1190,7 +1204,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size) { assert(0); return 0; }
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total) { assert(0); return 0; }
 
       virtual long submit(Request** requests, long nr) { assert(0); return 0; }
 

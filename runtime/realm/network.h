@@ -293,6 +293,15 @@ namespace Realm {
     void add_rdma_info(NetworkModule *network,
 		       const void *data, size_t len);
     const ByteArray *get_rdma_info(NetworkModule *network) const;
+
+    // returns whether the segment is registered for all networks,
+    //  or for a specific network
+    bool is_registered() const;
+    bool is_registered(NetworkModule *network) const;
+
+    // tests whether an address range is in segment
+    bool in_segment(const void *range_base, size_t range_bytes) const;
+    bool in_segment(uintptr_t range_base, size_t range_bytes) const;
   };
 
 }; // namespace Realm

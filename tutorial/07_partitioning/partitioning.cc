@@ -295,13 +295,17 @@ void check_task(const Task *task,
     // Probably shouldn't check for floating point equivalence but
     // the order of operations are the same should they should
     // be bitwise equal.
-    if (expected != received)
+    if (expected != received) {
       all_passed = false;
+      printf("expected %f, received %f\n", expected, received);
+    }
   }
   if (all_passed)
     printf("SUCCESS!\n");
-  else
+  else {
     printf("FAILURE!\n");
+    abort();
+  }
 }
 
 int main(int argc, char **argv)

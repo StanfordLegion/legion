@@ -163,7 +163,7 @@ function omp.generate_argument_type(symbols, reductions)
   local arg_type = terralib.types.newstruct("omp_worker_arg")
   arg_type.entries = terralib.newlist()
   local mapping = {}
-  for i, symbol in pairs(symbols) do
+  for i, symbol in ipairs(symbols) do
     local field_name
     if reductions[symbol] == nil then
       field_name = "_arg" .. tostring(i)

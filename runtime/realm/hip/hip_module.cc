@@ -41,8 +41,6 @@
 #include <string.h>
 #include <dlfcn.h>
 
-//#define HIP_DLOPEN
-
 #define IS_DEFAULT_STREAM(stream)   \
   ((stream) == 0)
 
@@ -54,46 +52,7 @@ namespace Realm {
     Logger log_cudart("cudart");
     Logger log_hipipc("hipipc");
 
-    Logger log_stream("hipstream");
-
-#ifdef HIP_DLOPEN
-   class HipRTAPI {
-    public:
-      HipRTAPI(void *handle);
-
-    protected:
-      template<typename T>
-      void get_symbol(T &fn, const char *symbol, bool missing_ok = false);
-
-    protected:
-      void *handle;
-
-    public:
-      hipError_t (*hipMemcpyAsync)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                                   hipStream_t stream);
-    };
-
-    HipRTAPI::HipRTAPI(void *_handle)
-      : handle(_handle)
-    {
-      get_symbol(this->hipMemcpyAsync, "hipMemcpyAsync");
-    }
-
-    template<typename T>
-    void HipRTAPI::get_symbol(T &fn, const char *symbol,
-                               bool missing_ok /*= false*/)
-    {
-      fn = reinterpret_cast<T>(dlsym(handle, symbol));
-      if(!fn && !missing_ok) {
-        const char *error = dlerror();
-        log_gpu.fatal() << "failed to find symbol '" << symbol << "': " << error;
-        assert(false);
-      }
-    }
-
-    HipRTAPI *hip_api = NULL;
-    void *hiplib_handle = NULL;
-#endif  
+    Logger log_stream("hipstream");  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -486,18 +445,10 @@ namespace Realm {
         default:
           assert(false);
       }
-#ifdef HIP_DLOPEN
-      printf("use dlopen for memcpy\n");
-      CHECK_HIP( hip_api->hipMemcpyAsync((void *)(((char*)dst)+span_start),
-                                        (const void*)(((char*)src)+span_start),
-                                        span_bytes, copy_type,
-                                        raw_stream) );
-#else
       CHECK_HIP( hipMemcpyAsync((void *)(((char*)dst)+span_start),
                                (const void*)(((char*)src)+span_start),
                                span_bytes, copy_type,
                                raw_stream) );
-#endif
 #endif
     }
 
@@ -545,7 +496,7 @@ namespace Realm {
       hip_Memcpy2D copy_info;
 
       // peer memory counts as DEVICE here
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
       copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
         CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
       copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ?
@@ -633,7 +584,7 @@ namespace Realm {
       //  consider specialized kernels in the future
 
       if(((src_pstride % src_stride) == 0) && ((dst_pstride % dst_stride) == 0)) {
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
         cudaMemcpyKind copy_type;
         if (kind == GPU_MEMCPY_PEER_TO_PEER) {
           // If we're doing peer to peer, just let unified memory it deal with it
@@ -1047,7 +998,7 @@ namespace Realm {
         copy_info.srcPtr = make_hipPitchedPtr((void*)dst, dst_stride, bytes, dst_pstride / dst_stride);
         copy_info.srcPos = make_hipPos(0,0,0);
         copy_info.dstPos = make_hipPos(0,0,0);
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
         copy_info.kind = cudaMemcpyDeviceToDevice;
 #else
         copy_info.kind = hipMemcpyDeviceToDevice;
@@ -1640,7 +1591,6 @@ namespace Realm {
     template <typename T>
     void GPUTaskScheduler<T>::execute_internal_task(InternalTask *task)
     {
-      printf("execute internal gpu task\n");
       // use TLS to make sure that the task can find the current GPU processor when it makes
       //  HIP RT calls
       // TODO: either eliminate these asserts or do TLS swapping when using user threads
@@ -3029,7 +2979,6 @@ namespace Realm {
       	if(info != (*it)->info) {
       	  AutoGPUContext agc(this);
 
-          printf("id %d\n", (*it)->device_id);
           CHECK_HIP( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
@@ -3087,7 +3036,6 @@ namespace Realm {
       	AutoGPUContext agc(this);
 
       	hipError_t ret = hipMalloc((void **)&fbmem_base, size);
-        printf("hipmalloc %p, size %ld\n", (void *)fbmem_base, size);
         assert(ret == hipSuccess);
 	      if(ret != hipSuccess) {
 	        if(ret == hipErrorMemoryAllocation) {
@@ -3118,7 +3066,6 @@ namespace Realm {
           AutoGPUContext agc(this);
 
           hipError_t ret = hipMalloc((void **)&fb_ibmem_base, ib_size);
-          printf("ib hipmalloc %p, size %ld\n", (void *)fb_ibmem_base, ib_size);
           if(ret != hipSuccess) {
             if(ret == hipErrorMemoryAllocation) {
               size_t free_bytes, total_bytes;
@@ -3372,14 +3319,6 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(hip_module_singleton == this);
       hip_module_singleton = 0;
-#ifdef HIP_DLOPEN
-      delete hip_api;
-      if (dlclose(hiplib_handle)) {
-        const char *error = dlerror();
-        log_gpu.fatal() << "libpython dlclose error: " << error;
-        assert(false);
-      }
-#endif
     }
 
     /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime,
@@ -3425,18 +3364,6 @@ namespace Realm {
       	  exit(1);
       	}
       }
-      
-#ifdef HIP_DLOPEN
-      printf("enable hip dlopen!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-      hiplib_handle = dlopen("/opt/rocm-3.7.0/lib/libamdhip64.so", RTLD_GLOBAL | RTLD_LAZY);
-      if (!hiplib_handle) {
-        const char *error = dlerror();
-        log_gpu.fatal() << error;
-        assert(false);
-      }
-
-      hip_api = new HipRTAPI(hiplib_handle);
-#endif
 
       // before we do anything, make sure there's a HIP driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
@@ -3652,8 +3579,7 @@ namespace Realm {
         //         hipError_t res = hipDevicePrimaryCtxRetain(&context,
         //                                                    gpu_info[i]->device);
         hipError_t res = hipSetDevice(gpu_info[idx]->device);
-        CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );  
-        printf("set device %d\n", gpu_info[idx]->device);	    	
+        CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );    	
         // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
       	if((res == hipErrorInvalidDevice) ||
       	   (res == hipErrorOutOfMemory)) {

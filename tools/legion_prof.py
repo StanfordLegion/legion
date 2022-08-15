@@ -976,18 +976,18 @@ class Channel(object):
         self.last_time = None
 
     def node_id(self):
-        if self.src is not None:
+        if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
             return (self.src.mem_id >> 40) & ((1 << 16) - 1)
-        elif self.dst is not None:
+        elif self.dst is not None and self.dst.mem_id != 0:
             return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
         else:
             return None
 
     def node_id_src(self):
-        if self.src is not None:
+        if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
@@ -997,10 +997,14 @@ class Channel(object):
     # mem_idx: 8
     def mem_idx_str(self, mem):
         if mem is not None:
+            if mem.mem_id == 0:
+                return "[all n]"
             return str(mem.mem_id & 0xff)
         return "none"
 
     def node_idx_str(self, mem_id):
+        if mem_id == 0:
+            return "[all n]"
         return str((mem_id >> 40) & ((1 << 16) - 1))
 
     def mem_str(self, mem):
@@ -1013,7 +1017,7 @@ class Channel(object):
         assert False
 
     def node_id_dst(self):
-        if self.dst is not None:
+        if self.dst is not None and self.dst.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
             # (mem_id >> 40) & ((1 << 16) - 1)
@@ -3451,14 +3455,13 @@ class State(object):
                 groups = [str(proc.node_id), "all"]
                 for node in groups:
                     group = node + " (" + proc.kind + ")"
-                    if group not in timepoints_dict:
-                        if len(proc.tasks) > 0:
-                            timepoints_dict[group] = [proc.util_time_points]
-                        proc_count[group] = 1;
-                    else:
-                        if len(proc.tasks) > 0:
-                            timepoints_dict[group].append(proc.util_time_points)
-                        proc_count[group] = proc_count[group]+1;
+                    if group not in proc_count:
+                        proc_count[group] = 0
+                    proc_count[group] = proc_count[group]+1
+                    if len(proc.tasks) > 0:
+                        if group not in timepoints_dict:
+                            timepoints_dict[group] = []
+                        timepoints_dict[group].append(proc.util_time_points)
         # memories
         for mem in itervalues(self.memories):
             if len(mem.time_points) > 0:

@@ -18,6 +18,7 @@
 #include "realm/proc_impl.h"
 #include "realm/logging.h"
 #include "realm/serialize.h"
+#include "realm/idx_impl.h"
 #include "realm/inst_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/profiling.h"
@@ -135,19 +136,48 @@ namespace Realm {
 
       // check precondition on allocation
       bool alloc_poisoned = false;
+      AllocationResult result;
+      size_t inst_offset = 0;
       if(precondition.has_triggered_faultaware(alloc_poisoned)) {
-	// attempt immediate allocation (it'll handle poison)
-	return allocate_storage_immediate(inst, need_alloc_result,
-					  alloc_poisoned,
-					  TimeLimit::responsive());
+	if(alloc_poisoned) {
+	  // a poisoned creation works a lot like a failed creation
+	  inst->notify_allocation(ALLOC_CANCELLED,
+				  RegionInstanceImpl::INSTOFFSET_FAILED,
+				  TimeLimit::responsive());
+	  return ALLOC_INSTANT_FAILURE;
+        }
+
+        if(inst->metadata.ext_resource != 0) {
+          // hopefully this memory can handle this kind of external resource
+          if(attempt_register_external_resource(inst, inst_offset)) {
+            result = ALLOC_INSTANT_SUCCESS;
+          } else {
+            log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+            result = ALLOC_INSTANT_FAILURE;
+          }
+        } else {
+          // attempt immediate allocation (this will notify as needed on
+          //  its own)
+          return allocate_storage_immediate(inst, need_alloc_result,
+                                            false /*!alloc_poisoned*/,
+                                            TimeLimit::responsive());
+        }
       } else {
 	// defer allocation attempt
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
 	inst->deferred_create.defer(inst, this,
 				    need_alloc_result,
 				    precondition);
-	return ALLOC_DEFERRED /*asynchronous notification*/;
+	result = ALLOC_DEFERRED /*asynchronous notification*/;
       }
+
+      // if we needed an alloc result, send deferred responses too
+      if((result != ALLOC_DEFERRED) || need_alloc_result) {
+        inst->notify_allocation(result, inst_offset,
+                                TimeLimit::responsive());
+      }
+
+      return result;
     }
 
     void MemoryImpl::release_storage_deferrable(RegionInstanceImpl *inst,
@@ -167,6 +197,30 @@ namespace Realm {
 	// ask the instance to tell us when the precondition is satisified
 	inst->deferred_destroy.defer(inst, this, precondition);
       }
+    }
+
+    bool MemoryImpl::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      // nothing supported in base memory implementation
+      return false;
+    }
+
+    void MemoryImpl::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // nothing to do
+    }
+
+    // for re-registration purposes, generate an ExternalInstanceResource *
+    //  (if possible) for a given instance, or a subset of one
+    ExternalInstanceResource *MemoryImpl::generate_resource_info(RegionInstanceImpl *inst,
+								 const IndexSpaceGeneric *subspace,
+								 span<const FieldID> fields,
+								 bool read_only)
+    {
+      // we don't know about any specific types of external resources in
+      //  the base class
+      return 0;
     }
 
 #if 0
@@ -464,6 +518,16 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class MemSpecificInfo
+  //
+
+  MemSpecificInfo::MemSpecificInfo()
+    : next(0)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class LocalManagedMemory
   //
 
@@ -525,19 +589,11 @@ namespace Realm {
       AllocationResult result;
       size_t inst_offset = 0;
       if(inst->metadata.ext_resource != 0) {
-	// this is an external allocation - it had better be a memory resource
-	ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
-	if(res != 0) {
-	  // automatic success - make the "offset" be the difference between the
-	  //  base address we were given and our own allocation's base
-	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
-	  // assert(mem_base != 0);
-	  // underflow is ok here - it'll work itself out when we add the mem_base
-	  //  back in on accesses
-	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+        // hopefully this memory can handle this kind of external resource
+        if(attempt_register_external_resource(inst, inst_offset)) {
 	  result = ALLOC_INSTANT_SUCCESS;
 	} else {
-	  log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	  log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
 	  result = ALLOC_INSTANT_FAILURE;
 	}
       } else {
@@ -648,7 +704,9 @@ namespace Realm {
 
       // ignore external instances here - we can't reuse their memory for
       //  future allocations
-      if(inst->metadata.ext_resource == 0) {
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+      } else {
 	// this release may satisfy pending allocation requests
 	std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
 
@@ -945,8 +1003,10 @@ namespace Realm {
       // for external instances, all we have to do is ack the destruction (assuming
       //  it wasn't poisoned)
       if(inst->metadata.ext_resource != 0) {
-	if(!poisoned)
+	if(!poisoned) {
+          unregister_external_resource(inst);
 	  inst->notify_deallocation();
+        }
 	return;
       }
 
@@ -1248,6 +1308,77 @@ namespace Realm {
   {
     if(!prealloced)
       free(base_orig);
+  }
+
+  // LocalCPUMemory supports ExternalMemoryResource
+  bool LocalCPUMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                          size_t& inst_offset)
+  {
+    ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
+    if(res != 0) {
+      // automatic success - make the "offset" be the difference between the
+      //  base address we were given and our own allocation's base
+      void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
+      // underflow is ok here - it'll work itself out when we add the mem_base
+      //  back in on accesses
+      inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+      return true;
+    }
+
+    // not a kind we recognize
+    return false;
+  }
+
+  void LocalCPUMemory::unregister_external_resource(RegionInstanceImpl *inst)
+  {
+    // nothing actually to clean up
+  }
+
+  // for re-registration purposes, generate an ExternalInstanceResource *
+  //  (if possible) for a given instance, or a subset of one
+  ExternalInstanceResource *LocalCPUMemory::generate_resource_info(RegionInstanceImpl *inst,
+								   const IndexSpaceGeneric *subspace,
+								   span<const FieldID> fields,
+								   bool read_only)
+  {
+    // TODO: handle subspaces
+    //assert(subspace == 0);
+
+    // compute the bounds of the instance relative to our base
+    assert(inst->metadata.is_valid() &&
+	   "instance metadata must be valid before accesses are performed");
+    assert(inst->metadata.layout);
+    InstanceLayoutGeneric *ilg = inst->metadata.layout;
+    uintptr_t rel_base, extent;
+    if(subspace == 0) {
+      // want full instance
+      rel_base = 0;
+      extent = ilg->bytes_used;
+    } else {
+      assert(!fields.empty());
+      uintptr_t limit;
+      for(size_t i = 0; i < fields.size(); i++) {
+        uintptr_t f_base, f_limit;
+        if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+          return 0;
+        if(i == 0) {
+          rel_base = f_base;
+          limit = f_limit;
+        } else {
+          rel_base = std::min(rel_base, f_base);
+          limit = std::max(limit, f_limit);
+        }
+      }
+      extent = limit - rel_base;
+    }
+
+    void *mem_base = get_direct_ptr(inst->metadata.inst_offset + rel_base,
+                                    extent); // only our subclasses know this
+    if(!mem_base)
+      return 0;
+
+    return new ExternalMemoryResource(reinterpret_cast<uintptr_t>(mem_base),
+                                      extent, read_only);
   }
 
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)

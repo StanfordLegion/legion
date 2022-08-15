@@ -1412,16 +1412,23 @@ namespace Legion {
        * and to always have concrete values.
        */
       template<typename T>
+      LEGION_DEPRECATED("Use the version without a runtime pointer argument")
       static inline Future from_value(Runtime *rt, const T &value);
+      template<typename T>
+      static inline Future from_value(const T &value);
 
       /**
        * Generates a future from an untyped pointer.  No
        * serialization is performed.
        */
-      static inline Future from_untyped_pointer(Runtime *rt,
-          const void *buffer, size_t bytes, bool take_ownership = false,
-          Memory::Kind mem = Memory::SYSTEM_MEM, 
-          void (*freefunc)(void*,size_t) = NULL);
+      LEGION_DEPRECATED("Use the version without a runtime pointer argument")
+      static Future from_untyped_pointer(Runtime *rt,
+          const void *buffer, size_t bytes, bool take_ownership = false);
+      static Future from_untyped_pointer(
+          const void *buffer, size_t bytes, bool take_ownership = false);
+      static Future from_value(const void *buffer, size_t bytes, bool owned,
+          const Realm::ExternalInstanceResource &resource,
+          void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL);
     private:
       // This should only be available for accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
@@ -3402,7 +3409,7 @@ namespace Legion {
       __CUDA_HD__
       inline DeferredValue<T>& operator=(T value);
     public:
-      inline void finalize(Runtime *runtime, Context ctx) const;
+      inline void finalize(Context ctx) const;
     protected:
       friend class UntypedDeferredValue;
       DeferredValue(void);
@@ -3454,7 +3461,7 @@ namespace Legion {
       template<typename REDOP, bool EXCLUSIVE>
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
-      void finalize(Runtime *runtime, Context ctx) const;
+      void finalize(Context ctx) const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
@@ -4636,17 +4643,13 @@ namespace Legion {
      */
     class FutureFunctor {
     public:
-      virtual ~FutureFunctor(void);
+      virtual ~FutureFunctor(void) { }
     public:
-      virtual void* callback_get_future(Memory::Kind &kind,
-          size_t &size, bool &owned, void (*&freefunc)(void*,size_t),
-          const void *&metadata, size_t &metasize);
+      virtual const void* callback_get_future(size_t &size, bool &owned,
+          const Realm::ExternalInstanceResource *&resource,
+          void (*&freefunc)(const Realm::ExternalInstanceResource&),
+          const void *&metadata, size_t &metasize) = 0;
       virtual void callback_release_future(void) = 0;
-    public:
-      // These two are deprecated and will be invoked only if 
-      // callback_get_future_instance is not overridden
-      virtual size_t callback_get_future_size(void);
-      virtual void callback_pack_future(void *buffer, size_t size); 
     };
 
     /**
@@ -9536,46 +9539,62 @@ namespace Legion {
        * This is the necessary postamble call to use when registering a task
        * variant with an explicit CodeDescriptor. It passes back the task
        * return value and completes the task. It should be the last thing
-       * called before the task finishes.
-       * @param runtime the runtime pointer
+       * called before the task finishes. Note that if the return value is
+       * not backed by an instance, then it must be in host-visible memory.
        * @param ctx the context for the task
        * @param retvalptr pointer to the return value
        * @param retvalsize the size of the return value in bytes
-       * @param owned whether the runtime now owns this result
+       * @param owned whether the runtime takes ownership of this result
        * @param inst optional Realm instance containing the data that
        *              Legion should take ownership of
-       * @param memory the kind of memory in which the retval resides
-       * @param freefunc a callback function for freeing owned memory
-       *              if this is NULL and owned is true the runtime
-       *              will free the memory using the system 'free' function
        * @param metadataptr a pointer to host memory that contains metadata
        *              for the future. The runtime will always make a copy
        *              of this data if it is not NULL.
        * @param metadatasize the size of the metadata buffer if non-NULL
        */
-      static void legion_task_postamble(Runtime *runtime, Context ctx,
+      static void legion_task_postamble(Context ctx,
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0,
                                         bool owned = false,
                                         Realm::RegionInstance inst = 
                                           Realm::RegionInstance::NO_INST,
-                                        Memory::Kind memory = 
-                                          Memory::SYSTEM_MEM,
-                                        void (*freefunc)(void*,size_t) = NULL,
                                         const void *metadataptr = NULL,
                                         size_t metadatasize = 0);
+
+      /**
+       * This variant of the Legion task postamble allows clients to
+       * return data in arbitrary memory locations as a future result.
+       * Realm::ExternalInstanceResource objects provide ways of describing
+       * all kinds of external allocations that Legion can understand
+       * @param ctx the context for the task
+       * @param retvalptr raw pointer for the allocation (can be NULL)
+       * @param retvalsize the size of the return value in bytes
+       * @param owned whether the runtime takes ownership of this result
+       * @param allocation an external instance resource description of 
+       *                   the future result data
+       * @param freefunc optional function pointer to invoke to free the
+       *                 resources associated with an external resource
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
+       */
+      static void legion_task_postamble(Context ctx,
+            const void *retvalptr, size_t retvalsize, bool owned,
+            const Realm::ExternalInstanceResource &allocation,
+            void (*freefunc)(const Realm::ExternalInstanceResource&) = NULL,
+            const void *metadataptr = NULL, size_t metadatasize = 0);
 
       /**
        * This variant of the Legion task postamble allows users to pass in
        * a future functor object to serve as a callback interface for Legion
        * to query so that it is only invoked in the case where futures actually
        * need to be serialized. 
-       * @param runtime the runtime pointer
        * @param ctx the context for the task
        * @param callback_functor pointer to the callback object
        * @param owned whether Legion should take ownership of the object
        */
-      static void legion_task_postamble(Runtime *runtime, Context ctx,
+      static void legion_task_postamble(Context ctx,
                                         FutureFunctor *callback_functor,
                                         bool owned = false);
     public:
@@ -9772,9 +9791,6 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      Future from_value(const void *value, size_t value_size, bool owned, 
-                        Memory::Kind memory_kind = Memory::SYSTEM_MEM,
-                        void (*freefunc)(void*,size_t) = NULL);
     private:
       template<typename T>
       friend class DeferredValue;
