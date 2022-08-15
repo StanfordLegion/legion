@@ -994,7 +994,6 @@ namespace Legion {
       TaskContext *const context;
     private:
       struct ExternalInstanceInfo {
-        bool eager_pool;
         uintptr_t ptr;
         size_t alignment;
       };

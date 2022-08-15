@@ -5550,7 +5550,6 @@ namespace Legion {
       // Here we simply queue up the output data, rather than eagerly
       // creating and setting an instance to the output region.
       ExternalInstanceInfo &info = returned_instances[field_id];
-      info.eager_pool = true;
       // Sanitize the pointer when the size is 0
       size_t num_elements = 1;
       for (int32_t dim = 0; dim < extents.dim; ++dim)
@@ -5806,9 +5805,7 @@ namespace Legion {
 #endif
         // Finally we set the instance to the physical manager
         const bool delete_now = manager->update_physical_instance(instance,
-                                          info.eager_pool ? 
-                                          PhysicalManager::EAGER_INSTANCE_KIND :
-                                  PhysicalManager::EXTERNAL_OWNED_INSTANCE_KIND,
+                                          PhysicalManager::EAGER_INSTANCE_KIND,
                                           bytes_used,
                                           info.ptr);
         if (delete_now)
