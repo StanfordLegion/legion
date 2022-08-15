@@ -763,6 +763,19 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUFBMemory supports ExternalHipMemoryResource and
+      //  ExternalHipArrayResource (not implemented)
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+                                                               const IndexSpaceGeneric *subspace,
+                                                               span<const FieldID> fields,
+                                                               bool read_only);
+
     public:
       GPU *gpu;
       char *base;
@@ -791,6 +804,19 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUDynamicFBMemory supports ExternalHipMemoryResource and
+      //  ExternalHipArrayResource (not implemented)
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+                                                               const IndexSpaceGeneric *subspace,
+                                                               span<const FieldID> fields,
+                                                               bool read_only);
+
     public:
       GPU *gpu;
       Mutex mutex;
@@ -811,6 +837,18 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      // GPUZCMemory supports ExternalHipPinnedHostResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
+      // for re-registration purposes, generate an ExternalInstanceResource *
+      //  (if possible) for a given instance, or a subset of one
+      virtual ExternalInstanceResource *generate_resource_info(RegionInstanceImpl *inst,
+                                                               const IndexSpaceGeneric *subspace,
+                                                               span<const FieldID> fields,
+                                                               bool read_only);
 
     public:
       char *gpu_base;
