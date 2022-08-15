@@ -960,17 +960,14 @@ namespace Legion {
     public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       uintptr_t ptr,
-                       size_t alignment,
-                       bool eager_pool = false);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments);
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       uintptr_t ptr,
+                       size_t alignment);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:

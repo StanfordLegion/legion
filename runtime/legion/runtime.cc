@@ -5510,8 +5510,7 @@ namespace Legion {
     void OutputRegionImpl::return_data(const DomainPoint &new_extents,
                                        FieldID field_id,
                                        uintptr_t ptr,
-                                       size_t alignment,
-                                       bool eager_pool /*= false */)
+                                       size_t alignment)
     //--------------------------------------------------------------------------
     {
       std::map<FieldID,ExternalInstanceInfo>::iterator finder =
@@ -5551,36 +5550,13 @@ namespace Legion {
       // Here we simply queue up the output data, rather than eagerly
       // creating and setting an instance to the output region.
       ExternalInstanceInfo &info = returned_instances[field_id];
-      info.eager_pool = eager_pool;
+      info.eager_pool = true;
       // Sanitize the pointer when the size is 0
       size_t num_elements = 1;
       for (int32_t dim = 0; dim < extents.dim; ++dim)
         num_elements *= extents[dim];
       info.ptr = num_elements != 0 ? ptr : 0;
       info.alignment = alignment;
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(const DomainPoint &extents,
-                                       std::map<FieldID,void*> ptrs,
-                                       std::map<FieldID,size_t> *_alignments)
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldID,size_t> dummy_alignments;
-      std::map<FieldID,size_t> &alignments =
-        _alignments != NULL ?  *_alignments : dummy_alignments;
-
-      for (std::map<FieldID,void*>::iterator it = ptrs.begin();
-           it != ptrs.end(); ++it)
-      {
-        std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
-        size_t alignment = finder != alignments.end() ? finder->second : 0;
-        return_data(extents,
-                    it->first,
-                    reinterpret_cast<uintptr_t>(it->second),
-                    alignment,
-                    false);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5669,7 +5645,7 @@ namespace Legion {
       }
 
       return_data(
-          extents, field_id, ptr, instance.get_layout()->alignment_reqd, true);
+          extents, field_id, ptr, instance.get_layout()->alignment_reqd);
 
       // This instance was escaped so the context is no longer responsible
       // for destroying it when the task is done, we take that responsibility
