@@ -345,8 +345,10 @@ void producer_global_task(const Task *task,
 
   if (args->empty)
   {
-    output.return_data(Point<DIM>::ZEROES(), FID_X, NULL);
-    output.return_data(Point<DIM>::ZEROES(), FID_Y, NULL);
+    Rect<DIM, int32_t> bounds(Point<DIM, int32_t>::ONES(), Point<DIM, int32_t>::ZEROES());
+    DeferredBuffer<int64_t, 2, int32_t> buf_x(bounds, Memory::Kind::SYSTEM_MEM, NULL, 32, true);
+    output.return_data(bounds.hi, FID_X, buf_x);
+    outputs[0].create_buffer<int32_t, 2>(bounds.hi, FID_Y, NULL, true);
     return;
   }
 
@@ -397,8 +399,17 @@ void producer_local_task(const Task *task,
 
   if (args->empty)
   {
-    output.return_data(Point<DIM>::ZEROES(), FID_Z, NULL);
-    output.return_data(Point<DIM>::ZEROES(), FID_W, NULL);
+    Rect<DIM, int32_t> bounds(
+        Point<DIM, int32_t>::ONES(), Point<DIM, int32_t>::ZEROES());
+    DeferredBuffer<int64_t, DIM, int32_t> buf_z(
+        bounds, Memory::Kind::SYSTEM_MEM);
+    output.return_data(bounds.hi, FID_Z, buf_z);
+    // TODO: Currently we can't return a buffer to FID_W, as deferred buffers
+    //       of a zero-size field cannot be created. Put back this test case
+    //       once we add APIs to return untyped buffers to output regions.
+    // DeferredBuffer<int8_t, DIM, int32_t> buf_w(
+    //   bounds, Memory::Kind::SYSTEM_MEM);
+    // output.return_data(bounds.hi, FID_W, buf_w);
     return;
   }
 
@@ -425,7 +436,13 @@ void producer_local_task(const Task *task,
     ptr_z[idx] = 333 + static_cast<int64_t>(idx);
 
   output.return_data(extents, FID_Z, buf_z);
-  output.return_data(extents, FID_W, NULL);
+
+  // TODO: Currently we can't return a buffer to FID_W, as deferred buffers
+  //       of a zero-size field cannot be created. Put back this test case
+  //       once we add APIs to return untyped buffers to output regions.
+  //DeferredBuffer<int8_t, DIM, int32_t> buf_w(
+  //  bounds, Memory::Kind::SYSTEM_MEM, NULL, 16, false);
+  //output.return_data(extents, FID_W, buf_w);
 }
 
 typedef FieldAccessor<READ_ONLY, int64_t, 2, int32_t,
@@ -614,7 +631,11 @@ void main_task(const Task *task,
   allocator.allocate_field(0, FID_W);
 
   std::set<FieldID> field_set1{FID_X, FID_Y};
-  std::set<FieldID> field_set2{FID_Z, FID_W};
+  // TODO: Currently we can't return a buffer to FID_W, as deferred buffers
+  //       of a zero-size field cannot be created. Put back this test case
+  //       once we add APIs to return untyped buffers to output regions.
+  // std::set<FieldID> field_set2{FID_Z, FID_W};
+  std::set<FieldID> field_set2{FID_Z};
 
   std::vector<OutputRequirement> out_reqs_global;
   std::vector<OutputRequirement> out_reqs_local;
