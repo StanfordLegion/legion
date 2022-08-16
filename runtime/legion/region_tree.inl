@@ -7129,10 +7129,16 @@ namespace Legion {
         // Note we don't bother doing this with legion spy since it doesn't
         // know how to analyze these anyway
         individual_field_indexes.resize(nonempty_indexes.size());
+        // We're also going to need to update preimages to match
+        std::vector<DomainT<D1,T1> > &preimages =
+          source ? current_src_preimages : current_dst_preimages;
+        std::vector<DomainT<D1,T1> > new_preimages(nonempty_indexes.size());
         // Iterate over the non empty indexes and get instances for each field
         for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
         {
           const unsigned nonempty_index = nonempty_indexes[idx];
+          // copy over the preimages to the set of dense non-empty preimages
+          new_preimages[idx] = preimages[nonempty_index]; 
           std::vector<unsigned> &field_indexes = individual_field_indexes[idx];
           field_indexes.resize(fields.size());
           const unsigned offset = indirections.size();
@@ -7186,6 +7192,8 @@ namespace Legion {
             field_indexes[fidx] = indirect_index;
           }
         }
+        // Now we can swap in the new preimages
+        preimages.swap(new_preimages);
       }
       else
 #else

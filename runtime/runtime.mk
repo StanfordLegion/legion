@@ -961,7 +961,8 @@ endif
 endif
 ifeq ($(strip $(USE_HIP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/hip/hip_module.cc \
-               $(LG_RT_DIR)/realm/hip/hip_internal.cc
+                   $(LG_RT_DIR)/realm/hip/hip_access.cc \
+                   $(LG_RT_DIR)/realm/hip/hip_internal.cc
 ifeq ($(strip $(USE_HIP_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/hip/hip_hijack.cc
 endif
