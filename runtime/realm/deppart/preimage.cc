@@ -757,7 +757,7 @@ namespace Realm {
     preimage.bounds = parent.bounds;
 
     // if the target has a sparsity map, use the same node.
-    int target_node = 0;
+    int target_node = Network::my_node_id;
     if (!target.dense()) {
       target_node = ID(target.sparsity).sparsity_creator_node();
     }
