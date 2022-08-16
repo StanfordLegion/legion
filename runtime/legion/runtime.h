@@ -993,7 +993,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskContext *const context;
     private:
-      struct ExternalInstanceInfo {
+      struct ReturnedInstanceInfo {
         uintptr_t ptr;
         size_t alignment;
       };
@@ -1001,7 +1001,7 @@ namespace Legion {
       OutputRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
-      std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::map<FieldID,ReturnedInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;

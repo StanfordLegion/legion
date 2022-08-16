@@ -5513,7 +5513,7 @@ namespace Legion {
                                        size_t alignment)
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,ExternalInstanceInfo>::iterator finder =
+      std::map<FieldID,ReturnedInstanceInfo>::iterator finder =
         returned_instances.find(field_id);
       if (finder != returned_instances.end())
       {
@@ -5549,7 +5549,7 @@ namespace Legion {
 
       // Here we simply queue up the output data, rather than eagerly
       // creating and setting an instance to the output region.
-      ExternalInstanceInfo &info = returned_instances[field_id];
+      ReturnedInstanceInfo &info = returned_instances[field_id];
       // Sanitize the pointer when the size is 0
       size_t num_elements = 1;
       for (int32_t dim = 0; dim < extents.dim; ++dim)
@@ -5723,7 +5723,7 @@ namespace Legion {
 
       // Create a Realm instance and update the physical manager
       // for each output field
-      for (std::map<FieldID,ExternalInstanceInfo>::iterator it =
+      for (std::map<FieldID,ReturnedInstanceInfo>::iterator it =
            returned_instances.begin(); it !=
            returned_instances.end(); ++it)
       {
@@ -5793,7 +5793,7 @@ namespace Legion {
         // Create an external Realm instance
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
-        ExternalInstanceInfo &info = it->second;
+        ReturnedInstanceInfo &info = it->second;
         const Realm::ExternalMemoryResource resource(info.ptr, 
                       layout->bytes_used, false/*read only*/);
         RtEvent wait_on(Realm::RegionInstance::create_external_instance(
