@@ -2959,8 +2959,6 @@ namespace Legion {
       void find_individual_interfering(const FieldMask &mask,
           const std::vector<DistributedID> &instances,
           FieldMaskSet<IndividualView> &interfering) const;
-      CollectiveView* create_collective_view(
-          const std::vector<DistributedID> &instances, RtEvent &ready);
       void invalidate_collective_views(ReferenceMutator &mutator,
           const LegionMap<CollectiveView*,
                           FieldMaskSet<InstanceView> > &to_invalidate);

@@ -2205,9 +2205,6 @@ namespace Legion {
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
-      if (!view_collective_arrivals.empty())
-        CollectiveView::release_collective_traversals(op->get_ctx_index(),
-            index, view_collective_arrivals, remote_ready);
       // Then perform the updates
       const RtEvent updates_ready = 
         analysis->perform_updates(traversal_done, map_applied_events);
@@ -2484,12 +2481,9 @@ namespace Legion {
       if (traversal_done.exists() || analysis.has_remote_sets())
         remote_ready = 
           analysis.perform_remote(traversal_done, map_applied_events);
-      const size_t op_ctx_index = op->get_ctx_index();
-      if (!collective_arrivals.empty())
-        CollectiveView::release_collective_traversals(op_ctx_index, index,
-            collective_arrivals, remote_ready);
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> acquired_events;
       if (remote_ready.exists() && !remote_ready.has_triggered())
@@ -2617,10 +2611,6 @@ namespace Legion {
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
-      const size_t op_ctx_index = op->get_ctx_index();
-      if (!collective_arrivals.empty())
-        CollectiveView::release_collective_traversals(op_ctx_index, index,
-            collective_arrivals, remote_ready);
       // Issue any release copies/fills that need to be done
       const RtEvent updates_done = 
         analysis->perform_updates(traversal_done, map_applied_events);
@@ -2630,6 +2620,7 @@ namespace Legion {
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> released_events;
       if (remote_ready.exists() && !remote_ready.has_triggered())
@@ -3526,9 +3517,6 @@ namespace Legion {
       RtEvent traversed;
       if (traversal_done.exists() || analysis->has_remote_sets())
         traversed = analysis->perform_remote(traversal_done,map_applied_events);
-      if (!collective_arrivals.empty())
-        CollectiveView::release_collective_traversals(op_ctx_index, index,
-            collective_arrivals, traversed);
       if (analysis->remove_reference())
         delete analysis;
       if (!ready_events.empty())
@@ -3614,9 +3602,6 @@ namespace Legion {
       RtEvent traversed;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         traversed = analysis->perform_remote(traversal_done,map_applied_events);
-      if (!collective_arrivals.empty())
-        CollectiveView::release_collective_traversals(op_ctx_index, index,
-            collective_arrivals, traversed);
       if (analysis->remove_reference())
         delete analysis;
       if (done_events.empty())

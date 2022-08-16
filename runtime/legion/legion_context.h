@@ -979,28 +979,22 @@ namespace Legion {
       };
       struct CollectiveResult : public Collectable {
       public:
-        CollectiveResult(const std::set<DistributedID> &dids,
-                         DistributedID collective_did);
+        CollectiveResult(const std::vector<DistributedID> &dids,
+                         DistributedID collective_did, RtEvent ready);
         CollectiveResult(std::vector<DistributedID> &&dids,
-                         DistributedID collective_did);
+                         DistributedID collective_did, RtEvent ready);
       public:
-        bool matches(const std::set<DistributedID> &dids) const;
-        bool overlaps(const CollectiveResult *other) const;
-        bool interferes(const std::set<DistributedID> &dids, 
-                        const FieldMask &mask, Runtime *runtime,
-                        bool &dominated, FieldMaskSet<CollectiveResult> &to_add,
-                        LegionList<FieldSet<DistributedID> > &remainders) const;
+        bool matches(const std::vector<DistributedID> &dids) const;
       public:
         const DistributedID collective_did;
         const std::vector<DistributedID> individual_dids;
-        RtEvent registered_event;
-        RtEvent ready_event;
+        const RtEvent ready_event;
       };
       struct PendingMatch {
       public:
         PendingMatch(size_t total, size_t tag) : total_arrivals(total),
           collective_tag(tag), ready(Runtime::create_rt_user_event()),
-          arrivals(0), success(true) { }
+          arrivals(0), success(tag > 0) { }
       public:
         const size_t total_arrivals;
         const size_t collective_tag;
@@ -1631,6 +1625,8 @@ namespace Legion {
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
+      virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
+                   const std::vector<DistributedID> &instances, RtEvent &ready);
     protected:
       // Check to see if all the participants are using the same arguments
       // as a previous rendezvous collective mapping, in which case there
@@ -1665,6 +1661,8 @@ namespace Legion {
       RtEvent dispatch_collective_invalidation(
           const CollectiveResult *collective, const FieldMask &invalid_mask,
           const FieldMaskSet<CollectiveResult> &replacements);
+      CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, bool need_lock = true);
       RtEvent create_collective_view(
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
@@ -1860,7 +1858,7 @@ namespace Legion {
     protected:
       // Only valid on the onwer context node
       LegionMap<RegionTreeID,
-                FieldMaskSet<CollectiveResult> >        collective_results;
+                std::vector<CollectiveResult*> >        collective_results;
       // Instance distributed IDs to the invalid fields
       LegionMap<DistributedID,FieldMask>                invalidated_collectives;
       std::atomic<size_t>                               next_collective_tag;

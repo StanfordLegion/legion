@@ -10160,8 +10160,14 @@ namespace Legion {
         if (it->first->refined == NULL)
         {
           RtEvent ready;
-          it->first->refined = 
-            create_collective_view(it->first->instances, ready);
+          const DistributedID collective_did = 
+            context->find_or_create_collective_view(
+                region_node->handle.get_tree_id(), it->first->instances, ready);
+          // Wait if it hasn't been registered everywhere yet
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          it->first->refined = static_cast<CollectiveView*>(
+              runtime->find_or_request_logical_view(collective_did, ready));
           if (ready.exists())
             pending_ready.push_back(ready);
         }
@@ -10212,8 +10218,14 @@ namespace Legion {
         if (it->first->refined == NULL)
         {
           RtEvent ready;
-          it->first->refined = 
-            create_collective_view(it->first->instances, ready);
+          const DistributedID collective_did = 
+            context->find_or_create_collective_view(
+                region_node->handle.get_tree_id(), it->first->instances, ready);
+          // Wait if it hasn't been registered everywhere yet
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          it->first->refined = static_cast<CollectiveView*>(
+              runtime->find_or_request_logical_view(collective_did, ready));
           if (ready.exists())
             pending_ready.push_back(ready);
         }

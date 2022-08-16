@@ -10239,24 +10239,6 @@ namespace Legion {
           }
         }
       }
-      // We need to preregister guard rendezvous users with the collective
-      // views before doing the match to ensure that the collective views
-      // knows that there are pending analyses in flight in case it gets
-      // invalidated after the match is complete.
-      if (result != NULL)
-      {
-        const size_t op_ctx_index = op->get_ctx_index();
-        for (std::map<InstanceView*,size_t>::const_iterator it =
-              result->collective_arrivals.begin(); it !=
-              result->collective_arrivals.end(); it++)
-        {
-          if (it->first->is_collective_view())
-          {
-            CollectiveView *view = it->first->as_collective_view();
-            view->record_pending_traversal(op_ctx_index, index);
-          }
-        }
-      }
       // Always try to do the match first to see if it succeeds
       if (match_collective_mapping(op, index,
             (result == NULL) ? 0 : result->collective_tag))
@@ -10287,25 +10269,6 @@ namespace Legion {
         if (result->remove_reference())
           delete result;
         return first_local;
-      }
-      // If we failed the match, then we can remove our guard since we
-      // know that we'll record the pending analyses as part of the rendezvous
-      if (result != NULL)
-      {
-        const size_t op_ctx_index = op->get_ctx_index();
-        for (std::map<InstanceView*,size_t>::const_iterator it =
-              result->collective_arrivals.begin(); it !=
-              result->collective_arrivals.end(); it++)
-        {
-          if (it->first->is_collective_view())
-          {
-            CollectiveView *view = it->first->as_collective_view();
-            view->release_pending_traversal(op_ctx_index, index,
-                                            RtEvent::NO_RT_EVENT);
-          }
-        }
-        if (result->remove_reference())
-          delete result;
       }
       // Find or create a rendezvous result and record for this context
       const PendingRendezvousKey key(op->get_ctx_index(), index, region);
@@ -10574,193 +10537,90 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult::CollectiveResult(
-                         const std::set<DistributedID> &dids, DistributedID did)
-      : collective_did(did), individual_dids(dids.begin(), dids.end())
+       const std::vector<DistributedID> &dids, DistributedID did, RtEvent ready)
+      : collective_did(did), individual_dids(dids.begin(), dids.end()),
+        ready_event(ready)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult::CollectiveResult(
-                           std::vector<DistributedID> &&dids, DistributedID did)
-      : collective_did(did), individual_dids(dids)
+            std::vector<DistributedID> &&dids, DistributedID did, RtEvent ready)
+      : collective_did(did), individual_dids(dids), ready_event(ready)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     bool InnerContext::CollectiveResult::matches(
-                                      const std::set<DistributedID> &dids) const
+                                   const std::vector<DistributedID> &dids) const
     //--------------------------------------------------------------------------
     {
       if (dids.size() != individual_dids.size())
         return false;
-      unsigned index = 0;
-      for (std::set<DistributedID>::const_iterator it =
-            dids.begin(); it != dids.end(); it++, index++)
-        if ((*it) != individual_dids[index])
+      for (unsigned idx = 0; idx < dids.size(); idx++)
+        if (dids[idx] != individual_dids[idx])
           return false;
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::CollectiveResult::overlaps(
-                                            const CollectiveResult *other) const
+    DistributedID InnerContext::find_or_create_collective_view(RegionTreeID tid,
+                    const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-      std::vector<DistributedID>::const_iterator first = 
-        individual_dids.begin();
-      std::vector<DistributedID>::const_iterator second = 
-        other->individual_dids.begin();
-      while ((first != individual_dids.end()) && 
-              (second != other->individual_dids.end()))
-      {
-        if (*first < *second) 
-          first++;
-        else if (*second < *first)
-          second++;
-        else 
-          return true;
-      }
-      return false;
+      CollectiveResult *result = find_or_create_collective_view(tid, instances);
+      ready = result->ready_event;
+      const DistributedID collective_did = result->collective_did;
+      if (result->remove_reference())
+        delete result;
+      return collective_did;
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::CollectiveResult::interferes(
-                        const std::set<DistributedID> &dids,
-                        const FieldMask &mask, Runtime *runtime,
-                        bool &dominated, FieldMaskSet<CollectiveResult> &to_add,
-                        LegionList<FieldSet<DistributedID> > &remainders) const
+    InnerContext::CollectiveResult*
+      InnerContext::find_or_create_collective_view(RegionTreeID tid,
+                    const std::vector<DistributedID> &instances, bool need_lock)
     //--------------------------------------------------------------------------
     {
-      std::vector<DistributedID> overlap;
+      if (need_lock)
       {
-        std::set<DistributedID>::const_iterator first = dids.begin();
-        std::vector<DistributedID>::const_iterator second = 
-          individual_dids.begin();
-        while ((first != dids.end()) && (second != individual_dids.end()))
-        {
-          if (*first < *second) 
-            first++;
-          else if (*second < *first)
-            second++;
-          else 
-          {
-            overlap.push_back(*first);
-            first++;
-            second++;
-          }
-        }
-      }
-      if (overlap.empty())
-        return false;
-      // Yes the interfere, now figure out how
-      if (overlap.size() <= individual_dids.size())
-      {
-        // Split this thing into pieces
-        std::vector<DistributedID> collective_remainder;
-        {
-          std::vector<DistributedID>::const_iterator first = 
-            individual_dids.begin();
-          std::vector<DistributedID>::const_iterator second = overlap.begin();
-          while ((first != individual_dids.begin()) && 
-                  (second != overlap.end()))
-          {
-            if (*first < *second)
-              collective_remainder.push_back(*first++);
-            else if (*second < *first)
-              second++;
-            else
-            {
-              first++;
-              second++;
-            }
-          }
-        }
-#ifdef DEBUG_LEGION
-        assert(!collective_remainder.empty());
-#endif
-        // Figure out where to get the distributed ID from
-        size_t distance = runtime->total_address_spaces;
-        AddressSpaceID nearest_space = runtime->address_space;
-        for (unsigned idx = 0; idx < collective_remainder.size(); idx++)
-        {
-          const AddressSpaceID space =
-            runtime->determine_owner(collective_remainder[idx]);
-          if (space == runtime->address_space)
-          {
-            nearest_space = space;
-            break;
-          }
-          else if (space > runtime->address_space)
-          {
-            size_t dist = space - runtime->address_space;
-            if (dist < distance)
-            {
-              nearest_space = space;
-              distance = dist;
-            }
-          }
-          else
-          {
-            size_t dist = runtime->address_space - space;
-            if (dist < distance)
-            {
-              nearest_space = space;
-              distance = dist;
-            }
-          }
-        }
-        CollectiveResult *result = new CollectiveResult(
-            std::move(collective_remainder), 
-            (nearest_space == runtime->address_space) ? 
-              runtime->get_available_distributed_id() :
-              runtime->get_remote_distributed_id(nearest_space));
+        AutoLock c_lock(collective_lock);
+        CollectiveResult *result =
+          find_or_create_collective_view(tid, instances, false/*need lock*/);
+        // Add a reference before returning the result
         result->add_reference();
-        to_add.insert(result, mask);
-        if (overlap.size() < dids.size())
-        {
-          remainders.emplace_back(FieldSet<DistributedID>(mask));
-          FieldSet<DistributedID> &remainder = remainders.back();
-          std::set<DistributedID>::const_iterator first = dids.begin();
-          std::vector<DistributedID>::const_iterator second = overlap.begin();
-          while ((first != dids.begin()) && (second != overlap.end()))
-          {
-            if (*first < *second)
-              remainder.elements.insert(*first++);
-            else if (*second < *first)
-              second++;
-            else
-            {
-              first++;
-              second++;
-            }
-          }
-        }
+        return result;
       }
-      else
-      {
-        // This collective view was dominated so we'll still be able to use it
-        dominated = true;
-        // Compute the remainder set of instances for these fields
-        remainders.emplace_back(FieldSet<DistributedID>(mask));
-        FieldSet<DistributedID> &remainder = remainders.back();
-        std::set<DistributedID>::const_iterator first = dids.begin();
-        std::vector<DistributedID>::const_iterator second = overlap.begin();
-        while ((first != dids.begin()) && (second != overlap.end()))
-        {
-          if (*first < *second)
-            remainder.elements.insert(*first++);
-          else if (*second < *first)
-            second++;
-          else
-          {
-            first++;
-            second++;
-          }
-        }
-      }
-      return true;
+      std::vector<CollectiveResult*> &collectives = collective_results[tid];
+      for (std::vector<CollectiveResult*>::const_iterator it =
+            collectives.begin(); it != collectives.end(); it++)
+        if ((*it)->matches(instances))
+          return (*it);
+      // If we get here then we need to make it
+      std::vector<AddressSpaceID> spaces(instances.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        spaces[idx] = runtime->determine_owner(instances[idx]);
+      std::sort(spaces.begin(), spaces.end());
+      std::vector<AddressSpaceID>::iterator end = 
+        std::unique(spaces.begin(), spaces.end());
+      spaces.resize(std::distance(spaces.begin(),end));
+      CollectiveMapping *mapping = 
+        new CollectiveMapping(spaces, runtime->legion_collective_radix);
+      mapping->add_reference();
+      const DistributedID collective_did = 
+        mapping->contains(runtime->address_space) ? runtime->address_space :
+        mapping->find_nearest(runtime->address_space);
+      const RtEvent ready = create_collective_view(collective_did,
+                                                   mapping, instances);
+      CollectiveResult *result = 
+        new CollectiveResult(instances, collective_did, ready);
+      result->add_reference();
+      collectives.push_back(result);
+      if (mapping->remove_reference())
+        delete mapping;     
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10769,17 +10629,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
-      // Now go through and find or create the collective views
-      // Split prior collective views if necessary
       LegionMap<LogicalRegion,FieldMaskSet<CollectiveResult> > views;
       {
-        FieldMaskSet<CollectiveResult> to_add;
-        FieldMaskSet<CollectiveResult> to_invalidate;
         AutoLock c_lock(collective_lock);
-        // The first pass here doesn't record anything
-        // Instead it just makes sure that all the collective views are
-        // sufficiently refined so that the collective views are unique
-        // atomics for the rendezvous that we need to do
         for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
               rendezvous.begin(); rit != rendezvous.end(); rit++)
         {
@@ -10789,251 +10641,28 @@ namespace Legion {
 #endif
           LegionList<FieldSet<DistributedID> > field_sets;
           compute_field_sets(FieldMask(), rit->second.groups, field_sets);
-          // Iterate over the field sets of distributed IDs for this region tree
-          for (LegionList<FieldSet<DistributedID> >::iterator fit =
-                field_sets.begin(); fit != field_sets.end(); fit++)
+          FieldMaskSet<CollectiveResult> &results = views[rit->first];
+          for (LegionList<FieldSet<DistributedID> >::const_iterator it =
+                field_sets.begin(); it != field_sets.end(); it++)
           {
-            // For each one of these compare against all prior collective views
-            // and see if they overlap with any of them in instances used for
-            // those particular fields
-            LegionMap<RegionTreeID,FieldMaskSet<CollectiveResult> >::iterator
-                      collective_finder = collective_results.find(tid);
-            if ((collective_finder != collective_results.end()) &&
-                !(fit->set_mask * collective_finder->second.get_valid_mask()))
-            {
-              std::vector<CollectiveResult*> to_delete;
-              for (FieldMaskSet<CollectiveResult>::iterator it =
-                    collective_finder->second.begin(); it !=
-                    collective_finder->second.end(); it++)
-              {
-                // Check for any field overlaps
-                const FieldMask overlap = fit->set_mask & it->second;
-                if (!overlap)
-                  continue;
-                // Check to see if they match which should be the common case
-                if (it->first->matches(fit->elements))
-                {
-                  fit->set_mask -= overlap;
-                  if (!fit->set_mask)
-                    break;
-                }
-                // If they didn't match, check for interference
-                bool dominated = false;
-                if (it->first->interferes(fit->elements, overlap, runtime,
-                                          dominated, to_add, field_sets))
-                {
-                  if (!dominated)
-                  {
-                    if (to_invalidate.insert(it->first, overlap))
-                      it->first->add_reference();
-                    it.filter(overlap);
-                    if (!it->second)
-                      to_delete.push_back(it->first);
-                  }
-                  fit->set_mask -= overlap;
-                  if (!fit->set_mask)
-                    break;
-                }
-              }
-              for (std::vector<CollectiveResult*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                collective_finder->second.erase(*it);
-                if ((*it)->remove_reference())
-                  delete (*it);
-              }
-            }
-            // Now check the to_add set also to see if they need to be split 
-            // Keep iterating until the to_add set stabilizes
-            while (!to_add.empty() && 
-                    !(fit->set_mask * to_add.get_valid_mask()))
-            {
-              std::vector<CollectiveResult*> to_delete;
-              FieldMaskSet<CollectiveResult> new_to_add;
-              for (FieldMaskSet<CollectiveResult>::iterator it =
-                    to_add.begin(); it != to_add.end(); it++)
-              {
-                // Check for any field overlaps
-                const FieldMask overlap = fit->set_mask & it->second;
-                if (!overlap)
-                  continue;
-                // Check to see if they match which should be the common case
-                if (it->first->matches(fit->elements))
-                {
-                  fit->set_mask -= overlap;
-                  if (!fit->set_mask)
-                    break;
-                }
-                // If they didn't match, check for interference
-                bool dominated = false;
-                if (it->first->interferes(fit->elements, overlap, runtime,
-                                          dominated, new_to_add, field_sets))
-                {
-                  if (!dominated)
-                  {
-                    it.filter(overlap);
-                    if (!it->second)
-                      to_delete.push_back(it->first);
-                  }
-                  fit->set_mask -= overlap;
-                  if (!fit->set_mask)
-                    break;
-                }
-              }
-              for (std::vector<CollectiveResult*>::const_iterator it =
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                collective_finder->second.erase(*it);
-                if ((*it)->remove_reference())
-                  delete (*it);
-              }
-              if (!new_to_add.empty())
-              {
-                for (FieldMaskSet<CollectiveResult>::const_iterator it =
-                      new_to_add.begin(); it != new_to_add.end(); it++)
-                  to_add.insert(it->first, it->second);
-              }
-              else // Nothing new to iterate over
-                break;
-            }
-            // If we get here and still have fields we haven't touched then 
-            // we can create a new collective result that we'll need to make
-            if (!!fit->set_mask)
-            {
-              // Figure out where to get the distributed ID from
-              size_t distance = runtime->total_address_spaces;
-              AddressSpaceID nearest_space = runtime->address_space;
-              for (std::set<DistributedID>::const_iterator it =
-                    fit->elements.begin(); it != fit->elements.end(); it++)
-              {
-                const AddressSpaceID space = runtime->determine_owner(*it);
-                if (space == runtime->address_space)
-                {
-                  nearest_space = space;
-                  break;
-                }
-                else if (space > runtime->address_space)
-                {
-                  size_t dist = space - runtime->address_space;
-                  if (dist < distance)
-                  {
-                    nearest_space = space;
-                    distance = dist;
-                  }
-                }
-                else
-                {
-                  size_t dist = runtime->address_space - space;
-                  if (dist < distance)
-                  {
-                    nearest_space = space;
-                    distance = dist;
-                  }
-                }
-              }
-              CollectiveResult *result = new CollectiveResult(fit->elements,
-                  (nearest_space == runtime->address_space) ?
-                    runtime->get_available_distributed_id() :
-                    runtime->get_remote_distributed_id(nearest_space));
+            const std::vector<DistributedID> instances(it->elements.begin(),
+                                                       it->elements.end());
+            CollectiveResult *result =
+              find_or_create_collective_view(tid, instances,false/*need lock*/);
+            if (results.insert(result, it->set_mask))
               result->add_reference();
-              to_add.insert(result, fit->set_mask);
-            }
-          }
-        }
-        FieldMaskSet<CollectiveResult> &collectives = collective_results[tid];
-        // Make the new collective views
-        for (FieldMaskSet<CollectiveResult>::iterator it =
-              to_add.begin(); it != to_add.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(!it->first->individual_dids.empty());
-#endif
-          // Make the collective mapping for this result
-          std::vector<AddressSpaceID> spaces(it->first->individual_dids.size());
-          for (unsigned idx = 0; idx < spaces.size(); idx++)
-            spaces[idx] = runtime->determine_owner(
-                it->first->individual_dids[idx]);
-          std::sort(spaces.begin(), spaces.end());
-          std::vector<AddressSpaceID>::iterator end = 
-            std::unique(spaces.begin(), spaces.end());
-          spaces.resize(std::distance(spaces.begin(),end));
-          CollectiveMapping *mapping = 
-            new CollectiveMapping(spaces, runtime->legion_collective_radix);
-          mapping->add_reference();
-          it->first->registered_event = create_collective_view(
-              it->first->collective_did, mapping, it->first->individual_dids);
-          if (collective_results[tid].insert(it->first, it->second))
-            it->first->add_reference();
-          if (mapping->remove_reference())
-            delete mapping;
-        }
-        // Send invalidations for all the old collective views to be replaced
-        std::map<CollectiveResult*,std::vector<RtEvent> > ready_events;
-        for (FieldMaskSet<CollectiveResult>::iterator cit =
-              to_invalidate.begin(); cit != to_invalidate.end(); cit++)
-        {
-          // Find the new collective views that overlap with this old
-          // one that is being replaced
-          FieldMaskSet<CollectiveResult> replacements;
-          for (FieldMaskSet<CollectiveResult>::const_iterator it =
-                to_add.begin(); it != to_add.end(); it++)
-          {
-            const FieldMask overlap = cit->second & it->second;
-            if (!overlap)
-              continue;
-            if (!cit->first->overlaps(it->first))
-              continue;
-            replacements.insert(it->first, overlap);
-          }
-          RtEvent invalidated = dispatch_collective_invalidation(
-                cit->first, cit->second, replacements);
-          if (invalidated.exists() && !invalidated.has_triggered())
-          {
-            for (FieldMaskSet<CollectiveResult>::const_iterator it =
-                  replacements.begin(); it != replacements.end(); it++)
-              ready_events[it->first].push_back(invalidated);
-          }
-        }
-        // Rebuild the ready events to reflect that some new collective
-        // views cannot be used until the invalidations are complete
-        for (std::map<CollectiveResult*,std::vector<RtEvent> >::iterator it =
-              ready_events.begin(); it != ready_events.end(); it++)
-          it->first->ready_event = Runtime::merge_events(it->second);
-        // Record the collective views for each of our rendezvous results
-        for (std::map<LogicalRegion,CollectiveRendezvous>::const_iterator rit =
-              rendezvous.begin(); rit != rendezvous.end(); rit++)
-        {
-          FieldMaskSet<CollectiveResult> &result_views = views[rit->first];  
-          for (FieldMaskSet<CollectiveResult>::const_iterator cit =
-                collectives.begin(); cit != collectives.end(); cit++)
-          {
-            FieldMask matched;
-            for (LegionMap<DistributedID,FieldMask>::const_iterator it =
-                  rit->second.groups.begin(); it != 
-                  rit->second.groups.end(); it++)
-            {
-              const FieldMask overlap = cit->second & it->second;
-              if (!overlap)
-                continue;
-              if (!std::binary_search(cit->first->individual_dids.begin(),
-                    cit->first->individual_dids.end(), it->first))
-                continue;
-              if (result_views.insert(cit->first, overlap))
-                cit->first->add_reference();
-              matched |= overlap;
-              if (matched == cit->second)
-                break;
-            }
           }
         }
       }
+      // Generate a new collective result ID
+      const size_t collective_tag = generate_collective_tag();
       // Send the resulting views back out to all the RendezvousResults
       for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
             rendezvous.begin(); rit != rendezvous.end(); rit++)
       {
         FieldMaskSet<CollectiveResult> &result_views = views[rit->first];
         std::sort(rit->second.results.begin(), rit->second.results.end());
-        finalize_collective_mapping(runtime, generate_collective_tag(),
+        finalize_collective_mapping(runtime, collective_tag,
             rit->second.results, rit->second.counts, result_views);
         for (FieldMaskSet<CollectiveResult>::const_iterator it =
               result_views.begin(); it != result_views.end(); it++)
@@ -11104,22 +10733,6 @@ namespace Legion {
               for (unsigned idx = 0; 
                     idx < vit->first->individual_dids.size(); idx++)
                 rez.serialize(vit->first->individual_dids[idx]);
-              if (vit->first->registered_event.exists())
-              {
-                std::map<CollectiveResult*,RtEvent>::const_iterator finder =
-                  local_registered_events.find(vit->first);
-                if (finder == local_registered_events.end())
-                {
-                  const RtUserEvent local = Runtime::create_rt_user_event();
-                  Runtime::trigger_event(local, vit->first->registered_event);
-                  local_registered_events[vit->first] = local;
-                  rez.serialize(local);
-                }
-                else
-                  rez.serialize(finder->second);
-              }
-              else
-                rez.serialize(vit->first->registered_event);
               if (!vit->first->ready_event.exists())
               {
                 std::map<CollectiveResult*,RtEvent>::const_iterator finder =
@@ -11127,7 +10740,7 @@ namespace Legion {
                 if (finder == local_ready_events.end())
                 {
                   const RtUserEvent local = Runtime::create_rt_user_event();
-                  Runtime::trigger_event(local, vit->first->registered_event);
+                  Runtime::trigger_event(local, vit->first->ready_event);
                   local_ready_events[vit->first] = local;
                   rez.serialize(local);
                 }
@@ -11177,9 +10790,9 @@ namespace Legion {
                 continue;
               // Successfully found one of the views
               // Wait until it is safe to request it
-              if (vit->first->registered_event.exists() &&
-                  !vit->first->registered_event.has_triggered())
-                vit->first->registered_event.wait();
+              if (vit->first->ready_event.exists() &&
+                  !vit->first->ready_event.has_triggered())
+                vit->first->ready_event.wait();
               RtEvent ready;
               CollectiveView *view = static_cast<CollectiveView*>(
                   runtime->find_or_request_logical_view(
@@ -11271,11 +10884,11 @@ namespace Legion {
         std::vector<DistributedID> individual_dids(num_dids);
         for (unsigned idx = 0; idx < num_dids; idx++)
           derez.deserialize(individual_dids[idx]);
-        CollectiveResult *view =
-          new CollectiveResult(std::move(individual_dids), collective_did);
+        RtEvent view_ready;
+        derez.deserialize(view_ready);
+        CollectiveResult *view = new CollectiveResult(
+            std::move(individual_dids), collective_did, view_ready);
         view->add_reference();
-        derez.deserialize(view->registered_event);
-        derez.deserialize(view->ready_event);
         FieldMask mask;
         derez.deserialize(mask);
         views.insert(view, mask);
