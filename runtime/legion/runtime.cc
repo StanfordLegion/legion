@@ -5794,10 +5794,11 @@ namespace Legion {
         Realm::RegionInstance instance;
         Realm::ProfilingRequestSet no_requests;
         ReturnedInstanceInfo &info = it->second;
-        const Realm::ExternalMemoryResource resource(info.ptr, 
-                      layout->bytes_used, false/*read only*/);
-        RtEvent wait_on(Realm::RegionInstance::create_external_instance(
-          instance, manager->get_memory(), layout, resource, no_requests));
+
+        MemoryManager* memory_manager =
+          runtime->find_memory_manager(manager->get_memory());
+        RtEvent wait_on = memory_manager->create_sub_eager_instance(
+            instance, info.ptr, bytes_used, layout);
         if (wait_on.exists())
           wait_on.wait();
 #ifdef DEBUG_LEGION
@@ -10714,16 +10715,8 @@ namespace Legion {
 
       if (allocated)
       {
-        const Point<1> start(offset);
-        const Point<1> stop(start[0] + size - 1);
-        const Rect<1> bounds(start, stop);
-        Realm::ExternalInstanceResource *external_resource = 
-          eager_pool_instance.generate_resource_info(
-              Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
-        Realm::ProfilingRequestSet no_requests;
-        wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
-              instance, memory, layout, *external_resource, no_requests));
-        delete external_resource;
+        wait_on = create_sub_eager_instance(
+            instance, eager_pool + offset, size, layout);
         log_eager.debug("allocate instance " IDFMT
                         " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
                         instance.id,
@@ -10748,6 +10741,29 @@ namespace Legion {
       if (collector != NULL)
         delete collector;
 
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::create_sub_eager_instance(PhysicalInstance &instance,
+                                                     uintptr_t ptr, size_t size,
+                                           Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ptr >= eager_pool || (size == 0 && ptr == 0));
+#endif
+      int64_t offset = size > 0 ? ptr - eager_pool : 0;
+      const Point<1> start(offset);
+      const Point<1> stop(offset + size - 1);
+      const Rect<1> bounds(start, stop);
+      Realm::ExternalInstanceResource* external_resource =
+        eager_pool_instance.generate_resource_info(
+            Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
+      Realm::ProfilingRequestSet no_requests;
+      RtEvent wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
+            instance, memory, layout, *external_resource, no_requests));
+      delete external_resource;
       return wait_on;
     }
 
@@ -10777,13 +10793,17 @@ namespace Legion {
           AutoLock lock(manager_lock);
           std::map<uintptr_t,size_t>::iterator finder = 
             eager_allocations.find(ptr);
-#ifdef DEBUG_LEGION
-          assert(finder != eager_allocations.end());
-#endif
-          const size_t size = eager_allocator->get_size(finder->second);
-          eager_remaining_capacity += size;
-          eager_allocator->deallocate(finder->second);
-          eager_allocations.erase(finder);
+
+          size_t size = 0;
+          // empty allocations are not created by the eager allocator,
+          // so we don't need to deallocate them
+          if (finder != eager_allocations.end())
+          {
+            size = eager_allocator->get_size(finder->second);
+            eager_remaining_capacity += size;
+            eager_allocator->deallocate(finder->second);
+            eager_allocations.erase(finder);
+          }
           log_eager.debug(
             "deallocate instance " IDFMT " of size %zd on memory " IDFMT
             ", %zd bytes left", instance.id, size, memory.id,
