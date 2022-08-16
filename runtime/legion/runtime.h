@@ -960,17 +960,14 @@ namespace Legion {
     public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       uintptr_t ptr,
-                       size_t alignment,
-                       bool eager_pool = false);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments);
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       uintptr_t ptr,
+                       size_t alignment);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -996,8 +993,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskContext *const context;
     private:
-      struct ExternalInstanceInfo {
-        bool eager_pool;
+      struct ReturnedInstanceInfo {
         uintptr_t ptr;
         size_t alignment;
       };
@@ -1005,7 +1001,7 @@ namespace Legion {
       OutputRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
-      std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::map<FieldID,ReturnedInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;
@@ -1601,6 +1597,10 @@ namespace Legion {
     public:
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
+      // Create an external instance that is a view to the eager pool instance
+      RtEvent create_sub_eager_instance(PhysicalInstance &instance,
+                                        uintptr_t ptr, size_t size,
+                                        Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
     public:

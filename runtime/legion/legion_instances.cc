@@ -2903,18 +2903,8 @@ namespace Legion {
       layout->compute_destroyed_fields(serdez_fields);
 
 #ifndef LEGION_MALLOC_INSTANCES
-      // If this is an owned external instance, deallocate it manually
-      if (kind == EXTERNAL_OWNED_INSTANCE_KIND)
-      {
-        memory_manager->free_external_allocation(
-            external_pointer, instance_footprint);
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_deletion);
-        else
-          instance.destroy(deferred_deletion);
-      }
       // If this is an eager allocation, return it back to the eager pool
-      else if (kind == EAGER_INSTANCE_KIND)
+      if (kind == EAGER_INSTANCE_KIND)
         memory_manager->free_eager_instance(instance, deferred_deletion);
       else
 #endif
@@ -2960,18 +2950,8 @@ namespace Legion {
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
 #ifndef LEGION_MALLOC_INSTANCES
-      // If this is an owned external instance, deallocate it manually
-      if (kind == EXTERNAL_OWNED_INSTANCE_KIND)
-      {
-        memory_manager->free_external_allocation(
-            external_pointer, instance_footprint);
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields);
-        else
-          instance.destroy();
-      }
       // If this is an eager allocation, return it back to the eager pool
-      else if (kind == EAGER_INSTANCE_KIND)
+      if (kind == EAGER_INSTANCE_KIND)
         memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
       else
 #endif
@@ -3065,8 +3045,7 @@ namespace Legion {
         kind = new_kind;
         external_pointer = new_pointer;
 #ifdef DEBUG_LEGION
-        assert((kind != EXTERNAL_OWNED_INSTANCE_KIND) || 
-                (external_pointer != -1UL));
+        assert(external_pointer != -1UL);
 #endif
 
         update_instance_footprint(new_footprint);

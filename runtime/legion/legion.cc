@@ -3041,32 +3041,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegion::return_data(const DomainPoint &extents,
                                    FieldID field_id,
-                                   void *ptr,
-                                   size_t alignment /*= 0*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->return_data(
-          extents, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputRegion::return_data(const DomainPoint &extents,
-                                   std::map<FieldID,void*> ptrs,
-                                std::map<FieldID,size_t> *alignments /*= NULL*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->return_data(extents, ptrs, alignments);
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputRegion::return_data(const DomainPoint &extents,
-                                   FieldID field_id,
                                    Realm::RegionInstance instance,
                                    bool check_constraints /*= true */)
     //--------------------------------------------------------------------------

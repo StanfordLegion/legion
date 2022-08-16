@@ -219,8 +219,6 @@ namespace Legion {
         INTERNAL_INSTANCE_KIND,
         // External allocations imported by attach operations
         EXTERNAL_ATTACHED_INSTANCE_KIND,
-        // External allocations from output regions, owned by the runtime
-        EXTERNAL_OWNED_INSTANCE_KIND,
         // Allocations drawn from the eager pool
         EAGER_INSTANCE_KIND,
         // Instance not yet bound
