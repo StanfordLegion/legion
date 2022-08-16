@@ -802,11 +802,10 @@ namespace Realm {
     IndexSpace<N, T> image;
     image.bounds = parent.bounds;
 
-    int target_node = 0;
+    int target_node = Network::my_node_id;
     if (!source.dense()) {
       target_node = ID(source.sparsity).sparsity_creator_node();
     }
-
     SparsityMap<N, T> sparsity = get_runtime()
                                      ->get_available_sparsity_impl(target_node)
                                      ->me.convert<SparsityMap<N, T>>();
