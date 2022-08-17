@@ -4392,25 +4392,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
       RtEvent mapped, ApEvent ready, ApUserEvent term, bool m, TaskContext *ctx, 
-      MapperID mid, MappingTagID t, bool leaf, bool virt, Runtime *rt)
+      MapperID mid, MappingTagID t, bool leaf, bool virt, bool col, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
-        leaf_region(leaf), virtual_mapped(virt), 
+        leaf_region(leaf), virtual_mapped(virt), collective(col),
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
         req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
         mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
-      : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
-        leaf_region(false), virtual_mapped(false), replaying(false),
-        req(rhs.req), mapped_event(RtEvent::NO_RT_EVENT)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4427,16 +4416,6 @@ namespace Legion {
         else
           references.remove_valid_references(PHYSICAL_REGION_REF, NULL/*mut*/);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegionImpl& PhysicalRegionImpl::operator=(
-                                                  const PhysicalRegionImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------

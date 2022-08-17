@@ -6262,7 +6262,8 @@ namespace Legion {
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
-          mid, tag, false/*leaf region*/, virtual_mapped, runtime);
+          mid, tag, false/*leaf region*/, virtual_mapped, 
+          false/*never collective*/, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
         impl->set_references(physical_instances, true/*safe*/);
@@ -10046,7 +10047,16 @@ namespace Legion {
           std::map<PhysicalManager*,IndividualView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
+          {
+#ifdef DEBUG_LEGION
+            // A little sanity check that the mappings match, if they don't
+            // then that will lead to bigger problems
+            assert((mapping == NULL) || 
+                (mapping == finder->second->collective_mapping) ||
+                (*mapping == *(finder->second->collective_mapping)));
+#endif
             source_views[idx] = finder->second;
+          }
           else
             still_needed.push_back(idx);
         }
@@ -10062,9 +10072,6 @@ namespace Legion {
             create_instance_top_view(manager, local_space, mapping);
         }
       }
-      // No need to invalidate the collective views here, we know that
-      // source views are never going to be registered with the physical
-      // analysis state so we can safely give out the individual views
     }
 
     //--------------------------------------------------------------------------
@@ -10084,7 +10091,16 @@ namespace Legion {
           std::map<PhysicalManager*,IndividualView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
+          {
+#ifdef DEBUG_LEGION
+            // A little sanity check that the mappings match, if they don't
+            // then that will lead to bigger problems
+            assert((mapping == NULL) || 
+                (mapping == finder->second->collective_mapping) ||
+                (*mapping == *(finder->second->collective_mapping)));
+#endif
             source_views[idx] = finder->second;
+          }
           else
             still_needed.push_back(idx);
         }
@@ -18872,7 +18888,7 @@ namespace Legion {
       }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
-      op->initialize_replication(this,
+      op->initialize_replication(this, region.impl->collective, 
           shard_manager->is_first_local_shard(owner_shard));
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
@@ -23284,7 +23300,7 @@ namespace Legion {
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
           ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
-          true/*leaf region*/, virtual_mapped, runtime);
+          true/*leaf region*/, virtual_mapped, false/*collective*/, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (mapped)
         impl->set_references(physical_instances, true/*safe*/);

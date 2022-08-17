@@ -1132,6 +1132,14 @@ namespace Legion {
       return 1;
     }
 
+    //--------------------------------------------------------------------------
+    bool Operation::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent Operation::acquire_collective_allocation_privileges(
@@ -4510,7 +4518,8 @@ namespace Legion {
       const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             mapped_event, ready_event, term_event, true/*mapped*/, ctx,
-            map_id, tag, false/*leaf*/, false/*virtual mapped*/, runtime));
+            map_id, tag, false/*leaf*/, false/*virtual mapped*/,
+            true/*collective for replication*/, runtime));
       termination_event = term_event;
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -21735,14 +21744,15 @@ namespace Legion {
         const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
         region = PhysicalRegion(new PhysicalRegionImpl(requirement,mapped_event,
               completion_event, term_event, true/*mapped*/, ctx, 0/*map id*/, 
-              0/*tag*/, false/*leaf*/, false/*virtual mapped*/, runtime));
+              0/*tag*/, false/*leaf*/, false/*virtual mapped*/, 
+              launcher.collective, runtime));
         termination_event = term_event;
       }
       else
         region = PhysicalRegion(new PhysicalRegionImpl(requirement,
               mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
               false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-              false/*virtual mapped*/, runtime)); 
+              false/*virtual mapped*/, launcher.collective, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, restricted);
@@ -23180,7 +23190,7 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-            false/*virtual mapped*/, runtime)); 
+            false/*virtual mapped*/, false/*collective*/, runtime)); 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_index_point(owner->get_unique_op_id(), 

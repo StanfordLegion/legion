@@ -785,11 +785,11 @@ namespace Legion {
       PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
             ApEvent ready_event, ApUserEvent term_event, bool mapped, 
             TaskContext *ctx, MapperID mid, MappingTagID tag, bool leaf, 
-            bool virt, Runtime *rt);
-      PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
+            bool virt, bool collective, Runtime *rt);
+      PhysicalRegionImpl(const PhysicalRegionImpl &rhs) = delete;
       ~PhysicalRegionImpl(void);
     public:
-      PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs);
+      PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs) = delete;
     public:
       inline bool created_accessor(void) const { return made_accessor; }
     public:
@@ -857,6 +857,9 @@ namespace Legion {
       const bool leaf_region;
       const bool virtual_mapped;
       const bool replaying;
+      // Whether this physical region represents a collectively
+      // created group of instances or not (e.g. ReplAttachOp)
+      const bool collective;
     private:
       const RegionRequirement req;
       // Event for when the 'references' are set by the producer op

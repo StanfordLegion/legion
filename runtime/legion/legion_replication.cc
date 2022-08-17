@@ -7405,11 +7405,11 @@ namespace Legion {
 #endif
       resource_barrier = resource_bar;
       ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
-      collective_instance = collective_inst;
+      collective_instances = collective_inst;
       deduplicate_across_shards = dedup_across_shards;
       is_first_local_shard = first_local_shard;
       // Setup the distributed ID broadcast and send out the value
-      if (collective_instance)
+      if (collective_instances)
       {
         // Check to make sure that everything is local here
         if (resource == LEGION_EXTERNAL_INSTANCE)
@@ -7488,7 +7488,7 @@ namespace Legion {
       activate_attach_op();
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       exchange_index = 0;
-      collective_instance = false;
+      collective_instances = false;
       deduplicate_across_shards = false;
       is_first_local_shard = false;
       contains_individual = false;
@@ -7569,7 +7569,7 @@ namespace Legion {
       // Register this instance with the memory manager
       PhysicalManager *external_manager =
         external_instances[0].get_physical_manager();
-      if (collective_instance)
+      if (collective_instances)
       {
         // Everybody does the attach in the case of collective construction
         if (!deduplicate_across_shards || is_first_local_shard)
@@ -7606,6 +7606,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplAttachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                   bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      if (!collective_instances)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(!collective_map_barrier.exists());
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        mapping = &repl_ctx->shard_manager->get_collective_mapping();
+        mapping->add_reference();
+        first_local = is_first_local_shard;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalManager* ReplAttachOp::create_manager(RegionNode *node,
                                    const std::vector<FieldID> &field_set,
                                    const std::vector<size_t> &field_sizes,
@@ -7618,7 +7640,7 @@ namespace Legion {
       LayoutConstraintSet constraints;
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       if (is_first_local_shard || 
-          (collective_instance && !deduplicate_across_shards))
+          (collective_instances && !deduplicate_across_shards))
       {
         switch (resource)
         {
@@ -7633,11 +7655,11 @@ namespace Legion {
               }
               // Do the call to make the instance if we're collective
               // or we're the origin for the single instance case
-              if (collective_instance || single_broadcast->is_origin())
+              if (collective_instances || single_broadcast->is_origin())
               {
                 instance = node->row_source->create_file_instance(file_name,
                             field_ids, field_sizes, file_mode, ready_event);
-                if (!collective_instance)
+                if (!collective_instances)
                   single_broadcast->broadcast({instance, ready_event});
               }
               constraints.specialized_constraint = 
@@ -7665,14 +7687,14 @@ namespace Legion {
                 field_files[idx] = it->second;
               }
               // Now ask the low-level runtime to create the instance
-              if (collective_instance || single_broadcast->is_origin())
+              if (collective_instances || single_broadcast->is_origin())
               {
                 instance = node->row_source->create_hdf5_instance(file_name,
                                       field_ids, field_sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
                                       ready_event);
-                if (!collective_instance)
+                if (!collective_instances)
                   single_broadcast->broadcast({instance, ready_event});
               }
               constraints.specialized_constraint = 
@@ -7693,11 +7715,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(pointer.is_valid);
 #endif
-              if (collective_instance || single_broadcast->is_origin())
+              if (collective_instances || single_broadcast->is_origin())
               {
                 ready_event = create_realm_instance(node->row_source, pointer,
                                             field_set, field_sizes, instance);
-                if (!collective_instance)
+                if (!collective_instances)
                   single_broadcast->broadcast({instance, ready_event});
               }
               constraints = layout_constraint_set;
@@ -7744,7 +7766,7 @@ namespace Legion {
 #endif
       ShardManager *shard_manager = repl_ctx->shard_manager;
       // Now we need to make the instance to span the shards
-      if (collective_instance)
+      if (collective_instances)
       {
         if (deduplicate_across_shards)
         {
@@ -7904,9 +7926,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
-                                              bool first_local_shard)
+                                        bool collective, bool first_local_shard)
     //--------------------------------------------------------------------------
     {
+      collective_instances = collective;
       is_first_local_shard = first_local_shard;
     }
 
@@ -7916,6 +7939,7 @@ namespace Legion {
     {
       activate_detach_op();
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      collective_instances = false;
       is_first_local_shard = false;
     }
 
@@ -7983,6 +8007,28 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDetachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                   bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      if (!collective_instances)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(!collective_map_barrier.exists());
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        mapping = &repl_ctx->shard_manager->get_collective_mapping();
+        mapping->add_reference();
+        first_local = is_first_local_shard;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8428,6 +8474,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplAcquireOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      if (!restricted_region.impl->collective)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(!collective_map_barrier.exists());
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        mapping = &repl_ctx->shard_manager->get_collective_mapping();
+        mapping->add_reference();
+        first_local = is_first_local_shard;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplAcquireOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
@@ -8584,6 +8652,28 @@ namespace Legion {
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplReleaseOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      if (!restricted_region.impl->collective)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(!collective_map_barrier.exists());
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        mapping = &repl_ctx->shard_manager->get_collective_mapping();
+        mapping->add_reference();
+        first_local = is_first_local_shard;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------

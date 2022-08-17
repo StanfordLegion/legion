@@ -484,6 +484,8 @@ namespace Legion {
                                   std::map<unsigned,PhysicalManager*> &points);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // Collective instance support

@@ -2460,9 +2460,26 @@ namespace Legion {
       if (known_targets)
       {
         InnerContext *context = op->find_physical_context(index);
-        first_local = context->convert_collective_views(op, index, req.region,
-            restricted_instances, analysis_mapping, restricted_views,
-            collective_arrivals, collective_precondition);
+        if (op->perform_collective_analysis(analysis_mapping, first_local))
+        {
+          if (analysis_mapping != NULL)
+          {
+            std::vector<IndividualView*> views(restricted_instances.size());
+            context->convert_individual_views(restricted_instances, views,
+                                              analysis_mapping);
+            restricted_views.resize(views.size());
+            for (unsigned idx = 0; idx < views.size(); idx++)
+              restricted_views[idx].insert(views[idx],
+                  restricted_instances[idx].get_valid_fields());
+          }
+          else
+            first_local = context->convert_collective_views(op, index,
+                req.region, restricted_instances, analysis_mapping,
+                restricted_views, collective_arrivals, collective_precondition);
+        }
+        else
+          context->convert_analysis_views(restricted_instances,
+                                          restricted_views);
       }
       // Iterate through the equivalence classes and find all the restrictions
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -2579,9 +2596,25 @@ namespace Legion {
       if (known_targets)
       {
         InnerContext *context = op->find_physical_context(index);
-        first_local = context->convert_collective_views(op, index, req.region,
-            restricted_instances, analysis_mapping, target_views,
-            collective_arrivals, collective_precondition);
+        if (op->perform_collective_analysis(analysis_mapping, first_local))
+        {
+          if (analysis_mapping != NULL)
+          {
+            std::vector<IndividualView*> views(restricted_instances.size());
+            context->convert_individual_views(restricted_instances, views,
+                                              analysis_mapping);
+            target_views.resize(views.size());
+            for (unsigned idx = 0; idx < views.size(); idx++)
+              target_views[idx].insert(views[idx],
+                  restricted_instances[idx].get_valid_fields());
+          }
+          else
+            first_local = context->convert_collective_views(op, index,
+                req.region, restricted_instances, analysis_mapping,
+                target_views, collective_arrivals, collective_precondition);
+        }
+        else
+          context->convert_analysis_views(restricted_instances, target_views);
         if (!sources.empty())
           context->convert_individual_views(sources, source_views,
                                             analysis_mapping);
@@ -3453,9 +3486,26 @@ namespace Legion {
       std::map<InstanceView*,size_t> collective_arrivals;
       CollectiveMapping *analysis_mapping = NULL;
       RtEvent collective_precondition;
-      const bool first_local = context->convert_collective_views(attach_op,
-          index, req.region, external_instances, analysis_mapping,
-          external_views, collective_arrivals, collective_precondition);
+      bool first_local = false;
+      if (attach_op->perform_collective_analysis(analysis_mapping, first_local))
+      {
+        if (analysis_mapping != NULL)
+        {
+          std::vector<IndividualView*> views(external_instances.size());
+          context->convert_individual_views(external_instances, views,
+                                            analysis_mapping);
+          external_views.resize(views.size());
+          for (unsigned idx = 0; idx < views.size(); idx++)
+            external_views[idx].insert(views[idx],
+                external_instances[idx].get_valid_fields());
+        }
+        else
+          first_local = context->convert_collective_views(attach_op,
+            index, req.region, external_instances, analysis_mapping,
+            external_views, collective_arrivals, collective_precondition);
+      }
+      else
+        context->convert_analysis_views(external_instances, external_views);
       // Perform the registration first since we might need it in case
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
@@ -3552,9 +3602,23 @@ namespace Legion {
       std::map<InstanceView*,size_t> collective_arrivals;
       CollectiveMapping *analysis_mapping = NULL;
       RtEvent collective_precondition;
-      const bool first_local = context->convert_collective_views(detach_op,
-          index, req.region, instances, analysis_mapping, external_views,
-          collective_arrivals, collective_precondition);
+      bool first_local = false;
+      if (detach_op->perform_collective_analysis(analysis_mapping, first_local))
+      {
+        if (analysis_mapping != NULL)
+        {
+          std::vector<IndividualView*> views(instances.size());
+          context->convert_individual_views(instances, views, analysis_mapping);
+          external_views.resize(views.size());
+          for (unsigned idx = 0; idx < views.size(); idx++)
+            external_views[idx].insert(views[idx],
+                instances[idx].get_valid_fields());
+        }
+        else
+          first_local = context->convert_collective_views(detach_op,
+            index, req.region, instances, analysis_mapping, external_views,
+            collective_arrivals, collective_precondition);
+      }
 #ifdef DEBUG_LEGION
       assert(external_views.size() == 1);
 #endif

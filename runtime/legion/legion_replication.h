@@ -2301,10 +2301,12 @@ namespace Legion {
                                    const std::vector<CustomSerdezID> &serez,
                                               const FieldMask &external_mask);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     protected:
       RtBarrier collective_map_barrier;
       size_t exchange_index;
-      bool collective_instance;
+      bool collective_instances;
       bool deduplicate_across_shards;
       bool is_first_local_shard;
       // individual insts: whether at least one shard lives on the local process
@@ -2365,6 +2367,7 @@ namespace Legion {
       ReplDetachOp& operator=(const ReplDetachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
+                                  bool collective_instances,
                                   bool first_local_shard);
     public:
       virtual void activate(void);
@@ -2372,12 +2375,15 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     public:
       // Help for unordered detachments
       void record_unordered_kind(
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     protected:
       RtBarrier collective_map_barrier;
+      bool collective_instances;
       bool is_first_local_shard;
     };
 
@@ -2425,6 +2431,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     protected:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
@@ -2450,6 +2458,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
