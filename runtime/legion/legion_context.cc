@@ -2821,7 +2821,7 @@ namespace Legion {
         mapping_fence_gen(0), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
-        last_implicit_gen(0), next_collective_tag(0)
+        last_implicit_gen(0)
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -10222,7 +10222,6 @@ namespace Legion {
                                    local_space), ref.get_valid_fields());
         }
       }
-      invalidate_collective_mapping(target_views);
     }
 
     //--------------------------------------------------------------------------
@@ -10236,56 +10235,6 @@ namespace Legion {
     {
       target_views.resize(targets.size());
       RendezvousResult *result = NULL;
-      {
-        AutoLock c_lock(collective_lock,1,false/*exclusive*/);
-        // First check to see if we can do the fast matching path
-        std::map<LogicalRegion,
-                 std::vector<RendezvousResult*> >::const_iterator
-                   finder = collective_rendezvous.find(region);
-        if (finder != collective_rendezvous.end())
-        {
-          for (std::vector<RendezvousResult*>::const_iterator it =
-                finder->second.begin(); it != finder->second.end(); it++)
-          {
-            if (!(*it)->matches(targets))
-              continue;
-            result = (*it);
-            result->add_reference();
-            break;
-          }
-        }
-      }
-      // Always try to do the match first to see if it succeeds
-      if (match_collective_mapping(op, index,
-            (result == NULL) ? 0 : result->collective_tag))
-      {
-        analysis_mapping = result->analysis_mapping;
-        target_views = result->target_views;
-        collective_arrivals = result->collective_arrivals;
-        collective_views_ready = result->collective_views_ready;
-        bool first_local = result->supports_first_local;
-        if (first_local && (result->local_arrivals > 1))
-        {
-          // Handle the deduplication of multiple arrivals for this
-          // rendezvous result, we need to know which one is actually
-          // going to be the one to be the first local arrival
-          const RendezvousKey key(op->get_ctx_index(), index);
-          AutoLock c_lock(collective_lock);
-          std::map<RendezvousKey,unsigned>::iterator finder =
-            result->first_local_arrivals.find(key);
-          if (finder != result->first_local_arrivals.end())
-          {
-            first_local = false;
-            if (++finder->second == result->local_arrivals)
-              result->first_local_arrivals.erase(finder);
-          }
-          else
-            result->first_local_arrivals[key] = 1;
-        }
-        if (result->remove_reference())
-          delete result;
-        return first_local;
-      }
       // Find or create a rendezvous result and record for this context
       const PendingRendezvousKey key(op->get_ctx_index(), index, region);
       {
@@ -10314,46 +10263,34 @@ namespace Legion {
                                     region, result->instances);
       if (result->ready.exists() && !result->ready.has_triggered())
         result->ready.wait();
-#ifdef DEBUG_LEGION
-      assert(result->collective_tag > 0);
-#endif
       analysis_mapping = result->analysis_mapping;
+      analysis_mapping->add_reference();
       target_views = result->target_views;
       collective_arrivals = result->collective_arrivals;
       collective_views_ready = result->collective_views_ready;
       bool first_local = result->supports_first_local;
-      // Retake the lock and remove the pending rendezvous and move the 
-      // result over to the collective result
+      // If we support first local see if we're the first for this rendezvous
+      if (first_local)
       {
         AutoLock c_lock(collective_lock);
-        // Move the pending rendezvous over to the collective rendezvous
-        // Only the first one here needs to do this
-        std::map<PendingRendezvousKey,std::vector<RendezvousResult*> >::iterator
-          finder = pending_rendezvous.find(key);
-        if (finder != pending_rendezvous.end())
+        std::map<RendezvousKey,unsigned>::iterator finder =
+          result->first_local_arrivals.find(key);
+        if (finder != result->first_local_arrivals.end())
         {
-          std::vector<RendezvousResult*> &results = 
-            collective_rendezvous[region];
-          if (!results.empty())
-            results.insert(results.end(), 
-                finder->second.begin(), finder->second.end());
-          else
-            results.swap(finder->second);
-          pending_rendezvous.erase(finder);
+          first_local = false;
+          if (++finder->second == result->local_arrivals)
+            result->first_local_arrivals.erase(finder);
         }
-        if (result->supports_first_local)
-        {
-          std::map<RendezvousKey,unsigned>::iterator finder =
-            result->first_local_arrivals.find(key);
-          if (finder != result->first_local_arrivals.end())
-          {
-            first_local = false;
-            if (++finder->second == result->local_arrivals)
-              result->first_local_arrivals.erase(finder);
-          }
-          else
-            result->first_local_arrivals[key] = 1;
-        }
+        else
+          result->first_local_arrivals[key] = 1;
+        // Prune out the pending rendezvous
+        pending_rendezvous.erase(key);
+      }
+      else
+      {
+        AutoLock c_lock(collective_lock);
+        // Prune out the pending rendezvous
+        pending_rendezvous.erase(key);
       }
       if (result->remove_reference())
         delete result;
@@ -10364,7 +10301,7 @@ namespace Legion {
     InnerContext::RendezvousResult::RendezvousResult(const InstanceSet &insts)
       : instances(init_instances(insts)),
         ready(Runtime::create_rt_user_event()), local_arrivals(0),
-        collective_tag(0), analysis_mapping(NULL), supports_first_local(false)
+        analysis_mapping(NULL), supports_first_local(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -10413,56 +10350,6 @@ namespace Legion {
       }
       return true;
     } 
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::match_collective_mapping(Operation *op,
-                              unsigned requirement_index, size_t collective_tag)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent wait_on;
-      std::map<RendezvousKey,PendingMatch>::iterator finder;
-      const RendezvousKey key(op->get_ctx_index(), requirement_index);
-      {
-        AutoLock c_lock(collective_lock);
-        finder = pending_matches.find(key);
-        if (finder == pending_matches.end())
-          finder = pending_matches.insert(std::make_pair(key,
-              PendingMatch(op->get_collective_points(), collective_tag))).first;
-        PendingMatch &match = finder->second;
-        if (match.collective_tag != collective_tag)
-          match.success = false;
-#ifdef DEBUG_LEGION
-        assert(match.arrivals < match.total_arrivals);
-#endif
-        if (++match.arrivals == match.total_arrivals)
-        {
-          // Last one, trigger the ready event and decrement the count
-          Runtime::trigger_event(match.ready);
-          match.arrivals--;
-          return match.success;
-        }
-        else
-          wait_on = match.ready;
-      }
-      if (!wait_on.has_triggered())
-        wait_on.wait();
-      AutoLock c_lock(collective_lock);
-      PendingMatch &match = finder->second;
-      const bool success = match.success;
-#ifdef DEBUG_LEGION
-      assert(match.arrivals > 0);
-#endif
-      if (--match.arrivals == 0)
-        pending_matches.erase(finder);
-      return success;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::generate_collective_tag(void)
-    //--------------------------------------------------------------------------
-    {
-      return next_collective_tag.fetch_add(1);
-    }
 
     //--------------------------------------------------------------------------
     void InnerContext::rendezvous_collective_mapping(Operation *op, 
@@ -10670,16 +10557,14 @@ namespace Legion {
           }
         }
       }
-      // Generate a new collective result ID
-      const size_t collective_tag = generate_collective_tag();
       // Send the resulting views back out to all the RendezvousResults
       for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
             rendezvous.begin(); rit != rendezvous.end(); rit++)
       {
         FieldMaskSet<CollectiveResult> &result_views = views[rit->first];
         std::sort(rit->second.results.begin(), rit->second.results.end());
-        finalize_collective_mapping(runtime, collective_tag,
-            rit->second.results, rit->second.counts, result_views);
+        finalize_collective_mapping(runtime, rit->second.results,
+                                    rit->second.counts, result_views);
         for (FieldMaskSet<CollectiveResult>::const_iterator it =
               result_views.begin(); it != result_views.end(); it++)
           if (it->first->remove_reference())
@@ -10688,8 +10573,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::finalize_collective_mapping(
-        Runtime *runtime, size_t collective_tag,
+    /*static*/ void InnerContext::finalize_collective_mapping(Runtime *runtime,
         std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
         std::map<DistributedID,size_t> &counts,
         FieldMaskSet<CollectiveResult> &views)
@@ -10726,7 +10610,6 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(collective_tag);
             mapping->pack(rez);
             rez.serialize<size_t>(results.size());
             for (unsigned idx = 0; idx < results.size(); idx++)
@@ -10784,7 +10667,6 @@ namespace Legion {
         while (result_it->first == runtime->address_space)
         {
           RendezvousResult *result = result_it->second;
-          result->collective_tag = collective_tag;
           result->analysis_mapping = mapping;
           result->analysis_mapping->add_reference();
           // Only the first local rendezvous result supports first local
@@ -10864,8 +10746,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      size_t collective_tag;
-      derez.deserialize(collective_tag);
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
@@ -10909,7 +10789,7 @@ namespace Legion {
         derez.deserialize(mask);
         views.insert(view, mask);
       }
-      finalize_collective_mapping(runtime,collective_tag,results,counts,views);
+      finalize_collective_mapping(runtime, results, counts, views);
       for (FieldMaskSet<CollectiveResult>::const_iterator it =
             views.begin(); it != views.end(); it++)
         if (it->first->remove_reference())

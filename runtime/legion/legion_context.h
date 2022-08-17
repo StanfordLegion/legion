@@ -955,7 +955,6 @@ namespace Legion {
         std::map<RendezvousKey,unsigned> first_local_arrivals;
       public:
         // These are the results of the rendezvous 
-        size_t collective_tag;
         CollectiveMapping *analysis_mapping;
         LegionVector<FieldMaskSet<InstanceView> > target_views;
         std::map<InstanceView*,size_t> collective_arrivals;
@@ -989,18 +988,6 @@ namespace Legion {
         const DistributedID collective_did;
         const std::vector<DistributedID> individual_dids;
         const RtEvent ready_event;
-      };
-      struct PendingMatch {
-      public:
-        PendingMatch(size_t total, size_t tag) : total_arrivals(total),
-          collective_tag(tag), ready(Runtime::create_rt_user_event()),
-          arrivals(0), success(tag > 0) { }
-      public:
-        const size_t total_arrivals;
-        const size_t collective_tag;
-        const  RtUserEvent ready;
-        size_t arrivals;
-        bool success;
       };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
@@ -1628,12 +1615,6 @@ namespace Legion {
       virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
                    const std::vector<DistributedID> &instances, RtEvent &ready);
     protected:
-      // Check to see if all the participants are using the same arguments
-      // as a previous rendezvous collective mapping, in which case there
-      // is no need to do the full rendezvou call.
-      virtual bool match_collective_mapping(Operation *op,
-                                  unsigned requirement_index,
-                                  size_t collective_tag);
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
                                   unsigned requirement_index,
@@ -1645,12 +1626,9 @@ namespace Legion {
       // Now we can construct the collective mapping
       virtual void construct_collective_mapping(
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
-      virtual void invalidate_collective_mapping(
-                        const LegionVector<FieldMaskSet<InstanceView> > &views);
-      virtual size_t generate_collective_tag(void);
       // This function will distribute out the results of a collective 
       // rendezvous to all the rendezvous result objects
-      static void finalize_collective_mapping(Runtime *runtime, size_t tag,
+      static void finalize_collective_mapping(Runtime *runtime,
           // Can assume that the results are sorted
           std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
           // Instance DID to counts of users
@@ -1849,19 +1827,12 @@ namespace Legion {
     protected:
       // Collective instance rendezvous data structures
       mutable LocalLock                                 collective_lock;
-      std::map<LogicalRegion,
-               std::vector<RendezvousResult*> >         collective_rendezvous;
       std::map<PendingRendezvousKey,
                std::vector<RendezvousResult*> >         pending_rendezvous;
-      std::map<RendezvousKey,PendingMatch>              pending_matches;
       std::map<RendezvousKey,PendingCollective>         pending_collectives;
-    protected:
       // Only valid on the onwer context node
       LegionMap<RegionTreeID,
                 std::vector<CollectiveResult*> >        collective_results;
-      // Instance distributed IDs to the invalid fields
-      LegionMap<DistributedID,FieldMask>                invalidated_collectives;
-      std::atomic<size_t>                               next_collective_tag;
     };
 
     /**

@@ -2208,6 +2208,8 @@ namespace Legion {
       // Then perform the updates
       const RtEvent updates_ready = 
         analysis->perform_updates(traversal_done, map_applied_events);
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       return Runtime::merge_events(remote_ready, updates_ready);
     }
 
@@ -2559,6 +2561,8 @@ namespace Legion {
             acquired_events.push_back(ready);
         }
       }
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       if (!acquired_events.empty())
         return Runtime::merge_events(&trace_info, acquired_events);
       return ApEvent::NO_AP_EVENT;
@@ -2716,6 +2720,8 @@ namespace Legion {
             released_events.push_back(ready);
         }
       }
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       if (!released_events.empty())
         return Runtime::merge_events(&trace_info, released_events);
       return ApEvent::NO_AP_EVENT;
@@ -3569,6 +3575,8 @@ namespace Legion {
         traversed = analysis->perform_remote(traversal_done,map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       if (!ready_events.empty())
         return Runtime::merge_events(&trace_info, ready_events);
       return ApEvent::NO_AP_EVENT;
@@ -3668,6 +3676,8 @@ namespace Legion {
         traversed = analysis->perform_remote(traversal_done,map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       if (done_events.empty())
         return ApEvent::NO_AP_EVENT;
       return Runtime::merge_events(&trace_info, done_events);
