@@ -82,6 +82,12 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
+  template <int N, typename T, int N2, typename T2>
+  class StructuredImageMicroOpBase;
+
+  template <int N, typename T, int N2, typename T2>
+  class AffineImageMicroOp;
+
   // a AffineTransform is used to describe an affine transformation
   // Ax + b on point where A is a transform matrix and b is an offset
   // vector.
@@ -96,6 +102,12 @@ namespace Realm {
 
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
+
+    template <typename T2>
+    StructuredImageMicroOpBase<M, T2, N, T>* create_image_op(
+        const IndexSpace<M, T2>& parent) const {
+      return new AffineImageMicroOp<M, T2, N, T>(parent, *this);
+    }
 
     bool is_dense() const;
     bool compute_if_dense() const;

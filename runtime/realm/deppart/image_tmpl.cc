@@ -40,13 +40,12 @@
 #define FOREACH_TT1(__func__) \
   __func__(int,int,AffineTransform<INST_N1 COMMA INST_N2 COMMA int>) \
   __func__(int,unsigned,AffineTransform<INST_N1 COMMA INST_N2 COMMA unsigned>) \
-  __func__(int,long long,AffineTransform<INST_N1 COMMA INST_N2 COMMA unsigned>) \
   __func__(unsigned,int,AffineTransform<INST_N1 COMMA INST_N2 COMMA int>) \
+  __func__(int,long long,AffineTransform<INST_N1 COMMA INST_N2 COMMA long long>) \
   __func__(unsigned,unsigned,AffineTransform<INST_N1 COMMA INST_N2 COMMA unsigned>) \
   __func__(unsigned,long long,AffineTransform<INST_N1 COMMA INST_N2 COMMA long long>) \
   __func__(long long,int,AffineTransform<INST_N1 COMMA INST_N2 COMMA int>) \
-  __func__(long long,unsigned,AffineTransform<INST_N1 COMMA INST_N2 COMMA unsigned>) \
-  __func__(long long,long long,AffineTransform<INST_N1 COMMA INST_N2 COMMA long long>)
+  __func__(long long,unsigned,AffineTransform<INST_N1 COMMA INST_N2 COMMA unsigned>)
 
 namespace Realm {
 
@@ -77,8 +76,9 @@ namespace Realm {
   FOREACH_TT(DOIT)
 
 #define DOIT1(T1, T2, TRANSFORM)                                              \
-  template class StructuredImageMicroOp<N1, T1, N2, T2, TRANSFORM>;           \
   template class StructuredImageOperation<N1, T1, N2, T2, TRANSFORM>;         \
+  template class StructuredImageMicroOpBase<N1,T1,N2,T2>;                     \
+  template class AffineImageMicroOp<N1,T1,N2,T2>;                             \
   template Event IndexSpace<N1, T1>::create_subspaces_by_image(               \
       const TRANSFORM &, const std::vector<IndexSpace<N2, T2> > &,            \
       std::vector<IndexSpace<N1, T1> > &, const ProfilingRequestSet &, Event) \

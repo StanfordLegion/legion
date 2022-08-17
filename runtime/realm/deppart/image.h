@@ -19,6 +19,7 @@
 #define REALM_DEPPART_IMAGE_H
 
 #include "realm/deppart/partitions.h"
+#include "realm/deppart/rectlist.h"
 
 namespace Realm {
 
@@ -115,40 +116,48 @@ namespace Realm {
     std::vector<SparsityMap<N,T> > images;
   };
 
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  class StructuredImageMicroOp : public PartitioningMicroOp {
+  template <int N, typename T, int N2, typename T2>
+  class StructuredImageMicroOpBase : public PartitioningMicroOp {
    public:
-    StructuredImageMicroOp(IndexSpace<N, T> _parent_space,
-                           const TRANSFORM& transform);
+    StructuredImageMicroOpBase(const IndexSpace<N, T>& parent);
 
-    virtual ~StructuredImageMicroOp(void);
+    virtual ~StructuredImageMicroOpBase(void);
+    virtual void execute(void);
 
-    void add_sparsity_output(IndexSpace<N2, T2> _source,
-                             SparsityMap<N, T> _sparsity);
+     void dispatch(PartitioningOperation *op, bool inline_ok);
+     void add_sparsity_output(IndexSpace<N2, T2> _source,
+                              SparsityMap<N, T> _sparsity);
 
-    template <typename BM>
-    void populate(std::map<int, BM*>& bitmasks);
+    protected:
+     IndexSpace<N, T> parent_space;
+     std::vector<IndexSpace<N2, T2>> sources;
+     std::vector<SparsityMap<N, T>> sparsity_outputs;
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class AffineImageMicroOp : public StructuredImageMicroOpBase<N, T, N2, T2> {
+   public:
+    AffineImageMicroOp(const IndexSpace<N, T>& _parent,
+                       const AffineTransform<N, N2, T2>& _transform);
+
+    virtual ~AffineImageMicroOp(void);
 
     virtual void execute(void);
 
-    void dispatch(PartitioningOperation* op, bool inline_ok);
+    void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
-   protected:
-    template <typename BM>
-    void intersect_dense_transform(std::map<int, BM*>& bitmasks,
-                                   const Rect<N, T>& parent_bbox,
-                                   const std::vector<Rect<N, T>>& parent_rects);
+    void intersect_dense_transform(
+        std::map<int, HybridRectangleList<N, T>*>& bitmasks,
+        const Rect<N, T>& parent_bbox,
+        const std::vector<Rect<N, T>>& parent_rects);
 
-    template <typename BM>
     void intersect_sparse_transform(
-        std::map<int, BM*>& bitmasks, const Rect<N, T>& parent_bbox,
+        std::map<int, HybridRectangleList<N, T>*>& bitmasks,
+        const Rect<N, T>& parent_bbox,
         const std::vector<Rect<N, T>>& parent_rects);
 
    protected:
-    IndexSpace<N,T> parent_space;
-    std::vector<IndexSpace<N2,T2> > sources;
-    std::vector<SparsityMap<N,T> > sparsity_outputs;
-    TRANSFORM transform;
+    AffineTransform<N, N2, T2> transform;
   };
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
@@ -175,5 +184,7 @@ namespace Realm {
     TRANSFORM transform;
   };
 };
+
+#include "realm/deppart/image.inl"
 
 #endif // REALM_DEPPART_IMAGE_H
