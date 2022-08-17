@@ -10751,25 +10751,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(ptr >= eager_pool || (size == 0 && ptr == 0));
+      assert((ptr >= eager_pool) || ((size == 0) && (ptr == 0)));
 #endif
-      int64_t offset = size > 0 ? ptr - eager_pool : 0;
-      const Point<1> start(offset);
-      const Point<1> stop(offset + size - 1);
-      const Rect<1> bounds(start, stop);
-      Realm::ExternalInstanceResource *external_resource =
-        eager_pool_instance.generate_resource_info(
-            Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
+      if (size > 0)
+      {
+        int64_t offset = ptr - eager_pool;
+        const Point<1> start(offset);
+        const Point<1> stop(offset + size - 1);
+        const Rect<1> bounds(start, stop);
+        Realm::ExternalInstanceResource *external_resource =
+          eager_pool_instance.generate_resource_info(
+              Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
 #ifdef DEBUG_LEGION
-      assert((external_resource != NULL) || (size == 0));
+        // Note that if you hit this then that likely means that Realm 
+        // doesn't support 'generate_resource_info' yet for that kind of
+        // memory and it probably just needs to be implemented
+        assert(external_resource != NULL);
 #endif
-      Realm::ProfilingRequestSet no_requests;
-      RtEvent wait_on = RtEvent(Realm::RegionInstance::create_external_instance(
-            instance, memory, layout, *external_resource, no_requests));
-      // Can be null in the case that the instance is empty
-      if (external_resource != NULL)
+        Realm::ProfilingRequestSet no_requests;
+        const RtEvent wait_on(Realm::RegionInstance::create_external_instance(
+              instance, memory, layout, *external_resource, no_requests));
         delete external_resource;
-      return wait_on;
+        return wait_on;
+      }
+      else
+      {
+        Realm::ProfilingRequestSet no_requests;
+        const RtEvent wait_on(
+            Realm::RegionInstance::create_instance(instance,memory, 
+                                                   layout, no_requests));
+        return wait_on;
+      }
     }
 
     //--------------------------------------------------------------------------
