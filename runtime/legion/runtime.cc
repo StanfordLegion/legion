@@ -10778,7 +10778,7 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet no_requests;
         const RtEvent wait_on(
-            Realm::RegionInstance::create_instance(instance,memory, 
+            Realm::RegionInstance::create_instance(instance, memory, 
                                                    layout, no_requests));
         return wait_on;
       }
