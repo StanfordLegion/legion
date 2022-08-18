@@ -23,10 +23,8 @@ def discover_llvm_version():
     return '130'
 
 def discover_skip_certificate_check():
-    if platform.node().startswith('titan'):
-        return True
-    else:
-        return False
+    # Elliott: I don't think any systems are sensitive to this anymore
+    return False
 
 def discover_conduit():
     if 'CONDUIT' in os.environ:
