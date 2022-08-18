@@ -42,7 +42,7 @@ def discover_conduit():
     elif os.environ.get('LMOD_SYSTEM_NAME') == 'crusher': # Crusher doesn't set hostname
         return 'ofi-slingshot11'
     elif os.environ.get('NERSC_HOST') == 'perlmutter':
-        return 'ofi-slingshot10'
+        return 'ofi-slingshot11'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
