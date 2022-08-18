@@ -3354,7 +3354,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping* ReplFillOp::get_collective_mapping(void)
+    bool ReplFillOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                 bool &first_local)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3363,7 +3364,10 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      return &(repl_ctx->shard_manager->get_collective_mapping()); 
+      mapping = &(repl_ctx->shard_manager->get_collective_mapping()); 
+      mapping->add_reference();
+      first_local = is_first_local_shard;
+      return true;
     }
 
     //--------------------------------------------------------------------------

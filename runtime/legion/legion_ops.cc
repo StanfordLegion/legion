@@ -4757,6 +4757,7 @@ namespace Legion {
       }
       else
         region.impl->get_references(mapped_instances);
+      const bool check_collective = (parent_ctx->get_replication_id() > 0);
       // Then we can register our mapped instances
       ApEvent effects_done =
         runtime->forest->physical_perform_updates_and_registration(
@@ -4767,12 +4768,12 @@ namespace Legion {
                                                 mapped_instances,
                                                 source_instances,
                                                 trace_info,
-                                                true/*check collective*/,
                                                 map_applied_conditions,
 #ifdef DEBUG_LEGION
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
+                                                check_collective,
                                                 record_valid);
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
@@ -6859,12 +6860,12 @@ namespace Legion {
                                               src_targets,
                                               src_sources,
                                               src_info,
-                                              check_collective,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
                                               unique_op_id,
 #endif
+                                              check_collective,
                                               record_valid);
         }
         else
@@ -6905,7 +6906,6 @@ namespace Legion {
                                           dst_targets,
                                           dst_sources,
                                           dst_info,
-                                          false/*check collective*/,
                                           (src_virtual >= 0) ?
                                             perform_ready_events :
                                             map_applied_conditions,
@@ -6913,6 +6913,7 @@ namespace Legion {
                                           get_logging_name(),
                                           unique_op_id,
 #endif
+                                          false/*check collective*/,
                                           true/*record valid*/,
                       // Only check initialized if we don't have an indirection.
                       // If we have an indirection then it is impossible to know
@@ -6955,12 +6956,12 @@ namespace Legion {
                                        gather_targets,
                                        gather_sources,
                                        gather_info,
-                                       check_collective,
                                        map_applied_conditions,
 #ifdef DEBUG_LEGION
                                        get_logging_name(),
                                        unique_op_id,
 #endif
+                                       check_collective,
                                        record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
@@ -6999,12 +7000,12 @@ namespace Legion {
                                       scatter_targets,
                                       scatter_sources,
                                       scatter_info,
-                                      check_collective,
                                       map_applied_conditions,
 #ifdef DEBUG_LEGION
                                       get_logging_name(),
                                       unique_op_id,
 #endif
+                                      check_collective,
                                       record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
@@ -11919,12 +11920,12 @@ namespace Legion {
                                               target_instances, 
                                               dummy_sources,
                                               trace_info,
-                                              false/*check collective*/,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
                                               unique_op_id,
 #endif
+                                              false/*check collective*/,
                                               true/*record valid*/,
                                               false/*check initialized*/);
       std::set<ApEvent> close_preconditions;
@@ -18409,12 +18410,12 @@ namespace Legion {
                                               mapped_instances,
                                               source_instances,
                                               trace_info,
-                                              check_collective,
                                               map_applied_conditions,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
                                               unique_op_id,
 #endif
+                                              check_collective,
                                               record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                          mapped_instances, trace_info);
@@ -23452,12 +23453,12 @@ namespace Legion {
                                                   ApEvent::NO_AP_EVENT,
                                                   references, dummy_sources,
                                                   trace_info,
-                                                  true/*check collectives*/,
                                                   map_applied_conditions,
 #ifdef DEBUG_LEGION
                                                   get_logging_name(),
                                                   unique_op_id,
 #endif
+                                                  true/*check collectives*/,
                                                   false/*record valid*/,
                                                   false/*check initialized*/);
         requirement.privilege = LEGION_READ_WRITE;

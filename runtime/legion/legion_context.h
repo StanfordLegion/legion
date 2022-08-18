@@ -936,30 +936,45 @@ namespace Legion {
         }
       public:
         LogicalRegion region;
+      }; 
+      struct CollectiveResult : public Collectable {
+      public:
+        CollectiveResult(const std::vector<DistributedID> &dids,
+                         DistributedID collective_did, RtEvent ready);
+        CollectiveResult(std::vector<DistributedID> &&dids,
+                         DistributedID collective_did, RtEvent ready);
+      public:
+        bool matches(const std::vector<DistributedID> &dids) const;
+      public:
+        const DistributedID collective_did;
+        const std::vector<DistributedID> individual_dids;
+        const RtEvent ready_event;
       };
       struct RendezvousResult : public Collectable {
       public:
-        RendezvousResult(const InstanceSet &insts);
+        RendezvousResult(InnerContext *owner, const PendingRendezvousKey &key,
+                         const InstanceSet &insts);
         ~RendezvousResult(void);
       public:
         bool matches(const InstanceSet &insts) const;
         static LegionVector<std::pair<DistributedID,FieldMask> >
                                   init_instances(const InstanceSet &insts);
+        bool finalize_rendezvous(CollectiveMapping *mapping,
+                                 const FieldMaskSet<CollectiveResult> &views,
+                                 const std::map<DistributedID,size_t> &counts,
+                                 Runtime *runtime, bool first);
       public:
+        InnerContext *const owner;
+        const PendingRendezvousKey key;
         // These are the instances represented for this particular result
         const LegionVector<std::pair<DistributedID,FieldMask> > instances;
         const RtUserEvent ready;
-        unsigned local_arrivals;
       public:
-        // Help for finding the first local arrival
-        std::map<RendezvousKey,unsigned> first_local_arrivals;
-      public:
-        // These are the results of the rendezvous 
-        CollectiveMapping *analysis_mapping;
-        LegionVector<FieldMaskSet<InstanceView> > target_views;
-        std::map<InstanceView*,size_t> collective_arrivals;
-        RtEvent collective_views_ready;
-        bool supports_first_local;
+        // These are the places to put the results when ready
+        std::vector<CollectiveMapping**> target_mappings;
+        std::vector<bool*> target_first_locals;
+        std::vector<LegionVector<FieldMaskSet<InstanceView> >*> target_views;
+        std::vector<std::map<InstanceView*,size_t>*> target_arrivals;
       };
       struct CollectiveRendezvous {
       public:
@@ -975,19 +990,6 @@ namespace Legion {
         // get duplicate arrivals from multiple operations
         std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
         size_t remaining_arrivals;
-      };
-      struct CollectiveResult : public Collectable {
-      public:
-        CollectiveResult(const std::vector<DistributedID> &dids,
-                         DistributedID collective_did, RtEvent ready);
-        CollectiveResult(std::vector<DistributedID> &&dids,
-                         DistributedID collective_did, RtEvent ready);
-      public:
-        bool matches(const std::vector<DistributedID> &dids) const;
-      public:
-        const DistributedID collective_did;
-        const std::vector<DistributedID> individual_dids;
-        const RtEvent ready_event;
       };
     public:
       InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
@@ -1603,12 +1605,11 @@ namespace Legion {
       // The view collective arrivals say how many different arrivals can be
       // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
-      bool convert_collective_views(Operation *op, unsigned index,
+      RtEvent convert_collective_views(Operation *op, unsigned index,
                        LogicalRegion region, const InstanceSet &targets,
-                       CollectiveMapping *&analysis_mapping,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
-                       std::map<InstanceView*,size_t> &collective_arrivals,
-                       RtEvent &collective_views_ready);
+                       std::map<InstanceView*,size_t> &collective_arrivals);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
@@ -1626,15 +1627,16 @@ namespace Legion {
       // Now we can construct the collective mapping
       virtual void construct_collective_mapping(
                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      bool remove_pending_rendezvous(RendezvousResult *rendezvous);
       // This function will distribute out the results of a collective 
       // rendezvous to all the rendezvous result objects
       static void finalize_collective_mapping(Runtime *runtime,
           // Can assume that the results are sorted
           std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
           // Instance DID to counts of users
-          std::map<DistributedID,size_t> &counts,
+          const std::map<DistributedID,size_t> &counts,
           // The collective views that describes the results for this region
-          FieldMaskSet<CollectiveResult> &views);
+          const FieldMaskSet<CollectiveResult> &views);
     protected:
       RtEvent dispatch_collective_invalidation(
           const CollectiveResult *collective, const FieldMask &invalid_mask,

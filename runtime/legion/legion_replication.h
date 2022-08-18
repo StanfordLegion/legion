@@ -1688,6 +1688,8 @@ namespace Legion {
       virtual bool is_collective_first_local_shard(void) const
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     public:
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;

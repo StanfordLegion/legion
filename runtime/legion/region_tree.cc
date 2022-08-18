@@ -3424,12 +3424,14 @@ namespace Legion {
       RegionNode *region_node = get_node(req.region);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
-      CollectiveMapping *collective_mapping = op->get_collective_mapping();
+      bool first_local = true;
+      CollectiveMapping *collective_mapping = NULL;
+      op->perform_collective_analysis(collective_mapping, first_local);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
-          eq_sets.get_valid_mask(), trace_info, collective_mapping,precondition,
-          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/,
-          false/*add restriction*/, op->is_collective_first_local_shard());
+          eq_sets.get_valid_mask(), trace_info, collective_mapping,
+          precondition, true_guard, true/*track effects*/,
+          false/*add restriction*/, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3450,6 +3452,9 @@ namespace Legion {
          Runtime::merge_events(remote_ready, output_ready), map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
+        delete collective_mapping;
       return result;
     }
 
@@ -3704,7 +3709,7 @@ namespace Legion {
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           usage, local_expr, NULL/*view*/, eq_sets.get_valid_mask(), 
           trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
-          RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT,false/*track effects*/,
+          PredEvent::NO_PRED_EVENT, false/*track effects*/,
           false/*add restriction*/, collective_first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;

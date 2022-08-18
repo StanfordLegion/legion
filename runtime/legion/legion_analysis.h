@@ -1703,15 +1703,16 @@ namespace Legion {
       // Local physical analysis
       PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,
                        IndexSpaceExpression *expr, bool on_heap,
-                       bool immutable, CollectiveMapping *mapping = NULL,
-                       bool exclusive = false, bool first_local = true);
+                       bool immutable, bool exclusive = false,
+                       CollectiveMapping *mapping = NULL,
+                       bool first_local = true);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
                        Operation *op, unsigned index, 
                        IndexSpaceExpression *expr, bool on_heap,
                        bool immutable = false,CollectiveMapping *mapping = NULL,
                        bool exclusive = false, bool first_local = true);
-      PhysicalAnalysis(const PhysicalAnalysis &rhs);
+      PhysicalAnalysis(const PhysicalAnalysis &rhs) = delete;
       virtual ~PhysicalAnalysis(void);
     public:
       inline bool has_remote_sets(void) const
@@ -1722,6 +1723,8 @@ namespace Legion {
         { return (collective_mapping != NULL); }
       inline CollectiveMapping* get_replicated_mapping(void) const
         { return collective_mapping; }
+      inline bool is_collective_first_local(void) const
+        { return collective_first_local; }
     public:
       void traverse(EquivalenceSet *set, const FieldMask &mask, 
                     std::set<RtEvent> &deferral_events,
@@ -1734,6 +1737,9 @@ namespace Legion {
               RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
               const bool already_deferred = true);
     public:
+      virtual RtEvent start_traversal(RtEvent precondition,
+                                      const VersionInfo &version_info,
+                                      std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
                                      const bool expr_covers,
@@ -1777,7 +1783,7 @@ namespace Legion {
       const AddressSpaceID original_source;
       Runtime *const runtime;
       IndexSpaceExpression *const analysis_expr;
-      CollectiveMapping *const collective_mapping;
+    public:
       Operation *const op;
       const unsigned index;
       const bool owns_op;
@@ -1786,8 +1792,9 @@ namespace Legion {
       const bool exclusive; 
       // whether this is an immutable analysis (e.g. only reading eq set)
       const bool immutable;
+    protected:
       // whether this is the first collective analysis on this address space
-      const bool collective_first_local;
+      bool collective_first_local;
     private:
       // This tracks whether this analysis is being used 
       // for parallel traversals or not
@@ -1797,6 +1804,62 @@ namespace Legion {
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> > remote_sets; 
       FieldMaskSet<LogicalView> *recorded_instances;
+    protected:
+      CollectiveMapping *collective_mapping;
+    };
+
+    /**
+     * \class RegistrationAnalysis
+     * A registration analysis is a kind of physical analysis that
+     * also supports performing registration on the views of the 
+     */
+    class RegistrationAnalysis : public PhysicalAnalysis {
+    public:
+      RegistrationAnalysis(Runtime *rt, Operation *op, unsigned index,
+                           IndexSpaceExpression *expr, bool on_heap,
+                           const PhysicalTraceInfo &trace_info, bool exclusive);
+      RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                           Operation *op, unsigned index, 
+                           IndexSpaceExpression *expr, bool on_heap, 
+                           std::vector<PhysicalManager*> &&target_insts,
+                           LegionVector<
+                              FieldMaskSet<InstanceView> > &&target_views,
+                           std::vector<IndividualView*> &&source_views,
+                           const PhysicalTraceInfo &trace_info,
+                           CollectiveMapping *collective_mapping,
+                           bool first_local, bool exclusive);
+      // Remote registration analysis with no views
+      RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                           Operation *op, unsigned index, 
+                           IndexSpaceExpression *expr, bool on_heap, 
+                           const PhysicalTraceInfo &trace_info,
+                           CollectiveMapping *collective_mapping,
+                           bool first_local, bool exclusive);
+    private:
+      friend class OverwriteAnalysis;
+      // Special helper constructor for overwrite analysis
+      RegistrationAnalysis(Runtime *rt, Operation *op, unsigned index,
+                           IndexSpaceExpression *expr, bool on_heap,
+                           const PhysicalTraceInfo &trace_info,
+                           CollectiveMapping *mapping, bool first_local);
+    public:
+      virtual ~RegistrationAnalysis(void) { }
+    public:
+      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
+          const std::vector<PhysicalManager*> &sources,
+          bool collective_rendezvous = false);
+    public:
+      virtual RtEvent perform_registrations(RtEvent precondition,
+          const RegionUsage &usage, std::vector<ApEvent> &registered_events);
+    public:
+      const size_t context_index;
+      const PhysicalTraceInfo trace_info;
+    public:
+      // Be careful to only access these after they are ready
+      std::vector<PhysicalManager*> target_instances;
+      LegionVector<FieldMaskSet<InstanceView> > target_views;
+      std::map<InstanceView*,size_t> collective_arrivals;
+      std::vector<IndividualView*> source_views;
     };
 
     /**
@@ -1846,18 +1909,12 @@ namespace Legion {
      * attributed to the correct operation. After the analysis is done
      * then the analysis will unregister itself with the collecitve instance.
      */
-    class CollectiveCopyFillAnalysis : public PhysicalAnalysis,
+    class CollectiveCopyFillAnalysis : public RegistrationAnalysis,
                                        public CollectiveAnalysis {
     public:
       CollectiveCopyFillAnalysis(Runtime *rt, Operation *op, unsigned index,
                                  IndexSpaceExpression *expr, bool on_heap,
-                                 const InstanceSet &target_instances,
-                                 const LegionVector<
-                                     FieldMaskSet<InstanceView> > &target_views,
-                                 const std::vector<IndividualView*> &src_views,
-                                 const std::map<InstanceView*,size_t> &arrive,
                                  const PhysicalTraceInfo &trace_info,
-                                 CollectiveMapping *mapping, bool first_local,
                                  bool exclusive);
       CollectiveCopyFillAnalysis(Runtime *rt, 
                                  AddressSpaceID src, AddressSpaceID prev,
@@ -1877,16 +1934,11 @@ namespace Legion {
       virtual void pack_collective_analysis(Serializer &rez) const;
       virtual void add_analysis_reference(void) { add_reference(); }
       virtual bool remove_analysis_reference(void)
-        { return remove_reference(); }
-    public:
-      static std::vector<PhysicalManager*> convert_instances(
-                            const InstanceSet &target_instances);
-    public:
-      const size_t context_index;
-      const std::vector<PhysicalManager*> target_instances;
-      const LegionVector<FieldMaskSet<InstanceView> > target_views;
-      const std::vector<IndividualView*> source_views;
-      const PhysicalTraceInfo trace_info;
+        { return remove_reference(); } 
+      virtual RtEvent start_traversal(RtEvent precondition,
+                                      const VersionInfo &version_info,
+                                      std::set<RtEvent> &deferral_events,
+                                      std::set<RtEvent> &applied_events);
     };
 
     /**
@@ -1901,10 +1953,10 @@ namespace Legion {
       ValidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op,unsigned index,IndexSpaceExpression *expr,
                         ValidInstAnalysis *target, ReductionOpID redop);
-      ValidInstAnalysis(const ValidInstAnalysis &rhs);
+      ValidInstAnalysis(const ValidInstAnalysis &rhs) = delete;
       virtual ~ValidInstAnalysis(void);
     public:
-      ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs);
+      ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs) = delete;
     public:
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
@@ -1942,10 +1994,10 @@ namespace Legion {
                         Operation *op, unsigned index, 
                         IndexSpaceExpression *expr, InvalidInstAnalysis *target,
                         const FieldMaskSet<LogicalView> &valid_instances);
-      InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
+      InvalidInstAnalysis(const InvalidInstAnalysis &rhs) = delete;
       virtual ~InvalidInstAnalysis(void);
     public:
-      InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
+      InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs) = delete;
     public:
       inline bool has_invalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
@@ -1985,10 +2037,10 @@ namespace Legion {
                       Operation *op, unsigned index, 
                       IndexSpaceExpression *expr, AntivalidInstAnalysis *target,
                       const FieldMaskSet<LogicalView> &anti_instances);
-      AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
+      AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs) = delete;
       virtual ~AntivalidInstAnalysis(void);
     public:
-      AntivalidInstAnalysis& operator=(const AntivalidInstAnalysis &rhs);
+      AntivalidInstAnalysis& operator=(const AntivalidInstAnalysis &r) = delete;
     public:
       inline bool has_antivalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
@@ -2023,16 +2075,9 @@ namespace Legion {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
                      const RegionRequirement &req, RegionNode *node,
-                     const InstanceSet &target_instances,
-                     const LegionVector<
-                              FieldMaskSet<InstanceView> > &target_views,
-                     const std::vector<IndividualView*> &source_views,
-                     const std::map<InstanceView*,size_t> &arrivals,
                      const PhysicalTraceInfo &trace_info,
-                     CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool check_initialized, const bool record_valid,
-                     const bool first_local);
+                     const bool check_initialized, const bool record_valid);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index,
                      const RegionUsage &usage, RegionNode *node, 
@@ -2098,16 +2143,18 @@ namespace Legion {
      * \class AcquireAnalysis
      * For performing acquires on equivalence set trees
      */
-    class AcquireAnalysis : public PhysicalAnalysis,
+    class AcquireAnalysis : public RegistrationAnalysis,
                             public LegionHeapify<AcquireAnalysis> {
     public: 
       AcquireAnalysis(Runtime *rt, Operation *op, unsigned index,
                       IndexSpaceExpression *expr,
-                      CollectiveMapping *collective_mapping,
-                      bool first_local);
+                      const PhysicalTraceInfo &t_info);
       AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
-                      AcquireAnalysis *target);
+                      AcquireAnalysis *target,
+                      const PhysicalTraceInfo &trace_info,
+                      CollectiveMapping *collective_mapping,
+                      bool first_local);
       AcquireAnalysis(const AcquireAnalysis &rhs) = delete;
       virtual ~AcquireAnalysis(void);
     public:
@@ -2142,14 +2189,7 @@ namespace Legion {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
                       ApEvent precondition, IndexSpaceExpression *expr,
-                      const InstanceSet &target_instances,
-                      const LegionVector<
-                              FieldMaskSet<InstanceView> > &target_views,
-                      const std::vector<IndividualView*> &source_views,
-                      const std::map<InstanceView*,size_t> &view_arrivals,
-                      const PhysicalTraceInfo &trace_info,
-                      CollectiveMapping *collective_mapping,
-                      const bool first_local);
+                      const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
@@ -2308,7 +2348,7 @@ namespace Legion {
      * \class OverwriteAnalysis 
      * For performing overwrite traversals on equivalence set trees
      */
-    class OverwriteAnalysis : public PhysicalAnalysis,
+    class OverwriteAnalysis : public RegistrationAnalysis,
                               public LegionHeapify<OverwriteAnalysis> {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
@@ -2317,23 +2357,27 @@ namespace Legion {
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                         const bool track_effects = false,
                         const bool add_restriction = false,
                         const bool first_local = true);
+      // Also local but with a full set of instances 
+      OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
+                        const PhysicalTraceInfo &trace_info,
+                        const ApEvent precondition,
+                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const bool track_effects = false,
+                        const bool add_restriction = false);
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<LogicalView> &views,
+                        const FieldMaskSet<LogicalView> &overwrite_views,
                         const PhysicalTraceInfo &trace_info,
-                        CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                         const bool track_effects = false,
-                        const bool add_restriction = false,
-                        const bool first_local = true);
+                        const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index,
                         IndexSpaceExpression *expr, const RegionUsage &usage, 
@@ -2341,8 +2385,9 @@ namespace Legion {
                         FieldMaskSet<InstanceView> &reduction_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const RtEvent guard_event,
                         const PredEvent pred_guard,
+                        CollectiveMapping *mapping,
+                        const bool first_local,
                         const bool track_effects,
                         const bool add_restriction);
       OverwriteAnalysis(const OverwriteAnalysis &rhs);
@@ -2353,6 +2398,10 @@ namespace Legion {
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
     public:
+      virtual RtEvent start_traversal(RtEvent precondition,
+                                      const VersionInfo &version_info,
+                                      std::set<RtEvent> &deferral_events,
+                                      std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
                                      const bool expr_covers,
@@ -2376,9 +2425,7 @@ namespace Legion {
       const RegionUsage usage;
       FieldMaskSet<LogicalView> views;
       FieldMaskSet<InstanceView> reduction_views;
-      const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
-      const RtEvent guard_event;
       const PredEvent pred_guard;
       const bool track_effects;
       const bool add_restriction;
@@ -2392,24 +2439,28 @@ namespace Legion {
      * \class FilterAnalysis
      * For performing filter traversals on equivalence set trees
      */
-    class FilterAnalysis : public PhysicalAnalysis,
+    class FilterAnalysis : public RegistrationAnalysis,
                            public LegionHeapify<FilterAnalysis> {
     public:
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     CollectiveMapping *collective_mapping,
                      IndexSpaceExpression *expr, 
-                     const FieldMaskSet<InstanceView> &filter_views,
-                     const bool remove_restriction = false,
-                     const bool first_local = false);
+                     const PhysicalTraceInfo &trace_info,
+                     const bool remove_restriction = false);
       FilterAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index, IndexSpaceExpression *expr,
+                     const PhysicalTraceInfo &trace_info,
                      const FieldMaskSet<InstanceView> &filter_views,
+                     CollectiveMapping *mapping, const bool first_local,
                      const bool remove_restriction);
       FilterAnalysis(const FilterAnalysis &rhs) = delete;
       virtual ~FilterAnalysis(void);
     public:
       FilterAnalysis& operator=(const FilterAnalysis &rhs) = delete;
     public:
+      virtual RtEvent start_traversal(RtEvent precondition,
+                                      const VersionInfo &version_info,
+                                      std::set<RtEvent> &deferral_events,
+                                      std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
                                      const bool expr_covers,
@@ -2424,7 +2475,7 @@ namespace Legion {
       static void handle_remote_filters(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
     public:
-      const FieldMaskSet<InstanceView> filter_views;
+      FieldMaskSet<InstanceView> filter_views;
       const bool remove_restriction;
     };
 
@@ -2441,10 +2492,10 @@ namespace Legion {
       CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                     IndexSpaceExpression *expr, Operation *op,
                     unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
-      CloneAnalysis(const CloneAnalysis &rhs);
+      CloneAnalysis(const CloneAnalysis &rhs) = delete;
       virtual ~CloneAnalysis(void);
     public:
-      CloneAnalysis& operator=(const CloneAnalysis &rhs);
+      CloneAnalysis& operator=(const CloneAnalysis &rhs) = delete;
     public:
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,

@@ -856,10 +856,10 @@ namespace Legion {
       const MappingTagID tag;
       const bool leaf_region;
       const bool virtual_mapped;
-      const bool replaying;
       // Whether this physical region represents a collectively
       // created group of instances or not (e.g. ReplAttachOp)
       const bool collective;
+      const bool replaying;
     private:
       const RegionRequirement req;
       // Event for when the 'references' are set by the producer op

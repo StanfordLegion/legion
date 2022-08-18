@@ -10225,12 +10225,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::convert_collective_views(Operation *op, unsigned index,
+    RtEvent InnerContext::convert_collective_views(Operation *op, unsigned index,
                         LogicalRegion region, const InstanceSet &targets,
-                        CollectiveMapping *&analysis_mapping,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
                         LegionVector<FieldMaskSet<InstanceView> > &target_views,
-                        std::map<InstanceView*,size_t> &collective_arrivals,
-                        RtEvent &collective_views_ready)
+                        std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
       target_views.resize(targets.size());
@@ -10250,60 +10249,35 @@ namespace Legion {
         }
         if (result == NULL)
         {
-          result = new RendezvousResult(targets);
+          result = new RendezvousResult(this, key, targets);
           // Reference for pending_rendezvous
           result->add_reference();
           pending.push_back(result);
         }
-        result->local_arrivals++;
+        // Record all our targets in the result
+        result->target_mappings.push_back(&analysis_mapping);
+        result->target_first_locals.push_back(&first_local);
+        result->target_views.push_back(&target_views);
+        result->target_arrivals.push_back(&collective_arrivals);
         // Reference for ourselves
         result->add_reference();
       }
       rendezvous_collective_mapping(op, index, result, runtime->address_space,
                                     region, result->instances);
-      if (result->ready.exists() && !result->ready.has_triggered())
-        result->ready.wait();
-      analysis_mapping = result->analysis_mapping;
-      analysis_mapping->add_reference();
-      target_views = result->target_views;
-      collective_arrivals = result->collective_arrivals;
-      collective_views_ready = result->collective_views_ready;
-      bool first_local = result->supports_first_local;
-      // If we support first local see if we're the first for this rendezvous
-      if (first_local)
-      {
-        AutoLock c_lock(collective_lock);
-        std::map<RendezvousKey,unsigned>::iterator finder =
-          result->first_local_arrivals.find(key);
-        if (finder != result->first_local_arrivals.end())
-        {
-          first_local = false;
-          if (++finder->second == result->local_arrivals)
-            result->first_local_arrivals.erase(finder);
-        }
-        else
-          result->first_local_arrivals[key] = 1;
-        // Prune out the pending rendezvous
-        pending_rendezvous.erase(key);
-      }
-      else
-      {
-        AutoLock c_lock(collective_lock);
-        // Prune out the pending rendezvous
-        pending_rendezvous.erase(key);
-      }
+      const RtEvent ready = result->ready;
       if (result->remove_reference())
         delete result;
-      return first_local;
+      return ready;
     }
 
     //--------------------------------------------------------------------------
-    InnerContext::RendezvousResult::RendezvousResult(const InstanceSet &insts)
-      : instances(init_instances(insts)),
-        ready(Runtime::create_rt_user_event()), local_arrivals(0),
-        analysis_mapping(NULL), supports_first_local(false)
+    InnerContext::RendezvousResult::RendezvousResult(InnerContext *own,
+        const PendingRendezvousKey &k, const InstanceSet &insts)
+      : owner(own), key(k), instances(init_instances(insts)),
+        ready(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
+      owner->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -10325,15 +10299,8 @@ namespace Legion {
     InnerContext::RendezvousResult::~RendezvousResult(void)
     //--------------------------------------------------------------------------
     {
-      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
-        delete analysis_mapping;
-      for (unsigned idx = 0; idx < target_views.size(); idx++)
-      {
-        for (FieldMaskSet<InstanceView>::const_iterator it =
-              target_views[idx].begin(); it != target_views[idx].end(); it++)
-          if (it->first->remove_base_resource_ref(CONTEXT_REF))
-            delete it->first;
-      }
+      if (owner->remove_reference())
+        delete owner;
     }
 
     //--------------------------------------------------------------------------
@@ -10575,8 +10542,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void InnerContext::finalize_collective_mapping(Runtime *runtime,
         std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
-        std::map<DistributedID,size_t> &counts,
-        FieldMaskSet<CollectiveResult> &views)
+        const std::map<DistributedID,size_t> &counts,
+        const FieldMaskSet<CollectiveResult> &views)
     //--------------------------------------------------------------------------
     {
       // First build the collective mapping
@@ -10667,77 +10634,124 @@ namespace Legion {
         while (result_it->first == runtime->address_space)
         {
           RendezvousResult *result = result_it->second;
-          result->analysis_mapping = mapping;
-          result->analysis_mapping->add_reference();
-          // Only the first local rendezvous result supports first local
-          result->supports_first_local = first;
+          if (result->finalize_rendezvous(mapping,views,counts,runtime,first))
+            delete result;
           first = false;
-          std::vector<RtEvent> ready_events, view_events;
-          for (unsigned idx = 0; idx < result->instances.size(); idx++)
-          {
-            const DistributedID inst_did = result->instances[idx].first;
-            const FieldMask &mask = result->instances[idx].second;
-            for (FieldMaskSet<CollectiveResult>::const_iterator vit =
-                  views.begin(); vit != views.end(); vit++)
-            {
-              const FieldMask overlap = mask & vit->second;
-              if (!overlap)
-                continue;
-              if (!std::binary_search(vit->first->individual_dids.begin(),
-                    vit->first->individual_dids.end(), inst_did))
-                continue;
-              // Successfully found one of the views
-              // Wait until it is safe to request it
-              if (vit->first->ready_event.exists() &&
-                  !vit->first->ready_event.has_triggered())
-                vit->first->ready_event.wait();
-              RtEvent ready;
-              CollectiveView *view = static_cast<CollectiveView*>(
-                  runtime->find_or_request_logical_view(
-                    vit->first->collective_did, ready));
-              if (ready.exists())
-                view_events.push_back(ready);
-              result->target_views[idx].insert(view, overlap);
-              // Now count how many local arrivals we have for 
-              // instances on the same address space
-              size_t local_arrivals = 0;
-              const AddressSpaceID inst_space = 
-                runtime->determine_owner(inst_did);
-              for (std::vector<DistributedID>::const_iterator it =
-                    vit->first->individual_dids.begin(); it !=
-                    vit->first->individual_dids.end(); it++)
-              {
-                if (inst_space != runtime->determine_owner(*it))
-                  continue;
-                std::map<DistributedID,size_t>::const_iterator
-                  count_finder = counts.find(*it);
-                if (count_finder == counts.end())
-                  local_arrivals += count_finder->second;
-                else
-                  local_arrivals++;
-              }
-              result->collective_arrivals[view] = local_arrivals;
-              if (vit->first->ready_event.exists())
-                ready_events.push_back(vit->first->ready_event);
-            }
-#ifdef DEBUG_LEGION
-            // Should have seen all the fields at this point
-            assert(result->target_views[idx].get_valid_mask() == mask);
-#endif
-          }
-          if (!ready_events.empty())
-            result->collective_views_ready = 
-              Runtime::merge_events(ready_events);
-          if (!view_events.empty())
-            Runtime::trigger_event(result->ready,
-                Runtime::merge_events(view_events));
-          else
-            Runtime::trigger_event(result->ready);
           result_it++;
         }
       }
       if (mapping->remove_reference())
         delete mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::RendezvousResult::finalize_rendezvous(
+     CollectiveMapping *mapping, const FieldMaskSet<CollectiveResult> &views,
+     const std::map<DistributedID,size_t> &counts, Runtime *runtime, bool first)
+    //--------------------------------------------------------------------------
+    {
+      mapping->add_reference(target_mappings.size());
+      for (unsigned idx = 0; idx < target_mappings.size(); idx++)
+        *target_mappings[idx] = mapping;
+      for (unsigned idx = 0; idx < target_first_locals.size(); idx++)
+      {
+        *target_first_locals[idx] = first;
+        first = false;
+      }
+      std::vector<RtEvent> ready_events;
+      LegionVector<FieldMaskSet<InstanceView> > result_views(instances.size()); 
+      std::map<InstanceView*,size_t> collective_arrivals;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const DistributedID inst_did = instances[idx].first;
+        const FieldMask &mask = instances[idx].second;
+        for (FieldMaskSet<CollectiveResult>::const_iterator vit =
+              views.begin(); vit != views.end(); vit++)
+        {
+          const FieldMask overlap = mask & vit->second;
+          if (!overlap)
+            continue;
+          if (!std::binary_search(vit->first->individual_dids.begin(),
+                vit->first->individual_dids.end(), inst_did))
+            continue;
+          // Successfully found one of the views
+          // Wait until it is safe to request it
+          if (vit->first->ready_event.exists() &&
+              !vit->first->ready_event.has_triggered())
+            vit->first->ready_event.wait();
+          RtEvent ready;
+          CollectiveView *view = static_cast<CollectiveView*>(
+              runtime->find_or_request_logical_view(
+                vit->first->collective_did, ready));
+          if (ready.exists())
+            ready_events.push_back(ready);
+          result_views[idx].insert(view, overlap);
+          // Now count how many local arrivals we have for 
+          // instances on the same address space
+          size_t local_arrivals = 0;
+          const AddressSpaceID inst_space = 
+            runtime->determine_owner(inst_did);
+          for (std::vector<DistributedID>::const_iterator it =
+                vit->first->individual_dids.begin(); it !=
+                vit->first->individual_dids.end(); it++)
+          {
+            if (inst_space != runtime->determine_owner(*it))
+              continue;
+            std::map<DistributedID,size_t>::const_iterator
+              count_finder = counts.find(*it);
+            if (count_finder == counts.end())
+              local_arrivals += count_finder->second;
+            else
+              local_arrivals++;
+          }
+          collective_arrivals[view] = local_arrivals;
+        }
+#ifdef DEBUG_LEGION
+        // Should have seen all the fields at this point
+        assert(result_views[idx].get_valid_mask() == mask);
+#endif
+      }
+      for (int idx = target_views.size()-1; idx >= 0; idx--)
+      {
+        if (idx == 0)
+        {
+          target_views[idx]->swap(result_views);
+          target_arrivals[idx]->swap(collective_arrivals);
+        }
+        else
+        {
+          *target_views[idx] = result_views;
+          *target_arrivals[idx] = collective_arrivals;
+        }
+      }
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+      return owner->remove_pending_rendezvous(this);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::remove_pending_rendezvous(RendezvousResult *result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      std::map<PendingRendezvousKey,std::vector<RendezvousResult*> >::iterator
+        finder = pending_rendezvous.find(result->key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_rendezvous.end());
+#endif
+      for (std::vector<RendezvousResult*>::iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != result)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        pending_rendezvous.erase(finder);
+      return result->remove_reference();
     }
 
     //--------------------------------------------------------------------------

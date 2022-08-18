@@ -4239,11 +4239,12 @@ namespace Legion {
                     regions[0], version_infos[0], this, 0, 
                     init_precondition, single_task_termination,
                     physical_instances[0], source_instances[0],
-                    PhysicalTraceInfo(trace_info, 0), check_collective, map_applied_conditions,
+                    PhysicalTraceInfo(trace_info, 0), map_applied_conditions,
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
                                           unique_op_id,
 #endif
+                                          check_collective,
                                           record_valid);
               if (task_effects_complete.exists())
                 task_effects_complete = Runtime::merge_events(&trace_info, 
@@ -4683,10 +4684,11 @@ namespace Legion {
                           completion_event/*wait for task to be done*/,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           result, sources, PhysicalTraceInfo(trace_info, idx), 
-                          false/*check for collectives*/, map_applied_conditions,
+                          map_applied_conditions,
 #ifdef DEBUG_LEGION
                           get_logging_name(), unique_op_id,
 #endif
+                          false/*check for collectives*/,
                           false/*track effects*/);
         regions[idx].privilege = mode; 
       }

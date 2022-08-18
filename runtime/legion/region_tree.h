@@ -550,12 +550,12 @@ namespace Legion {
                                    InstanceSet &targets,
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
-                                   const bool collective_rendezvous,
                                    std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
                                    const char *log_name,
                                    UniqueID uid,
 #endif
+                                   const bool collective_rendezvous,
                                    const bool record_valid = true,
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
