@@ -248,14 +248,9 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
 
     # mirror = 'http://sapling.stanford.edu/~eslaught/llvm'
     mirror = 'https://releases.llvm.org'
-    if llvm_version == '35':
-        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.5.2.src.tar.xz')
-        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
-        clang_tarball = os.path.join(llvm_dir, 'cfe-3.5.2.src.tar.xz')
-        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.5.2.src')
-        download(llvm_tarball, '%s/3.5.2/llvm-3.5.2.src.tar.xz' % mirror, '44196156d5749eb4b4224fe471a29cc3984df92570a4a89fa859f7394fc0c575', insecure=insecure)
-        download(clang_tarball, '%s/3.5.2/cfe-3.5.2.src.tar.xz' % mirror, '4feb575f74fb3a74b6245400460230141bf610f235ef3a25008cfe6137828620', insecure=insecure)
-    elif llvm_version == '38':
+    if llvm_version == '38':
+        if not os.environ.get('SETUP_ENV_ENABLE_LLVM_38_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT') == 1:
+            raise Exception('LLVM 3.8 is about to be removed from Terra. If you still rely on this version is it VERY IMPORANT that you contact the Legion team IMMEDIATELY so that your use case can be addressed. If you want to TEMPORARILY work around this warning, you can set the environment variable SETUP_ENV_ENABLE_LLVM_38_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT=1')
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
@@ -263,6 +258,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         download(llvm_tarball, '%s/3.8.1/llvm-3.8.1.src.tar.xz' % mirror, '6e82ce4adb54ff3afc18053d6981b6aed1406751b8742582ed50f04b5ab475f9', insecure=insecure)
         download(clang_tarball, '%s/3.8.1/cfe-3.8.1.src.tar.xz' % mirror, '4cd3836dfb4b88b597e075341cae86d61c63ce3963e45c7fe6a8bf59bb382cdf', insecure=insecure)
     elif llvm_version == '39':
+        if not os.environ.get('SETUP_ENV_ENABLE_LLVM_39_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT') == 1:
+            raise Exception('LLVM 3.9 is about to be removed from Terra. If you still rely on this version is it VERY IMPORANT that you contact the Legion team IMMEDIATELY so that your use case can be addressed. If you want to TEMPORARILY work around this warning, you can set the environment variable SETUP_ENV_ENABLE_LLVM_39_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT=1')
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
@@ -270,6 +267,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         download(llvm_tarball, '%s/3.9.1/llvm-3.9.1.src.tar.xz' % mirror, '1fd90354b9cf19232e8f168faf2220e79be555df3aa743242700879e8fd329ee', insecure=insecure)
         download(clang_tarball, '%s/3.9.1/cfe-3.9.1.src.tar.xz' % mirror, 'e6c4cebb96dee827fa0470af313dff265af391cb6da8d429842ef208c8f25e63', insecure=insecure)
     elif llvm_version == '60':
+        if not os.environ.get('SETUP_ENV_ENABLE_LLVM_60_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT') == 1:
+            raise Exception('LLVM 6.0 is pending deprecation in Terra. If you still rely on this version is it VERY IMPORANT that you contact the Legion team IMMEDIATELY so that your use case can be addressed. If you want to TEMPORARILY work around this warning, you can set the environment variable SETUP_ENV_ENABLE_LLVM_60_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT=1')
         llvm_tarball = os.path.join(llvm_dir, 'llvm-6.0.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-6.0.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-6.0.1.src.tar.xz')
@@ -277,6 +276,8 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
         download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
     elif llvm_version == '90':
+        if not os.environ.get('SETUP_ENV_ENABLE_LLVM_90_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT') == 1:
+            raise Exception('LLVM 9.0 is pending deprecation in Terra. If you still rely on this version is it VERY IMPORANT that you contact the Legion team IMMEDIATELY so that your use case can be addressed. If you want to TEMPORARILY work around this warning, you can set the environment variable SETUP_ENV_ENABLE_LLVM_90_TEMPORARILY_THIS_IS_JUST_A_WORKAROUND_AND_WILL_GO_AWAY_SO_DONT_RELY_ON_IT=1')
         llvm_tarball = os.path.join(llvm_dir, 'llvm-9.0.0.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-9.0.0.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-9.0.0.src.tar.xz')
@@ -304,9 +305,7 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         extract(llvm_dir, llvm_tarball, 'xz')
         if clang_tarball:
             extract(llvm_dir, clang_tarball, 'xz')
-        if llvm_version == '35':
-            apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.5-gcc.patch'))
-        elif llvm_version == '38':
+        if llvm_version == '38':
             apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.8-gcc.patch'))
         if clang_tarball:
             os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
@@ -401,7 +400,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if 'HOST_CXX' not in os.environ:
             raise Exception('Please set HOST_CXX in your environment')
 
-    if llvm_version in ('35', '38'):
+    if llvm_version in ('38'):
         llvm_use_cmake = False
     elif llvm_version in ('39', '60', '90', '110', '130'):
         llvm_use_cmake = True
@@ -561,7 +560,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90', '110', '130'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('38', '39', '60', '90', '110', '130'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
