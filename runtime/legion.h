@@ -1451,7 +1451,8 @@ namespace Legion {
                    Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0,
                    MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   UntypedBuffer provenance = UntypedBuffer());
     public:
       inline IndexSpaceRequirement&
               add_index_requirement(const IndexSpaceRequirement &req);
@@ -1496,6 +1497,10 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       UntypedBuffer                      predicate_false_result;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                      provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1553,7 +1558,8 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexTaskLauncher(TaskID tid,
                         IndexSpace launch_space,
                         UntypedBuffer global_arg,
@@ -1562,7 +1568,8 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
     public:
       inline IndexSpaceRequirement&
                   add_index_requirement(const IndexSpaceRequirement &req);
@@ -1613,6 +1620,10 @@ namespace Legion {
       Future                             predicate_false_future;
       UntypedBuffer                      predicate_false_result;
     public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                      provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1655,7 +1666,8 @@ namespace Legion {
                      MapperID id = 0,
                      MappingTagID tag = 0,
                      LayoutConstraintID layout_id = 0,
-                     UntypedBuffer map_arg = UntypedBuffer());
+                     UntypedBuffer map_arg = UntypedBuffer(),
+                     UntypedBuffer provenance = UntypedBuffer());
     public:
       inline void add_field(FieldID fid, bool inst = true);
     public:
@@ -1674,6 +1686,10 @@ namespace Legion {
       UntypedBuffer                   map_arg;
     public:
       LayoutConstraintID              layout_constraint_id;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1708,7 +1724,8 @@ namespace Legion {
     public:
       CopyLauncher(Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   UntypedBuffer provenance = UntypedBuffer());
     public:
       inline unsigned add_copy_requirements(const RegionRequirement &src,
 					    const RegionRequirement &dst);
@@ -1756,6 +1773,10 @@ namespace Legion {
       // will use an index space of size 1 containing 'point'
       IndexSpace                      sharding_space;
     public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1786,10 +1807,12 @@ namespace Legion {
       IndexCopyLauncher(void);
       IndexCopyLauncher(Domain domain, Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexCopyLauncher(IndexSpace space, Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
     public:
       inline unsigned add_copy_requirements(const RegionRequirement &src,
 					    const RegionRequirement &dst);
@@ -1837,6 +1860,10 @@ namespace Legion {
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
     public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1870,11 +1897,13 @@ namespace Legion {
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
                    UntypedBuffer arg, Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   UntypedBuffer provenance = UntypedBuffer());
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
                    Future f, Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   UntypedBuffer provenance = UntypedBuffer());
     public:
       inline void set_argument(UntypedBuffer arg);
       inline void set_future(Future f);
@@ -1903,6 +1932,10 @@ namespace Legion {
       // will use an index space of size 1 containing 'point'
       IndexSpace                      sharding_space;
     public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1928,50 +1961,58 @@ namespace Legion {
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(Domain domain, LogicalRegion handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       // Partition projection
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
       IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        UntypedBuffer provenance = UntypedBuffer());
     public:
       inline void set_argument(UntypedBuffer arg);
       inline void set_future(Future f);
@@ -2001,6 +2042,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -2050,6 +2095,10 @@ namespace Legion {
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
       bool                                          mapped; /*= true*/
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                                 provenance;
     public:
       // Data for files
       const char                                    *file_name;
@@ -2112,6 +2161,10 @@ namespace Legion {
       // same resource to different shards if this is set to false
       bool                                          deduplicate_across_shards;
     public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                                 provenance;
+    public:
       // Data for files
       LegionFileMode                                mode;
       std::vector<const char*>                      file_names;
@@ -2161,6 +2214,10 @@ namespace Legion {
     public:
       TimingMeasurement               measurement;
       std::set<Future>                preconditions;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     };
 
     /**
@@ -2179,6 +2236,10 @@ namespace Legion {
       MappingTagID                        tag;
       UntypedBuffer                       arg;
       std::vector<Future>                 futures;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     };
 
     //==========================================================================
@@ -3448,7 +3509,8 @@ namespace Legion {
                       PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0,
-                      UntypedBuffer map_arg = UntypedBuffer());
+                      UntypedBuffer map_arg = UntypedBuffer(),
+                      UntypedBuffer provenance = UntypedBuffer());
     public:
       inline void add_field(FieldID f);
       inline void add_grant(Grant g);
@@ -3471,6 +3533,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -3492,7 +3558,8 @@ namespace Legion {
                       PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0,
-                      UntypedBuffer map_arg = UntypedBuffer());
+                      UntypedBuffer map_arg = UntypedBuffer(),
+                      UntypedBuffer provenance = UntypedBuffer());
     public:
       inline void add_field(FieldID f);
       inline void add_grant(Grant g);
@@ -3515,6 +3582,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                   provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -3558,6 +3629,10 @@ namespace Legion {
       // Will only be used in control replication context. If left
       // unset the runtime will use launch_space/launch_domain
       IndexSpace                     sharding_space;
+    public:
+      // Provenance information - the runtime will interpret
+      // this as a string for use with profiling and error messages
+      UntypedBuffer                  provenance;
     public:
       bool                           silence_warnings;
     };
@@ -4956,8 +5031,10 @@ namespace Legion {
        * @param fid the field of domain in which to place the results
        * @param range the index space to serve as the range of the mapping
        * @param id the ID of the mapper to use for mapping the fields
-       * @param map_arg an untyped buffer for the mapper data of the Partition
        * @param tag the tag to pass to the mapper for context
+       * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void create_association(Context ctx,
                               LogicalRegion domain,
@@ -4966,7 +5043,8 @@ namespace Legion {
                               IndexSpace range,
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer marg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       void create_bidirectional_association(Context ctx,
                                             LogicalRegion domain,
                                             LogicalRegion domain_parent,
@@ -4977,6 +5055,8 @@ namespace Legion {
                                             MapperID id = 0,
                                             MappingTagID tag = 0,
                                             UntypedBuffer map_arg = 
+                                                    UntypedBuffer(),
+                                            UntypedBuffer provenance =
                                                     UntypedBuffer());
       // Template versions
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
@@ -4987,7 +5067,8 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> range,
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
       void create_bidirectional_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
@@ -4998,7 +5079,8 @@ namespace Legion {
                               FieldID range_fid, // type: Point<DIM1,COORD_T1>
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       ///@}
       ///@{
       /**
@@ -5182,6 +5264,8 @@ namespace Legion {
        * @param tag the context tag to pass to the mapper
        * @param part_kind the kind of the partition
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
@@ -5196,6 +5280,8 @@ namespace Legion {
                                                PartitionKind part_kind = 
                                                          LEGION_DISJOINT_KIND,
                                                UntypedBuffer map_arg = 
+                                                         UntypedBuffer(),
+                                               UntypedBuffer provenance =
                                                          UntypedBuffer());
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5207,7 +5293,8 @@ namespace Legion {
                           Color color = LEGION_AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0,
                           PartitionKind part_kind = LEGION_DISJOINT_KIND,
-                          UntypedBuffer map_arg = UntypedBuffer());
+                          UntypedBuffer map_arg = UntypedBuffer(),
+                          UntypedBuffer provenance = UntypedBuffer());
       ///@}
       ///@{
       /**
@@ -5239,6 +5326,8 @@ namespace Legion {
        * @param id the ID of the mapper to use for mapping field
        * @param tag the mapper tag to provide context to the mapper
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
@@ -5250,7 +5339,8 @@ namespace Legion {
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                  Color color = LEGION_AUTO_GENERATE_ID,
                                  MapperID id = 0, MappingTagID tag = 0,
-                                 UntypedBuffer map_arg = UntypedBuffer());
+                                 UntypedBuffer map_arg = UntypedBuffer(),
+                                 UntypedBuffer provenance = UntypedBuffer());
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5263,7 +5353,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       // Range versions of image
       IndexPartition create_partition_by_image_range(Context ctx,
                                  IndexSpace handle,
@@ -5274,7 +5365,8 @@ namespace Legion {
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                  Color color = LEGION_AUTO_GENERATE_ID,
                                  MapperID id = 0, MappingTagID tag = 0,
-                                 UntypedBuffer map_arg = UntypedBuffer());
+                                 UntypedBuffer map_arg = UntypedBuffer(),
+                                 UntypedBuffer provenance = UntypedBuffer());
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5288,7 +5380,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       ///@}                                    
       ///@{
       /**
@@ -5317,6 +5410,8 @@ namespace Legion {
        * @param id the ID of the mapper to use for mapping field
        * @param tag the mapper tag to provide context to the mapper
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the index space of 'handle'
        */
       IndexPartition create_partition_by_preimage(Context ctx, 
@@ -5328,7 +5423,8 @@ namespace Legion {
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
                                   MapperID id = 0, MappingTagID tag = 0,
-                                  UntypedBuffer map_arg = UntypedBuffer());
+                                  UntypedBuffer map_arg = UntypedBuffer(),
+                                  UntypedBuffer provenance = UntypedBuffer());
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5341,7 +5437,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       // Range versions of preimage 
       IndexPartition create_partition_by_preimage_range(Context ctx, 
                                   IndexPartition projection,
@@ -5352,7 +5449,8 @@ namespace Legion {
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
                                   MapperID id = 0, MappingTagID tag = 0,
-                                  UntypedBuffer map_arg = UntypedBuffer());
+                                  UntypedBuffer map_arg = UntypedBuffer(),
+                                  UntypedBuffer provenance = UntypedBuffer());
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5366,7 +5464,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              UntypedBuffer provenance = UntypedBuffer());
       ///@} 
     public:
       //------------------------------------------------------------------------
@@ -6462,11 +6561,14 @@ namespace Legion {
        * @param redop ID for the reduction op to use for reducing values
        * @param deterministic request that the reduced future be computed
        *        in a deterministic way (more expensive than non-deterministic)
+       * @param provenance an optional string for describing the provenance
+       *        of this invocation
        * @return a future result representing the the reduction of all the
        *         values in the future map
        */
       Future reduce_future_map(Context ctx, const FutureMap &future_map, 
-                               ReductionOpID redop, bool deterministic = false);
+                               ReductionOpID redop, bool deterministic = false,
+                               UntypedBuffer provenance = UntypedBuffer());
 
       /**
        * Construct a future map from a collection of buffers. The user must

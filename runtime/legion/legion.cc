@@ -1453,12 +1453,13 @@ namespace Legion {
     TaskLauncher::TaskLauncher(TaskID tid, UntypedBuffer arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer*/)
+                               UntypedBuffer marg /*=UntypedBuffer*/,
+                               UntypedBuffer prov /*=UntypedBuffer*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        map_arg(marg), point(DomainPoint()), static_dependences(NULL), 
-        enable_inlining(false), local_function_task(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        map_arg(marg), point(DomainPoint()), provenance(prov),
+        static_dependences(NULL), enable_inlining(false),
+        local_function_task(false), independent_requirements(false),
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1485,11 +1486,12 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     UntypedBuffer prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
         global_arg(global), argument_map(map), predicate(pred), 
         must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        static_dependences(NULL), enable_inlining(false),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
         independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1503,11 +1505,12 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     UntypedBuffer prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
         global_arg(global), argument_map(map), predicate(pred), 
         must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        static_dependences(NULL), enable_inlining(false),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
         independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1529,9 +1532,10 @@ namespace Legion {
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
                                    MapperID mid /*=0*/, MappingTagID t /*=0*/,
                                    LayoutConstraintID lay_id /*=0*/,
-                                   UntypedBuffer marg /*= UntypedBuffer()*/)
+                                   UntypedBuffer marg /*= UntypedBuffer()*/,
+                                   UntypedBuffer prov /*= UntypedBuffer()*/)
       : requirement(req), map_id(mid), tag(t), map_arg(marg),
-        layout_constraint_id(lay_id), static_dependences(NULL)
+        layout_constraint_id(lay_id), provenance(prov), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1543,8 +1547,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
-      : predicate(pred), map_id(mid), tag(t), map_arg(marg), 
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               UntypedBuffer prov /*=UntypedBuffer()*/)
+      : predicate(pred), map_id(mid), tag(t), map_arg(marg), provenance(prov), 
         static_dependences(NULL), possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), silence_warnings(false)
@@ -1573,10 +1578,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    UntypedBuffer prov/*=UntypedBuffer()*/) 
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), predicate(pred),
-        map_id(mid), tag(t), map_arg(marg), static_dependences(NULL),
-        possible_src_indirect_out_of_range(true),
+        map_id(mid), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
         collective_src_indirect_points(true),
@@ -1589,10 +1595,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(IndexSpace space, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    UntypedBuffer prov /*=UntypedBuffer()*/) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), predicate(pred),
-        map_id(mid), tag(t), map_arg(marg), static_dependences(NULL), 
-        possible_src_indirect_out_of_range(true),
+        map_id(mid), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
         collective_src_indirect_points(true),
@@ -1610,9 +1617,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     UntypedBuffer prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1627,9 +1635,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     UntypedBuffer prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1652,9 +1661,11 @@ namespace Legion {
                                UntypedBuffer arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               UntypedBuffer prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), argument(arg), predicate(pred), map_id(id), 
-        tag(t), map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1663,9 +1674,11 @@ namespace Legion {
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               UntypedBuffer prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), future(f), predicate(pred), map_id(id), tag(t), 
-        map_arg(marg), static_dependences(NULL), silence_warnings(false) 
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1689,11 +1702,12 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               UntypedBuffer prov /*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1703,11 +1717,12 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                UntypedBuffer prov /*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1717,11 +1732,12 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               UntypedBuffer prov /*=UntypedBuffer()*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1731,11 +1747,12 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                UntypedBuffer prov /*=UntypedBuffer()*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1746,11 +1763,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         UntypedBuffer prov/*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         region(LogicalRegion::NO_REGION), partition(h), parent(p),
         projection(proj), argument(arg), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1761,11 +1780,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         UntypedBuffer prov/*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         region(LogicalRegion::NO_REGION), partition(h), parent(p),
         projection(proj), future(f), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1776,11 +1797,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         UntypedBuffer prov/*=UntypedBuffer()*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         region(LogicalRegion::NO_REGION), partition(h), parent(p),
         projection(proj), argument(arg), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1791,11 +1814,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         UntypedBuffer prov/*=UntypedBuffer()*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         region(LogicalRegion::NO_REGION), partition(h), parent(p),
         projection(proj), future(f), predicate(pred), map_id(id), tag(t),
-        map_arg(marg), static_dependences(NULL), silence_warnings(false)
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4198,11 +4223,12 @@ namespace Legion {
                                      FieldID domain_fid,
                                      IndexSpace range,
                                      MapperID id, MappingTagID tag,
-                                     UntypedBuffer marg)
+                                     UntypedBuffer marg,
+                                     UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       ctx->create_association(domain, domain_parent, domain_fid, range,
-                              id, tag, marg);
+                              id, tag, marg, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -4214,15 +4240,16 @@ namespace Legion {
                                       LogicalRegion range_parent,
                                       FieldID range_fid,
                                       MapperID id, MappingTagID tag,
-                                      UntypedBuffer marg)
+                                      UntypedBuffer marg,
+                                      UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       // Realm guarantees that creating association in either direction
       // will produce the same result, so we can do these separately
       create_association(ctx, domain, domain_parent, domain_fid, 
-                         range.get_index_space(), id, tag, marg);
+                         range.get_index_space(), id, tag, marg, prov);
       create_association(ctx, range, range_parent, range_fid, 
-                         domain.get_index_space(), id, tag, marg);
+                         domain.get_index_space(), id, tag, marg, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -4353,59 +4380,60 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                   LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                   IndexSpace color_space, Color color, MapperID id,
-                  MappingTagID tag, PartitionKind part_kind, UntypedBuffer marg)
+                  MappingTagID tag, PartitionKind part_kind, 
+                  UntypedBuffer marg, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_partition_by_field(handle, parent, fid, color_space, 
-                                            color, id, tag, part_kind, marg);
+                                      color, id, tag, part_kind, marg, prov);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_partition_by_image(handle, projection, parent, fid, 
-                                color_space, part_kind, color, id, tag, marg);
+                        color_space, part_kind, color, id, tag, marg, prov);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image_range(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color, 
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_partition_by_image_range(handle, projection, parent, 
-                          fid, color_space, part_kind, color, id, tag, marg);
+                    fid, color_space, part_kind, color, id, tag, marg, prov);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id, 
+                  MappingTagID tag, UntypedBuffer marg, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_partition_by_preimage(projection, handle, parent,
-                        fid, color_space, part_kind, color, id, tag, marg);
+                  fid, color_space, part_kind, color, id, tag, marg, prov);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_partition_by_preimage_range(projection, handle, parent,
-                             fid, color_space, part_kind, color, id, tag, marg);
+                       fid, color_space, part_kind, color, id, tag, marg, prov);
     } 
 
     //--------------------------------------------------------------------------
@@ -5674,10 +5702,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
-                                      ReductionOpID redop, bool deterministic)
+                    ReductionOpID redop, bool deterministic, UntypedBuffer prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->reduce_future_map(future_map, redop, deterministic);
+      return ctx->reduce_future_map(future_map, redop, deterministic, prov);
     }
 
     //--------------------------------------------------------------------------
