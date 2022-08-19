@@ -29,6 +29,11 @@ enum {
   INIT_MINIAERO_DATA_TASK,
 };
 
+enum TransformType {
+  Affine = 0,
+  Translation = 1,
+};
+
 namespace std {
   template <typename T>
   std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
@@ -61,6 +66,7 @@ void sigalrm_handler(int sig)
 template <int N, typename T>
 void dump_sparse_index_space(const char *pfx, IndexSpace<N,T> is)
 {
+  return;
   std::cout << pfx << ": " << is << "\n";
   if(!is.sparsity.exists()) return;
   SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();
@@ -2200,16 +2206,18 @@ void top_level_task(const void *args, size_t arglen,
   printf("all done!\n");
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
 class RandomAffineTest : public TestInterface {
-public:
-  RandomAffineTest(int argc, const char *argv[]);
+ public:
+  RandomAffineTest(int argc, const char *argv[],
+                   const std::vector<TRANSFORM> &transforms);
   virtual ~RandomAffineTest(void);
 
   virtual void print_info(void);
 
-  virtual Event initialize_data(const std::vector<Memory>& memories,
-				const std::vector<Processor>& procs);
+  virtual Event initialize_data(const std::vector<Memory> &memories,
+                                const std::vector<Processor> &procs);
 
   virtual Event perform_partitioning(void);
 
@@ -2217,40 +2225,50 @@ public:
 
   virtual int check_partitioning(void);
 
-  void fill_instance_data(IndexSpace<N1,T1> ibounds, RegionInstance inst);
+  void fill_instance_data(IndexSpace<N1, T1> ibounds, RegionInstance inst);
 
   int verify_results(const IndexSpace<N2, T2> &root,
-                     const AffineTransform<N2, N1, T2> &transform,
+                     const TRANSFORM &transform,
                      const std::vector<IndexSpace<N2, T1>> &images);
 
  protected:
+  std::vector<TRANSFORM> transforms;
   T1 base1_min, base1_max, extent1_min, extent1_max;
   T2 base2_min, base2_max, extent2_min, extent2_max;
   int num_pieces, num_colors;
 
-  std::vector<AffineTransform<N2, N1, T2>> transforms;
+  //std::vector<AffineTransform<N2, N1, T2>> transforms;
 
   std::vector<std::vector<IndexSpace<N2, T1>>> dense_images;
   std::vector<std::vector<IndexSpace<N2, T1>>> sparse_images;
 
-  std::vector<IndexSpace<N1,T1> > ss_by_color;
+  std::vector<IndexSpace<N1, T1>> ss_by_color;
 
-  Rect<N1,T1> bounds1;
-  Rect<N2,T2> bounds2;
+  Rect<N1, T1> bounds1;
+  Rect<N2, T2> bounds2;
   IndexSpace<N1, T1> root1;
   IndexSpace<N2, T2> root2;
   IndexSpace<N2, T2> root2_sparse;
   std::vector<FT> colors;
   std::vector<RegionInstance> ri_data1;
-  std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, FT> > fd_vals1;
+  std::vector<FieldDataDescriptor<IndexSpace<N1, T1>, FT>> fd_vals1;
 };
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
-  : base1_min(0), base1_max(0), extent1_min(16), extent1_max(32)
-  , base2_min(0), base2_max(0), extent2_min(16), extent2_max(32)
-  , num_pieces(2), num_colors(4)
-{
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
+    int argc, const char *argv[], const std::vector<TRANSFORM> &_transforms)
+    : transforms(_transforms),
+      base1_min(0),
+      base1_max(0),
+      extent1_min(16),
+      extent1_max(32),
+      base2_min(0),
+      base2_max(0),
+      extent2_min(16),
+      extent2_max(32),
+      num_pieces(2),
+      num_colors(4) {
   RandStream<> rs(random_seed+2);
 
   for(int i = 0; i < N1; i++) {
@@ -2268,87 +2286,25 @@ RandomAffineTest<N1,T1,N2,T2,FT>::RandomAffineTest(int argc, const char *argv[])
   for(int i = 0; i < num_colors; i++)
     colors[i] = randval<FT>(rs);
 
-  {
-    AffineTransform<N2, N1, T2> transpose;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        transpose.transform[i][j] = (i == N1 - j - 1);
-      }
-    }
-
-    transpose.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-      transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
-    transforms.push_back(transpose);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> translate;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        translate.transform[i][j] = (i == j);
-      }
-    }
-    translate.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-      translate.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
-    transforms.push_back(translate);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> scale;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        scale.transform[i][j] = (i == j) ? 2 : 0;
-      }
-    }
-    scale.offset = Point<N2, T2>::ZEROES();
-    //scale.is_dense = false;
-    transforms.push_back(scale);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> shear;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        shear.transform[i][j] = (i == j);
-      }
-      shear.transform[i][i + 1] = 1;
-    }
-    shear.offset = Point<N2, T2>::ZEROES();
-   // shear.is_dense = false;
-    transforms.push_back(shear);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> reflect;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        reflect.transform[i][j] = (i == j) ? -1 : 0;
-      }
-    }
-    reflect.offset = Point<N2, T2>::ZEROES();
-    transforms.push_back(reflect);
-  }
-
   dense_images.resize(transforms.size());
   sparse_images.resize(transforms.size());
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-RandomAffineTest<N1,T1,N2,T2,FT>::~RandomAffineTest(void)
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::~RandomAffineTest(void)
 {}
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-void RandomAffineTest<N1,T1,N2,T2,FT>::print_info(void)
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+void RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::print_info(void)
 {
   printf("Realm dependent partitioning test - random affine\n");
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-void RandomAffineTest<N1, T1, N2, T2, FT>::fill_instance_data(
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+void RandomAffineTest<N1, T1, N2, T2, FT,TRANSFORM>::fill_instance_data(
     IndexSpace<N1, T1> ibounds, RegionInstance inst) {
   {
     // start with value field
@@ -2369,8 +2325,9 @@ void RandomAffineTest<N1, T1, N2, T2, FT>::fill_instance_data(
   }
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& memories,
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+Event RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::initialize_data(const std::vector<Memory>& memories,
 						  const std::vector<Processor>& procs)
 {
   std::vector<Point<N2, T2>> sparse_points;
@@ -2432,8 +2389,9 @@ Event RandomAffineTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory
   return Event::NO_EVENT;
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-Event RandomAffineTest<N1, T1, N2, T2, FT>::perform_partitioning(void) {
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+Event RandomAffineTest<N1, T1, N2, T2, FT,TRANSFORM>::perform_partitioning(void) {
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
 
@@ -2483,16 +2441,18 @@ Event RandomAffineTest<N1, T1, N2, T2, FT>::perform_partitioning(void) {
   return Event::NO_EVENT;
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-int RandomAffineTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+int RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::perform_dynamic_checks(void)
 {
   return 0;
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
     const IndexSpace<N2, T2> &root,
-    const AffineTransform<N2, N1, T2>& transform,
+    const TRANSFORM& transform,
     const std::vector<IndexSpace<N2, T1>> &images) {
   int image_points = 0;
   for (const auto &image : images) {
@@ -2523,8 +2483,9 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::verify_results(
   return !(image_points == 0);
 }
 
-template <int N1, typename T1, int N2, typename T2, typename FT>
-int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
+template <int N1, typename T1, int N2, typename T2, typename FT,
+          typename TRANSFORM>
+int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
   for (size_t i = 0; i < transforms.size(); i++) {
     if (verify_results(root2, transforms[i], dense_images[i]) ||
         verify_results(root2_sparse, transforms[i], sparse_images[i])) {
@@ -2532,6 +2493,91 @@ int RandomAffineTest<N1, T1, N2, T2, FT>::check_partitioning(void) {
     }
   }
   return 0;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+std::vector<TranslationTransform<N2, N1, T2>> create_translate_transforms(int size) {
+  RandStream<> rs(random_seed+2);
+  std::vector<TranslationTransform<N2, N1, T2>> transforms;
+  {
+    TranslationTransform<N2, N1, T2> translate;
+    translate.offset = Point<N2, T2>::ZEROES();
+    for (int i = 0; i < N2; i++) {
+      translate.offset[i] = rs.rand_int(size - 1);
+    }
+    transforms.push_back(translate);
+  }
+  return transforms;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
+
+  std::vector<AffineTransform<N2, N1, T2>> transforms;
+
+  {
+   AffineTransform<N2, N1, T2> transpose;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        transpose.transform[i][j] = (i == N1 - j - 1);
+      }
+    }
+
+    transpose.offset = Point<N2, T2>::ZEROES();
+    for (int i = 0; i < N2; i++) {
+  //    transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+    }
+    transforms.push_back(transpose);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> translate;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        translate.transform[i][j] = (i == j);
+      }
+    }
+    translate.offset = Point<N2, T2>::ZEROES();
+    for (int i = 0; i < N2; i++) {
+    //  translate.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
+    }
+    transforms.push_back(translate);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> scale;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        scale.transform[i][j] = (i == j) ? 2 : 0;
+      }
+    }
+    scale.offset = Point<N2, T2>::ZEROES();
+    transforms.push_back(scale);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> shear;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        shear.transform[i][j] = (i == j);
+      }
+      shear.transform[i][i + 1] = 1;
+    }
+    shear.offset = Point<N2, T2>::ZEROES();
+    transforms.push_back(shear);
+  }
+
+  {
+    AffineTransform<N2, N1, T2> reflect;
+    for (int i = 0; i < N2; i++) {
+      for (int j = 0; j < N1; j++) {
+        reflect.transform[i][j] = (i == j) ? -1 : 0;
+      }
+    }
+    reflect.offset = Point<N2, T2>::ZEROES();
+    transforms.push_back(reflect);
+  }
+  return transforms;
 }
 
 int main(int argc, char **argv) {
@@ -2589,9 +2635,24 @@ int main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[i], "affine")) {
-      // TODO(apriakhin): Add tests with more dimensions.
-      testcfg = new RandomAffineTest<2, int, 2, int, int>(
-          argc, const_cast<const char **>(argv));
+      TransformType type = TransformType::Affine;
+      if (i < argc - 1 && !strcmp(argv[++i], "-type")) {
+        type = static_cast<TransformType>(atoi(argv[++i]));
+      }
+      switch (type) {
+        case TransformType::Affine:
+          testcfg = new RandomAffineTest<2, int, 2, int, int,
+                                         AffineTransform<2, 2, int>>(
+              argc, const_cast<const char **>(argv),
+              create_affine_transforms<2, int, 2, int, int>());
+          break;
+        case TransformType::Translation:
+          testcfg = new RandomAffineTest<2, int, 2, int, int,
+                                         TranslationTransform<2, 2, int>>(
+              argc, const_cast<const char **>(argv),
+              create_translate_transforms<2, int, 2, int, int>(16));
+          break;
+      }
       break;
     }
 

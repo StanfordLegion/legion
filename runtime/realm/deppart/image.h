@@ -124,14 +124,31 @@ namespace Realm {
     virtual ~StructuredImageMicroOpBase(void);
     virtual void execute(void);
 
-     void dispatch(PartitioningOperation *op, bool inline_ok);
-     void add_sparsity_output(IndexSpace<N2, T2> _source,
-                              SparsityMap<N, T> _sparsity);
+    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
-    protected:
-     IndexSpace<N, T> parent_space;
-     std::vector<IndexSpace<N2, T2>> sources;
-     std::vector<SparsityMap<N, T>> sparsity_outputs;
+    void dispatch(PartitioningOperation* op, bool inline_ok);
+    void add_sparsity_output(IndexSpace<N2, T2> _source,
+                             SparsityMap<N, T> _sparsity);
+
+   protected:
+    IndexSpace<N, T> parent_space;
+    std::vector<IndexSpace<N2, T2>> sources;
+    std::vector<SparsityMap<N, T>> sparsity_outputs;
+  };
+
+  template <int N, typename T, int N2, typename T2>
+  class TranslateImageMicroOp
+      : public StructuredImageMicroOpBase<N, T, N2, T2> {
+   public:
+    TranslateImageMicroOp(const IndexSpace<N, T>& _parent,
+                          const TranslationTransform<N, N2, T2>& _transform);
+
+    virtual ~TranslateImageMicroOp(void);
+
+    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
+
+   protected:
+    TranslationTransform<N, N2, T2> transform;
   };
 
   template <int N, typename T, int N2, typename T2>
@@ -142,19 +159,7 @@ namespace Realm {
 
     virtual ~AffineImageMicroOp(void);
 
-    virtual void execute(void);
-
-    void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
-
-    void intersect_dense_transform(
-        std::map<int, HybridRectangleList<N, T>*>& bitmasks,
-        const Rect<N, T>& parent_bbox,
-        const std::vector<Rect<N, T>>& parent_rects);
-
-    void intersect_sparse_transform(
-        std::map<int, HybridRectangleList<N, T>*>& bitmasks,
-        const Rect<N, T>& parent_bbox,
-        const std::vector<Rect<N, T>>& parent_rects);
+    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
    protected:
     AffineTransform<N, N2, T2> transform;
@@ -164,26 +169,26 @@ namespace Realm {
   class StructuredImageOperation : public PartitioningOperation {
    public:
     StructuredImageOperation(const IndexSpace<N, T>& _parent,
-                             const TRANSFORM& transform,
+                             const TRANSFORM& _transform,
                              const ProfilingRequestSet& reqs,
                              GenEventImpl* _finish_event,
                              EventImpl::gen_t _finish_gen);
 
     virtual ~StructuredImageOperation(void);
 
-    IndexSpace<N,T> add_source(const IndexSpace<N2,T2>& source);
+    IndexSpace<N, T> add_source(const IndexSpace<N2, T2>& source);
 
     virtual void execute(void);
 
     virtual void print(std::ostream& os) const;
 
    protected:
-    IndexSpace<N,T> parent;
-    std::vector<IndexSpace<N2,T2> > sources;
-    std::vector<SparsityMap<N,T> > images;
+    IndexSpace<N, T> parent;
+    std::vector<IndexSpace<N2, T2>> sources;
+    std::vector<SparsityMap<N, T>> images;
     TRANSFORM transform;
   };
-};
+  };  // namespace Realm
 
 #include "realm/deppart/image.inl"
 

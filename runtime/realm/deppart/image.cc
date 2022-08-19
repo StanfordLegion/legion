@@ -741,8 +741,46 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void StructuredImageMicroOpBase<N, T, N2, T2>::execute() {
+  void StructuredImageMicroOpBase<N, T, N2, T2>::populate(
+      std::map<int, HybridRectangleList<N, T> *> &bitmasks) {
+    // Should never be caled.
     assert(true);
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void StructuredImageMicroOpBase<N, T, N2, T2>::execute(void) {
+    TimeStamp ts("StructuredImageMicroOp::execute", true, &log_uop_timing);
+
+    if (!sparsity_outputs.empty()) {
+      std::map<int, HybridRectangleList<N, T> *> rect_map;
+
+      populate(rect_map);
+
+#ifdef DEBUG_PARTITIONING
+      std::cout << rect_map.size() << " non-empty images present in instance "
+                << inst << std::endl;
+      for (typename std::map<int, DenseRectangleList<N, T> *>::const_iterator
+               it = rect_map.begin();
+           it != rect_map.end(); it++)
+        std::cout << "  " << sources[it->first] << " = "
+                  << it->second->rects.size() << " rectangles" << std::endl;
+#endif
+
+      // iterate over sparsity outputs and contribute to all (even if we didn't
+      // have any points found for it)
+      for (size_t i = 0; i < sparsity_outputs.size(); i++) {
+        SparsityMapImpl<N, T> *impl =
+            SparsityMapImpl<N, T>::lookup(sparsity_outputs[i]);
+        typename std::map<int, HybridRectangleList<N, T> *>::const_iterator
+            it2 = rect_map.find(i);
+        if (it2 != rect_map.end()) {
+          impl->contribute_dense_rect_list(it2->second->convert_to_vector(),
+                                           false /*!disjoint*/);
+          delete it2->second;
+        } else
+          impl->contribute_nothing();
+      }
+    }
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -751,7 +789,8 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
-      const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
+      const IndexSpace<N, T> &_parent, const TRANSFORM& _transform,
+   //   const typename StructuredTransform<N, T, N2, T2>::Base *_transform,
       const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
       EventImpl::gen_t _finish_gen)
       : PartitioningOperation(reqs, _finish_event, _finish_gen),
@@ -759,8 +798,7 @@ namespace Realm {
         transform(_transform) {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  StructuredImageOperation<N, T, N2, T2,
-                           TRANSFORM>::~StructuredImageOperation() {}
+  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::~StructuredImageOperation() {}
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   IndexSpace<N, T>
@@ -798,7 +836,7 @@ namespace Realm {
     }
 
     StructuredImageMicroOpBase<N, T, N2, T2> *micro_op =
-        transform.template create_image_op<T>(parent);
+        transform.create_image_op(parent, sources);
 
     for (size_t j = 0; j < sources.size(); j++) {
       micro_op->add_sparsity_output(sources[j], images[j]);

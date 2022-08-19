@@ -34,43 +34,36 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class TranslationTransform<M, N, T>
+
+  template <int M, int N, typename T>
+  inline TranslationTransform<M, N, T>::TranslationTransform(
+      const Point<M, T>& _offset)
+      : offset(_offset) {}
+
+  template <int M, int N, typename T>
+  template <typename T2>
+  inline Realm::Point<M, T> TranslationTransform<M, N, T>::operator[](
+      const Realm::Point<M, T2>& point) const {
+    return point + offset;
+ //   return (transform * point) + offset;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class AfineTransform<M, N, T>
 
   template <int M, int N, typename T>
   template <typename T2, typename T3>
   inline AffineTransform<M, N, T>::AffineTransform(
       const Realm::Matrix<M, N, T2>& _transform, const Point<M, T3>& _offset)
-      : transform(_transform), offset(_offset), dense(compute_if_dense()) {}
+      : transform(_transform), offset(_offset) {}
 
   template <int M, int N, typename T>
   template <typename T2>
   inline Realm::Point<M, T> AffineTransform<M, N, T>::operator[](
       const Realm::Point<N, T2>& point) const {
     return (transform * point) + offset;
-  }
-
-  template <int M, int N, typename T>
-  inline bool AffineTransform<M, N, T>::is_dense() const {
-    return dense;
-  }
-
-  template <int M, int N, typename T>
-  inline bool AffineTransform<M, N, T>::compute_if_dense() const {
-    if (M != N) return false;
-
-    for (int i = 0; i < M; i++) {
-      int count = 0;
-      for (int j = 0; j < N; j++)
-        if (transform[i][j] == 1) count++;
-      for (int j = 0; j < N; j++) {
-        if (i == j) {
-          if (transform[i][j] != 1 && count != 1) return false;
-        } else {
-          if (transform[i][j] != 0 && count != 1) return false;
-        }
-      }
-    }
-    return true;
   }
 
   ////////////////////////////////////////////////////////////////////////
