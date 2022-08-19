@@ -66,7 +66,6 @@ void sigalrm_handler(int sig)
 template <int N, typename T>
 void dump_sparse_index_space(const char *pfx, IndexSpace<N,T> is)
 {
-  return;
   std::cout << pfx << ": " << is << "\n";
   if(!is.sparsity.exists()) return;
   SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();
@@ -2512,21 +2511,16 @@ std::vector<TranslationTransform<N2, T2>> create_translate_transforms(int size) 
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
 std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
-
   std::vector<AffineTransform<N2, N1, T2>> transforms;
 
   {
-   AffineTransform<N2, N1, T2> transpose;
+    AffineTransform<N2, N1, T2> transpose;
     for (int i = 0; i < N2; i++) {
       for (int j = 0; j < N1; j++) {
         transpose.transform[i][j] = (i == N1 - j - 1);
       }
     }
-
     transpose.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-  //    transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
     transforms.push_back(transpose);
   }
 
@@ -2538,9 +2532,6 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
       }
     }
     translate.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-    //  translate.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
     transforms.push_back(translate);
   }
 
@@ -2578,6 +2569,21 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
     transforms.push_back(reflect);
   }
   return transforms;
+}
+
+TestInterface* run_structured_test(TransformType type, int argc, char **argv) {
+  switch (type) {
+    case TransformType::Affine:
+          return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
+              argc, const_cast<const char **>(argv),
+              create_affine_transforms<2, int, 2, int, int>());
+    case TransformType::Translation:
+      return new RandomAffineTest<2, int, 2, int, int,
+                                     TranslationTransform<2, int>>(
+          argc, const_cast<const char **>(argv),
+          create_translate_transforms<2, int, 2, int, int>(16));
+  }
+  return nullptr;
 }
 
 int main(int argc, char **argv) {
@@ -2639,20 +2645,7 @@ int main(int argc, char **argv) {
       if (i < argc - 1 && !strcmp(argv[++i], "-type")) {
         type = static_cast<TransformType>(atoi(argv[++i]));
       }
-      switch (type) {
-        case TransformType::Affine:
-          testcfg = new RandomAffineTest<2, int, 2, int, int,
-                                         AffineTransform<2, 2, int>>(
-              argc, const_cast<const char **>(argv),
-              create_affine_transforms<2, int, 2, int, int>());
-          break;
-        case TransformType::Translation:
-          testcfg = new RandomAffineTest<2, int, 2, int, int,
-                                         TranslationTransform<2, int>>(
-              argc, const_cast<const char **>(argv),
-              create_translate_transforms<2, int, 2, int, int>(16));
-          break;
-      }
+      testcfg = run_structured_test(type, argc, argv);
       break;
     }
 

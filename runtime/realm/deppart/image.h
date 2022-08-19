@@ -119,7 +119,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class StructuredImageMicroOpBase : public PartitioningMicroOp {
    public:
-    StructuredImageMicroOpBase(const IndexSpace<N, T>& parent,
+    StructuredImageMicroOpBase(const IndexSpace<N, T>& _parent,
                                const std::vector<IndexSpace<N2, T2>>& _sources);
 
     virtual ~StructuredImageMicroOpBase(void);
@@ -173,7 +173,7 @@ namespace Realm {
    public:
     StructuredImageOperation(const IndexSpace<N, T>& _parent,
                              const TRANSFORM& _transform,
-                             const ProfilingRequestSet& reqs,
+                             const ProfilingRequestSet& _reqs,
                              GenEventImpl* _finish_event,
                              EventImpl::gen_t _finish_gen);
 

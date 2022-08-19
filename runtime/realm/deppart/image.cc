@@ -694,13 +694,13 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class StructuredImageMicroOpBase
+  // class StructuredImageMicroOpBase<N, T, N2, T2>
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::StructuredImageMicroOpBase(
-      const IndexSpace<N, T> &parent,
+      const IndexSpace<N, T> &_parent,
       const std::vector<IndexSpace<N2, T2>> &_sources)
-      : parent_space(parent), sources(_sources) {}
+      : parent_space(_parent), sources(_sources) {}
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::~StructuredImageMicroOpBase() {}
@@ -708,27 +708,17 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void StructuredImageMicroOpBase<N, T, N2, T2>::dispatch(
       PartitioningOperation *op, bool inline_ok) {
-    // need valid data for each source
     for (size_t i = 0; i < sources.size(); i++) {
       if (!sources[i].dense()) {
-        // it's safe to add the count after the registration only because we
-        // initialized
-        //  the count to 2 instead of 1
-        bool registered =
-            SparsityMapImpl<N2, T2>::lookup(sources[i].sparsity)
-                ->add_waiter(this, true /*precise*/);
+        bool registered = SparsityMapImpl<N2, T2>::lookup(sources[i].sparsity)
+                              ->add_waiter(this, true /*precise*/);
         if (registered) wait_count.fetch_add(1);
       }
     }
 
-    // need valid data for the parent space too
     if (!parent_space.dense()) {
-      // it's safe to add the count after the registration only because we
-      // initialized
-      //  the count to 2 instead of 1
-      bool registered =
-          SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
-              ->add_waiter(this, true /*precise*/);
+      bool registered = SparsityMapImpl<N, T>::lookup(parent_space.sparsity)
+                            ->add_waiter(this, true /*precise*/);
       if (registered) wait_count.fetch_add(1);
     }
     this->finish_dispatch(op, inline_ok);
@@ -743,7 +733,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void StructuredImageMicroOpBase<N, T, N2, T2>::populate(
       std::map<int, HybridRectangleList<N, T> *> &bitmasks) {
-    // Should never be caled.
+    // This should never be called.
     assert(true);
   }
 
@@ -789,11 +779,10 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2, typename TRANSFORM>
   StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
-      const IndexSpace<N, T> &_parent, const TRANSFORM& _transform,
-   //   const typename StructuredTransform<N, T, N2, T2>::Base *_transform,
-      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
+      const ProfilingRequestSet &_reqs, GenEventImpl *_finish_event,
       EventImpl::gen_t _finish_gen)
-      : PartitioningOperation(reqs, _finish_event, _finish_gen),
+      : PartitioningOperation(_reqs, _finish_event, _finish_gen),
         parent(_parent),
         transform(_transform) {}
 
