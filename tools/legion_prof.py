@@ -1791,6 +1791,7 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
     def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
                  level, level_ready):
         assert self.level is not None
+        assert self.ready is not None
         assert self.start is not None
         assert self.stop is not None
         copy_name = repr(self)
@@ -1801,7 +1802,7 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
-                                ready = None,
+                                ready = self.ready,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
