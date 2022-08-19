@@ -407,7 +407,21 @@ function getMouseOver() {
     total = parseFloat(total.toFixed(3))
     delay = parseFloat(delay.toFixed(3))
     var initiation = "";
+    var provenance = "";
+    var initiation_provenance = "";
     // Insert texts in reverse order
+    if (d.op_id != -1) {
+        provenance = state.operations[d.op_id].provenance;
+    }
+    if ((d.initiation != undefined) && (d.initiation != "")) {
+        initiation_provenance = state.operations[d.initiation].provenance;
+    }
+    if (provenance != "") {
+        descTexts.push("Provenance: " + provenance);
+    }
+    if (initiation_provenance != "") {
+        descTexts.push("Initiator Provenance: " + initiation_provenance);
+    }
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
 	descTexts.push("Ready State: " + get_time_str(delay,false));
     }
@@ -2302,6 +2316,8 @@ function load_proc_timeline(proc) {
         var out = d.out === "" ? [] : JSON.parse(d.out)
         var children = d.children === "" ? [] : JSON.parse(d.children)
         var parents = d.parents === "" ? [] : JSON.parse(d.parents)
+        // if op_id is empty, then we set it to -1
+        var op_id = d.op_id == "" ? -1 : parseInt(d.op_id)
         if (total > state.resolution) {
             return {
                 id: i,
@@ -2319,6 +2335,7 @@ function load_proc_timeline(proc) {
                 children: children,
                 parents: parents,
                 prof_uid: d.prof_uid,
+                op_id: op_id,
                 proc: proc
             };
         }

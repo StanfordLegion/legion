@@ -220,11 +220,11 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "OperationInstance {"
-         << "id:" << OPERATION_INSTANCE_ID            << delim
-         << "op_id:UniqueID:" << sizeof(UniqueID)     << delim
+         << "id:" << OPERATION_INSTANCE_ID        << delim
+         << "op_id:UniqueID:" << sizeof(UniqueID) << delim
          << "parent_id:UniqueID:" << sizeof(UniqueID) << delim
-         << "kind:unsigned:"  << sizeof(unsigned)     << delim
-         << "provenance:string:"
+         << "kind:unsigned:"  << sizeof(unsigned) << delim
+         << "provenance:string:" << "-1"
          << "}" << std::endl;
 
       ss << "MultiTask {"
