@@ -698,8 +698,9 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::StructuredImageMicroOpBase(
-      const IndexSpace<N, T> &parent)
-      : parent_space(parent) {}
+      const IndexSpace<N, T> &parent,
+      const std::vector<IndexSpace<N2, T2>> &_sources)
+      : parent_space(parent), sources(_sources) {}
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::~StructuredImageMicroOpBase() {}
@@ -735,8 +736,7 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   void StructuredImageMicroOpBase<N, T, N2, T2>::add_sparsity_output(
-      IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
-    sources.push_back(_source);
+      SparsityMap<N, T> _sparsity) {
     sparsity_outputs.push_back(_sparsity);
   }
 
@@ -839,7 +839,7 @@ namespace Realm {
         transform.create_image_op(parent, sources);
 
     for (size_t j = 0; j < sources.size(); j++) {
-      micro_op->add_sparsity_output(sources[j], images[j]);
+      micro_op->add_sparsity_output(images[j]);
     }
 
     micro_op->dispatch(this, /*inline_ok=*/true);

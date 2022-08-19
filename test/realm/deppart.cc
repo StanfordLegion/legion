@@ -2496,11 +2496,11 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
-std::vector<TranslationTransform<N2, N1, T2>> create_translate_transforms(int size) {
+std::vector<TranslationTransform<N2, T2>> create_translate_transforms(int size) {
   RandStream<> rs(random_seed+2);
-  std::vector<TranslationTransform<N2, N1, T2>> transforms;
+  std::vector<TranslationTransform<N2, T2>> transforms;
   {
-    TranslationTransform<N2, N1, T2> translate;
+    TranslationTransform<N2, T2> translate;
     translate.offset = Point<N2, T2>::ZEROES();
     for (int i = 0; i < N2; i++) {
       translate.offset[i] = rs.rand_int(size - 1);
@@ -2648,7 +2648,7 @@ int main(int argc, char **argv) {
           break;
         case TransformType::Translation:
           testcfg = new RandomAffineTest<2, int, 2, int, int,
-                                         TranslationTransform<2, 2, int>>(
+                                         TranslationTransform<2, int>>(
               argc, const_cast<const char **>(argv),
               create_translate_transforms<2, int, 2, int, int>(16));
           break;

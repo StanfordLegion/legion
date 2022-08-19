@@ -119,7 +119,8 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class StructuredImageMicroOpBase : public PartitioningMicroOp {
    public:
-    StructuredImageMicroOpBase(const IndexSpace<N, T>& parent);
+    StructuredImageMicroOpBase(const IndexSpace<N, T>& parent,
+                               const std::vector<IndexSpace<N2, T2>>& _sources);
 
     virtual ~StructuredImageMicroOpBase(void);
     virtual void execute(void);
@@ -127,8 +128,7 @@ namespace Realm {
     virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
     void dispatch(PartitioningOperation* op, bool inline_ok);
-    void add_sparsity_output(IndexSpace<N2, T2> _source,
-                             SparsityMap<N, T> _sparsity);
+    void add_sparsity_output(SparsityMap<N, T> _sparsity);
 
    protected:
     IndexSpace<N, T> parent_space;
@@ -141,20 +141,23 @@ namespace Realm {
       : public StructuredImageMicroOpBase<N, T, N2, T2> {
    public:
     TranslateImageMicroOp(const IndexSpace<N, T>& _parent,
-                          const TranslationTransform<N, N2, T2>& _transform);
+                          const std::vector<IndexSpace<N2, T2>>& _sources,
+                          const TranslationTransform<N, T2>& _transform);
 
     virtual ~TranslateImageMicroOp(void);
 
     virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
    protected:
-    TranslationTransform<N, N2, T2> transform;
+    TranslationTransform<N, T2> transform;
+    Matrix<N, N2, T2> scale;
   };
 
   template <int N, typename T, int N2, typename T2>
   class AffineImageMicroOp : public StructuredImageMicroOpBase<N, T, N2, T2> {
    public:
     AffineImageMicroOp(const IndexSpace<N, T>& _parent,
+                       const std::vector<IndexSpace<N2, T2>>& _sources,
                        const AffineTransform<N, N2, T2>& _transform);
 
     virtual ~AffineImageMicroOp(void);

@@ -34,19 +34,18 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class TranslationTransform<M, N, T>
+  // class TranslationTransform<N, T>
 
-  template <int M, int N, typename T>
-  inline TranslationTransform<M, N, T>::TranslationTransform(
-      const Point<M, T>& _offset)
+  template <int N, typename T>
+  inline TranslationTransform<N, T>::TranslationTransform(
+      const Point<N, T>& _offset)
       : offset(_offset) {}
 
-  template <int M, int N, typename T>
+  template <int N, typename T>
   template <typename T2>
-  inline Realm::Point<M, T> TranslationTransform<M, N, T>::operator[](
-      const Realm::Point<M, T2>& point) const {
+  inline Realm::Point<N, T> TranslationTransform<N, T>::operator[](
+      const Realm::Point<N, T2>& point) const {
     return point + offset;
- //   return (transform * point) + offset;
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -54,9 +53,8 @@ namespace Realm {
   // class AfineTransform<M, N, T>
 
   template <int M, int N, typename T>
-  template <typename T2, typename T3>
   inline AffineTransform<M, N, T>::AffineTransform(
-      const Realm::Matrix<M, N, T2>& _transform, const Point<M, T3>& _offset)
+      const Realm::Matrix<M, N, T>& _transform, const Point<M, T>& _offset)
       : transform(_transform), offset(_offset) {}
 
   template <int M, int N, typename T>

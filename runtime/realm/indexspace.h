@@ -90,22 +90,23 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class AffineImageMicroOp;
 
-  template <int M, int N, typename T = int>
+  template <int N, typename T = int>
   class REALM_PUBLIC_API TranslationTransform {
    public:
     TranslationTransform(void) = default;
-    TranslationTransform(const Point<M, T>& _offset);
+    TranslationTransform(const Point<N, T>& _offset);
 
     template <typename T2>
-    Realm::Point<M, T> operator[](const Realm::Point<M, T2>& point) const;
+    Realm::Point<N, T> operator[](const Realm::Point<N, T2>& point) const;
 
-    template <typename T2>
-    StructuredImageMicroOpBase<M, T2, N, T>* create_image_op(
-        const IndexSpace<M, T2>& parent, std::vector<IndexSpace<N, T>>& sources) const {
-      return new TranslateImageMicroOp<M, T2, N, T>(parent, *this);
+    template <int N2, typename T2>
+    StructuredImageMicroOpBase<N, T2, N2, T>* create_image_op(
+        const IndexSpace<N, T2>& parent,
+        std::vector<IndexSpace<N2, T>>& sources) const {
+      return new TranslateImageMicroOp<N, T2, N2, T>(parent, sources, *this);
     }
 
-    Point<M, T> offset;
+    Point<N, T> offset;
   };
 
   // AffineTransform is used to describe an affine transformation
@@ -115,71 +116,22 @@ namespace Realm {
   class REALM_PUBLIC_API AffineTransform {
    public:
     AffineTransform(void) = default;
-
-    template <typename T2, typename T3>
-    AffineTransform(const Realm::Matrix<M, N, T2>& _transform,
-                    const Point<M, T3>& _offset);
+    AffineTransform(const Realm::Matrix<M, N, T>& _transform,
+                    const Point<M, T>& _offset);
 
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
 
     template <typename T2>
     StructuredImageMicroOpBase<M, T2, N, T>* create_image_op(
-        const IndexSpace<M, T2>& parent, std::vector<IndexSpace<N, T>>& sources) const {
-      return new AffineImageMicroOp<M, T2, N, T>(parent, *this);
+        const IndexSpace<M, T2>& parent,
+        std::vector<IndexSpace<N, T>>& sources) const {
+      return new AffineImageMicroOp<M, T2, N, T>(parent, sources, *this);
     }
 
     Realm::Matrix<M, N, T> transform;
     Point<M, T> offset;
   };
-
-  /*template <int N, typename T, int N2, typename T2>
-  class REALM_PUBLIC_API StructuredTransform {
-   public:
-    class Base {
-     public:
-      virtual Realm::Point<N, T2> operator[](const Realm::Point<N2, T>& point) const {
-        std::cout << "BASE " << std::endl;
-        return Point<N, T2>();
-      }
-
-      virtual StructuredImageMicroOpBase<N, T, N2, T2>* create_image_op(
-          const IndexSpace<N, T>& parent) const {
-        return nullptr;
-      }
-    };
-
-    class AffineTransform : public Base {
-      public:
-      virtual Realm::Point<N, T2> operator[](const Realm::Point<N2, T>& point) const {
-        std::cout << "AFFINE" << std::endl;
-        return Point<N, T2>();
-      }
-
-      virtual StructuredImageMicroOpBase<N, T, N2, T2>* create_image_op(
-          const IndexSpace<N, T>& parent) const {
-        return nullptr;
-        // return new AffineImageMicroOp<M, T2, N, T>(parent, *this);
-      }
-      Point<N2, T2> offset;
-      Realm::Matrix<N, N2, T2> transform;
-    };
-
-    class TranslationTransform : public Base {
-      public:
-      virtual Realm::Point<N, T2> operator[](const Realm::Point<N2, T>& point) const {
-        std::cout << "TRANSLATE" << std::endl;
-        return Point<N, T2>();
-      }
-
-      virtual StructuredImageMicroOpBase<N, T, N2, T2>* create_image_op(
-          const IndexSpace<N, T>& parent) const {
-        return nullptr;
-        // return new AffineImageMicroOp<M, T2, N, T>(parent, *this);
-      }
-      Point<N2, T2> offset;
-    };
-  };*/
 
   class IndirectionInfo;
 
