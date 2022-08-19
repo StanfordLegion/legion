@@ -102,9 +102,7 @@ namespace Realm {
     template <int N2, typename T2>
     StructuredImageMicroOpBase<N, T2, N2, T>* create_image_op(
         const IndexSpace<N, T2>& parent,
-        std::vector<IndexSpace<N2, T>>& sources) const {
-      return new TranslateImageMicroOp<N, T2, N2, T>(parent, sources, *this);
-    }
+        std::vector<IndexSpace<N2, T>>& sources) const;
 
     Point<N, T> offset;
   };
@@ -125,9 +123,7 @@ namespace Realm {
     template <typename T2>
     StructuredImageMicroOpBase<M, T2, N, T>* create_image_op(
         const IndexSpace<M, T2>& parent,
-        std::vector<IndexSpace<N, T>>& sources) const {
-      return new AffineImageMicroOp<M, T2, N, T>(parent, sources, *this);
-    }
+        std::vector<IndexSpace<N, T>>& sources) const;
 
     Realm::Matrix<M, N, T> transform;
     Point<M, T> offset;

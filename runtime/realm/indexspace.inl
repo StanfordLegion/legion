@@ -43,9 +43,18 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename T2>
-  inline Realm::Point<N, T> TranslationTransform<N, T>::operator[](
-      const Realm::Point<N, T2>& point) const {
+  inline Point<N, T> TranslationTransform<N, T>::operator[](
+      const Point<N, T2>& point) const {
     return point + offset;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline StructuredImageMicroOpBase<N, T2, N2, T>*
+  TranslationTransform<N, T>::create_image_op(
+        const IndexSpace<N, T2>& parent,
+        std::vector<IndexSpace<N2, T>>& sources) const {
+    return new TranslateImageMicroOp<N, T2, N2, T>(parent, sources, *this);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -54,14 +63,23 @@ namespace Realm {
 
   template <int M, int N, typename T>
   inline AffineTransform<M, N, T>::AffineTransform(
-      const Realm::Matrix<M, N, T>& _transform, const Point<M, T>& _offset)
+      const Matrix<M, N, T>& _transform, const Point<M, T>& _offset)
       : transform(_transform), offset(_offset) {}
 
   template <int M, int N, typename T>
   template <typename T2>
-  inline Realm::Point<M, T> AffineTransform<M, N, T>::operator[](
-      const Realm::Point<N, T2>& point) const {
+  inline Point<M, T> AffineTransform<M, N, T>::operator[](
+      const Point<N, T2>& point) const {
     return (transform * point) + offset;
+  }
+
+  template <int M, int N, typename T>
+  template <typename T2>
+  inline StructuredImageMicroOpBase<M, T2, N, T>*
+  AffineTransform<M, N, T>::create_image_op(
+      const IndexSpace<M, T2>& parent,
+      std::vector<IndexSpace<N, T>>& sources) const {
+    return new AffineImageMicroOp<M, T2, N, T>(parent, sources, *this);
   }
 
   ////////////////////////////////////////////////////////////////////////
