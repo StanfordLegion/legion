@@ -2128,8 +2128,6 @@ namespace Legion {
                                const std::vector<PhysicalManager*> &sources,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
-                               std::map<InstanceView*,
-                                        size_t> &view_collective_arrivals,
                                UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                const char *log_name,
@@ -2153,7 +2151,6 @@ namespace Legion {
               (req.handle_type == LEGION_REGION_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
-      assert(view_collective_arrivals.empty());
 #endif
       RegionNode *region_node = get_node(req.region);
       const FieldMask user_mask = 
@@ -2171,36 +2168,14 @@ namespace Legion {
       // Should be recording or must be read-only
       assert(record_valid || IS_READ_ONLY(req));
 #endif
-      std::set<RtEvent> deferral_events;
-      const FieldMaskSet<EquivalenceSet> &eq_sets =
-        version_info.get_equivalence_sets();
-      // Being by converting all the target views
-      bool first_local = true;
-      std::vector<IndividualView*> source_views;
-      LegionVector<FieldMaskSet<InstanceView> > target_views;
-      CollectiveMapping *analysis_mapping = NULL;
-      RtEvent collective_precondition;
-      if (!collective_rendezvous)
-        context->convert_analysis_views(targets, target_views);
-      else
-        first_local = context->convert_collective_views(op, index,
-            req.region, targets, analysis_mapping, target_views,
-            view_collective_arrivals, collective_precondition);
-      if (!sources.empty())
-        context->convert_individual_views(sources, source_views);
-      analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
-                                    targets, target_views, source_views, 
-                                    view_collective_arrivals, trace_info,
-                                    analysis_mapping, precondition,
-                                    term_event, check_initialized,
-                                    record_valid, first_local);
-      analysis->add_reference();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events, collective_precondition);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      analysis = new UpdateAnalysis(runtime, op, index, req, region_node, 
+                                    trace_info, precondition, term_event,
+                                    check_initialized, record_valid);
+      analysis->add_reference(); 
+      const RtEvent views_ready = analysis->convert_views(req.region,
+                                      targets, &sources, collective_rendezvous);
+      const RtEvent traversal_done =
+       analysis->start_traversal(views_ready, version_info, map_applied_events);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
@@ -2208,24 +2183,21 @@ namespace Legion {
       // Then perform the updates
       const RtEvent updates_ready = 
         analysis->perform_updates(traversal_done, map_applied_events);
-      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
-        delete analysis_mapping;
       return Runtime::merge_events(remote_ready, updates_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_registration(
-                           UpdateAnalysis *analysis, InstanceSet &targets,
-                           const std::map<InstanceView*,
-                                          size_t> &collective_arrivals,
-                           const PhysicalTraceInfo &trace_info,
-                           std::set<RtEvent> &map_applied_events,
-                           bool symbolic /*=false*/)
+                           UpdateAnalysis *analysis, 
+                           std::set<RtEvent> &map_applied_events, bool symbolic)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
       if (analysis == NULL)
         return ApEvent::NO_AP_EVENT;
+      analysis->perform_registration(RtEvent::NO_RT_EVENT,
+          analysis->usage, map_applied_events, symbolic);
+#if 0
       // We can skip this if the term event is a 
       // no-event (happens with post-mapping and copies)
       if (analysis->term_event.exists())
@@ -2346,6 +2318,8 @@ namespace Legion {
               analysis->op, analysis->index, exclusive);
         }
       }
+#endif
+      analysis->find_atomic_reservations();
       // Perform any output copies (e.g. for restriction) that need to be done
       ApEvent result;
       if (analysis->has_output_updates())
@@ -2367,21 +2341,20 @@ namespace Legion {
                                        InstanceSet &targets,
                                        const std::vector<PhysicalManager*> &src,
                                        const PhysicalTraceInfo &trace_info,
-                                       const bool collective_rendezvous,
                                        std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
                                        const char *log_name,
                                        UniqueID uid,
 #endif
+                                       const bool collective_rendezvous,
                                        const bool record_valid,
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
     {
       UpdateAnalysis *analysis = NULL;
-      std::map<InstanceView*,size_t> view_collective_arrivals;
       const RtEvent registration_precondition = physical_perform_updates(req,
          version_info, op, index, precondition, term_event, targets, src,
-         trace_info, map_applied_events, view_collective_arrivals, analysis,
+         trace_info, map_applied_events, analysis,
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
@@ -2390,24 +2363,19 @@ namespace Legion {
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();
-      return physical_perform_registration(analysis, targets,
-          view_collective_arrivals, trace_info, map_applied_events);
+      return physical_perform_registration(analysis, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
-                         UpdateAnalysis *analysis, InstanceSet &targets,
-                         std::map<InstanceView*,size_t> &collective_arrivals,
-                         std::set<RtEvent> &map_applied_events,
-                         ApEvent &result, const PhysicalTraceInfo &info,
-                         bool symbolic)
+                UpdateAnalysis *analysis, std::set<RtEvent> &map_applied_events,
+                ApEvent &result, bool symbolic)
     //--------------------------------------------------------------------------
     {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result,
-                             collective_arrivals, info, symbolic);
+                             analysis,  map_applied_done, result, symbolic);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2419,9 +2387,8 @@ namespace Legion {
       const DeferPhysicalRegistrationArgs *dargs =
         (const DeferPhysicalRegistrationArgs*)args;
       std::set<RtEvent> applied_events;
-      dargs->result = physical_perform_registration(dargs->analysis,
-                        dargs->targets, dargs->view_collective_arrivals,
-                        *dargs, applied_events, dargs->symbolic);
+      dargs->result = physical_perform_registration(dargs->analysis, 
+          applied_events, dargs->symbolic);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
@@ -2429,7 +2396,6 @@ namespace Legion {
         Runtime::trigger_event(dargs->map_applied_done);
       if (dargs->analysis->remove_reference())
         delete dargs->analysis;
-      dargs->remove_recorder_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -2454,52 +2420,20 @@ namespace Legion {
       assert(IS_EXCLUSIVE(req));
 #endif
       const bool known_targets = !restricted_instances.empty();
-      LegionVector<FieldMaskSet<InstanceView> > restricted_views;
-      bool first_local = true;
-      CollectiveMapping *analysis_mapping = NULL;
-      std::map<InstanceView*,size_t> collective_arrivals;
-      RtEvent collective_precondition;
-      if (known_targets)
-      {
-        InnerContext *context = op->find_physical_context(index);
-        if (op->perform_collective_analysis(analysis_mapping, first_local))
-        {
-          if (analysis_mapping != NULL)
-          {
-            std::vector<IndividualView*> views(restricted_instances.size());
-            context->convert_individual_views(restricted_instances, views,
-                                              analysis_mapping);
-            restricted_views.resize(views.size());
-            for (unsigned idx = 0; idx < views.size(); idx++)
-              restricted_views[idx].insert(views[idx],
-                  restricted_instances[idx].get_valid_fields());
-          }
-          else
-            first_local = context->convert_collective_views(op, index,
-                req.region, restricted_instances, analysis_mapping,
-                restricted_views, collective_arrivals, collective_precondition);
-        }
-        else
-          context->convert_analysis_views(restricted_instances,
-                                          restricted_views);
-      }
-      // Iterate through the equivalence classes and find all the restrictions
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      AcquireAnalysis analysis(runtime, op, index, local_expr,
-                               analysis_mapping, first_local);
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events, collective_precondition);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      AcquireAnalysis *analysis = new AcquireAnalysis(runtime, op, index,
+                                                      local_expr, trace_info);
+      analysis->add_reference();
+      RtEvent views_ready;
+      if (known_targets)
+        views_ready = analysis->convert_views(req.region, restricted_instances);
+      // Iterate through the equivalence classes and find all the restrictions
+      const RtEvent traversal_done =
+       analysis->start_traversal(views_ready, version_info, map_applied_events);
       RtEvent remote_ready;
-      if (traversal_done.exists() || analysis.has_remote_sets())
+      if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
-          analysis.perform_remote(traversal_done, map_applied_events);
+          analysis->perform_remote(traversal_done, map_applied_events);
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
       const size_t op_ctx_index = op->get_ctx_index();
@@ -2510,9 +2444,10 @@ namespace Legion {
       if (!known_targets)
       {
         FieldMaskSet<LogicalView> instances;
-        analysis.report_instances(instances);
-        restricted_views.resize(instances.size());
+        analysis->report_instances(instances);
         restricted_instances.resize(instances.size());
+        analysis->target_instances.resize(instances.size());
+        analysis->target_views.resize(instances.size());
         unsigned inst_index = 0;
         // Note that all of these should be individual views.
         // The only way to get collective restricted view is by
@@ -2528,12 +2463,14 @@ namespace Legion {
           assert(it->first->is_individual_view());
 #endif         
           IndividualView *inst_view = it->first->as_individual_view();
-          restricted_instances[inst_index] = 
-            InstanceRef(inst_view->get_manager(), it->second);
-          restricted_views[inst_index].insert(inst_view, it->second);
+          PhysicalManager *manager = inst_view->get_manager();
+          restricted_instances[inst_index] = InstanceRef(manager, it->second);
+          analysis->target_instances[inst_index] = manager;
+          analysis->target_views[inst_index].insert(inst_view, it->second);
         }
       }
       // Now add users for all the instances
+      
       for (unsigned idx = 0; idx < restricted_views.size(); idx++)
       {
         const InstanceRef &ref = restricted_instances[idx];
@@ -2738,7 +2675,8 @@ namespace Legion {
                                    const std::vector<PhysicalManager*> &sources,
                                    CopyOp *op, 
                                    unsigned src_index, unsigned dst_index,
-                                   ApEvent precondition, PredEvent guard, 
+                                   ApEvent precondition, ApEvent src_ready,
+                                   ApEvent dst_ready, PredEvent guard, 
                                  const std::map<Reservation,bool> &reservations,
                                    const PhysicalTraceInfo &trace_info,
                                    std::set<RtEvent> &map_applied_events)
@@ -2785,18 +2723,10 @@ namespace Legion {
         std::vector<ApEvent> copy_preconditions;
         if (precondition.exists())
           copy_preconditions.push_back(precondition);
-        for (unsigned idx = 0; idx < src_targets.size(); idx++)
-        {
-          const ApEvent ready = src_targets[idx].get_ready_event();
-          if (ready.exists())
-            copy_preconditions.push_back(ready);
-        }
-        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-        {
-          const ApEvent ready = dst_targets[idx].get_ready_event();
-          if (ready.exists())
-            copy_preconditions.push_back(ready);
-        }
+        if (src_ready.exists())
+          copy_preconditions.push_back(src_ready);
+        if (dst_ready.exists())
+          copy_preconditions.push_back(dst_ready);
         if (!copy_preconditions.empty())
           precondition = Runtime::merge_events(&trace_info, copy_preconditions);
         ApEvent result = across->execute(op, guard, precondition,
@@ -2918,6 +2848,9 @@ namespace Legion {
                                             unsigned dst_index,
                                             const bool gather_is_range,
                                             const ApEvent init_precondition, 
+                                            const ApEvent src_ready,
+                                            const ApEvent dst_ready,
+                                            const ApEvent idx_ready,
                                             const PredEvent pred_guard,
                                             const ApEvent collective_pre,
                                             const ApEvent collective_post,
@@ -2945,12 +2878,8 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (src_ready.exists())
+        local_preconditions.push_back(src_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition = 
@@ -2981,13 +2910,9 @@ namespace Legion {
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          copy_preconditions.push_back(ready);
-      }
-      ApEvent src_indirect_ready = idx_target.get_ready_event();
+      if (dst_ready.exists())
+        copy_preconditions.push_back(dst_ready);
+      ApEvent src_indirect_ready = idx_ready;
       if (src_indirect_ready.exists())
         copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
@@ -3068,6 +2993,9 @@ namespace Legion {
                                              unsigned dst_index,
                                              const bool scatter_is_range,
                                              const ApEvent init_precondition, 
+                                             const ApEvent src_ready,
+                                             const ApEvent dst_ready,
+                                             const ApEvent idx_ready,
                                              const PredEvent pred_guard,
                                              const ApEvent collective_pre,
                                              const ApEvent collective_post,
@@ -3097,12 +3025,8 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (dst_ready.exists())
+        local_preconditions.push_back(dst_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition =
@@ -3135,13 +3059,9 @@ namespace Legion {
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          copy_preconditions.push_back(ready);
-      }
-      ApEvent dst_indirect_ready = idx_target.get_ready_event();
+      if (src_ready.exists())
+        copy_preconditions.push_back(src_ready);
+      ApEvent dst_indirect_ready = idx_ready;
       if (dst_indirect_ready.exists())
         copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
@@ -3224,6 +3144,10 @@ namespace Legion {
                               unsigned src_idx_index, unsigned dst_idx_index,
                               const bool both_are_range,
                               const ApEvent init_precondition, 
+                              const ApEvent src_ready,
+                              const ApEvent dst_ready,
+                              const ApEvent src_idx_ready,
+                              const ApEvent dst_idx_ready,
                               const PredEvent pred_guard,
                               const ApEvent collective_pre,
                               const ApEvent collective_post,
@@ -3259,18 +3183,10 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (src_ready.exists())
+        local_precondition.push_back(src_ready);
+      if (dst_ready.exists())
+        local_preconditions.push_back(dst_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition = 
@@ -3309,7 +3225,7 @@ namespace Legion {
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      ApEvent src_indirect_ready = src_idx_target.get_ready_event();
+      ApEvent src_indirect_ready = src_idx_ready;
       if (src_indirect_ready.exists())
         copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
@@ -3320,7 +3236,7 @@ namespace Legion {
         else
           src_indirect_ready = init_precondition;
       }
-      ApEvent dst_indirect_ready = dst_idx_target.get_ready_event();
+      ApEvent dst_indirect_ready = dst_idx_ready;
       if (dst_indirect_ready.exists())
         copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())

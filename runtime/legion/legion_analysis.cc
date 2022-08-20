@@ -1024,7 +1024,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_set_effects(const TraceLocalID &tlid, 
-                                                 ApEvent &rhs)
+                                        ApEvent rhs, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -1044,7 +1044,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_set_effects(tlid, rhs);
+        remote_tpl->record_set_effects(tlid, rhs, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1564,8 +1564,13 @@ namespace Legion {
             tlid.deserialize(derez);
             ApEvent postcondition;
             derez.deserialize(postcondition);
-            tpl->record_set_effects(tlid, postcondition);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_set_effects(tlid, postcondition, applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied,
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
@@ -5799,8 +5804,7 @@ namespace Legion {
                            PhysicalAnalysis *ana, const PhysicalTraceInfo &info)
       : LgTaskArgs<DeferPerformOutputArgs>(ana->op->get_unique_op_id()), 
         analysis(ana), trace_info(&info),
-        applied_event(Runtime::create_rt_user_event()),
-        effects_event(Runtime::create_ap_user_event(trace_info))
+        applied_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5814,10 +5818,8 @@ namespace Legion {
       const DeferPerformOutputArgs *dargs = (const DeferPerformOutputArgs*)args;
       std::set<RtEvent> applied_events;
       const bool on_heap = dargs->analysis->on_heap;
-      const ApEvent effects = dargs->analysis->perform_output(
+      dargs->analysis->perform_output(
           RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
-      // Get this before doing anything
-      Runtime::trigger_event(dargs->trace_info, dargs->effects_event, effects);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->applied_event, 
             Runtime::merge_events(applied_events));
@@ -5884,13 +5886,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent RegistrationAnalysis::convert_views(LogicalRegion region,
                         const InstanceSet &targets,
-                        const std::vector<PhysicalManager*> &sources,
+                        const std::vector<PhysicalManager*> *sources,
                         bool collective_rendezvous)
     //--------------------------------------------------------------------------
     {
       InnerContext *context = op->find_physical_context(index);
-      if (!sources.empty())
-        context->convert_individual_views(sources, source_views);
+      if ((sources != NULL) && !sources->empty())
+        context->convert_individual_views(*sources, source_views);
       target_instances.resize(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
         target_instances[idx] = targets[idx].get_physical_manager();
@@ -6812,7 +6814,6 @@ namespace Legion {
         const AddressSpaceID target = rit->first;
         const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent effects = Runtime::create_ap_user_event(&trace_info);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -6859,14 +6860,12 @@ namespace Legion {
           rez.serialize(updated);
           rez.serialize(remote_user_registered);
           rez.serialize(applied);
-          rez.serialize(effects);
           rez.serialize<bool>(check_initialized);
           rez.serialize<bool>(record_valid);
         }
         runtime->send_equivalence_set_remote_updates(target, rez);
         remote_events.insert(updated);
         applied_events.insert(applied);
-        effects_events.insert(effects);
       }
       return Runtime::merge_events(remote_events);
     }
@@ -6946,9 +6945,8 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
-        return args.effects_event;
+        return instances_ready;
       }
-      ApEvent result;
       if (output_aggregator != NULL)
       {
         output_aggregator->issue_updates(trace_info, term_event,
@@ -6964,11 +6962,12 @@ namespace Legion {
         if (!output_aggregator->effects_applied.has_triggered())
           applied_events.insert(output_aggregator->effects_applied);
 #endif
-        result = output_aggregator->summarize(trace_info);
+        op->record_completion_effect(
+            output_aggregator->summarize(trace_info), applied_events);
         if (output_aggregator->release_guards(op->runtime, applied_events))
           delete output_aggregator;
       }
-      return result;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
@@ -7061,8 +7060,6 @@ namespace Legion {
       derez.deserialize(remote_user_registered);
       RtUserEvent applied;
       derez.deserialize(applied);
-      ApUserEvent effects_done;
-      derez.deserialize(effects_done);
       bool check_initialized;
       derez.deserialize(check_initialized);
       bool record_valid;
@@ -7110,10 +7107,7 @@ namespace Legion {
         Runtime::trigger_event(updated);
       // If we have outputs we need for the user to be registered
       // before we can apply the output copies
-      const ApEvent result = 
-        analysis->perform_output(remote_user_registered, applied_events);
-      if (effects_done.exists())
-        Runtime::trigger_event(&trace_info, effects_done, result);
+      analysis->perform_output(remote_user_registered, applied_events);
       // Do the rest of the triggers
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -7715,7 +7709,8 @@ namespace Legion {
         const RegionRequirement &dst_req, const InstanceSet &target_insts,
         const LegionVector<FieldMaskSet<InstanceView> > &target_vws,
         const std::vector<IndividualView*> &source_vws,
-        const ApEvent pre, const PredEvent pred, const ReductionOpID red,
+        const ApEvent pre, const ApEvent dst_ready,
+        const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
         const std::vector<unsigned> &dst_idxes, 
         const PhysicalTraceInfo &t_info, const bool perf)
@@ -7726,7 +7721,7 @@ namespace Legion {
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), src_usage(src_req), 
         dst_usage(dst_req), src_region(src_req.region), 
-        dst_region(dst_req.region), targets_ready(convert_ready(target_insts)),
+        dst_region(dst_req.region), targets_ready(dst_ready),
         target_instances(convert_instances(target_insts)),
         target_views(target_vws), source_views(source_vws), precondition(pre),
         pred_guard(pred), redop(red), src_indexes(src_idxes), 
@@ -7744,8 +7739,7 @@ namespace Legion {
         AddressSpaceID prev, Operation *o, unsigned src_idx, unsigned dst_idx,
         const RegionUsage &src_use, const RegionUsage &dst_use, 
         const LogicalRegion src_reg, const LogicalRegion dst_reg, 
-        std::vector<ApEvent> &&ready,
-        std::vector<PhysicalManager*> &&target_insts,
+        const ApEvent dst_ready, std::vector<PhysicalManager*> &&target_insts,
         LegionVector<FieldMaskSet<InstanceView> > &&target_vws,
         std::vector<IndividualView*> &&source_vws,
         const ApEvent pre, const PredEvent pred, const ReductionOpID red,
@@ -7758,7 +7752,7 @@ namespace Legion {
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), src_usage(src_use),
         dst_usage(dst_use), src_region(src_reg), dst_region(dst_reg),
-        targets_ready(ready), target_instances(target_insts),
+        targets_ready(dst_ready), target_instances(target_insts),
         target_views(target_vws), source_views(source_vws), precondition(pre),
         pred_guard(pred), redop(red), src_indexes(src_idxes), 
         dst_indexes(dst_idxes), across_helpers(perf ? 
@@ -7879,10 +7873,10 @@ namespace Legion {
           rez.serialize(dst_index);
           rez.serialize(src_usage);
           rez.serialize(dst_usage);
+          rez.serialize(targets_ready);
           rez.serialize<size_t>(target_instances.size());
           for (unsigned idx = 0; idx < target_instances.size(); idx++)
           {
-            rez.serialize(targets_ready[idx]);
             rez.serialize(target_instances[idx]->did);
             rez.serialize<size_t>(target_views[idx].size());
             for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -7975,9 +7969,7 @@ namespace Legion {
                 target_views[idx].begin(); it != target_views[idx].end(); it++)
           {
             // Always instantiate the entry in the map
-            std::vector<ApEvent> &events = dst_events[it->first];
-            if (targets_ready[idx].exists())
-              events.push_back(targets_ready[idx]);
+            dst_events[it->first].push_back(targets_ready);
           }
         }
         // This is a copy-across aggregator so the destination events
@@ -8068,14 +8060,14 @@ namespace Legion {
       RegionUsage src_usage, dst_usage;
       derez.deserialize(src_usage);
       derez.deserialize(dst_usage);
+      ApEvent dst_ready;
+      derez.deserialize(dst_ready);
       size_t num_dsts;
       derez.deserialize(num_dsts);
-      std::vector<ApEvent> dst_ready(num_dsts);
       std::vector<PhysicalManager*> dst_instances(num_dsts);
       LegionVector<FieldMaskSet<InstanceView> > dst_views(num_dsts);
       for (unsigned idx1 = 0; idx1 < num_dsts; idx1++)
       {
-        derez.deserialize(dst_ready[idx1]);
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
@@ -8156,7 +8148,7 @@ namespace Legion {
       // This takes ownership of the op and the across helpers
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, 
           original_source, previous, op, src_index, dst_index,
-          src_usage, dst_usage, src_handle, dst_handle, std::move(dst_ready),
+          src_usage, dst_usage, src_handle, dst_handle, dst_ready,
           std::move(dst_instances), std::move(dst_views),
           std::move(src_views), precondition, pred_guard,
           redop, src_indexes, dst_indexes, trace_info, perfect);
@@ -8221,17 +8213,6 @@ namespace Legion {
       std::vector<PhysicalManager*> result(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
         result[idx] = instances[idx].get_physical_manager();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::vector<ApEvent> CopyAcrossAnalysis::convert_ready(
-                                                   const InstanceSet &instances)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<ApEvent> result(instances.size());
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-        result[idx] = instances[idx].get_ready_event();
       return result;
     }
 
@@ -19994,22 +19975,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(bool comp)
-      : ready_event(ApEvent::NO_AP_EVENT), manager(NULL), local(true)
+      : manager(NULL), local(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(const InstanceRef &rhs)
-      : valid_fields(rhs.valid_fields), ready_event(rhs.ready_event),
-        manager(rhs.manager), local(rhs.local)
+      : valid_fields(rhs.valid_fields), manager(rhs.manager), local(rhs.local)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(InstanceManager *man, const FieldMask &m,ApEvent r)
-      : valid_fields(m), ready_event(r), manager(man), local(true)
+    InstanceRef::InstanceRef(InstanceManager *man, const FieldMask &m)
+      : valid_fields(m), manager(man), local(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -20025,7 +20005,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       valid_fields = rhs.valid_fields;
-      ready_event = rhs.ready_event;
       local = rhs.local;
       manager = rhs.manager;
       return *this;
@@ -20036,8 +20015,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (valid_fields != rhs.valid_fields)
-        return false;
-      if (ready_event != rhs.ready_event)
         return false;
       if (manager != rhs.manager)
         return false;
@@ -20174,7 +20151,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(valid_fields);
-      rez.serialize(ready_event);
       if (manager != NULL)
         rez.serialize(manager->did);
       else
@@ -20187,7 +20163,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(valid_fields);
-      derez.deserialize(ready_event);
       DistributedID did;
       derez.deserialize(did);
       if (did == 0)
@@ -20206,7 +20181,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       valid_fields = rhs.valid_fields;
-      ready_event = rhs.ready_event;
       local = rhs.local;
       manager = rhs.manager;
       return *this;
@@ -20793,30 +20767,6 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
           refs.multi->vector[idx].remove_valid_reference(source, mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceSet::update_wait_on_events(std::set<ApEvent> &wait_on) const 
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-        if (refs.single != NULL)
-        {
-          ApEvent ready = refs.single->get_ready_event();
-          if (ready.exists())
-            wait_on.insert(ready);
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-        {
-          ApEvent ready = refs.multi->vector[idx].get_ready_event();
-          if (ready.exists())
-            wait_on.insert(ready);
-        }
       }
     }
 

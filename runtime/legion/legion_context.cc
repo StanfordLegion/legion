@@ -2761,7 +2761,7 @@ namespace Legion {
           if (!overlap)
             continue;
           physical_instances[idx1].add_instance(
-              InstanceRef(ref.get_manager(), overlap, ref.get_ready_event()));
+              InstanceRef(ref.get_manager(), overlap));
           input.chosen_instances[idx1].push_back(
               MappingInstance(ref.get_manager()));
           mask -= overlap;

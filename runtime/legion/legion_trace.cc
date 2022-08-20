@@ -1452,7 +1452,8 @@ namespace Legion {
         // We need to do this because we're not registering this as
         // a fence with the context
         physical_trace->chain_replays(this);
-        physical_trace->record_previous_template_completion(completion_event);
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -1463,7 +1464,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        physical_trace->record_previous_template_completion(completion_event);
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
         // Save this for later since we can't read it safely in mapping stage
@@ -1532,12 +1534,7 @@ namespace Legion {
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
         complete_mapping();
-        if (!template_postconditions.empty())
-          Runtime::trigger_event(NULL, completion_event, 
-              Runtime::merge_events(NULL, template_postconditions));
-        else
-          Runtime::trigger_event(NULL, completion_event);
-        need_completion_trigger = false;
+        record_completion_effects(template_postconditions);
         complete_execution();
         return;
       }
@@ -6649,7 +6646,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_effects(const TraceLocalID &tlid, 
-                                              ApEvent &rhs)
+                                 ApEvent rhs, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);

@@ -2204,7 +2204,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
       activate_task();
-      task_effects_complete = ApEvent::NO_AP_EVENT;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       outstanding_profiling_requests.store(0);
@@ -2228,12 +2227,14 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
+      region_preconditions.clear();
       source_instances.clear();
       future_memories.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       intra_space_mapping_dependences.clear();
       map_applied_conditions.clear();
+      task_completion_effects.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
       if (!profiling_info.empty())
@@ -2341,9 +2342,14 @@ namespace Legion {
         deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize(single_task_termination);
         single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
+#ifdef DEBUG_LEGION
+        assert(physical_instances.size() == region_preconditions.size());
+#endif
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           physical_instances[idx].pack_references(rez);
+        for (unsigned idx = 0; idx < region_preconditions.size(); idx++)
+          rez.serialize(region_preconditions[idx]);
         rez.serialize<size_t>(future_memories.size());
         for (unsigned idx = 0; idx < future_memories.size(); idx++)
           rez.serialize(future_memories[idx]);
@@ -2436,6 +2442,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_phy; idx++)
           physical_instances[idx].unpack_references(runtime,
                                                     derez, ready_events);
+        region_preconditions.resize(num_phy);
+        for (unsigned idx = 0; idx < num_phy; idx++)
+          derez.deserialize(region_preconditions[idx]);
         size_t num_future_memories;
         derez.deserialize(num_future_memories);
         future_memories.resize(num_future_memories);
@@ -3604,7 +3613,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent SingleTask::get_memo_completion(void) const
+    ApEvent SingleTask::get_memo_completion(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3683,12 +3692,8 @@ namespace Legion {
       if (needs_reservations)
         // We group all reservations together anyway
         tpl->get_task_reservations(this, atomic_locks);
-#ifdef DEBUG_LEGION
-      assert(!task_effects_complete.exists());
-#endif
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL);
-      task_effects_complete = single_task_termination;
       set_origin_mapped(true); // it's like this was origin mapped
     }
 
@@ -3696,10 +3701,8 @@ namespace Legion {
     void SingleTask::set_effects_postcondition(ApEvent postcondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(task_effects_complete == single_task_termination);
-#endif
-      task_effects_complete = postcondition;
+      if (postcondition != single_task_termination)
+        task_completion_effects.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4144,332 +4147,202 @@ namespace Legion {
         remote_trace_recorder->request_term_event(single_task_termination);
       }
       // Only do this the first or second time through
-      if ((defer_args == NULL) || (defer_args->invocation_count < 3))
+      if ((defer_args == NULL) || (defer_args->invocation_count < 2))
       {
-        if ((defer_args == NULL) || (defer_args->invocation_count < 2))
+        if (request_valid_instances)
         {
-          if (request_valid_instances)
+          // If the mapper wants valid instances we first need to do our
+          // versioning analysis and then call the mapper
+          if ((defer_args == NULL/*first invocation*/) ||
+              (defer_args->invocation_count == 0))
           {
-            // If the mapper wants valid instances we first need to do our
-            // versioning analysis and then call the mapper
-            if ((defer_args == NULL/*first invocation*/) ||
-                (defer_args->invocation_count == 0))
-            {
-              const RtEvent version_ready_event = 
-                perform_versioning_analysis(false/*post mapper*/);
-              if (version_ready_event.exists() && 
-                  !version_ready_event.has_triggered())
-              return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                           defer_args, 1/*invocation count*/);
-            }
-            // Now do the mapping call
+            const RtEvent version_ready_event = 
+              perform_versioning_analysis(false/*post mapper*/);
+            if (version_ready_event.exists() && 
+                !version_ready_event.has_triggered())
+            return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                         defer_args, 1/*invocation count*/);
+          }
+          // Now do the mapping call
+          if (is_replicated())
+            invoke_mapper_replicated(must_epoch_op);
+          else
+            invoke_mapper(must_epoch_op);
+        }
+        else
+        {
+          // If the mapper doesn't need valid instances, we do the mapper
+          // call first and then see if we need to do any versioning analysis
+          if ((defer_args == NULL/*first invocation*/) ||
+              (defer_args->invocation_count == 0))
+          {
             if (is_replicated())
               invoke_mapper_replicated(must_epoch_op);
             else
               invoke_mapper(must_epoch_op);
-          }
-          else
-          {
-            // If the mapper doesn't need valid instances, we do the mapper
-            // call first and then see if we need to do any versioning analysis
-            if ((defer_args == NULL/*first invocation*/) ||
-                (defer_args->invocation_count == 0))
-            {
-              if (is_replicated())
-                invoke_mapper_replicated(must_epoch_op);
-              else
-                invoke_mapper(must_epoch_op);
-              const RtEvent version_ready_event = 
-                perform_versioning_analysis(true/*post mapper*/);
-              if (version_ready_event.exists() && 
-                  !version_ready_event.has_triggered())
-              return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                           defer_args, 1/*invocation count*/);
-            }
+            const RtEvent version_ready_event = 
+              perform_versioning_analysis(true/*post mapper*/);
+            if (version_ready_event.exists() && 
+                !version_ready_event.has_triggered())
+            return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                         defer_args, 1/*invocation count*/);
           }
         }
-        // If we have any intra-space mapping dependences that haven't triggered
-        // then we need to defer ourselves until they have occurred
-        if (!intra_space_mapping_dependences.empty())
-        {
-          const RtEvent ready = 
-            Runtime::merge_events(intra_space_mapping_dependences);
-          intra_space_mapping_dependences.clear();
-          if (ready.exists() && !ready.has_triggered())
-            return defer_perform_mapping(ready, must_epoch_op,
-                                         defer_args, 2/*invocation count*/);
-        }
-        // Create our task termination event at this point
-        // Note that tracing doesn't track this as a user event, it is just
-        // a name we're making for the termination event
-        // This might already exist if it is a point task,
-        // see comment in PointTask::initialize_point for details about tracing
-        // We might also have made this event already if we have output regions
-#ifdef DEBUG_LEGION
-        assert(!single_task_termination.exists() || !output_regions.empty() ||
-                is_remote());
-#endif
-        if (!single_task_termination.exists())
-          single_task_termination = Runtime::create_ap_user_event(NULL); 
-        // See if we have a remote trace info to use, if we don't then make
-        // our trace info and do the initialization
-        const TraceInfo trace_info = is_remote() ?
-          TraceInfo(this, remote_trace_recorder, true/*initialize*/) :
-          TraceInfo(this, true/*initialize*/);
-        ApEvent init_precondition = compute_init_precondition(trace_info);
-        // After we've got our results, apply the state to the region tree
-        size_t region_count = get_region_count();
-        if (region_count > 0)
-        {
-          if (regions.size() == 1 && output_regions.empty())
-          {
-            if (!no_access_regions[0] && !virtual_mapped[0])
-            {
-              const bool record_valid = !std::binary_search(
-                  untracked_valid_regions.begin(),
-                  untracked_valid_regions.end(), 0);
-              const bool check_collective = std::binary_search(
-                  check_collective_regions.begin(),
-                  check_collective_regions.end(), 0);
-#ifdef DEBUG_LEGION
-              assert(!task_effects_complete.exists());
-#endif
-              task_effects_complete =
-                runtime->forest->physical_perform_updates_and_registration(
-                    regions[0], version_infos[0], this, 0, 
-                    init_precondition, single_task_termination,
-                    physical_instances[0], source_instances[0],
-                    PhysicalTraceInfo(trace_info, 0), map_applied_conditions,
-#ifdef DEBUG_LEGION
-                                          get_logging_name(),
-                                          unique_op_id,
-#endif
-                                          check_collective,
-                                          record_valid);
-              if (task_effects_complete.exists())
-                task_effects_complete = Runtime::merge_events(&trace_info, 
-                    task_effects_complete, single_task_termination);
-              else
-                task_effects_complete = single_task_termination;
-              if (is_recording() && 
-                  (task_effects_complete != single_task_termination))
-                trace_info.record_set_effects(task_effects_complete);
-#ifdef DEBUG_LEGION
-              dump_physical_state(&regions[0], 0);
-#endif
-            }
-          }
-          else
-          {
-            unsigned read_only_count = 0;
-            std::vector<unsigned> performed_regions;
-            performed_regions.reserve(region_count);
-            std::set<RtEvent> registration_postconditions;
-            std::vector<UpdateAnalysis*> analyses(region_count, NULL);
-            std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
-            std::vector<RtEvent> reg_pre(region_count, RtEvent::NO_RT_EVENT);
-            std::vector<
-              std::map<InstanceView*,size_t> > target_arrivals(region_count);
-            for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-            {
-              if (no_access_regions[idx])
-                continue;
-              VersionInfo &local_info = get_version_info(idx);
-              // If we virtual mapped it, there is nothing to do
-              if (virtual_mapped[idx])
-                continue;
-              performed_regions.push_back(idx);
-              const bool record_valid = !std::binary_search(
-                  untracked_valid_regions.begin(),
-                  untracked_valid_regions.end(), idx);
-              const bool check_collective = std::binary_search(
-                  check_collective_regions.begin(),
-                  check_collective_regions.end(), idx);
-              // apply the results of the mapping to the tree
-              reg_pre[idx] = runtime->forest->physical_perform_updates(
-                                          logical_regions[idx], local_info,
-                                          this, idx, init_precondition,
-                                          single_task_termination,
-                                          physical_instances[idx],
-                                          source_instances[idx],
-                                          PhysicalTraceInfo(trace_info, idx),
-                                          map_applied_conditions,
-                                          target_arrivals[idx],
-                                          analyses[idx],
-#ifdef DEBUG_LEGION
-                                          get_logging_name(),
-                                          unique_op_id,
-#endif
-                                          check_collective,
-                                          record_valid);
-              if (IS_READ_ONLY(logical_regions[idx]))
-                read_only_count++;
-            }
-            // In order to avoid cycles when mapping multiple tasks in parallel
-            // with read-only requirements, we need to guarantee that all read-only
-            // copies are issued before we can perform any registrations for the
-            // task that will be using their results.
-            if (read_only_count > 1)
-            {
-              std::vector<RtEvent> read_only_preconditions;
-              read_only_preconditions.reserve(read_only_count);
-              std::vector<unsigned> read_only_regions;
-              read_only_regions.reserve(read_only_count);
-              for (std::vector<unsigned>::const_iterator it =
-                    performed_regions.begin(); it !=
-                    performed_regions.end(); it++)
-              {
-                if (!IS_READ_ONLY(logical_regions[*it]))
-                  continue;
-                read_only_regions.push_back(*it);
-                const RtEvent precondition = reg_pre[*it];
-                if (precondition.exists())
-                  read_only_preconditions.push_back(precondition);
-              }
-              if (!read_only_preconditions.empty())
-              {
-                const RtEvent read_only_precondition =
-                  Runtime::merge_events(read_only_preconditions);
-                if (read_only_precondition.exists())
-                {
-                  for (std::vector<unsigned>::const_iterator it =
-                        read_only_regions.begin(); it !=
-                        read_only_regions.end(); it++)
-                    reg_pre[*it] = read_only_precondition;
-                }
-              }
-            }
-
-            for (std::vector<unsigned>::const_iterator it = 
-                 performed_regions.begin(); it != performed_regions.end(); it++)
-            {
-              // If we have updates for either copy launcher then defer it
-              // in order to avoid blocking here, otherwise we can just do
-              // it here as we know that we won't block
-              if (reg_pre[*it].exists() || analyses[*it]->has_output_updates())
-              {
-                InstanceSet &targets = physical_instances[*it];
-                const RtEvent registration_post = 
-                  runtime->forest->defer_physical_perform_registration(
-                                        reg_pre[*it], analyses[*it],
-                                        targets, target_arrivals[*it],
-                                        map_applied_conditions, effects[*it],
-                                        PhysicalTraceInfo(trace_info, *it),
-                                        logical_regions.is_output_created(*it));
-                registration_postconditions.insert(registration_post);
-              }
-              else
-              {
-                InstanceSet &targets = physical_instances[*it];
-                effects[*it] = runtime->forest->physical_perform_registration(
-                                        analyses[*it], targets, 
-                                        target_arrivals[*it],
-                                        PhysicalTraceInfo(trace_info, *it),
-                                        map_applied_conditions,
-                                        logical_regions.is_output_created(*it));
-              }
-            }
-            // Wait for all the registrations to be done
-            if (!registration_postconditions.empty())
-            {
-              const RtEvent registration_post = 
-                Runtime::merge_events(registration_postconditions);
-              if (registration_post.exists() && 
-                  !registration_post.has_triggered())
-              {
-                std::vector<unsigned> *performed_copy = 
-                  new std::vector<unsigned>();
-                performed_copy->swap(performed_regions);
-                std::vector<ApEvent> *effects_copy = 
-                  new std::vector<ApEvent>();
-                effects_copy->swap(effects);
-                // We'll restart down below with the third possible invocation
-                return defer_perform_mapping(registration_post, must_epoch_op,
-                                            defer_args, 3/*invocation count*/, 
-                                            performed_copy, effects_copy);
-              }
-            }
-            // Now we can do the registrations
-            std::set<ApEvent> effects_postconditions;
-            for (std::vector<unsigned>::const_iterator it =
-                 performed_regions.begin(); it != performed_regions.end(); it++)
-            {
-              if (effects[*it].exists())
-                effects_postconditions.insert(effects[*it]);
-#ifdef DEBUG_LEGION
-              RegionRequirement *req = &logical_regions[*it];
-              dump_physical_state(req, *it);
-#endif
-            }
-#ifdef DEBUG_LEGION
-            assert(!task_effects_complete.exists());
-#endif
-            if (!effects_postconditions.empty())
-            {
-              effects_postconditions.insert(single_task_termination);
-              task_effects_complete =
-                Runtime::merge_events(&trace_info, effects_postconditions);
-              if (is_recording())
-                trace_info.record_set_effects(task_effects_complete);
-            }
-            else
-              task_effects_complete = single_task_termination;
-          }
-          if (perform_postmap)
-            perform_post_mapping(trace_info);
-        } // if (!regions.empty())
-        else
-          task_effects_complete = single_task_termination;
       }
-      else // third invocation
+      // If we have any intra-space mapping dependences that haven't triggered
+      // then we need to defer ourselves until they have occurred
+      if (!intra_space_mapping_dependences.empty())
       {
+        const RtEvent ready = 
+          Runtime::merge_events(intra_space_mapping_dependences);
+        intra_space_mapping_dependences.clear();
+        if (ready.exists() && !ready.has_triggered())
+          return defer_perform_mapping(ready, must_epoch_op,
+                                       defer_args, 2/*invocation count*/);
+      }
+      // Create our task termination event at this point
+      // Note that tracing doesn't track this as a user event, it is just
+      // a name we're making for the termination event
+      // This might already exist if it is a point task,
+      // see comment in PointTask::initialize_point for details about tracing
+      // We might also have made this event already if we have output regions
 #ifdef DEBUG_LEGION
-        assert(defer_args->invocation_count == 3);
-        assert(defer_args->performed_regions != NULL);
-        assert(defer_args->effects != NULL);
+      assert(!single_task_termination.exists() || !output_regions.empty() ||
+              is_remote());
 #endif
-        // This is in case we had to defer the second part of the invocation
-        std::set<ApEvent> effects_postconditions;
-        for (std::vector<unsigned>::const_iterator it =
-              defer_args->performed_regions->begin(); it !=
-              defer_args->performed_regions->end(); it++)
+      if (!single_task_termination.exists())
+        single_task_termination = Runtime::create_ap_user_event(NULL); 
+      // See if we have a remote trace info to use, if we don't then make
+      // our trace info and do the initialization
+      const TraceInfo trace_info = is_remote() ?
+        TraceInfo(this, remote_trace_recorder, true/*initialize*/) :
+        TraceInfo(this, true/*initialize*/);
+      ApEvent init_precondition = compute_init_precondition(trace_info);
+      region_preconditions.resize(regions.size());
+      // After we've got our results, apply the state to the region tree
+      size_t region_count = get_region_count();
+      if (region_count > 0)
+      {
+        if (regions.size() == 1 && output_regions.empty())
         {
-          if ((*(defer_args->effects))[*it].exists())
-            effects_postconditions.insert((*(defer_args->effects))[*it]);
+          if (!no_access_regions[0] && !virtual_mapped[0])
+          {
+            const bool record_valid = !std::binary_search(
+                untracked_valid_regions.begin(),
+                untracked_valid_regions.end(), 0);
+            const bool check_collective = std::binary_search(
+                check_collective_regions.begin(),
+                check_collective_regions.end(), 0);
+            region_preconditions.back() =
+              runtime->forest->physical_perform_updates_and_registration(
+                  regions[0], version_infos[0], this, 0, 
+                  init_precondition, single_task_termination,
+                  physical_instances[0], source_instances[0],
+                  PhysicalTraceInfo(trace_info, 0), map_applied_conditions,
 #ifdef DEBUG_LEGION
-          RegionRequirement *req = &logical_regions[*it]; 
-          dump_physical_state(req, *it);
+                                        get_logging_name(),
+                                        unique_op_id,
 #endif
-        }
+                                        check_collective,
+                                        record_valid);
 #ifdef DEBUG_LEGION
-        assert(!task_effects_complete.exists());
+            dump_physical_state(&regions[0], 0);
 #endif
-        if (!effects_postconditions.empty())
-        {
-          const TraceInfo trace_info = is_remote() ?
-            TraceInfo(this, remote_trace_recorder) : TraceInfo(this);
-          effects_postconditions.insert(single_task_termination);
-          task_effects_complete =
-            Runtime::merge_events(&trace_info, effects_postconditions);
-          if (is_recording())
-            trace_info.record_set_effects(task_effects_complete);
+          }
         }
         else
-          task_effects_complete = single_task_termination;
-        delete defer_args->performed_regions;
-        delete defer_args->effects;
-        if (perform_postmap)
         {
-          const TraceInfo trace_info = is_remote() ?
-            TraceInfo(this, remote_trace_recorder) : TraceInfo(this);
-          perform_post_mapping(trace_info);
-        }
-      }
+          unsigned read_only_count = 0;
+          std::vector<unsigned> performed_regions;
+          performed_regions.reserve(region_count);
+          std::vector<UpdateAnalysis*> analyses(region_count, NULL);
+          std::vector<RtEvent> reg_pre(region_count, RtEvent::NO_RT_EVENT);
+          for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          {
+            if (no_access_regions[idx])
+              continue;
+            VersionInfo &local_info = get_version_info(idx);
+            // If we virtual mapped it, there is nothing to do
+            if (virtual_mapped[idx])
+              continue;
+            performed_regions.push_back(idx);
+            const bool record_valid = !std::binary_search(
+                untracked_valid_regions.begin(),
+                untracked_valid_regions.end(), idx);
+            const bool check_collective = std::binary_search(
+                check_collective_regions.begin(),
+                check_collective_regions.end(), idx);
+            // apply the results of the mapping to the tree
+            reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                        logical_regions[idx], local_info,
+                                        this, idx, init_precondition,
+                                        single_task_termination,
+                                        physical_instances[idx],
+                                        source_instances[idx],
+                                        PhysicalTraceInfo(trace_info, idx),
+                                        map_applied_conditions,
+                                        analyses[idx],
+#ifdef DEBUG_LEGION
+                                        get_logging_name(),
+                                        unique_op_id,
+#endif
+                                        check_collective,
+                                        record_valid);
+            if (IS_READ_ONLY(logical_regions[idx]))
+              read_only_count++;
+          }
+          // In order to avoid cycles when mapping multiple tasks in parallel
+          // with read-only requirements, we need to guarantee that all read-only
+          // copies are issued before we can perform any registrations for the
+          // task that will be using their results.
+          if (read_only_count > 1)
+          {
+            std::vector<RtEvent> read_only_preconditions;
+            read_only_preconditions.reserve(read_only_count);
+            std::vector<unsigned> read_only_regions;
+            read_only_regions.reserve(read_only_count);
+            for (std::vector<unsigned>::const_iterator it =
+                  performed_regions.begin(); it !=
+                  performed_regions.end(); it++)
+            {
+              if (!IS_READ_ONLY(logical_regions[*it]))
+                continue;
+              read_only_regions.push_back(*it);
+              const RtEvent precondition = reg_pre[*it];
+              if (precondition.exists())
+                read_only_preconditions.push_back(precondition);
+            }
+            if (!read_only_preconditions.empty())
+            {
+              const RtEvent read_only_precondition =
+                Runtime::merge_events(read_only_preconditions);
+              if (read_only_precondition.exists())
+              {
+                for (std::vector<unsigned>::const_iterator it =
+                      read_only_regions.begin(); it !=
+                      read_only_regions.end(); it++)
+                  reg_pre[*it] = read_only_precondition;
+              }
+            }
+          }
 
-      // If we are replicating the task then we have to extract the conditions
-      // under which each of the instances will be ready to be used
-      if (shard_manager != NULL)
-        shard_manager->extract_event_preconditions(physical_instances);
+          for (std::vector<unsigned>::const_iterator it = 
+               performed_regions.begin(); it != performed_regions.end(); it++)
+          {
+            region_preconditions[*it] = 
+              runtime->forest->physical_perform_registration(
+                                    analyses[*it], 
+                                    map_applied_conditions,
+                                    logical_regions.is_output_created(*it));
+#ifdef DEBUG_LEGION
+            RegionRequirement *req = &logical_regions[*it];
+            dump_physical_state(req, *it);
+#endif
+          }
+        }
+        if (perform_postmap)
+          perform_post_mapping(trace_info);
+      } // if (!regions.empty())
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -4477,23 +4350,22 @@ namespace Legion {
 #endif
         const TraceInfo trace_info = is_remote() ?
           TraceInfo(this, remote_trace_recorder) : TraceInfo(this);
-        std::set<ApEvent> ready_events;
         if (execution_fence_event.exists())
-          ready_events.insert(execution_fence_event);
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (!virtual_mapped[idx] && !no_access_regions[idx])
-            physical_instances[idx].update_wait_on_events(ready_events);
-        }
-        ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
+          region_preconditions.push_back(execution_fence_event);
+        ApEvent ready_event = 
+          Runtime::merge_events(&trace_info, region_preconditions);
+        if (execution_fence_event.exists())
+          region_preconditions.pop_back();
+        const TraceLocalID tlid = get_trace_local_id();
         if (!atomic_locks.empty())
         {
-          const TraceLocalID tlid = get_trace_local_id();
           trace_info.record_reservations(tlid, atomic_locks,
                                          map_applied_conditions);
 
         }
         trace_info.record_complete_replay(ready_event);
+        trace_info.record_set_effects(get_completion_event(),
+                                      map_applied_conditions);
       }
       if (remote_trace_recorder != NULL)
       {
@@ -4681,7 +4553,7 @@ namespace Legion {
               !runtime->unsafe_mapper ? get_acquired_instances_ref() : NULL);
         runtime->forest->physical_perform_updates_and_registration(
                           regions[idx], local_version_info, this, idx,
-                          completion_event/*wait for task to be done*/,
+                          single_task_termination/*wait for task to be done*/,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           result, sources, PhysicalTraceInfo(trace_info, idx), 
                           map_applied_conditions,
@@ -4738,10 +4610,8 @@ namespace Legion {
       if (!do_inner_task_optimization)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (!virtual_mapped[idx] && !no_access_regions[idx])
-            physical_instances[idx].update_wait_on_events(wait_on_events);
-        }
+          if (region_preconditions[idx].exists())
+            wait_on_events.insert(region_preconditions[idx]);
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           FutureImpl *impl = futures[idx].impl; 
@@ -4824,10 +4694,8 @@ namespace Legion {
 #endif
             // Trigger the user event when the region is 
             // actually ready to be used
-            std::set<ApEvent> ready_events;
-            physical_instances[idx].update_wait_on_events(ready_events);
-            ApEvent precondition = Runtime::merge_events(NULL, ready_events);
-            Runtime::trigger_event(NULL, unmap_events[idx], precondition);
+            Runtime::trigger_event(NULL, unmap_events[idx],
+                                   region_preconditions[idx]);
           }
           else
           { 
@@ -5298,9 +5166,9 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(is_implicit_top_level_task());
-        assert(!task_effects_complete.exists());
 #endif
-        task_effects_complete = all_children_complete;
+        AutoLock o_lock(op_lock);
+        task_completion_effects.insert(all_children_complete);
       }
       TaskOp::trigger_children_complete();
     }
@@ -6593,14 +6461,20 @@ namespace Legion {
         RtEvent precondition;
         if (!completion_preconditions.empty())
           precondition = Runtime::merge_events(completion_preconditions);
+        if (!task_completion_effects.empty())
+          must_epoch->record_completion_effects(task_completion_effects);
         must_epoch->notify_subop_complete(this, precondition);
         complete_operation();
       }
       else
       {
-        if (!request_early_complete(task_effects_complete))
-          completion_preconditions.insert(
-              Runtime::protect_event(task_effects_complete));
+        if (!task_completion_effects.empty())
+        {
+          task_completion_effects.insert(single_task_termination);
+          Operation::record_completion_effects(task_completion_effects);
+        }
+        else if (single_task_termination.exists())
+          record_completion_effect(single_task_termination);
         if (!completion_preconditions.empty())
           complete_operation(Runtime::merge_events(completion_preconditions));
         else
@@ -6873,6 +6747,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      AutoLock o_lock(op_lock);
+      task_completion_effects.insert(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      AutoLock o_lock(op_lock);
+      task_completion_effects.insert(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      if (effects.empty())
+        return;
+      AutoLock o_lock(op_lock);
+      for (std::set<ApEvent>::const_iterator it =
+            effects.begin(); it != effects.end(); it++)
+        if (it->exists())
+          task_completion_effects.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::pack_remote_complete(Serializer &rez, RtEvent pre)
     //--------------------------------------------------------------------------
     {
@@ -6891,7 +6800,17 @@ namespace Legion {
       else
         rez.serialize<bool>(false);
       if (!is_origin_mapped())
-        rez.serialize(task_effects_complete);
+      {
+        if (!task_completion_effects.empty())
+        {
+          task_completion_effects.insert(single_task_termination);
+          ApEvent task_effects = 
+            Runtime::merge_events(NULL, task_completion_effects);
+          rez.serialize(task_effects);
+        }
+        else
+          rez.serialize(single_task_termination);
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -6920,7 +6839,11 @@ namespace Legion {
         }
       }
       if (!is_origin_mapped())
-        derez.deserialize(task_effects_complete);
+      {
+        ApEvent task_effects;
+        derez.deserialize(task_effects);
+        record_completion_effect(task_effects);
+      }
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution(remote_precondition);
@@ -6985,11 +6908,9 @@ namespace Legion {
       { 
 #ifdef DEBUG_LEGION
         assert(is_leaf());
+        assert(region_preconditions.empty());
 #endif
-        for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
-             it != physical_instances.end(); ++it)
-          for (unsigned idx = 0; idx < it->size(); ++idx)
-            (*it)[idx].set_ready_event(instance_ready_event);
+        region_preconditions.resize(regions.size(), instance_ready_event);
         execution_fence_event = instance_ready_event;
         update_no_access_regions();
         launch_task();
@@ -7336,8 +7257,8 @@ namespace Legion {
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
       }
-      slice_owner->record_point_mapped(applied_condition, task_effects_complete,
-                                       acquired_instances);
+      slice_owner->record_point_mapped(applied_condition,
+            single_task_termination, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
@@ -7659,14 +7580,16 @@ namespace Legion {
       assert(is_leaf());
       assert(is_origin_mapped());
       assert(!target_processors.empty());
+      assert(single_task_termination.exists());
+      assert(region_preconditions.empty());
 #endif
-      const AddressSpaceID target_space = 
+      const AddressSpaceID target_space =
         runtime->find_address_space(target_processors.front());
       // Check to see if we're replaying this locally or remotely
       if (target_space != runtime->address_space)
       {
         slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                    task_effects_complete, acquired_instances);
+                  single_task_termination, acquired_instances);
         // Record this slice as an origin-mapped slice so that it
         // will be deactivated accordingly
         slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
@@ -7687,11 +7610,8 @@ namespace Legion {
         // This is the local case
         if (!is_remote())
           slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
-                      task_effects_complete, acquired_instances);
-        for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
-             it != physical_instances.end(); ++it)
-          for (unsigned idx = 0; idx < it->size(); ++idx)
-            (*it)[idx].set_ready_event(instance_ready_event);
+                      single_task_termination, acquired_instances);
+        region_preconditions.resize(regions.size(), instance_ready_event);
         update_no_access_regions();
         launch_task();
       }
@@ -7876,10 +7796,7 @@ namespace Legion {
           manager->original_task->get_context()->get_unique_id();
       // Only make our termination event on the node where the shard will run
       if (runtime->find_address_space(proc) == runtime->address_space)
-      {
         single_task_termination = Runtime::create_ap_user_event(NULL);
-        task_effects_complete = single_task_termination;
-      }
     }
     
     //--------------------------------------------------------------------------
@@ -8054,13 +7971,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ShardTask::get_task_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_completion_event();
-    }
-
-    //--------------------------------------------------------------------------
     TaskOp::TaskKind ShardTask::get_task_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -8107,8 +8017,14 @@ namespace Legion {
                                                          preconditions);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
+      ApEvent task_effects = single_task_termination;
+      if (!task_completion_effects.empty())
+      {
+        task_completion_effects.insert(single_task_termination);
+        task_effects = Runtime::merge_events(NULL, task_completion_effects);
+      }
       const RtEvent shard_event =
-      shard_manager->trigger_task_complete(true/*local*/,task_effects_complete);
+        shard_manager->trigger_task_complete(true/*local*/, task_effects);
       if (shard_event.exists())
         preconditions.insert(shard_event);
       // See if we need to trigger that our children are complete
@@ -8311,43 +8227,6 @@ namespace Legion {
       resolve_speculation();
       // Then launch the task for execution
       launch_task();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardTask::extract_event_preconditions(
-                                   const std::deque<InstanceSet> &all_instances)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(all_instances.size() == physical_instances.size());
-#endif
-      for (unsigned region_idx = 0; 
-            region_idx < physical_instances.size(); region_idx++)
-      {
-        InstanceSet &local_instances = physical_instances[region_idx];
-        const InstanceSet &instances = all_instances[region_idx];
-        for (unsigned idx1 = 0; idx1 < local_instances.size(); idx1++)
-        {
-          InstanceRef &ref = local_instances[idx1];
-#ifdef DEBUG_LEGION
-          bool found = false;
-#endif
-          for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-          {
-            const InstanceRef &other_ref = instances[idx2];
-            if (ref.get_manager() != other_ref.get_manager())
-              continue;
-            ref.set_ready_event(other_ref.get_ready_event());
-#ifdef DEBUG_LEGION
-            found = true;
-#endif
-            break;
-          }
-#ifdef DEBUG_LEGION
-          assert(found);
-#endif
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8572,6 +8451,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_completion_effect(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_completion_effect(effect, map_applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_completion_effects(const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::has_remaining_inlining_dependences(
                    std::map<PointTask*,unsigned> &remaining,
                    std::map<RtEvent,std::vector<PointTask*> > &event_deps) const
@@ -8706,7 +8607,6 @@ namespace Legion {
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
-      complete_effects.clear();
       complete_preconditions.clear();
       commit_preconditions.clear();
       version_infos.clear();
@@ -9777,9 +9677,13 @@ namespace Legion {
                reduction_instances[2*idx+1]->copy_from(reduction_instances[idx],
                  this, reduction_instances_ready[idx]));
             }
+            std::set<ApEvent> complete_effects(
+                reduction_instances_ready.begin(),
+                reduction_instances_ready.end());
+            record_completion_effects(complete_effects);
           }
-          complete_effects.insert(reduction_instances_ready.begin(),
-                                  reduction_instances_ready.end());
+          else
+            record_completion_effect(reduction_instances_ready.back());
           reduction_future.impl->set_results(reduction_instances, 
                           reduction_metadata, reduction_metasize);
           // Clear this since we no longer own the buffer
@@ -9787,24 +9691,9 @@ namespace Legion {
           reduction_instances.clear();
           reduction_instances_ready.clear();
         }
-        // Finally we now have a complete set of effects so we can try
-        // to early trigger the completion event
-        if (!complete_effects.empty())
-        {
-          const ApEvent all_slices_complete = 
-            Runtime::merge_events(NULL, complete_effects);
-          if (!request_early_complete(all_slices_complete))
-            complete_preconditions.insert(
-                Runtime::protect_event(all_slices_complete));
-          complete_effects.clear();
-        }
       }
       else if (!elide_future_return)
         Runtime::trigger_event(future_map_ready);
-#ifdef DEBUG_LEGION
-      // Should be empty at this point
-      assert(complete_effects.empty());
-#endif
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
@@ -9938,7 +9827,6 @@ namespace Legion {
         enumerate_futures(index_domain);
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
-      complete_effects.insert(slice->get_completion_event());
       slice->enumerate_points(true/*inlining*/);
       slice->perform_inlining(variant, parent_regions);
       // Record that we had our speculation resolved too
@@ -10192,8 +10080,7 @@ namespace Legion {
         mapped_points += points;
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
-        if (slice_complete.exists())
-          complete_effects.insert(slice_complete);
+        record_completion_effect(slice_complete);
         // Already know that mapped points is the same as total points
         if (mapped_points == total_points)
         {
@@ -10229,18 +10116,6 @@ namespace Legion {
         }
         else
           complete_mapping();
-        // We can only do this here if we know there is no redop
-        // and therefore we know there will be no additional copy
-        // operations for reduction futures so complete_effects is fixed
-        if ((redop == 0) && !complete_effects.empty())
-        {
-          const ApEvent all_slices_complete = 
-            Runtime::merge_events(NULL, complete_effects);
-          if (!request_early_complete(all_slices_complete))
-            complete_preconditions.insert(
-                Runtime::protect_event(all_slices_complete));
-          complete_effects.clear();
-        }
       }
       if (trigger_children_completed)
         trigger_children_complete();
@@ -10463,12 +10338,14 @@ namespace Legion {
       const RtEvent resources_returned = (must_epoch == NULL) ?
         ResourceTracker::unpack_resources_return(derez, parent_ctx) :
         ResourceTracker::unpack_resources_return(derez, must_epoch);
+      ApEvent completion_effect;
+      derez.deserialize(completion_effect);
+      record_completion_effect(completion_effect);
       if (redop > 0)
       {
 #ifdef DEBUG_LEGION
         assert(reduction_op != NULL);
 #endif
-        bool guard_remote_completion = true;
         if (deterministic_redop)
         {
           for (unsigned idx = 0; idx < points; idx++)
@@ -10492,7 +10369,6 @@ namespace Legion {
             fold_reduction_future(&instance, reduction_effects, false/*excl*/);
             // Advance the pointer on the deserializer
             derez.advance_pointer(reduc_size);
-            guard_remote_completion = false;
           }
           else
           {
@@ -10502,12 +10378,6 @@ namespace Legion {
               FutureInstance::unpack_instance(derez, runtime); 
             reduce_future(point, instance);
           }
-        }
-        if (guard_remote_completion)
-        {
-          ApUserEvent done_event;
-          derez.deserialize(done_event);
-          Runtime::trigger_event(NULL, done_event, completion_event);
         }
         size_t metasize;
         derez.deserialize(metasize);
@@ -11766,6 +11636,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        point_completions.insert(effect);
+      }
+      else
+        index_owner->record_completion_effect(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        point_completions.insert(effect);
+      }
+      else
+        index_owner->record_completion_effect(effect, map_applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::record_completion_effects(const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      if (effects.empty())
+        return;
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        for (std::set<ApEvent>::const_iterator it =
+              effects.begin(); it != effects.end(); it++)
+          if (it->exists())
+            point_completions.insert(*it);
+      }
+      else
+        index_owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::return_privileges(TaskContext *point_context,
                                       std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -12064,10 +11983,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(point_completions.empty() || (redop > 0));
 #endif
+      if (!point_completions.empty())
+      {
+        const ApEvent completion_effects =
+          Runtime::merge_events(NULL, point_completions);
+        rez.serialize(completion_effects);
+        point_completions.clear();
+      }
+      else
+        rez.serialize(ApEvent::NO_AP_EVENT);
       // Now pack up the future results
       if (redop > 0)
       {
-        bool guard_completion = true;
         if (deterministic_redop)
         {
 #ifdef DEBUG_LEGION
@@ -12093,9 +12020,6 @@ namespace Legion {
             // Easy case just for serdez, we just pack up the local buffer
             rez.serialize(serdez_redop_state_size);
             rez.serialize(serdez_redop_state, serdez_redop_state_size);
-            // No need to guard completion here since we've already
-            // got the actual data out of all the instances
-            guard_completion = false;
           }
           else
           {
@@ -12115,22 +12039,6 @@ namespace Legion {
             else
               reduction_instance->pack_instance(rez, true/*pack ownership*/);
           }
-        }
-        if (guard_completion)
-        {
-          // In these cases we have to make sure the instances are not
-          // reclaimed until all the copies are done from them first
-          const ApUserEvent done_event = Runtime::create_ap_user_event(NULL);
-          rez.serialize(done_event);
-          // This is a slice task so we don't have to bother asking for
-          // permission to early complete the event, we know that it won't
-          // matter cause slices aren't subject to program order execution
-#ifdef DEBUG_LEGION
-          assert(need_completion_trigger);
-#endif
-          need_completion_trigger = false;
-          __sync_synchronize();
-          Runtime::trigger_event(NULL, completion_event, done_event);
         }
         if (reduction_metadata != NULL)
         {

@@ -312,7 +312,8 @@ namespace Legion {
                          const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(const TraceLocalID &tlid, 
-                                      ApEvent &rhs) = 0;
+                                      ApEvent rhs,
+                                      std::set<RtEvent> &applied) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent rhs) = 0;
       virtual void record_reservations(const TraceLocalID &tlid,
@@ -458,7 +459,8 @@ namespace Legion {
                           const std::vector<size_t> &future_size_bounds,
                           const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
+      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent rhs,
+                                      std::set<RtEvent> &applied);
       virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
@@ -571,10 +573,11 @@ namespace Legion {
           rec->record_mapper_output(tlid, output, physical_instances,
                             future_size_bounds, coordinates, applied);
         }
-      inline void record_set_effects(ApEvent &rhs) const
+      inline void record_set_effects(ApEvent rhs,
+                                     std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_set_effects(tlid, rhs);
+          rec->record_set_effects(tlid, rhs, applied);
         }
       inline void record_complete_replay(ApEvent ready_event) const
         {
@@ -1165,8 +1168,7 @@ namespace Legion {
     public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
-      InstanceRef(InstanceManager *manager, const FieldMask &valid_fields,
-                  ApEvent ready_event = ApEvent::NO_AP_EVENT);
+      InstanceRef(InstanceManager *manager, const FieldMask &valid_fields);
       ~InstanceRef(void);
     public:
       InstanceRef& operator=(const InstanceRef &rhs);
@@ -1175,8 +1177,6 @@ namespace Legion {
       bool operator!=(const InstanceRef &rhs) const;
     public:
       inline bool has_ref(void) const { return (manager != NULL); }
-      inline ApEvent get_ready_event(void) const { return ready_event; }
-      inline void set_ready_event(ApEvent ready) { ready_event = ready; }
       inline InstanceManager* get_manager(void) const { return manager; }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
@@ -1209,7 +1209,6 @@ namespace Legion {
       void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
     protected:
       FieldMask valid_fields; 
-      ApEvent ready_event;
       InstanceManager *manager;
       bool local;
     };
@@ -1279,8 +1278,6 @@ namespace Legion {
                                 ReferenceMutator *mutator) const;
       void remove_valid_references(ReferenceSource source,
                                    ReferenceMutator *mutator) const;
-    public:
-      void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -1697,7 +1694,6 @@ namespace Legion {
         PhysicalAnalysis *const analysis;
         const PhysicalTraceInfo *trace_info;
         const RtUserEvent applied_event;
-        const ApUserEvent effects_event;
       };
     public:
       // Local physical analysis
@@ -1846,11 +1842,13 @@ namespace Legion {
       virtual ~RegistrationAnalysis(void) { }
     public:
       RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
-          const std::vector<PhysicalManager*> &sources,
+          const std::vector<PhysicalManager*> *sources = NULL,
           bool collective_rendezvous = false);
     public:
-      virtual RtEvent perform_registrations(RtEvent precondition,
-          const RegionUsage &usage, std::vector<ApEvent> &registered_events);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &registered_events,
+                                           bool symbolic = false);
     public:
       const size_t context_index;
       const PhysicalTraceInfo trace_info;
@@ -1937,7 +1935,6 @@ namespace Legion {
         { return remove_reference(); } 
       virtual RtEvent start_traversal(RtEvent precondition,
                                       const VersionInfo &version_info,
-                                      std::set<RtEvent> &deferral_events,
                                       std::set<RtEvent> &applied_events);
     };
 
@@ -2095,8 +2092,7 @@ namespace Legion {
     public:
       UpdateAnalysis& operator=(const UpdateAnalysis &rhs) = delete;
     public:
-      bool has_output_updates(void) const 
-        { return (output_aggregator != NULL); }
+      void find_atomic_reservations(void);
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
@@ -2136,7 +2132,9 @@ namespace Legion {
       // For remote tracking
       RtEvent remote_user_registered;
       RtUserEvent user_registered;
-      std::set<ApEvent> effects_events;
+    public:
+      // Event for when target instances are ready
+      ApEvent instances_ready;
     };
 
     /**
@@ -2242,7 +2240,7 @@ namespace Legion {
                          const LegionVector<
                              FieldMaskSet<InstanceView> > &target_views,
                          const std::vector<IndividualView*> &source_views,
-                         const ApEvent precondition,
+                         const ApEvent precondition, const ApEvent dst_ready,
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
@@ -2254,7 +2252,7 @@ namespace Legion {
                          const RegionUsage &dst_usage,
                          const LogicalRegion src_region,
                          const LogicalRegion dst_region,
-                         std::vector<ApEvent> &&target_ready,
+                         const ApEvent dst_ready,
                          std::vector<PhysicalManager*> &&target_instances,
                          LegionVector<
                               FieldMaskSet<InstanceView> > &&target_views,
@@ -2307,8 +2305,6 @@ namespace Legion {
                             const std::vector<PhysicalManager*> &dst_instances,
                             const std::vector<unsigned> &src_indexes,
                             const std::vector<unsigned> &dst_indexes);
-      static std::vector<ApEvent> convert_ready(
-                                        const InstanceSet &instances);
       static std::vector<PhysicalManager*> convert_instances(
                                         const InstanceSet &instances);
     public:
@@ -2320,7 +2316,7 @@ namespace Legion {
       const RegionUsage dst_usage;
       const LogicalRegion src_region;
       const LogicalRegion dst_region;
-      const std::vector<ApEvent> targets_ready;
+      const ApEvent targets_ready;
       const std::vector<PhysicalManager*> target_instances;
       const LegionVector<FieldMaskSet<InstanceView> > target_views;
       const std::vector<IndividualView*> source_views;
@@ -2400,7 +2396,6 @@ namespace Legion {
     public:
       virtual RtEvent start_traversal(RtEvent precondition,
                                       const VersionInfo &version_info,
-                                      std::set<RtEvent> &deferral_events,
                                       std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
@@ -2459,7 +2454,6 @@ namespace Legion {
     public:
       virtual RtEvent start_traversal(RtEvent precondition,
                                       const VersionInfo &version_info,
-                                      std::set<RtEvent> &deferral_events,
                                       std::set<RtEvent> &applied_events);
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,

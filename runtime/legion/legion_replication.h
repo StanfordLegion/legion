@@ -1200,17 +1200,17 @@ namespace Legion {
       public:
         PendingPoint(void)
           : region(LogicalRegion::NO_REGION),
-            instances(NULL), attached_event(NULL) { }
-        PendingPoint(LogicalRegion r, InstanceSet &s, ApUserEvent &e)
-          : region(r), instances(&s), attached_event(&e) { }
+            instances(NULL), perform(NULL) { }
+        PendingPoint(LogicalRegion r, InstanceSet &s, bool &p)
+          : region(r), instances(&s), perform(&p) { }
       public:
         LogicalRegion region;
         InstanceSet *instances;
-        ApUserEvent *attached_event;
+        bool *perform;
       };
       struct RegionPoints {
       public:
-        std::map<ShardID,ApUserEvent> shard_events;
+        std::set<ShardID> shards;
         std::set<DistributedID> managers;
       };
     public:
@@ -1226,7 +1226,7 @@ namespace Legion {
       virtual RtEvent post_complete_exchange(void);
     public:
       bool record_point(PointAttachOp *point, LogicalRegion region,
-              InstanceSet &instances, ApUserEvent &attached_event);
+                        InstanceSet &instances, bool &perform);
     public:
       const size_t total_points;
     protected:
@@ -2346,7 +2346,7 @@ namespace Legion {
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local);
       virtual RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
-          InstanceSet &instances, ApUserEvent &attached_event);
+          InstanceSet &instances, bool &perform);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -2801,7 +2801,6 @@ namespace Legion {
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
       void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target);
-      void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(const std::vector<bool> &virtual_mapped);
       void distribute_shards(AddressSpaceID target,
                              const std::vector<ShardTask*> &shards);

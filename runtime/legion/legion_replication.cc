@@ -5483,11 +5483,8 @@ namespace Legion {
           // We have no local points, so we can just trigger
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
           complete_mapping(mapping_barrier);
-          // We can try to early-complete this operation too
-          if (!request_early_complete(done_event))
-            complete_execution(Runtime::protect_event(done_event));
-          else
-            complete_execution();
+          record_completion_effect(done_event);
+          complete_execution();
         }
         else // If we have valid points then we do the base call
         {
@@ -6820,7 +6817,7 @@ namespace Legion {
           MemoryManager *manager = runtime->find_memory_manager(target->memory);
           FutureInstance *shadow_instance = 
             manager->create_future_instance(this, unique_op_id,
-                completion_event, redop->sizeof_rhs, false/*eager*/);
+                get_completion_event(), redop->sizeof_rhs, false/*eager*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -6969,15 +6966,7 @@ namespace Legion {
         if (!postconditions.empty())
           local_precondition = Runtime::merge_events(NULL, postconditions);
       }
-      if (!request_early_complete(local_precondition) &&
-          local_precondition.exists())
-      {
-        const RtEvent local_done = Runtime::protect_event(local_precondition);
-        if (collective_done.exists())
-          return Runtime::merge_events(local_done, collective_done);
-        else
-          return local_done;
-      }
+      record_completion_effect(local_precondition);
       return collective_done;
     }
 
@@ -7105,11 +7094,8 @@ namespace Legion {
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
             // We can always trigger the completion event when these are done
-            if (!request_early_complete(execution_fence_barrier))
-              complete_execution(
-                  Runtime::protect_event(execution_fence_barrier));
-            else
-              complete_execution();
+            record_completion_effect(execution_fence_barrier);
+            complete_execution();
             break;
           }
         default:
@@ -8232,14 +8218,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent ReplIndexAttachOp::find_coregions(PointAttachOp *point,
-      LogicalRegion region, InstanceSet &instances, ApUserEvent &attached_event)
+                    LogicalRegion region, InstanceSet &instances, bool &perform)
     //--------------------------------------------------------------------------
     {
       // Record all the data structures that we need to update
       // No need for the lock here since we know we're exclusive
       // On the last call, we can launch the collective operation
       if (attach_coregions_collective->record_point(point, region, 
-                                                    instances, attached_event))
+                                                    instances, perform))
         attach_coregions_collective->perform_collective_async();
       // When the collective is done then all the points will have been updated 
       return attach_coregions_collective->perform_collective_wait(false);
@@ -9178,7 +9164,8 @@ namespace Legion {
         // We need to do this because we're not registering this as
         // a fence with the context
         physical_trace->chain_replays(this);
-        physical_trace->record_previous_template_completion(completion_event);
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -9190,7 +9177,8 @@ namespace Legion {
         assert(physical_trace != NULL);
 #endif
         current_template = physical_trace->get_current_template();
-        physical_trace->record_previous_template_completion(completion_event);
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
         physical_trace->clear_cached_template();
         // Get an additional mapping fence to ensure that all our prior
         // operations are done mapping before anybody tries to finalize
@@ -9294,8 +9282,7 @@ namespace Legion {
               Runtime::merge_events(NULL, template_postconditions));
         else
           Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/);
-        Runtime::trigger_event(NULL, completion_event, execution_fence_barrier);
-        need_completion_trigger = false;
+        record_completion_effect(execution_fence_barrier);
         complete_execution();
         return;
       }
@@ -10093,18 +10080,6 @@ namespace Legion {
       ShardTask *shard = new ShardTask(runtime, this, id, target);
       local_shards.push_back(shard);
       return shard;
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::extract_event_preconditions(
-                                       const std::deque<InstanceSet> &instances)
-    //--------------------------------------------------------------------------
-    {
-      // Iterate through all the shards and have them extract 
-      // their event preconditions
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
-        (*it)->extract_event_preconditions(instances);
     }
 
     //--------------------------------------------------------------------------
@@ -16498,14 +16473,11 @@ namespace Legion {
             region_points.begin(); rit != region_points.end(); rit++)
       {
         rez.serialize(rit->first);
-        rez.serialize<size_t>(rit->second.shard_events.size());
-        for (std::map<ShardID,ApUserEvent>::const_iterator it =
-              rit->second.shard_events.begin(); it !=
-              rit->second.shard_events.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
+        rez.serialize<size_t>(rit->second.shards.size());
+        for (std::set<ShardID>::const_iterator it =
+              rit->second.shards.begin(); it !=
+              rit->second.shards.end(); it++)
+          rez.serialize(*it);
         rez.serialize<size_t>(rit->second.managers.size());
         for (std::set<DistributedID>::const_iterator it =
               rit->second.managers.begin(); it != 
@@ -16532,7 +16504,7 @@ namespace Legion {
         {
           ShardID shard;
           derez.deserialize(shard);
-          derez.deserialize(region_point.shard_events[shard]);
+          region_point.shards.insert(shard);
         }
         size_t num_managers;
         derez.deserialize(num_managers);
@@ -16559,19 +16531,19 @@ namespace Legion {
             region_points.begin(); rit != region_points.end(); rit++)
       {
 #ifdef DEBUG_LEGION
-        assert(!rit->second.shard_events.empty());
+        assert(!rit->second.shards.empty());
 #endif
         ShardID owner;
-        if (rit->second.shard_events.size() > 1)
+        if (rit->second.shards.size() > 1)
         {
           // Pick the shard with the fewest owned regions
           unsigned min = UINT_MAX;
-          for (std::map<ShardID,ApUserEvent>::const_iterator it = 
-                rit->second.shard_events.begin(); it !=
-                rit->second.shard_events.end(); it++)
+          for (std::set<ShardID>::const_iterator it = 
+                rit->second.shards.begin(); it !=
+                rit->second.shards.end(); it++)
           {
             std::map<ShardID,unsigned>::const_iterator finder = 
-              shard_counts.find(it->first);
+              shard_counts.find(*it);
             if (finder == shard_counts.end())
             {
               // No counts so always wins
@@ -16587,31 +16559,13 @@ namespace Legion {
         }
         else
           // Easy case, just a single shard for this region
-          owner = rit->second.shard_events.begin()->first;
+          owner = *(rit->second.shards.begin());
         std::map<ShardID,unsigned>::iterator finder = shard_counts.find(owner);
         if (finder == shard_counts.end())
           shard_counts[owner] = 1;
         else
           finder->second++;
         owner_shards[rit->first] = owner; 
-        // Check to see if we were a participant in this region
-        // If we are and we're not the owner then we need to trigger our
-        // user event when the owner is done, in the future we could turn
-        // this into a broadast tree for better scalability, but for 
-        // simplicitly for now, we're just going to do the dumb and easy thing
-        std::map<ShardID,ApUserEvent>::const_iterator event_finder =
-          rit->second.shard_events.find(local_shard);
-        if ((event_finder != rit->second.shard_events.end()) && 
-            (owner != local_shard))
-        {
-          std::map<ShardID,ApUserEvent>::const_iterator owner_finder =
-            rit->second.shard_events.find(owner);
-#ifdef DEBUG_LEGION
-          assert(owner_finder != rit->second.shard_events.end());
-#endif
-          Runtime::trigger_event(NULL, event_finder->second, 
-                                 owner_finder->second);
-        }
       }
       // Now that we have the owner shard for each region (and this is the
       // same result across all the shards), we can now fill in the results
@@ -16631,11 +16585,11 @@ namespace Legion {
 #endif
         RegionPoints &region_point = region_points[it->second.region];
 #ifdef DEBUG_LEGION
-        assert(region_point.shard_events.find(local_shard) !=
-                region_point.shard_events.end());
+        assert(region_point.shards.find(local_shard) !=
+                region_point.shards.end());
 #endif
         // No matter what we're going to store the event here
-        *(it->second.attached_event) = region_point.shard_events[local_shard];
+        *(it->second.perform) = (owner == local_shard);
         if (owner == local_shard)
         {
           // If we're the owner, see if we're the first point for this
@@ -16677,22 +16631,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexAttachCoregions::record_point(PointAttachOp *point,
-      LogicalRegion region, InstanceSet &instances, ApUserEvent &attached_event)
+                    LogicalRegion region, InstanceSet &instances, bool &perform)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(pending_points.find(point) == pending_points.end());
       assert(pending_points.size() < total_points);
 #endif
-      pending_points[point] = PendingPoint(region, instances, attached_event);
+      pending_points[point] = PendingPoint(region, instances, perform);
       std::map<LogicalRegion,RegionPoints>::iterator finder =
         region_points.find(region);
       if (finder == region_points.end())
       {
         finder =
           region_points.insert(std::make_pair(region,RegionPoints())).first;
-        finder->second.shard_events[local_shard] = 
-          Runtime::create_ap_user_event(NULL);
+        finder->second.shards.insert(local_shard);
       }
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {

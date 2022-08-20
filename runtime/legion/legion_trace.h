@@ -1065,7 +1065,8 @@ namespace Legion {
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs,
                                             const TraceLocalID &tlid);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
+      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent rhs,
+                                      std::set<RtEvent> &applied_events);
       virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,

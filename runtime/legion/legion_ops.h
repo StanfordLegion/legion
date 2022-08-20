@@ -352,7 +352,6 @@ namespace Legion {
       inline GenerationID get_generation(void) const { return gen; }
       inline RtEvent get_mapped_event(void) const { return mapped_event; }
       inline RtEvent get_resolved_event(void) const { return resolved_event; }
-      inline ApEvent get_completion_event(void) const {return completion_event;}
       inline RtEvent get_commit_event(void) const { return commit_event; }
       inline ApEvent get_execution_fence_event(void) const 
         { return execution_fence_event; }
@@ -546,8 +545,15 @@ namespace Legion {
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const TraceInfo &info); 
       // Return the event to use for waiting for program order execution
-      virtual ApEvent get_program_order_event(void) const 
-        { return completion_event; }
+      virtual ApEvent get_program_order_event(void)
+        { return get_completion_event(); }
+      // Record an application event that needs to trigger before this
+      // operation can be considered completed
+      virtual ApEvent get_completion_event(void);
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -577,42 +583,6 @@ namespace Legion {
       // Quash this task and do what is necessary to the
       // rest of the operations in the graph
       void quash_operation(GenerationID gen, bool restart);
-    public:
-      // For operations that wish to complete early they can do so
-      // using this method which will allow them to immediately 
-      // chain an event to directly trigger the completion event
-      // Note that we don't support early completion if we're doing
-      // inorder program execution
-      inline bool request_early_complete(ApEvent chain_event) 
-        {
-          if (!runtime->program_order_execution)
-          {
-#ifdef DEBUG_LEGION
-            assert(need_completion_trigger);
-#endif
-            need_completion_trigger = false;
-            __sync_synchronize();
-            Runtime::trigger_event(NULL, completion_event, chain_event);
-            return true;
-          }
-          else
-            return false;
-        }
-      inline bool request_early_complete_no_trigger(ApUserEvent &to_trigger)
-        {
-          if (!runtime->program_order_execution)
-          {
-#ifdef DEBUG_LEGION
-            assert(need_completion_trigger);
-#endif
-            need_completion_trigger = false;
-            __sync_synchronize();
-            to_trigger = completion_event;
-            return true;
-          }
-          else
-            return false;
-        }
       // For operations that need to trigger commit early,
       // then they should use this call to avoid races
       // which could result in trigger commit being
@@ -781,11 +751,14 @@ namespace Legion {
       bool trigger_commit_invoked;
       // Keep track of whether an eary commit was requested
       bool early_commit_request;
-      // Indicate whether we are responsible for
-      // triggering the completion event for this operation
-      bool need_completion_trigger;
       // Are we tracking this operation in the parent's context
       bool track_parent;
+      // Track whether we are tracing this operation
+      bool tracing;
+      // The id local to a trace
+      size_t trace_local_id;
+      // The trace for this operation if any
+      LegionTrace *trace;
       // The enclosing context for this operation
       InnerContext *parent_ctx;
       // The prepipeline event for this operation
@@ -794,18 +767,10 @@ namespace Legion {
       RtUserEvent mapped_event;
       // The resolved event for this operation
       RtUserEvent resolved_event;
-      // The completion event for this operation
-      ApUserEvent completion_event;
       // The commit event for this operation
       RtUserEvent commit_event;
       // Previous execution fence if there was one
       ApEvent execution_fence_event;
-      // The trace for this operation if any
-      LegionTrace *trace;
-      // Track whether we are tracing this operation
-      bool tracing;
-      // The id local to a trace
-      size_t trace_local_id;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
@@ -813,6 +778,12 @@ namespace Legion {
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+    private:
+      // The completion event for this operation
+      ApUserEvent completion_event;
+      // Track the completion events for this operation in case someone
+      // decides that they are going to ask for it later
+      std::set<ApEvent> completion_effects;
     };
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -1194,7 +1165,7 @@ namespace Legion {
       virtual bool is_memoizing(void) const = 0;
       virtual AddressSpaceID get_origin_space(void) const = 0;
       virtual PhysicalTemplate* get_template(void) const = 0;
-      virtual ApEvent get_memo_completion(void) const = 0;
+      virtual ApEvent get_memo_completion(void) = 0;
       virtual void replay_mapping_output(void) = 0;
       virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
@@ -1247,7 +1218,7 @@ namespace Legion {
         { assert(false); }
       virtual void complete_replay(ApEvent complete_event)
         { assert(false); }
-      virtual ApEvent get_memo_completion(void) const
+      virtual ApEvent get_memo_completion(void)
         { return this->get_completion_event(); }
       virtual void replay_mapping_output(void) { /*do nothing*/ }
       virtual Operation::OpKind get_memoizable_kind(void) const
@@ -1343,7 +1314,7 @@ namespace Legion {
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual ApEvent get_program_order_event(void) const;
+      virtual ApEvent get_program_order_event(void);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
@@ -1432,7 +1403,9 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
       public:
         DeferredCopyAcross(CopyOp *op, const PhysicalTraceInfo &info,
-                           unsigned idx, ApEvent init, ApUserEvent local_pre,
+                           unsigned idx, ApEvent init, ApEvent sready,
+                           ApEvent dready, ApEvent gready,
+                           ApEvent cready, ApUserEvent local_pre,
                            ApUserEvent local_post, ApEvent collective_pre, 
                            ApEvent collective_post, PredEvent g, RtUserEvent a,
                            InstanceSet *src, InstanceSet *dst,
@@ -1440,8 +1413,9 @@ namespace Legion {
                            const bool preimages)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
             PhysicalTraceInfo(info), copy(op), index(idx),
-            init_precondition(init), local_precondition(local_pre),
-            local_postcondition(local_post), 
+            init_precondition(init), src_ready(sready), dst_ready(dready),
+            gather_ready(gready), scatter_ready(cready),
+            local_precondition(local_pre), local_postcondition(local_post),
             collective_precondition(collective_pre), 
             collective_postcondition(collective_post), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
@@ -1458,6 +1432,10 @@ namespace Legion {
         CopyOp *const copy;
         const unsigned index;
         const ApEvent init_precondition;
+        const ApEvent src_ready;
+        const ApEvent dst_ready;
+        const ApEvent gather_ready;
+        const ApEvent scatter_ready;
         const ApUserEvent local_precondition;
         const ApUserEvent local_postcondition;
         const ApEvent collective_precondition;
@@ -1534,6 +1512,10 @@ namespace Legion {
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
                                const ApEvent init_precondition,
+                               const ApEvent src_ready,
+                               const ApEvent dst_ready,
+                               const ApEvent gather_ready,
+                               const ApEvent scatter_ready,
                                const ApUserEvent local_precondition,
                                const ApUserEvent local_postcondition,
                                const ApEvent collective_precondition,
@@ -1737,6 +1719,10 @@ namespace Legion {
           ApEvent &collective_post, const TraceInfo &trace_info,
           const InstanceSet &instances, const RegionRequirement &req,
           std::vector<IndirectRecord> &records, const bool sources);
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -1830,9 +1816,6 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-#ifdef LEGION_SPY
-      virtual void trigger_complete(void);
-#endif
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
@@ -2274,9 +2257,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
-#ifdef LEGION_SPY
-      virtual void trigger_complete(void);
-#endif
     protected:
       VersionInfo source_version_info;
       const VersionInfo *target_version_info;
@@ -2382,9 +2362,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-#ifdef LEGION_SPY
-      virtual void trigger_complete(void);
-#endif
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       LogicalRegion parent;
@@ -2672,7 +2649,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void trigger_complete(void);
     protected:
       Future future;
       DynamicCollective collective;
@@ -3581,7 +3557,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       // A method for override with control replication
       virtual void finalize_mapping(void);
-      virtual ApEvent trigger_thunk(IndexSpace handle,
+      virtual ApEvent trigger_thunk(IndexSpace handle, ApEvent insts_ready,
                                     const InstanceSet &mapped_instances,
                                     const PhysicalTraceInfo &info);
       virtual unsigned find_parent_index(unsigned idx);
@@ -3741,11 +3717,15 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
-      virtual ApEvent trigger_thunk(IndexSpace handle,
+      virtual ApEvent trigger_thunk(IndexSpace handle, ApEvent insts_ready,
                                     const InstanceSet &mapped_instances,
                                     const PhysicalTraceInfo &trace_info);
       virtual void trigger_commit(void);
       virtual PartitionKind get_partition_kind(void) const;
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -3979,6 +3959,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -4096,13 +4080,13 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       InstanceSet external_instances;
-      ApUserEvent attached_event;
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
       ApEvent termination_event;
       bool restricted;
       bool mapping;
+      bool perform_attach;
     };
 
     /**
@@ -4145,7 +4129,7 @@ namespace Legion {
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local) { return local; }
       virtual RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
-          InstanceSet &instances, ApUserEvent &attached_event);
+          InstanceSet &instances, bool &perform);
     public:
       void handle_point_commit(void);
     protected:
@@ -4161,7 +4145,6 @@ namespace Legion {
       IndexSpaceNode*                               launch_space;
       std::vector<PointAttachOp*>                   points;
       std::map<LogicalRegion,std::vector<PointAttachOp*> >  coregions;
-      std::map<LogicalRegion,ApUserEvent>           coregions_attached;
       std::set<RtEvent>                             map_applied_conditions;
       unsigned                                      parent_req_index;
       unsigned                                      points_committed;
@@ -4191,6 +4174,10 @@ namespace Legion {
       virtual RtEvent check_for_coregions(void);
       virtual void trigger_ready(void);
       virtual void trigger_commit(void);
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;
@@ -4333,6 +4320,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     protected:
       IndexDetachOp *owner;
       DomainPoint index_point;
@@ -4514,6 +4505,10 @@ namespace Legion {
                                               RtUserEvent reported);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const = 0;
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;

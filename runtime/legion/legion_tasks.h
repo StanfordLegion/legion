@@ -534,7 +534,7 @@ namespace Legion {
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
-      virtual ApEvent get_memo_completion(void) const;
+      virtual ApEvent get_memo_completion(void);
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
     public:
@@ -556,6 +556,7 @@ namespace Legion {
       std::vector<Processor>                      target_processors;
       // Hold the result of the mapping 
       std::deque<InstanceSet>                     physical_instances;
+      std::vector<ApEvent>                        region_preconditions;
       std::vector<std::vector<PhysicalManager*> > source_instances;
       std::vector<Memory>                         future_memories;
     protected: // Mapper choices 
@@ -576,14 +577,14 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
-      // Event recording when all "effects" are complete
+      // Structure recording when all "effects" are complete
       // The effects of the task include the following:
       // 1. the execution of the task
       // 2. the execution of all child ops of the task
       // 3. all copy-out operations of child ops
       // 4. all copy-out operations of the task itself
       // Note that this definition is recursive
-      ApEvent                               task_effects_complete;
+      std::set<ApEvent>                     task_completion_effects;
     protected:
       TaskContext*                          execution_context;
       RemoteTraceRecorder*                  remote_trace_recorder;
@@ -830,8 +831,12 @@ namespace Legion {
       virtual bool is_implicit_top_level_task(void) const 
         { return implicit_top_level_task; }
 #endif
+    public:
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     protected:
-      void pack_remote_versions(Serializer &rez);
       void pack_remote_complete(Serializer &rez, RtEvent precondition);
       void pack_remote_commit(Serializer &rez);
       void unpack_remote_complete(Deserializer &derez);
@@ -987,6 +992,11 @@ namespace Legion {
                                   unsigned index, LogicalRegion region,
                                   DistributedID inst_did);
 #endif
+    public:
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public: 
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
@@ -1048,7 +1058,6 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
-      virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       // Override these methods from operation class
@@ -1080,7 +1089,6 @@ namespace Legion {
       virtual InnerContext* create_implicit_context(void);
     public:
       void launch_shard(void);
-      void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void return_resources(ResourceTracker *target,
                             std::set<RtEvent> &preconditions);
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
@@ -1298,7 +1306,6 @@ namespace Legion {
       std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> complete_effects;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
@@ -1419,6 +1426,11 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
+    public:
+      virtual void record_completion_effect(ApEvent effect);
+      virtual void record_completion_effect(ApEvent effect,
+          std::set<RtEvent> &map_applied_events);
+      virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
