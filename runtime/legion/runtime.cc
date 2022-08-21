@@ -11176,9 +11176,9 @@ namespace Legion {
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
-        unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
+        unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
