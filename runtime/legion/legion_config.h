@@ -2065,14 +2065,14 @@ typedef unsigned int legion_replication_id_t;
 typedef unsigned int legion_shard_id_t;
 typedef unsigned int legion_variant_id_t;
 typedef unsigned long long legion_distributed_id_t;
-typedef unsigned long legion_mapping_tag_id_t;
-typedef unsigned long legion_code_descriptor_id_t;
-typedef unsigned long legion_semantic_tag_t;
+typedef unsigned long long legion_mapping_tag_id_t;
+typedef unsigned long long legion_code_descriptor_id_t;
+typedef unsigned long long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
 typedef realm_task_func_id_t legion_task_id_t;
-typedef unsigned long legion_layout_constraint_id_t;
+typedef unsigned long long legion_layout_constraint_id_t;
 typedef long long legion_internal_color_t;
 
 #endif // __LEGION_CONFIG_H__

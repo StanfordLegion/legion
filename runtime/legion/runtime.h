@@ -3088,11 +3088,11 @@ namespace Legion {
       std::atomic<unsigned> unique_field_space_id;
       std::atomic<unsigned> unique_index_tree_id;
       std::atomic<unsigned> unique_region_tree_id;
-      std::atomic<unsigned> unique_operation_id;
       std::atomic<unsigned> unique_field_id; 
-      std::atomic<unsigned> unique_code_descriptor_id;
-      std::atomic<unsigned> unique_constraint_id;
-      std::atomic<unsigned> unique_is_expr_id;
+      std::atomic<unsigned long long> unique_operation_id;
+      std::atomic<unsigned long long> unique_code_descriptor_id;
+      std::atomic<unsigned long long> unique_constraint_id;
+      std::atomic<unsigned long long> unique_is_expr_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
 #endif
