@@ -686,8 +686,7 @@ namespace Legion {
         Runtime::trigger_event(mapped_event);
       if (!resolved)
         Runtime::trigger_event(resolved_event);
-      if (need_completion_trigger && 
-          !completion_event.has_triggered_faultignorant())
+      if (need_completion_trigger)
         Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
@@ -1045,7 +1044,16 @@ namespace Legion {
     {
       // Mark that we finished mapping
       complete_mapping();
-      // If we have nothing to do also mark that we have completed execution
+      // The execution stage only gets invoked if you call it explicitly
+      // We do so here to ensure that we call the complete execution method
+      trigger_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that we finished execution
       complete_execution();
     }
     
@@ -1068,35 +1076,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       commit_operation(true/*deactivate*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    {
-      // should only be called if overridden
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::deferred_commit_trigger(GenerationID our_gen)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(our_gen <= gen); // better not be ahead of where we are now
-#endif
-        if ((our_gen == gen) && !trigger_commit_invoked)
-        {
-          trigger_commit_invoked = true;
-          need_trigger = true;
-        }
-      }
-      if (need_trigger)
-        trigger_commit();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Operation::report_interfering_requirements(unsigned idx1,unsigned idx2)
@@ -1325,8 +1305,8 @@ namespace Legion {
                            LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
-      Processor p = parent_ctx->get_executing_processor();
-      runtime->add_to_local_queue(p, this, priority, wait_on);
+      TriggerOpArgs args(this);
+      runtime->issue_runtime_meta_task(args, priority, wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -1347,9 +1327,7 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         // We have to defer the execution of this operation
-        DeferredExecArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_execution_queue(this, wait_on);
         return;
       }
       // Tell our parent context that we are done mapping
@@ -1366,9 +1344,10 @@ namespace Legion {
       {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
-        TriggerCompleteArgs args(this);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         trigger_pre);
+        if (trigger_pre.exists() && !trigger_pre.has_triggered())
+          parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
+        else
+          trigger_complete();
       }
       else // Do the trigger now
         trigger_complete();
@@ -1391,9 +1370,7 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCompleteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_completion_queue(this, wait_on);
         return;
       }
       bool need_trigger = false;
@@ -1440,7 +1417,10 @@ namespace Legion {
         }
       }
       if (need_completion_trigger)
+      {
         Runtime::trigger_event(NULL, completion_event);
+        need_completion_trigger = false;
+      }
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -1466,9 +1446,7 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCommitArgs args(this, do_deactivate);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_commit_queue(this, wait_on, do_deactivate);
         return;
       }
       // Tell our parent context that we are committed
@@ -1482,10 +1460,12 @@ namespace Legion {
         // Inner task completion also relies upon this to work correctly
         if (!completion_event.has_triggered_faultignorant())
         {
-          DeferredCommitArgs args(this, do_deactivate);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(completion_event));
-          return;
+          const RtEvent safe = Runtime::protect_event(completion_event);
+          if (safe.exists() && !safe.has_triggered())
+          {
+            parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
+            return;
+          }
         }
         parent_ctx->register_child_commit(this);
       }
@@ -2037,15 +2017,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool resolve_now = true;
+      bool trigger_now = false;
       RtEvent map_precondition;
       if (!mapping_dependences.empty())
         map_precondition = Runtime::merge_events(mapping_dependences);
       if (must_epoch == NULL)
       {
-        // We always launch the task to avoid expensive recursive calls
-        DeferredReadyArgs args(op);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         map_precondition);
+        if (map_precondition.exists() && !map_precondition.has_triggered())
+          op->get_context()->add_to_ready_queue(op, map_precondition);
+        else
+          trigger_now = true;
       }
       else if (!map_precondition.has_triggered())
         must_epoch->add_mapping_dependence(map_precondition);
@@ -2056,14 +2037,14 @@ namespace Legion {
           Runtime::merge_events(resolution_dependences);
         if (!resolve_precondition.has_triggered())
         {
-          DeferredResolutionArgs args(op);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           resolve_precondition);
+          op->get_context()->add_to_resolution_queue(op, resolve_precondition);
           resolve_now = false;
         }
       }
       if (resolve_now)
         op->trigger_resolution();
+      if (trigger_now)
+        op->trigger_ready();
     }
     
     //--------------------------------------------------------------------------
@@ -2076,9 +2057,8 @@ namespace Legion {
         RtEvent commit_precondition = Runtime::merge_events(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
-          DeferredCommitTriggerArgs args(op);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           commit_precondition);
+          op->get_context()->add_to_trigger_commit_queue(op,
+                                        commit_precondition);
           return false;
         }
       }
@@ -13423,21 +13403,22 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
       if (!barrier.has_triggered_faultignorant())
       {
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         Runtime::protect_event(barrier));
+        const RtEvent safe = Runtime::protect_event(barrier);
+        if (safe.exists() && !safe.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, safe);
+        else
+          trigger_execution();
       }
       else
-        deferred_execute();
-      complete_mapping();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::deferred_execute(void)
+    void DynamicCollectiveOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
@@ -13576,17 +13557,13 @@ namespace Legion {
           future.impl->request_internal_buffer(this, false/*eager*/));
       const RtEvent ready = future.impl->subscribe();
       if (ready.exists() && !ready.has_triggered())
-      {
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                        LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::deferred_execute(void)
+    void FuturePredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       // See if we have a value
@@ -14347,6 +14324,8 @@ namespace Legion {
       output.constraint_mappings.clear();
       slice_version_events.clear();
       completion_preconditions.clear();
+      commit_preconditions.clear();
+      completion_effects.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -15319,7 +15298,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::notify_subop_commit(Operation *op)
+    void MustEpochOp::notify_subop_commit(Operation *op, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       bool need_commit;
@@ -15328,11 +15307,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
+        if (precondition.exists())
+          commit_preconditions.insert(precondition);
         remaining_subop_commits--;
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation(true/*deactivate*/);
+      {
+        RtEvent commit_precondition;
+        if (!commit_preconditions.empty())
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        commit_operation(true/*deactivate*/, commit_precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18286,19 +18272,14 @@ namespace Legion {
         // If we have a future value see if its event has triggered
         const RtEvent future_ready_event = future.impl->subscribe(); 
         if (!future_ready_event.has_triggered())
-        {
-          // Launch a task to handle the deferred complete
-          DeferredExecuteArgs deferred_execute_args(this);
-          runtime->issue_runtime_meta_task(deferred_execute_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, future_ready_event);
-        }
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
         else
-          deferred_execute(); // can do the completion now
+          trigger_execution(); // can do the completion now
       }
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deferred_execute(void)
+    void FillOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -21944,17 +21925,13 @@ namespace Legion {
         wait_on = Runtime::protect_event(
             Runtime::merge_events(NULL, pre_events));
       if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        DeferredExecuteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, wait_on);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void TimingOp::deferred_execute(void)
+    void TimingOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       switch (measurement)
@@ -22152,17 +22129,13 @@ namespace Legion {
         ready = Runtime::protect_event(
             Runtime::merge_events(NULL, pre_events));
       if (ready.exists() && !ready.has_triggered())
-      {
-        DeferredExecuteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::deferred_execute(void)
+    void TunableOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       MapperManager *mapper =
