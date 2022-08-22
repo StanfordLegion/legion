@@ -3910,18 +3910,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_local_ready_queue(Operation *op, 
-                                           LgPriority priority, RtEvent wait_on) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-#endif
-      Operation::TriggerOpArgs args(op);
-      runtime->issue_runtime_meta_task(args, priority, wait_on); 
-    }
-
-    //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
     //--------------------------------------------------------------------------
     {
@@ -11176,9 +11164,9 @@ namespace Legion {
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
-        unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
+        unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
@@ -19396,37 +19384,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, TaskOp *task,
-                                     RtEvent wait_on, bool select_options)
+    void Runtime::add_to_ready_queue(Processor p, TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        TaskOp::DeferredEnqueueArgs args(proc_managers[p], task,select_options);
-        issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, wait_on);
-      }
-      else
-      {
-        if (select_options)
-          task->select_task_options(false/*prioritize*/); 
-        proc_managers[p]->add_to_ready_queue(task);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::add_to_local_queue(Processor p, Operation *op, 
-                                     LgPriority priority, RtEvent wait_on)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(p.kind() != Processor::UTIL_PROC);
-      assert(proc_managers.find(p) != proc_managers.end());
-#endif
-      proc_managers[p]->add_to_local_ready_queue(op, priority, wait_on);
+      proc_managers[p]->add_to_ready_queue(task);
     }
 
     //--------------------------------------------------------------------------
@@ -22662,8 +22627,7 @@ namespace Legion {
                               Runtime::protect_event(pre));
       // Put the task in the ready queue, make sure that the runtime is all
       // set up across the machine before we launch it as well
-      // Also indicate that we need to select task options when ready
-      add_to_ready_queue(target, top_task, runtime_started_event, true);
+      top_task->enqueue_ready_task(false/*target*/, runtime_started_event);
       return result;
     }
 
@@ -24151,55 +24115,39 @@ namespace Legion {
             InnerContext::handle_post_end_task(args); 
             break;
           }
-        case LG_DEFERRED_READY_TRIGGER_ID:
+        case LG_TRIGGER_READY_ID:
           {
-            const Operation::DeferredReadyArgs *deferred_ready_args = 
-              (const Operation::DeferredReadyArgs*)args;
-            deferred_ready_args->proxy_this->trigger_ready();
+            InnerContext::handle_ready_queue(args);
             break;
           }
-        case LG_DEFERRED_RESOLUTION_TRIGGER_ID:
+        case LG_TRIGGER_RESOLUTION_ID:
           {
-            const Operation::DeferredResolutionArgs *deferred_resolution_args =
-              (const Operation::DeferredResolutionArgs*)args;
-            deferred_resolution_args->proxy_this->trigger_resolution();
+            InnerContext::handle_resolution_queue(args);
             break;
           }
-        case LG_DEFERRED_COMMIT_TRIGGER_ID:
+        case LG_TRIGGER_COMMIT_ID:
           {
-            const Operation::DeferredCommitTriggerArgs *deferred_commit_args =
-              (const Operation::DeferredCommitTriggerArgs*)args;
-            deferred_commit_args->proxy_this->deferred_commit_trigger(
-                deferred_commit_args->gen);
+            InnerContext::handle_trigger_commit_queue(args);
             break;
           }
-        case LG_DEFERRED_EXECUTE_ID:
+        case LG_DEFERRED_EXECUTION_ID:
           {
-            const Operation::DeferredExecArgs *deferred_exec_args = 
-              (const Operation::DeferredExecArgs*)args;
-            deferred_exec_args->proxy_this->complete_execution();
+            InnerContext::handle_deferred_execution_queue(args);
             break;
           }
-        case LG_DEFERRED_EXECUTION_TRIGGER_ID:
+        case LG_TRIGGER_EXECUTION_ID:
           {
-            const Operation::DeferredExecuteArgs *deferred_mapping_args = 
-              (const Operation::DeferredExecuteArgs*)args;
-            deferred_mapping_args->proxy_this->deferred_execute();
+            InnerContext::handle_trigger_execution_queue(args);
             break;
           }
-        case LG_DEFERRED_COMPLETE_ID:
+        case LG_DEFERRED_COMPLETION_ID:
           {
-            const Operation::DeferredCompleteArgs *deferred_complete_args =
-              (const Operation::DeferredCompleteArgs*)args;
-            deferred_complete_args->proxy_this->complete_operation();
+            InnerContext::handle_deferred_completion_queue(args);
             break;
           } 
         case LG_DEFERRED_COMMIT_ID:
           {
-            const Operation::DeferredCommitArgs *deferred_commit_args = 
-              (const Operation::DeferredCommitArgs*)args;
-            deferred_commit_args->proxy_this->commit_operation(
-                deferred_commit_args->deactivate);
+            InnerContext::handle_deferred_commit_queue(args);
             break;
           }
         case LG_DEFERRED_COLLECT_ID:
@@ -24221,11 +24169,9 @@ namespace Legion {
             InnerContext::handle_dependence_stage(args);
             break;
           }
-        case LG_TRIGGER_COMPLETE_ID:
+        case LG_TRIGGER_COMPLETION_ID:
           {
-            const Operation::TriggerCompleteArgs *trigger_complete_args =
-              (const Operation::TriggerCompleteArgs*)args;
-            trigger_complete_args->proxy_this->trigger_complete();
+            InnerContext::handle_trigger_completion_queue(args);
             break;
           }
         case LG_TRIGGER_OP_ID:
@@ -24380,13 +24326,6 @@ namespace Legion {
             IndexPartNode::handle_pending_child_task(args);
             break;
           }
-        case LG_POST_DECREMENT_TASK_ID:
-          {
-            InnerContext::PostDecrementArgs *dargs = 
-              (InnerContext::PostDecrementArgs*)args;
-            runtime->activate_context(dargs->parent_ctx);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 
@@ -24478,21 +24417,9 @@ namespace Legion {
             IndexPartNode::defer_node_child_request(args);
             break;
           }
-        case LG_DEFERRED_ENQUEUE_OP_ID:
-          {
-            const Operation::DeferredEnqueueArgs *deferred_enqueue_args = 
-              (const Operation::DeferredEnqueueArgs*)args;
-            deferred_enqueue_args->proxy_this->enqueue_ready_operation(
-                RtEvent::NO_RT_EVENT, deferred_enqueue_args->priority);
-            break;
-          }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
           {
-            const TaskOp::DeferredEnqueueArgs *enqueue_args = 
-              (const TaskOp::DeferredEnqueueArgs*)args;
-            if (enqueue_args->select_options)
-              enqueue_args->task->select_task_options(false/*prioritize*/);
-            enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
+            InnerContext::handle_enqueue_task_queue(args);
             break;
           }
         case LG_DEFER_MAPPER_MESSAGE_TASK_ID:
@@ -24505,12 +24432,9 @@ namespace Legion {
             InnerContext::handle_remote_view_creation(args);
             break;
           }
-        case LG_DEFER_DISTRIBUTE_TASK_ID:
+        case LG_DEFERRED_DISTRIBUTE_TASK_ID:
           {
-            const TaskOp::DeferDistributeArgs *dargs = 
-              (const TaskOp::DeferDistributeArgs*)args;
-            if (dargs->proxy_this->distribute_task())
-              dargs->proxy_this->launch_task();
+            InnerContext::handle_distribute_task_queue(args);
             break;
           }
         case LG_DEFER_PERFORM_MAPPING_TASK_ID:
@@ -24525,11 +24449,9 @@ namespace Legion {
               Runtime::trigger_event(margs->done_event);
             break;
           }
-        case LG_DEFER_LAUNCH_TASK_ID:
+        case LG_DEFERRED_LAUNCH_TASK_ID:
           {
-            const TaskOp::DeferLaunchArgs *largs = 
-              (const TaskOp::DeferLaunchArgs*)args;
-            largs->proxy_this->launch_task();
+            InnerContext::handle_launch_task_queue(args);
             break;
           }
         case LG_MISSPECULATE_TASK_ID:

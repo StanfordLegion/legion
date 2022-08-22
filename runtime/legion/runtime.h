@@ -733,8 +733,6 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op, LgPriority priority,
-                                    RtEvent wait_on);
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
@@ -2763,10 +2761,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_ready_queue(Processor p, TaskOp *task_op, 
-          RtEvent wait_on = RtEvent::NO_RT_EVENT, bool select_options = false);
-      void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void add_to_ready_queue(Processor p, TaskOp *task_op);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -3088,11 +3083,11 @@ namespace Legion {
       std::atomic<unsigned> unique_field_space_id;
       std::atomic<unsigned> unique_index_tree_id;
       std::atomic<unsigned> unique_region_tree_id;
-      std::atomic<unsigned> unique_operation_id;
       std::atomic<unsigned> unique_field_id; 
-      std::atomic<unsigned> unique_code_descriptor_id;
-      std::atomic<unsigned> unique_constraint_id;
-      std::atomic<unsigned> unique_is_expr_id;
+      std::atomic<unsigned long long> unique_operation_id;
+      std::atomic<unsigned long long> unique_code_descriptor_id;
+      std::atomic<unsigned long long> unique_constraint_id;
+      std::atomic<unsigned long long> unique_is_expr_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
 #endif
