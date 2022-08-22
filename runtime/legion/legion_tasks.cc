@@ -805,6 +805,8 @@ namespace Legion {
         early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
+      // Already had our options selected
+      options_selected = true;
     }
 
     //--------------------------------------------------------------------------
@@ -837,7 +839,7 @@ namespace Legion {
                       LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, ready);
+                task->enqueue_ready_task(false/*target*/, ready);
             }
             break;
           }
@@ -859,7 +861,7 @@ namespace Legion {
                       LG_THROUGHPUT_WORK_PRIORITY, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, ready);
+                task->enqueue_ready_task(false/*target*/, ready);
             }
             break;
           }
@@ -1272,12 +1274,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_distribute_task(RtEvent precondition)
+    void TaskOp::defer_distribute_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferDistributeArgs args(this);
-      return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      parent_ctx->add_to_distribute_task_queue(this, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -1298,12 +1298,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_launch_task(RtEvent precondition)
+    void TaskOp::defer_launch_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferLaunchArgs args(this);
-      return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      parent_ctx->add_to_launch_task_queue(this, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -1312,12 +1310,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (use_target_processor)
-      {
         set_current_proc(target_proc);
-        runtime->add_to_ready_queue(target_proc, this, wait_on);
+      if (!wait_on.exists() || wait_on.has_triggered())
+      {
+        // Need to invoke select task options here for top-level tasks
+        if (!options_selected)
+          select_task_options(false/*prioritize*/);
+        runtime->add_to_ready_queue(current_proc, this);
       }
       else
-        runtime->add_to_ready_queue(current_proc, this, wait_on);
+        parent_ctx->add_to_task_queue(this, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -5849,10 +5851,8 @@ namespace Legion {
         finalize_single_task_profiling();
       if (must_epoch != NULL)
       {
-        if (profiling_reported.exists() && !profiling_reported.has_triggered())
-          profiling_reported.wait();
-        must_epoch->notify_subop_commit(this);
-        commit_operation(true/*deactivate*/);
+        must_epoch->notify_subop_commit(this, profiling_reported);
+        commit_operation(true/*deactivate*/, profiling_reported);
       }
       else
         commit_operation(true/*deactivate*/, profiling_reported);
@@ -5995,9 +5995,14 @@ namespace Legion {
 #endif
         // If we were sent back then mark that we are no longer remote
         orig_task->sent_remotely = false;
+        if (deferred_complete_mapping.exists())
+        {
+          orig_task->deferred_complete_mapping = deferred_complete_mapping;
+          deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
-        runtime->add_to_ready_queue(current_proc, orig_task);
+        orig_task->enqueue_ready_task(false/*target*/);
         deactivate();
         return false;
       }
@@ -8047,14 +8052,11 @@ namespace Legion {
       }
       if (must_epoch != NULL)
       {
+        RtEvent commit_precondition;
         if (!commit_preconditions.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(commit_preconditions);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
-        must_epoch->notify_subop_commit(this);
-        commit_operation(true/*deactivate*/);
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        must_epoch->notify_subop_commit(this, commit_precondition);
+        commit_operation(true/*deactivate*/, commit_precondition);
       }
       else
       {

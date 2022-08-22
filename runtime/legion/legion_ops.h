@@ -121,101 +121,6 @@ namespace Legion {
       public:
         Operation *const op;
       };
-      struct DeferredReadyArgs : public LgTaskArgs<DeferredReadyArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_READY_TRIGGER_ID;
-      public:
-        DeferredReadyArgs(Operation *op)
-          : LgTaskArgs<DeferredReadyArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_OP_ID;
-      public:
-        DeferredEnqueueArgs(Operation *op, LgPriority p)
-          : LgTaskArgs<DeferredEnqueueArgs>(op->get_unique_op_id()),
-            proxy_this(op), priority(p) { }
-      public:
-        Operation *const proxy_this;
-        const LgPriority priority;
-      };
-      struct DeferredResolutionArgs :
-        public LgTaskArgs<DeferredResolutionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_RESOLUTION_TRIGGER_ID;
-      public:
-        DeferredResolutionArgs(Operation *op)
-          : LgTaskArgs<DeferredResolutionArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct DeferredExecuteArgs : public LgTaskArgs<DeferredExecuteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTION_TRIGGER_ID;
-      public:
-        DeferredExecuteArgs(Operation *op)
-          : LgTaskArgs<DeferredExecuteArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct DeferredExecArgs : public LgTaskArgs<DeferredExecArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTE_ID;
-      public:
-        DeferredExecArgs(Operation *op)
-          : LgTaskArgs<DeferredExecArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct TriggerCompleteArgs : public LgTaskArgs<TriggerCompleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_TRIGGER_COMPLETE_ID;
-      public:
-        TriggerCompleteArgs(Operation *op)
-          : LgTaskArgs<TriggerCompleteArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct DeferredCompleteArgs : public LgTaskArgs<DeferredCompleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COMPLETE_ID;
-      public:
-        DeferredCompleteArgs(Operation *op)
-          : LgTaskArgs<DeferredCompleteArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        Operation *const proxy_this;
-      };
-      struct DeferredCommitTriggerArgs : 
-        public LgTaskArgs<DeferredCommitTriggerArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_TRIGGER_ID; 
-      public:
-        DeferredCommitTriggerArgs(Operation *op)
-          : LgTaskArgs<DeferredCommitTriggerArgs>(op->get_unique_op_id()),
-            proxy_this(op), gen(op->get_generation()) { }
-      public:
-        Operation *const proxy_this;
-        const GenerationID gen;
-      };
-      struct DeferredCommitArgs : public LgTaskArgs<DeferredCommitArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_ID;
-      public:
-        DeferredCommitArgs(Operation *op, bool d)
-          : LgTaskArgs<DeferredCommitArgs>(op->get_unique_op_id()),
-            proxy_this(op), deactivate(d) { }
-      public:
-        Operation *proxy_this;
-        bool deactivate;
-      };
       struct DeferReleaseAcquiredArgs : 
         public LgTaskArgs<DeferReleaseAcquiredArgs> {
       public:
@@ -380,6 +285,10 @@ namespace Legion {
       // placed on the ready queue in order for the runtime to
       // perform this mapping
       virtual void trigger_mapping(void);
+      // Helper function for trigger execution 
+      // (only used in a limited set of operations and not
+      // part of the default pipeline)
+      virtual void trigger_execution(void);
       // The function to trigger once speculation is
       // ready to be resolved
       virtual void trigger_resolution(void);
@@ -388,12 +297,6 @@ namespace Legion {
       // The function to call when commit the operation is
       // ready to commit
       virtual void trigger_commit(void);
-      // Helper function for deferring complete operations
-      // (only used in a limited set of operations and not
-      // part of the default pipeline)
-      virtual void deferred_execute(void);
-      // Helper function for deferring commit operations
-      virtual void deferred_commit_trigger(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -703,6 +606,8 @@ namespace Legion {
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC> logical_records;
       // Dependence trackers for detecting when it is safe to map and commit
+      // We allocate and free these every time to ensure that their memory
+      // is always cleaned up after each operation
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
     };
@@ -2248,7 +2153,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       Future future;
@@ -2454,7 +2359,7 @@ namespace Legion {
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
       void notify_subop_complete(Operation *op, RtEvent precondition);
-      void notify_subop_commit(Operation *op);
+      void notify_subop_commit(Operation *op, RtEvent precondition);
     public:
       RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
     protected:
@@ -2498,7 +2403,7 @@ namespace Legion {
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:
-      std::set<RtEvent> completion_preconditions;
+      std::set<RtEvent> completion_preconditions, commit_preconditions;
       std::set<ApEvent> completion_effects;
     };
 
@@ -3300,7 +3205,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -3761,7 +3666,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       TimingMeasurement measurement;
       std::set<Future> preconditions;
@@ -3793,7 +3698,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       TunableID tunable_id;
       MapperID mapper_id;
@@ -3829,7 +3734,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     protected:
       FutureMap future_map;
       const ReductionOp *redop; 

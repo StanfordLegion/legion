@@ -454,8 +454,8 @@ namespace Legion {
       virtual void increment_outstanding(void) = 0;
       virtual void decrement_outstanding(void) = 0;
       virtual void increment_pending(void) = 0;
-      virtual RtEvent decrement_pending(TaskOp *child) = 0;
-      virtual RtEvent decrement_pending(bool need_deferral) = 0;
+      virtual void decrement_pending(TaskOp *child) = 0;
+      virtual void decrement_pending(bool need_deferral) = 0;
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
@@ -662,7 +662,6 @@ namespace Legion {
       std::vector<PhysicalInstance> task_local_instances;
 #endif
     protected:
-      RtEvent pending_done;
       bool task_executed;
       bool has_inline_accessor;
       bool mutable_priority;
@@ -702,6 +701,121 @@ namespace Legion {
             context(ctx) { }
       public:
         InnerContext *const context;
+      }; 
+      struct TriggerReadyArgs : public LgTaskArgs<TriggerReadyArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_READY_ID;
+      public:
+        TriggerReadyArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<TriggerReadyArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredEnqueueTaskArgs : 
+        public LgTaskArgs<DeferredEnqueueTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
+      public:
+        DeferredEnqueueTaskArgs(TaskOp *t, InnerContext *ctx)
+          : LgTaskArgs<DeferredEnqueueTaskArgs>(t->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredDistributeTaskArgs : 
+        public LgTaskArgs<DeferredDistributeTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_DISTRIBUTE_TASK_ID;
+      public:
+        DeferredDistributeTaskArgs(TaskOp *op, InnerContext *ctx)
+          : LgTaskArgs<DeferredDistributeTaskArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredLaunchTaskArgs :
+        public LgTaskArgs<DeferredLaunchTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_LAUNCH_TASK_ID;
+      public:
+        DeferredLaunchTaskArgs(TaskOp *op, InnerContext *ctx)
+          : LgTaskArgs<DeferredLaunchTaskArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct TriggerResolutionArgs : public LgTaskArgs<TriggerResolutionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_RESOLUTION_ID;
+      public:
+        TriggerResolutionArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<TriggerResolutionArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct TriggerExecutionArgs : public LgTaskArgs<TriggerExecutionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_EXECUTION_ID;
+      public:
+        TriggerExecutionArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<TriggerExecutionArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredExecutionArgs : public LgTaskArgs<DeferredExecutionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTION_ID;
+      public:
+        DeferredExecutionArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<DeferredExecutionArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct TriggerCompletionArgs : public LgTaskArgs<TriggerCompletionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_COMPLETION_ID;
+      public:
+        TriggerCompletionArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<TriggerCompletionArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredCompletionArgs : 
+        public LgTaskArgs<DeferredCompletionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COMPLETION_ID;
+      public:
+        DeferredCompletionArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<DeferredCompletionArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct TriggerCommitArgs : public LgTaskArgs<TriggerCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_COMMIT_ID; 
+      public:
+        TriggerCommitArgs(Operation *op, InnerContext *ctx)
+          : LgTaskArgs<TriggerCommitArgs>(op->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
+      };
+      struct DeferredCommitArgs : public LgTaskArgs<DeferredCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_ID;
+      public:
+        DeferredCommitArgs(const std::pair<Operation*,bool> &op,
+                           InnerContext *ctx)
+          : LgTaskArgs<DeferredCommitArgs>(op.first->get_unique_op_id()),
+            context(ctx) { }
+      public:
+        InnerContext *const context;
       };
       struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
       public:
@@ -731,16 +845,6 @@ namespace Legion {
         RtEvent wait_on;
         FutureFunctor *functor;
         bool owned;
-      };
-      struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
-      public:
-        PostDecrementArgs(InnerContext *ctx)
-          : LgTaskArgs<PostDecrementArgs>(ctx->get_context_uid()),
-            parent_ctx(ctx) { }
-      public:
-        InnerContext *const parent_ctx;
       };
       struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
       public:
@@ -784,6 +888,15 @@ namespace Legion {
         const IndexPartition pid;
         const PartitionKind kind;
         const char *const func;
+      };
+      template<typename T>
+      struct QueueEntry {
+      public:
+        QueueEntry(void) { op = {}; }
+        QueueEntry(T o, RtEvent r) : op(o), ready(r) { }
+      public:
+        T op;
+        RtEvent ready;
       };
       struct LocalFieldInfo {
       public:
@@ -1203,11 +1316,58 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
+    public:
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
+    public:
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false);
       void process_dependence_stage(void);
+    public:
+      template<typename T, typename ARGS, bool HAS_BOUNDS>
+      void add_to_queue(QueueEntry<T> entry, LocalLock &lock,
+                        std::list<QueueEntry<T> > &queue,
+                        CompletionQueue &comp_queue);
+      template<typename T>
+      T process_queue(LocalLock &lock, RtEvent &next_ready,
+                      std::list<QueueEntry<T> > &queue,
+                      CompletionQueue &comp_queue,
+                      std::vector<T> &to_perform) const;
+    public:
+      void add_to_ready_queue(Operation *op, RtEvent ready);
+      bool process_ready_queue(void);
+    public:
+      void add_to_task_queue(TaskOp *op, RtEvent ready);
+      bool process_enqueue_task_queue(void);
+    public:
+      void add_to_distribute_task_queue(TaskOp *op, RtEvent ready);
+      bool process_distribute_task_queue(void);
+    public:
+      void add_to_launch_task_queue(TaskOp *op, RtEvent ready);
+      bool process_launch_task_queue(void);
+    public:
+      void add_to_resolution_queue(Operation *op, RtEvent ready);
+      bool process_resolution_queue(void);
+    public:
+      void add_to_trigger_execution_queue(Operation *op, RtEvent ready);
+      bool process_trigger_execution_queue(void);
+    public:
+      void add_to_deferred_execution_queue(Operation *op, RtEvent ready);
+      bool process_deferred_execution_queue(void);
+    public:
+      void add_to_trigger_completion_queue(Operation *op, RtEvent ready);
+      bool process_trigger_completion_queue(void);
+    public:
+      void add_to_deferred_completion_queue(Operation *op, RtEvent ready);
+      bool process_deferred_completion_queue(void);
+    public:
+      void add_to_trigger_commit_queue(Operation *op, RtEvent ready); 
+      bool process_trigger_commit_queue(void);
+    public:
+      void add_to_deferred_commit_queue(Operation *op, RtEvent ready,
+                                        bool deactivate);
+      bool process_deferred_commit_queue(void);
+    public:
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
                                           PhysicalInstance instance =
@@ -1215,6 +1375,7 @@ namespace Legion {
                                           FutureFunctor *callback_functor=NULL,
                                           bool own_functor = false);
       bool process_post_end_tasks(void);
+    public:
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1245,8 +1406,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child);
-      virtual RtEvent decrement_pending(bool need_deferral);
+      virtual void decrement_pending(TaskOp *child);
+      virtual void decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
@@ -1327,6 +1488,17 @@ namespace Legion {
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
+      static void handle_ready_queue(const void *args);
+      static void handle_enqueue_task_queue(const void *args);
+      static void handle_distribute_task_queue(const void *args);
+      static void handle_launch_task_queue(const void *args);
+      static void handle_resolution_queue(const void *args);
+      static void handle_trigger_execution_queue(const void *args);
+      static void handle_deferred_execution_queue(const void *args);
+      static void handle_trigger_completion_queue(const void *args);
+      static void handle_deferred_completion_queue(const void *args);
+      static void handle_trigger_commit_queue(const void *args);
+      static void handle_deferred_commit_queue(const void *args);
       static void handle_post_end_task(const void *args);
     public:
       void free_remote_contexts(void);
@@ -1414,6 +1586,50 @@ namespace Legion {
       RtEvent                                         dependence_precondition;
       // Only one of these ever to keep things in order
       bool                                            outstanding_dependence;
+    protected: 
+      mutable LocalLock                               ready_lock;
+      std::list<QueueEntry<Operation*> >              ready_queue;
+      CompletionQueue                                 ready_comp_queue;
+    protected:
+      mutable LocalLock                               enqueue_task_lock;
+      std::list<QueueEntry<TaskOp*> >                 enqueue_task_queue;
+      CompletionQueue                                 enqueue_task_comp_queue;
+    protected:
+      mutable LocalLock                               distribute_task_lock;
+      std::list<QueueEntry<TaskOp*> >                 distribute_task_queue;
+      CompletionQueue                                distribute_task_comp_queue;
+    protected:
+      mutable LocalLock                               launch_task_lock;
+      std::list<QueueEntry<TaskOp*> >                 launch_task_queue;
+      CompletionQueue                                 launch_task_comp_queue;
+    protected:
+      mutable LocalLock                               resolution_lock;
+      std::list<QueueEntry<Operation*> >              resolution_queue;
+      CompletionQueue                                 resolution_comp_queue;
+    protected:
+      mutable LocalLock                               trigger_execution_lock;
+      std::list<QueueEntry<Operation*> >              trigger_execution_queue;
+      CompletionQueue                             trigger_execution_comp_queue;
+    protected:
+      mutable LocalLock                               deferred_execution_lock;
+      std::list<QueueEntry<Operation*> >              deferred_execution_queue;
+      CompletionQueue                             deferred_execution_comp_queue;
+    protected:
+      mutable LocalLock                               trigger_completion_lock;
+      std::list<QueueEntry<Operation*> >              trigger_completion_queue;
+      CompletionQueue                             trigger_completion_comp_queue;
+    protected:
+      mutable LocalLock                               deferred_completion_lock;
+      std::list<QueueEntry<Operation*> >              deferred_completion_queue;
+      CompletionQueue                            deferred_completion_comp_queue;
+    protected:
+      mutable LocalLock                               trigger_commit_lock;
+      std::list<QueueEntry<Operation*> >              trigger_commit_queue;
+      CompletionQueue                                 trigger_commit_comp_queue;
+    protected:
+      mutable LocalLock                               deferred_commit_lock;
+      std::list<QueueEntry<std::pair<Operation*,bool> > > deferred_commit_queue;
+      CompletionQueue                                deferred_commit_comp_queue;
     protected:
       mutable LocalLock                               post_task_lock;
       std::list<PostTaskArgs>                         post_task_queue;
@@ -1437,8 +1653,6 @@ namespace Legion {
       unsigned pending_subtasks;
       // Number of pending_frames
       unsigned pending_frames;
-      // Event used to order operations to the runtime
-      RtEvent context_order_event;
       // Track whether this context is current active for scheduling
       // indicating that it is no longer far enough ahead
       bool currently_active_context;
@@ -2007,8 +2221,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child);
-      virtual RtEvent decrement_pending(bool need_deferral);
+      virtual void decrement_pending(TaskOp *child);
+      virtual void decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
