@@ -128,7 +128,9 @@ namespace Legion {
       OperationInstance &inst = operation_instances.back();
       inst.op_id = op->get_unique_op_id();
       inst.kind = op->get_operation_kind();
-      owner->update_footprint(sizeof(OperationInstance), this);
+      inst.provenance = strdup(op->get_provenance().c_str());
+      owner->update_footprint(
+          sizeof(OperationInstance) + strlen(inst.provenance), this);
     }
 
     //--------------------------------------------------------------------------
@@ -893,6 +895,7 @@ namespace Legion {
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
         serializer->serialize(*it);
+        free(const_cast<char*>(it->provenance));
       }
       for (std::deque<MultiTask>::const_iterator it = 
             multi_tasks.begin(); it != multi_tasks.end(); it++)
@@ -1162,7 +1165,8 @@ namespace Legion {
       {
         OperationInstance &front = operation_instances.front();
         serializer->serialize(front);
-        diff += sizeof(front);
+        diff += sizeof(front) + strlen(front.provenance);
+        free(const_cast<char*>(front.provenance));
         operation_instances.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)

@@ -1929,7 +1929,8 @@ namespace Legion {
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
                           context->get_task_name(), context->get_unique_id())
-        runtime->remap_region(context, PhysicalRegion(this));
+        const UntypedBuffer no_provenance;
+        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -2004,7 +2005,8 @@ namespace Legion {
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
                           context->get_task_name(), context->get_unique_id())
-        runtime->remap_region(context, PhysicalRegion(this));
+        const UntypedBuffer no_provenance;
+        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -2365,7 +2367,8 @@ namespace Legion {
                           "Please try to be more careful. Warning string: %s",
                           context->get_task_name(), context->get_unique_id(),
                           (warning_string == NULL) ? "" : warning_string)
-        runtime->remap_region(context, PhysicalRegion(this));
+        const UntypedBuffer no_provenance;
+        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -13490,7 +13493,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                                                  MapperID id, MappingTagID tag)
+                 MapperID id, MappingTagID tag, const UntypedBuffer &provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -13498,17 +13501,18 @@ namespace Legion {
       PhysicalRegion result = ctx->get_physical_region(idx);
       // Check to see if we are already mapped, if not, then remap it
       if (!result.impl->is_mapped())
-        remap_region(ctx, result);
+        remap_region(ctx, result, provenance);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, const PhysicalRegion &region,
+                               const UntypedBuffer &provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context remap region!");
-      ctx->remap_region(region); 
+      ctx->remap_region(region, provenance);
     }
 
     //--------------------------------------------------------------------------

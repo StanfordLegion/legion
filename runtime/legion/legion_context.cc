@@ -2002,7 +2002,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::remap_unmapped_regions(LegionTrace *trace,
-                            const std::vector<PhysicalRegion> &unmapped_regions)
+                            const std::vector<PhysicalRegion> &unmapped_regions,
+                            const UntypedBuffer &provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2026,7 +2027,7 @@ namespace Legion {
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        const ApEvent ready = remap_region(unmapped_regions[idx]);
+        const ApEvent ready = remap_region(unmapped_regions[idx], provenance);
         if (ready.exists())
           mapped_events.insert(ready);
       }
@@ -4192,7 +4193,8 @@ namespace Legion {
                                           FieldID domain_fid,
                                           IndexSpace range,
                                           MapperID id, MappingTagID tag,
-                                          const UntypedBuffer &marg)
+                                          const UntypedBuffer &marg,
+                                          const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4203,7 +4205,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op();
       part_op->initialize_by_association(this, domain, domain_parent, 
-                                         domain_fid, range, id, tag, marg);
+                              domain_fid, range, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4224,7 +4226,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -4321,7 +4323,8 @@ namespace Legion {
                                               Color color,
                                               MapperID id, MappingTagID tag,
                                               PartitionKind part_kind,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4350,7 +4353,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
-                                   fid, id, tag, marg);
+                                   fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4371,7 +4374,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4391,7 +4394,8 @@ namespace Legion {
                                                     Color color,
                                                     MapperID id, 
                                                     MappingTagID tag,
-                                                    const UntypedBuffer &marg)
+                                                    const UntypedBuffer &marg,
+                                                    const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4417,7 +4421,8 @@ namespace Legion {
             handle, color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image(this,pid,projection,parent,fid,id,tag,marg);
+      part_op->initialize_by_image(this, pid, projection, parent,
+                                   fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4438,7 +4443,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4458,7 +4463,8 @@ namespace Legion {
                                                     Color color,
                                                     MapperID id, 
                                                     MappingTagID tag,
-                                                    const UntypedBuffer &marg)
+                                                    const UntypedBuffer &marg,
+                                                    const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4485,7 +4491,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, projection, parent, 
-                                         fid, id, tag, marg);
+                                         fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4506,7 +4512,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4525,7 +4531,8 @@ namespace Legion {
                                                   PartitionKind part_kind,
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
-                                                  const UntypedBuffer &marg)
+                                                  const UntypedBuffer &marg,
+                                                  const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4571,7 +4578,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
-                                      parent, fid, id, tag, marg);
+                                      parent, fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4592,7 +4599,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4611,7 +4618,8 @@ namespace Legion {
                                                   PartitionKind part_kind,
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
-                                                  const UntypedBuffer &marg)
+                                                  const UntypedBuffer &marg,
+                                                  const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4640,7 +4648,7 @@ namespace Legion {
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
-                                            parent, fid, id, tag, marg);
+                                            parent, fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4661,7 +4669,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -5735,7 +5743,8 @@ namespace Legion {
         MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
         epoch_launcher.add_index_task(launcher);
         FutureMap result = execute_must_epoch(epoch_launcher);
-        return reduce_future_map(result, redop, deterministic);
+        return reduce_future_map(result, redop, deterministic,
+                                 launcher.provenance);
       }
       AutoRuntimeCall call(this);
       // Quick out for predicate false
@@ -5775,7 +5784,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+             ReductionOpID redop, bool deterministic, const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -5791,7 +5800,7 @@ namespace Legion {
       }
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = 
-        all_reduce_op->initialize(this, future_map, redop, deterministic);
+        all_reduce_op->initialize(this, future_map, redop, deterministic, prov);
       add_to_dependence_queue(all_reduce_op);
       return result;
     }
@@ -5942,7 +5951,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::remap_region(PhysicalRegion region)
+    ApEvent InnerContext::remap_region(const PhysicalRegion &region,
+                                       const UntypedBuffer &provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5962,7 +5972,7 @@ namespace Legion {
                       current_trace->tid, get_task_name(), get_unique_id())
       }
       MapOp *map_op = runtime->get_available_map_op();
-      map_op->initialize(this, region);
+      map_op->initialize(this, region, provenance);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
@@ -6046,7 +6056,8 @@ namespace Legion {
       add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6100,7 +6111,8 @@ namespace Legion {
       add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6136,7 +6148,8 @@ namespace Legion {
       add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6183,7 +6196,8 @@ namespace Legion {
       add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6218,7 +6232,8 @@ namespace Legion {
       add_to_dependence_queue(acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6253,7 +6268,8 @@ namespace Legion {
       add_to_dependence_queue(release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6701,7 +6717,8 @@ namespace Legion {
       add_to_dependence_queue(epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance);
       return result;
     }
 
@@ -8295,7 +8312,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::register_inline_mapped_region(PhysicalRegion &region)
+    void InnerContext::register_inline_mapped_region(
+                                                   const PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
       // Because of 'remap_region', this method can be called
@@ -8313,7 +8331,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::unregister_inline_mapped_region(PhysicalRegion &region)
+    void InnerContext::unregister_inline_mapped_region(
+                                                   const PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
       // Need lock because of unordered detach operations
@@ -10608,7 +10627,11 @@ namespace Legion {
         add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
-          remap_unmapped_regions(current_trace, unmapped_regions);
+        {
+          const std::string &prov = task->get_provenance();
+          const UntypedBuffer provenance(prov.c_str(), prov.length());
+          remap_unmapped_regions(current_trace, unmapped_regions, provenance);
+        }
       }
     }
 
@@ -11793,7 +11816,8 @@ namespace Legion {
                                          LogicalRegion domain_parent,
                                          FieldID domain_fid, IndexSpace range,
                                          MapperID id, MappingTagID tag,
-                                         const UntypedBuffer &marg)
+                                         const UntypedBuffer &marg,
+                                         const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_ASSOCIATION,
@@ -11844,7 +11868,8 @@ namespace Legion {
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
                                                 PartitionKind part_kind,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_FIELD,
@@ -11863,7 +11888,8 @@ namespace Legion {
                                               PartitionKind part_kind,
                                               Color color,
                                               MapperID id, MappingTagID tag,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE,
@@ -11882,7 +11908,8 @@ namespace Legion {
                                               PartitionKind part_kind,
                                               Color color,
                                               MapperID id, MappingTagID tag,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE_RANGE,
@@ -11901,7 +11928,8 @@ namespace Legion {
                                                 PartitionKind part_kind,
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE,
@@ -11920,7 +11948,8 @@ namespace Legion {
                                                 PartitionKind part_kind,
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE_RANGE,
@@ -12389,7 +12418,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+             ReductionOpID redop, bool deterministic, const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12459,7 +12488,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::remap_region(PhysicalRegion region)
+    ApEvent LeafContext::remap_region(const PhysicalRegion &region,
+                                      const UntypedBuffer &provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,

@@ -108,6 +108,7 @@ namespace Legion {
       public:
         UniqueID op_id;
         unsigned kind;
+        const char *provenance;
       };
       struct MultiTask {
       public:

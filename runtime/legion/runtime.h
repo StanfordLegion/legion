@@ -2006,8 +2006,10 @@ namespace Legion {
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
-                                MapperID id = 0, MappingTagID tag = 0);
-      void remap_region(Context ctx, PhysicalRegion region);
+                                MapperID id, MappingTagID tag,
+                                const UntypedBuffer &provenance);
+      void remap_region(Context ctx, const PhysicalRegion &region,
+                        const UntypedBuffer &buffer);
       void unmap_region(Context ctx, PhysicalRegion region);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);

@@ -931,10 +931,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
                   const std::vector<StaticDependence> *dependences,
-                  const Predicate &p, Processor::TaskFuncID tid)
+                  const Predicate &p, Processor::TaskFuncID tid,
+                  const UntypedBuffer &prov)
     //--------------------------------------------------------------------------
     {
-      initialize_speculation(ctx, track, regions.size(), dependences, p);
+      initialize_speculation(ctx, track, regions.size(), dependences, p, prov);
       initialize_memoizable();
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
@@ -5315,7 +5316,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, launcher.provenance);
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -7099,7 +7100,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, launcher.provenance);
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -7205,7 +7206,7 @@ namespace Legion {
       else
         initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, launcher.provenance);
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -8131,8 +8132,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
+      const UntypedBuffer prov(provenance.c_str(), provenance.length());
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+                                   Predicate::TRUE_PRED, this->task_id, prov);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
@@ -9416,8 +9418,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
+      const UntypedBuffer prov(provenance.c_str(), provenance.length());
       result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+                                   Predicate::TRUE_PRED, this->task_id, prov);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
@@ -9531,8 +9534,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task();
+      const UntypedBuffer prov(provenance.c_str(), provenance.length());
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+                                   Predicate::TRUE_PRED, this->task_id, prov);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;

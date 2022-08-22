@@ -209,7 +209,8 @@ namespace Legion {
       void mark_stolen(void);
       void initialize_base_task(InnerContext *ctx, bool track,
             const std::vector<StaticDependence> *dependences,
-            const Predicate &p, Processor::TaskFuncID tid);
+            const Predicate &p, Processor::TaskFuncID tid,
+            const UntypedBuffer &provenance);
       void check_empty_field_requirements(void);
       size_t check_future_size(FutureImpl *impl);
     public:

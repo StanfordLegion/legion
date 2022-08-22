@@ -6754,10 +6754,13 @@ namespace Legion {
        * @param req the region requirement for the inline mapping
        * @param id the mapper ID to associate with the operation
        * @param tag the mapping tag to pass to any mapping calls
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a physical region for the resulting data
        */
       PhysicalRegion map_region(Context ctx, const RegionRequirement &req, 
-                                MapperID id = 0, MappingTagID tag = 0);
+                                MapperID id = 0, MappingTagID tag = 0,
+                                UntypedBuffer provenance = UntypedBuffer());
 
       /**
        * Perform an inline mapping operation that re-maps a physical region
@@ -6766,10 +6769,13 @@ namespace Legion {
        * @param idx index of the region requirement from the enclosing task
        * @param id the mapper ID to associate with the operation
        * @param the mapping tag to pass to any mapping calls 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a physical region for the resulting data 
        */
       PhysicalRegion map_region(Context ctx, unsigned idx, 
-                                MapperID id = 0, MappingTagID tag = 0);
+                                MapperID id = 0, MappingTagID tag = 0,
+                                UntypedBuffer provenance = UntypedBuffer());
 
       /**
        * Remap a region from an existing physical region.  It will
@@ -6777,8 +6783,11 @@ namespace Legion {
        * physical region is valid again before using it.
        * @param ctx enclosing task context
        * @param region the physical region to be remapped
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
-      void remap_region(Context ctx, PhysicalRegion region);
+      void remap_region(Context ctx, PhysicalRegion region,
+                        UntypedBuffer provenance = UntypedBuffer());
 
       /**
        * Unmap a physical region.  This can unmap either a previous

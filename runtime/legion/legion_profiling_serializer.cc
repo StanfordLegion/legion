@@ -222,7 +222,8 @@ namespace Legion {
       ss << "OperationInstance {"
          << "id:" << OPERATION_INSTANCE_ID        << delim
          << "op_id:UniqueID:" << sizeof(UniqueID) << delim
-         << "kind:unsigned:"  << sizeof(unsigned)
+         << "kind:unsigned:"  << sizeof(unsigned) << delim
+         << "provenance:string:"
          << "}" << std::endl;
 
       ss << "MultiTask {"
@@ -728,6 +729,8 @@ namespace Legion {
                 sizeof(operation_instance.op_id));
       lp_fwrite(f, (char*)&(operation_instance.kind),
                 sizeof(operation_instance.kind));
+      lp_fwrite(f, operation_instance.provenance, 
+          strlen(operation_instance.provenance) + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1564,7 +1567,8 @@ namespace Legion {
                            const LegionProfInstance::OperationInstance& op_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Operation %llu %u", op_inst.op_id, op_inst.kind);
+      log_prof.print("Prof Operation %llu %u %s", 
+          op_inst.op_id, op_inst.kind, op_inst.provenance);
     }
 
     //--------------------------------------------------------------------------

@@ -379,7 +379,8 @@ namespace Legion {
                                              ShardingID sid = 0,
                                              bool implicit = false) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
-      virtual ApEvent remap_region(PhysicalRegion region) = 0;
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   const UntypedBuffer &provenance) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
@@ -598,7 +599,8 @@ namespace Legion {
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void); 
       void remap_unmapped_regions(LegionTrace *current_trace,
-                           const std::vector<PhysicalRegion> &unmapped_regions);
+                           const std::vector<PhysicalRegion> &unmapped_regions,
+                           const UntypedBuffer &provenance);
     public:
       void* get_local_task_variable(LocalVariableID id);
       void set_local_task_variable(LocalVariableID id, const void *value,
@@ -1028,8 +1030,8 @@ namespace Legion {
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(FillOp *fill,
                                     std::vector<PhysicalRegion> &conflicting); 
-      void register_inline_mapped_region(PhysicalRegion &region);
-      void unregister_inline_mapped_region(PhysicalRegion &region);
+      void register_inline_mapped_region(const PhysicalRegion &region);
+      void unregister_inline_mapped_region(const PhysicalRegion &region);
     public:
       void print_children(void);
       void perform_window_wait(void);
@@ -1288,7 +1290,8 @@ namespace Legion {
                                              ShardingID sid = 0,
                                              bool implicit = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   const UntypedBuffer &provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -2167,7 +2170,8 @@ namespace Legion {
                                              ShardingID sid = 0,
                                              bool implicit = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   const UntypedBuffer &provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);

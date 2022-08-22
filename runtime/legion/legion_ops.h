@@ -204,6 +204,8 @@ namespace Legion {
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
+      inline const std::string& get_provenance(void) const 
+        { return provenance; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -250,7 +252,8 @@ namespace Legion {
       // along with the number of regions this task has
       void initialize_operation(InnerContext *ctx, bool track,
                                 unsigned num_regions = 0,
-          const std::vector<StaticDependence> *dependences = NULL);
+          const std::vector<StaticDependence> *dependences = NULL,
+          const UntypedBuffer *provenance = NULL);
     public:
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -610,6 +613,8 @@ namespace Legion {
       // is always cleaned up after each operation
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+      // The provenance string from the application
+      std::string provenance;
     };
 
     /**
@@ -764,7 +769,8 @@ namespace Legion {
       void deactivate_speculative(void);
     public:
       void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
-          const std::vector<StaticDependence> *dependences, const Predicate &p);
+          const std::vector<StaticDependence> *dependences, const Predicate &p,
+          const UntypedBuffer &provenance);
       void register_predicate_dependence(void);
       virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
@@ -987,7 +993,8 @@ namespace Legion {
     public:
       PhysicalRegion initialize(InnerContext *ctx,
                                 const InlineLauncher &launcher);
-      void initialize(InnerContext *ctx, const PhysicalRegion &region);
+      void initialize(InnerContext *ctx, const PhysicalRegion &region,
+                      const UntypedBuffer &provenance);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -2955,31 +2962,37 @@ namespace Legion {
       void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
                                FieldID fid, MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg); 
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov); 
       void initialize_by_image(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov);
       void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov);
       void initialize_by_preimage(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov);
       void initialize_by_preimage_range(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov);
       void initialize_by_association(InnerContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               const UntypedBuffer &prov);
       void perform_logging(void) const;
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;
@@ -3723,7 +3736,8 @@ namespace Legion {
       AllReduceOp& operator=(const AllReduceOp &rhs);
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
-                        ReductionOpID redop, bool deterministic);
+                        ReductionOpID redop, bool deterministic,
+                        const UntypedBuffer &prov);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

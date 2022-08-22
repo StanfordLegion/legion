@@ -5821,26 +5821,29 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, 
-                    const RegionRequirement &req, MapperID id, MappingTagID tag)
+                                    const RegionRequirement &req, MapperID id,
+                                    MappingTagID tag, UntypedBuffer provenance)
     //--------------------------------------------------------------------------
     {
       InlineLauncher launcher(req, id, tag);
+      launcher.provenance = provenance;
       return runtime->map_region(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                                                  MapperID id, MappingTagID tag)
+                        MapperID id, MappingTagID tag, UntypedBuffer provenance)
     //--------------------------------------------------------------------------
     {
-      return runtime->map_region(ctx, idx, id, tag);
+      return runtime->map_region(ctx, idx, id, tag, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, PhysicalRegion region,
+                               UntypedBuffer provenance)
     //--------------------------------------------------------------------------
     {
-      runtime->remap_region(ctx, region);
+      runtime->remap_region(ctx, region, provenance);
     }
 
     //--------------------------------------------------------------------------
