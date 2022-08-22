@@ -3685,13 +3685,6 @@ namespace Legion {
                       std::vector<DimensionKind> &ordering,
                       size_t &alignment) const;
     public:
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
-                       void *ptr,
-                       size_t alignment = 0);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments = NULL);
       template<typename T,
                int DIM,
                typename COORD_T = coord_t,

@@ -4156,18 +4156,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
-      ApUserEvent fence = Runtime::create_ap_user_event(NULL);
-      const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
       // should be able to read front() even while new maps for operations 
       // are begin appended to the back of 'operations'
       std::map<TraceLocalID,Memoizable*> &ops = operations.front();
-      for (unsigned idx = 0; idx < tasks.size(); ++idx)
-        ops[tasks[idx]]->get_operation()->set_execution_fence_event(fence);
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute(events, user_events, ops, recurrent_replay);
-      Runtime::trigger_event(NULL, fence);
     }
 
     //--------------------------------------------------------------------------
@@ -4826,7 +4821,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slices.resize(replay_parallelism);
-      slice_tasks.resize(replay_parallelism);
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
@@ -4873,8 +4867,6 @@ namespace Legion {
         assert(slice_index != -1U);
 #endif
         slice_indices_by_owner[it->first] = slice_index;
-        if (it->second.second == Operation::TASK_OP_KIND)
-          slice_tasks[slice_index].push_back(it->first);
       }
       // Make sure that event creations and triggers are in the same slice
       std::map<unsigned/*user event*/,unsigned/*slice*/> user_event_slices;

@@ -6623,21 +6623,16 @@ namespace Legion {
         RtEvent result_ready = 
           timing_collective->perform_collective_wait(false/*block*/);
         if (result_ready.exists() && !result_ready.has_triggered())
-        {
-          // Defer completion until the value is ready
-          DeferredExecuteArgs deferred_execute_args(this);
-          runtime->issue_runtime_meta_task(deferred_execute_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
-        }
+          parent_ctx->add_to_trigger_execution_queue(this, result_ready);
         else
-          deferred_execute();
+          trigger_execution();
       }
       else // Shard 0 does the normal timing operation
         TimingOp::trigger_mapping();
     } 
 
     //--------------------------------------------------------------------------
-    void ReplTimingOp::deferred_execute(void)
+    void ReplTimingOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

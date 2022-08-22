@@ -491,6 +491,7 @@ namespace Legion {
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
+      const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
       ApEvent get_ready(bool check_ready_event = true);
       PhysicalInstance get_instance(void);
@@ -510,7 +511,7 @@ namespace Legion {
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
       Runtime *const runtime;
-      const void *const data;
+    public:
       const size_t size;
       const Memory memory;
       const ApEvent ready_event;
@@ -522,6 +523,7 @@ namespace Legion {
       const bool is_meta_visible;
     protected:
       bool own_allocation;
+      std::atomic<const void*> data;
       std::atomic<PhysicalInstance> instance;
       std::atomic<RtEvent> use_event;
       std::atomic<bool> own_instance;
@@ -957,17 +959,14 @@ namespace Legion {
     public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       uintptr_t ptr,
-                       size_t alignment,
-                       bool eager_pool = false);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments);
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       uintptr_t ptr,
+                       size_t alignment);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -993,8 +992,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskContext *const context;
     private:
-      struct ExternalInstanceInfo {
-        bool eager_pool;
+      struct ReturnedInstanceInfo {
         uintptr_t ptr;
         size_t alignment;
       };
@@ -1002,7 +1000,7 @@ namespace Legion {
       OutputRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
-      std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::map<FieldID,ReturnedInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;
@@ -1302,8 +1300,6 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op, LgPriority priority,
-                                    RtEvent wait_on);
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
@@ -1637,6 +1633,10 @@ namespace Legion {
     public:
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
+      // Create an external instance that is a view to the eager pool instance
+      RtEvent create_sub_eager_instance(PhysicalInstance &instance,
+                                        uintptr_t ptr, size_t size,
+                                        Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
     public:
@@ -3910,10 +3910,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_ready_queue(Processor p, TaskOp *task_op, 
-          RtEvent wait_on = RtEvent::NO_RT_EVENT, bool select_options = false);
-      void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void add_to_ready_queue(Processor p, TaskOp *task_op);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -4325,12 +4322,12 @@ namespace Legion {
       std::atomic<unsigned> unique_field_space_id;
       std::atomic<unsigned> unique_index_tree_id;
       std::atomic<unsigned> unique_region_tree_id;
-      std::atomic<unsigned> unique_operation_id;
       std::atomic<unsigned> unique_field_id; 
-      std::atomic<unsigned> unique_code_descriptor_id;
-      std::atomic<unsigned> unique_constraint_id;
-      std::atomic<unsigned> unique_is_expr_id;
       std::atomic<unsigned> unique_control_replication_id;
+      std::atomic<unsigned long long> unique_operation_id;
+      std::atomic<unsigned long long> unique_code_descriptor_id;
+      std::atomic<unsigned long long> unique_constraint_id;
+      std::atomic<unsigned long long> unique_is_expr_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
 #endif

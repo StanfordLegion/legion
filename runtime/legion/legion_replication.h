@@ -2153,7 +2153,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_execution(void);
     public:
       inline void set_timing_collective(ValueBroadcast<long long> *collective) 
         { timing_collective = collective; }

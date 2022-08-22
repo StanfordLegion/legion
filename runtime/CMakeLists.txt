@@ -92,6 +92,7 @@ if(Legion_USE_HIP)
   list(APPEND REALM_SRC
     realm/hip/hip_module.h    realm/hip/hip_module.cc
     realm/hip/hip_internal.h  realm/hip/hip_internal.cc
+    realm/hip/hip_access.h    realm/hip/hip_access.cc
 		realm/hip/hiphijack_api.h
   )
   if(REALM_USE_HIP_HIJACK)
