@@ -7300,19 +7300,21 @@ namespace Legion {
       for (typename std::list<QueueEntry<T> >::iterator it =
             queue.begin(); it != queue.end(); /*nothing*/)
       {
-        if (std::binary_search(ready_events.begin(), 
-                      ready_events.end(), it->ready))
+        std::vector<RtEvent>::iterator finder = 
+          std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
+        if (finder != ready_events.end())
         {
           to_perform.push_back(it->op);
           it = queue.erase(it);
-          if (++found == ready_events.size())
+          ready_events.erase(finder);
+          if (ready_events.empty())
             break;
         }
         else
           it++;
       }
 #ifdef DEBUG_LEGION
-      assert(found == ready_events.size());
+      assert(ready_events.empty());
 #endif
       if (!queue.empty())
       {
