@@ -7296,6 +7296,7 @@ namespace Legion {
       ready_events.resize(num_ready);
       std::sort(ready_events.begin(), ready_events.end());
       // Find the entries
+      unsigned found = 0;
       for (typename std::list<QueueEntry<T> >::iterator it =
             queue.begin(); it != queue.end(); /*nothing*/)
       {
@@ -7304,13 +7305,15 @@ namespace Legion {
         {
           to_perform.push_back(it->op);
           it = queue.erase(it);
-          // You might think you can break out early here when you've seen
-          // all the ready events once but you can't because there might
-          // be duplicates!
+          if (++found == ready_events.size())
+            break;
         }
         else
           it++;
       }
+#ifdef DEBUG_LEGION
+      assert(found == ready_events.size());
+#endif
       if (!queue.empty())
       {
         next_ready = RtEvent(comp_queue.get_nonempty_event());
