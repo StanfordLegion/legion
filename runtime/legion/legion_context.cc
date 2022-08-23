@@ -5224,12 +5224,12 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
@@ -5249,7 +5249,7 @@ namespace Legion {
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -15065,11 +15065,11 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       PartitionKind part_kind,
-                                                      Color color)
+                                                      Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+      for (int i = 0; runtime->safe_control_replication && !trust && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
@@ -15082,7 +15082,7 @@ namespace Legion {
           break;
       }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
@@ -15123,7 +15123,7 @@ namespace Legion {
             part_color, color_generated, disjoint_result, partition_ready))
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -22245,7 +22245,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_PENDING_PARTITION,

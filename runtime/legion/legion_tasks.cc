@@ -9013,7 +9013,7 @@ namespace Legion {
           IndexPartition pid = parent_ctx->create_pending_partition(
               index_space, color_space,
               LEGION_DISJOINT_COMPLETE_KIND,
-              LEGION_AUTO_GENERATE_ID);
+              LEGION_AUTO_GENERATE_ID, true/*trust partitioning*/);
 
           // Create an output region and a partition
           LogicalRegion region = parent_ctx->create_logical_region(
