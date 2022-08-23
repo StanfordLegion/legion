@@ -2227,8 +2227,7 @@ class RandomAffineTest : public TestInterface {
   void fill_instance_data(IndexSpace<N1, T1> ibounds, RegionInstance inst);
 
   int verify_results(
-      const IndexSpace<N2, T2> &root,
-                     const TRANSFORM &transform,
+      const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
       const std::vector<std::vector<IndexSpace<N2, T1>>> &images,
       const std::vector<std::vector<IndexSpace<N1, T1>>> &preimages);
 
@@ -2290,59 +2289,6 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
   colors.resize(num_colors);
 
   for (int i = 0; i < num_colors; i++) colors[i] = randval<FT>(rs);
-
-  {
-    AffineTransform<N2, N1, T2> transpose;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        transpose.transform[i][j] = (i == N1 - j - 1);
-      }
-    }
-    transpose.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-      transpose.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
-    transforms.push_back(transpose);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> translate;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        translate.transform[i][j] = (i == j);
-      }
-    }
-    translate.offset = Point<N2, T2>::ZEROES();
-    for (int i = 0; i < N2; i++) {
-      translate.offset[i] = rs.rand_int(bounds2.hi[i] - 1);
-    }
-    transforms.push_back(translate);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> scale;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        scale.transform[i][j] = (i == j) ? 2 : 0;
-      }
-    }
-    scale.offset = Point<N2, T2>::ZEROES();
-    scale.is_dense = false;
-    transforms.push_back(scale);
-  }
-
-  {
-    AffineTransform<N2, N1, T2> shear;
-    for (int i = 0; i < N2; i++) {
-      for (int j = 0; j < N1; j++) {
-        shear.transform[i][j] = (i == j);
-      }
-      shear.transform[i][i + 1] = 1;
-    }
-    shear.offset = Point<N2, T2>::ZEROES();
-    shear.is_dense = false;
-    transforms.push_back(shear);
-  }
 
   dense_images.resize(transforms.size());
   sparse_images.resize(transforms.size());
@@ -2537,7 +2483,7 @@ template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
     const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
-    const std::vector<IndexSpace<N2, T1>> &images,
+    const std::vector<std::vector<IndexSpace<N2, T1>>> &images,
     const std::vector<std::vector<IndexSpace<N1, T1>>> &preimages) {
   for (size_t idx = 0; idx < transforms.size(); idx++) {
     assert(ss_by_color.size() == images[idx].size() &&
@@ -2581,319 +2527,11 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
-  return verify_results(root2, dense_images, dense_preimages) ||
-         verify_results(root2_sparse, sparse_images, sparse_preimages);
-}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-class StructuredUnstructuredTest : public TestInterface {
- public:
-  StructuredUnstructuredTest(int argc, const char *argv[]);
-  virtual ~StructuredUnstructuredTest(void);
-
-  virtual void print_info(void);
-
-  virtual Event initialize_data(const std::vector<Memory> &memories,
-                                const std::vector<Processor> &procs);
-
-  virtual Event perform_partitioning(void);
-
-  virtual int perform_dynamic_checks(void){return 0;}
-
-  virtual int check_partitioning(void);
-
-protected:
-  T1 base1_min, base1_max, extent1_min, extent1_max;
-  T2 base2_min, base2_max, extent2_min, extent2_max;
-  int num_pieces, num_colors;
-
-  AffineTransform<N2, N1, T2> fi;
-  AffineTransform<N3, N2, T3> fs;
-
-  std::vector<IndexSpace<N1, T1>> source_copy_domains;
-
-  Rect<N1,T1> bounds1;
-  Rect<N2,T2> bounds2;
-  Rect<N3,T3> bounds3;
-
-  IndexSpace<N1,T1> copy_domain;
-  IndexSpace<N2,T2> root2;
-  IndexSpace<N3,T3> source_domain;
-  std::vector<IndexSpace<N3, T3>> source_domains;
-
-  std::vector<FT> colors;
-
-  std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, FT> > fd_vals1;
-
-  std::vector<FieldDataDescriptor<IndexSpace<N3,T3>, FT> > fd_vals3;
-  std::vector<FieldDataDescriptor<IndexSpace<N2,T2>, Point<N2,T2> > > indirect_points;
-};
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3,
-                           FT>::StructuredUnstructuredTest(int argc,
-                                                           const char *argv[])
-    : base1_min(0),
-      base1_max(0),
-      extent1_min(4),
-      extent1_max(6),
-      base2_min(0),
-      base2_max(0),
-      extent2_min(4),
-      extent2_max(6),
-      num_pieces(1),
-      num_colors(4) {
-  RandStream<> rs(random_seed + 0);
-
-  for (int i = 0; i < N1; i++) {
-    bounds1.lo[i] = base1_min + rs.rand_int(base1_max - base1_min + 1);
-    bounds1.hi[i] = (bounds1.lo[i] + extent1_min +
-                     rs.rand_int(extent1_max - extent1_min + 1));
-  }
-  for (int i = 0; i < N2; i++) {
-    bounds2.lo[i] = base2_min + rs.rand_int(base2_max - base2_min + 1);
-    bounds2.hi[i] = (bounds2.lo[i] + extent2_min +
-                     rs.rand_int(extent2_max - extent2_min + 1));
-  }
-
-  for (int i = 0; i < N3; i++) {
-    bounds3.lo[i] = base2_min + rs.rand_int(base2_max - base2_min + 1);
-    bounds3.hi[i] = (bounds3.lo[i] + extent2_min +
-                     rs.rand_int(extent2_max - extent2_min + 1));
-  }
-
-  colors.resize(num_colors);
-  for (int i = 0; i < num_colors; i++) colors[i] = randval<FT>(rs);
-
-  Realm::Matrix<N2, N1, T2> matrix1;
-  for (int i = 0; i < N2; i++) {
-    for (int j = 0; j < N1; j++) {
-      matrix1[i][j] = (i == N1 - j - 1);
-    }
-  }
-
-  Realm::Matrix<N3, N2, T3> matrix2;
-  for (int i = 0; i < N3; i++) {
-    for (int j = 0; j < N2; j++) {
-      matrix2[i][j] = (i == j);
-    }
-  }
-
-  Point<N2, T2> offset1 = Point<N2, T2>::ZEROES();
-  for (int i = 0; i < N2; i++) offset1[i] = rs.rand_int(bounds2.hi[i] - 1);
-
-  fi.transform = matrix1;
-  fi.offset = offset1;
-
-  fs.transform = matrix2;
-  fs.offset = Point<N3, T3>::ZEROES();
-}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3,
-                           FT>::~StructuredUnstructuredTest(void) {}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-void StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3, FT>::print_info(void) {
-  printf("Realm dependent partitioning test - random\n");
-}
-
-template <int N1, typename T1, int N2, typename T2, typename FT>
-static void fill_instance(IndexSpace<N1, T1> ibounds, RegionInstance inst,
-                          Rect<N1, T1> bounds1, Rect<N2, T2> bounds2,
-                          std::vector<FT> colors) {
-  // start with value field
-  AffineAccessor<FT, N1, T1> a_vals(inst, 0);
-
-  // iterate over all points in root1 with initial random values
-  RandStream<> rs1(random_seed + 1);
-  for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
-    FT v = colors[rs1.rand_int(colors.size())];
-    if (ibounds.contains(pir.p)) a_vals.write(pir.p, v);
-  }
-
-  // print results
-  for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
-    if (ibounds.contains(pir.p))
-      log_app.debug() << "v[" << pir.p << "] = " << a_vals.read(pir.p);
-  }
-
-  {
-    // now pointer field
-    AffineAccessor<Point<N2, T2>, N1, T1> a_ptrs(inst, 0 + sizeof(FT));
-
-    // iterate over all points in root1 with initial random values
-    RandStream<> rs2(random_seed + 2);
-    for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
-      Point<N2, T2> p2;
-      for (int i = 0; i < N2; i++)
-        p2[i] = bounds2.lo[i] + rs2.rand_int(bounds2.hi[i] - bounds2.lo[i] + 1);
-      if (ibounds.contains(pir.p)) a_ptrs.write(pir.p, p2);
-    }
-
-    // print results
-    for (PointInRectIterator<N1, T1> pir(bounds1); pir.valid; pir.step()) {
-      if (ibounds.contains(pir.p))
-        log_app.debug() << "p[" << pir.p << "] = " << a_ptrs.read(pir.p);
-    }
-  }
-}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-Event StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3, FT>::initialize_data(
-    const std::vector<Memory> &memories, const std::vector<Processor> &procs) {
-  copy_domain = IndexSpace<N1, T1>(bounds1);
-  root2 = IndexSpace<N2,T2>(bounds2);
-  source_domain = IndexSpace<N3, T3>(bounds3);
-
-  log_app.debug() << "root1 = " << copy_domain;
-  log_app.debug() << "root2 = " << root2;
-
-  // create instances to hold actual data
-  size_t num_insts = memories.size();
-  log_app.debug() << "procs: " << procs;
-  log_app.debug() << "mems: " << memories;
-
-  std::vector<IndexSpace<N1,T1> > ss_inst1;
-  copy_domain.create_equal_subspaces(num_insts, 1, ss_inst1,
-			       Realm::ProfilingRequestSet()).wait();
-
-  std::vector<size_t> field_sizes;
-  field_sizes.push_back(sizeof(FT));
-  field_sizes.push_back(sizeof(Point<N2,T2>));
-
-  fd_vals1.resize(num_insts);
-  fd_vals3.resize(num_insts);
-  indirect_points.resize(num_insts);
-
-  for(size_t i = 0; i < num_insts; i++) {
-    RegionInstance ri;
-    RegionInstance::create_instance(ri,
-				    memories[i],
-				    ss_inst1[i],
-				    field_sizes,
-				    0 /*SOA*/,
-				    Realm::ProfilingRequestSet()).wait();
-    log_app.debug() << "inst[" << i << "] = " << ri << " (" << ss_inst1[i] << ")";
-
-    fd_vals1[i].index_space = ss_inst1[i];
-    fd_vals1[i].inst = ri;
-    fd_vals1[i].field_offset = 0;
-
-    fill_instance(copy_domain, ri, bounds1, bounds2, colors);
-
-    RegionInstance indirect_inst;
-    RegionInstance::create_instance(indirect_inst,
-				    memories[i],
-				    root2,
-				    field_sizes,
-				    0 /*SOA*/,
-				    Realm::ProfilingRequestSet()).wait();
-
-    indirect_points[i].index_space = root2;
-    indirect_points[i].inst = indirect_inst;
-    indirect_points[i].field_offset = 0 + sizeof(FT);
-
-    fill_instance(root2, indirect_inst, bounds2, bounds2, colors);
-
-    RegionInstance source_domain_instance;
-    RegionInstance::create_instance(source_domain_instance, memories[i],
-                                    source_domain, field_sizes, 0 /*SOA*/,
-                                    Realm::ProfilingRequestSet())
-        .wait();
-
-    fd_vals3[i].index_space = source_domain;
-    fd_vals3[i].inst = source_domain_instance;
-    fd_vals3[i].field_offset = 0;
-    fill_instance(source_domain, source_domain_instance, bounds3,
-                           bounds2, colors);
-  }
-
-  return Event::NO_EVENT;
-}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-Event StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3,
-                                 FT>::perform_partitioning(void) {
-  std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
-
-  // Example: D = S[ fs( I[ fi(i) ] ) ]
-  // D - destination_domain
-  // S - source_domain
-  // I - indirect_points/indiret_domain
-  // fi - affine transform copy_domain -> indirect_domain
-  // fs - affine transform indirect_domain -> source_domain
-  // i - copy_domain
-
-  // im1 = image(copy_domain, fi)
-  IndexSpace<N2, T2> im1;
-  Event e2 = root2.create_subspace_by_image(fi, copy_domain, im1,
-                                            ProfilingRequestSet());
-  e2.wait();
-
-  // im2 = image(im1, I)
-  IndexSpace<N2, T2> im2;
-  Event e3 = root2.create_subspace_by_image(indirect_points, im1, im2,
-                                            ProfilingRequestSet(), e2);
-
-  e3.wait();
-
-  // src_domains = [get_index_space_of_instance(s) for s in S]
-  Event e4 = source_domain.create_subspaces_by_field(
-      fd_vals3, piece_colors, source_domains, ProfilingRequestSet());
-  e4.wait();
-
-  // src_preimages1 = [preimage(im2, d, fs) for d in src_domains]
-  std::vector<IndexSpace<N2, T2>> preimages1;
-  Event e5 = im2.create_subspaces_by_preimage(fs, source_domains, preimages1,
-                                              ProfilingRequestSet(), e4);
-  e5.wait();
-
-  // src_preimages2 = [preimage(im1, p, I) for p in src_preimages1]
-  std::vector<IndexSpace<N2, T2>> preimages2;
-  Event e6 = im1.create_subspaces_by_preimage(
-      indirect_points, preimages1, preimages2, ProfilingRequestSet(), e5);
-  e6.wait();
-
-  // src_copy_domains = [preimage(copy_domain, p, fi) for p in src_preimages2]
-  Event e7 = copy_domain.create_subspaces_by_preimage(
-      fi, preimages2, source_copy_domains, ProfilingRequestSet(), e6);
-  e7.wait();
-
-  return Event::NO_EVENT;
-}
-
-template <int N1, typename T1, int N2, typename T2, int N3, typename T3,
-          typename FT>
-int StructuredUnstructuredTest<N1, T1, N2, T2, N3, T3,
-                               FT>::check_partitioning() {
-  if (source_copy_domains.empty() ||
-      source_domains.size() != source_copy_domains.size())
-    return 1;
-  // TODO(apryakhin): Consider whether this is the right validation.
-  for (IndexSpaceIterator<N1, T1> it(copy_domain); it.valid; it.step()) {
-    for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
-         point.step()) {
-      Point<N2, T2> point_fi = fi[point.p];
-      for (auto indirect : indirect_points) {
-        AffineAccessor<Point<N2, T2>, N2, T2> indirect_data(
-            indirect.inst, indirect.field_offset);
-        Point<N3, T3> point_fs = fs[indirect_data[point_fi]];
-        for (size_t i = 0; i < source_domains.size(); i++) {
-          if (source_domains[i].contains(point_fs)) {
-            if (!source_copy_domains[i].contains(point.p)) {
-              return 1;
-            }
-          }
-        }
-      }
->>>>>>> fc14a1098 (Rebase from an image PR to pick recent changes.)
+  for (size_t i = 0; i < transforms.size(); i++) {
+    if (verify_results(root2, transforms[i], dense_images, dense_preimages) ||
+        verify_results(root2_sparse, transforms[i], sparse_images,
+                       sparse_preimages)) {
+      return 1;
     }
   }
   return 0;
@@ -2971,27 +2609,26 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
       }
     }
     reflect.offset = Point<N2, T2>::ZEROES();
-    transforms.push_back(reflect);
+    //transforms.push_back(reflect);
   }
   return transforms;
 }
 
 TestInterface *run_structured_test(TransformType type, int argc, char **argv) {
-  switch (type) {
-    case TransformType::AFFINE:
-      return new RandomAffineTest<2, int, 2, int, int,
-                                  AffineTransform<2, 2, int>>(
-          argc, const_cast<const char **>(argv),
-          create_affine_transforms<2, int, 2, int, int>());
-    case TransformType::TRANSLATION:
-      // TODO(apryakhin): Test other structured transform types.
-      /*return new RandomAffineTest<2, int, 2, int, int,
-                                     TranslationTransform<2, int>>(
-          argc, const_cast<const char **>(argv),
-          create_translate_transforms<2, int, 2, int, int>(16));*/
-      break;
-  }
-  return nullptr;
+ switch (type) {
+  case TransformType::AFFINE:
+   return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
+       argc, const_cast<const char **>(argv),
+       create_affine_transforms<2, int, 2, int, int>());
+  case TransformType::TRANSLATION:
+   // TODO(apryakhin): Test other structured transform types.
+   /*return new RandomAffineTest<2, int, 2, int, int,
+                                  TranslationTransform<2, int>>(
+       argc, const_cast<const char **>(argv),
+       create_translate_transforms<2, int, 2, int, int>(16));*/
+   break;
+ }
+ return nullptr;
 }
 
 int main(int argc, char **argv) {
