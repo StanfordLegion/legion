@@ -10688,6 +10688,8 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       origin_mapped = false;
       origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT;
+      // Slice tasks always already have their options selected
+      options_selected = true;
     }
 
     //--------------------------------------------------------------------------
