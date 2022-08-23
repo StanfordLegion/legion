@@ -252,8 +252,8 @@ namespace Legion {
       // along with the number of regions this task has
       void initialize_operation(InnerContext *ctx, bool track,
                                 unsigned num_regions = 0,
-          const std::vector<StaticDependence> *dependences = NULL,
-          const UntypedBuffer *provenance = NULL);
+                                const char *provenance = NULL,
+          const std::vector<StaticDependence> *dependences = NULL);
     public:
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -770,7 +770,7 @@ namespace Legion {
     public:
       void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
           const std::vector<StaticDependence> *dependences, const Predicate &p,
-          const UntypedBuffer &provenance);
+          const char *provenance);
       void register_predicate_dependence(void);
       virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
@@ -994,7 +994,7 @@ namespace Legion {
       PhysicalRegion initialize(InnerContext *ctx,
                                 const InlineLauncher &launcher);
       void initialize(InnerContext *ctx, const PhysicalRegion &region,
-                      const UntypedBuffer &provenance);
+                      const char *provenance);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -1462,7 +1462,8 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future);
+      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future,
+                        const char *provenance);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
       inline void record_execution_precondition(ApEvent precondition)
@@ -1513,7 +1514,7 @@ namespace Legion {
     public:
       FrameOp& operator=(const FrameOp &rhs);
     public:
-      void initialize(InnerContext *ctx);
+      void initialize(InnerContext *ctx, const char *provenance);
       void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
@@ -2963,36 +2964,36 @@ namespace Legion {
                                LogicalRegion handle, LogicalRegion parent,
                                FieldID fid, MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov); 
+                               const char *provenance);
       void initialize_by_image(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov);
+                               const char *provenance);
       void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov);
+                               const char *provenance);
       void initialize_by_preimage(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov);
+                               const char *provenance);
       void initialize_by_preimage_range(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov);
+                               const char *provenance);
       void initialize_by_association(InnerContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               const UntypedBuffer &prov);
+                               const char *provenance);
       void perform_logging(void) const;
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;
@@ -3530,7 +3531,8 @@ namespace Legion {
       DetachOp& operator=(const DetachOp &rhs);
     public:
       Future initialize_detach(InnerContext *ctx, PhysicalRegion region,
-                               const bool flush, const bool unordered);
+                               const bool flush, const bool unordered,
+                               const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3591,7 +3593,8 @@ namespace Legion {
                                ExternalResourcesImpl *external,
                                const std::vector<FieldID> &privilege_fields,
                                const std::vector<PhysicalRegion> &regions,
-                               bool flush, bool unordered);
+                               bool flush, bool unordered,
+                               const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3737,7 +3740,7 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
                         ReductionOpID redop, bool deterministic,
-                        const UntypedBuffer &prov);
+                        const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

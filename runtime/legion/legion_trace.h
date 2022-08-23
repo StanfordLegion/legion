@@ -331,7 +331,7 @@ namespace Legion {
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
       void initialize_capture(InnerContext *ctx, bool has_blocking_call,
-                              bool remove_trace_reference);
+                    bool remove_trace_reference, const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -364,7 +364,8 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(InnerContext *ctx, bool has_blocking_call);
+      void initialize_complete(InnerContext *ctx, bool has_blocking_call,
+                               const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -396,7 +397,8 @@ namespace Legion {
     public:
       TraceReplayOp& operator=(const TraceReplayOp &rhs);
     public:
-      void initialize_replay(InnerContext *ctx, LegionTrace *trace);
+      void initialize_replay(InnerContext *ctx, LegionTrace *trace,
+                             const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -423,7 +425,8 @@ namespace Legion {
     public:
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
-      void initialize_begin(InnerContext *ctx, LegionTrace *trace);
+      void initialize_begin(InnerContext *ctx, LegionTrace *trace,
+                            const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

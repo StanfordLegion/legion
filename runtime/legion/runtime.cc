@@ -1929,8 +1929,7 @@ namespace Legion {
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
                           context->get_task_name(), context->get_unique_id())
-        const UntypedBuffer no_provenance;
-        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
+        runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -2005,8 +2004,7 @@ namespace Legion {
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
                           context->get_task_name(), context->get_unique_id())
-        const UntypedBuffer no_provenance;
-        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
+        runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -2367,8 +2365,7 @@ namespace Legion {
                           "Please try to be more careful. Warning string: %s",
                           context->get_task_name(), context->get_unique_id(),
                           (warning_string == NULL) ? "" : warning_string)
-        const UntypedBuffer no_provenance;
-        runtime->remap_region(context, PhysicalRegion(this), no_provenance);
+        runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
 #ifdef DEBUG_LEGION
@@ -2759,7 +2756,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ExternalResourcesImpl::detach(InnerContext *ctx, IndexDetachOp *op,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx != context)
@@ -2785,7 +2782,7 @@ namespace Legion {
       }
       // Now initialize the detach operation
       return op->initialize_detach(ctx, parent, upper_bound, launch_bounds,
-                        this, privilege_fields, regions, flush, unordered);
+            this, privilege_fields, regions, flush, unordered, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13493,7 +13490,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                 MapperID id, MappingTagID tag, const UntypedBuffer &provenance)
+                          MapperID id, MappingTagID tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -13507,7 +13504,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::remap_region(Context ctx, const PhysicalRegion &region,
-                               const UntypedBuffer &provenance)
+                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -13616,26 +13613,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context issue release!");
       ctx->issue_release(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_mapping_fence(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue mapping fence!");
-      return ctx->issue_mapping_fence(); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_execution_fence(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue execution fence!");
-      return ctx->issue_execution_fence(); 
     }
 
     //--------------------------------------------------------------------------
@@ -13780,15 +13757,6 @@ namespace Legion {
                       "Illegal call to 'generate_static_trace_id' after "
                       "the runtime has been started!")
       return next_trace++;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::complete_frame(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context issue frame!");
-      ctx->complete_frame(); 
     }
 
     //--------------------------------------------------------------------------

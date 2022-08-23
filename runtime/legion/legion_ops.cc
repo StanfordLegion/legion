@@ -100,9 +100,7 @@ namespace Legion {
       assert(completion_event.exists());
       if (runtime->resilient_mode)
         assert(commit_event.exists());
-#endif
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+#endif 
     }
     
     //--------------------------------------------------------------------------
@@ -363,8 +361,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Operation::initialize_operation(InnerContext *ctx, bool track, 
                                          unsigned regs/*= 0*/,
-                      const std::vector<StaticDependence> *dependences/*=NULL*/,
-                      const UntypedBuffer *prov/*= NULL*/)
+                                         const char *prov/*= NULL*/,
+                      const std::vector<StaticDependence> *dependences/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -378,8 +376,10 @@ namespace Legion {
           parent_ctx->register_new_child_operation(this, dependences);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
-      if ((prov != NULL) && (prov->get_size() > 0))
-        provenance.assign((const char*)prov->get_ptr(), prov->get_size());
+      if (prov != NULL)
+        provenance.assign(prov);
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2321,10 +2321,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
         unsigned regions, const std::vector<StaticDependence> *dependences,
-        const Predicate &p, const UntypedBuffer &provenance)
+        const Predicate &p, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, regions, dependences, &provenance);
+      initialize_operation(ctx, track, regions, provenance, dependences);
       if (p == Predicate::TRUE_PRED)
       {
         speculation_state = RESOLVE_TRUE_STATE;
@@ -2742,8 +2742,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, 
-                           launcher.static_dependences, &launcher.provenance);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/,
+          launcher.provenance.c_str(), launcher.static_dependences);
       if (launcher.requirement.privilege_fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_INLINE,
@@ -2797,10 +2797,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapOp::initialize(InnerContext *ctx, const PhysicalRegion &reg,
-                           const UntypedBuffer &provenance)
+                           const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 1/*regions*/, NULL, &provenance);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, provenance);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
       // If this was a write-discard privilege, change it to read-write
@@ -3905,7 +3905,7 @@ namespace Legion {
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
       initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
@@ -6405,7 +6405,7 @@ namespace Legion {
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
 #endif
@@ -7514,7 +7514,8 @@ namespace Legion {
     {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 
-          own->src_requirements.size() + own->dst_requirements.size());
+          own->src_requirements.size() + own->dst_requirements.size(),
+          own->get_provenance().c_str());
       index_point = p;
       index_domain = own->index_domain;
       owner = own;
@@ -7881,10 +7882,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
-                               bool need_future)
+                               bool need_future, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       fence_kind = kind;
       if (need_future)
@@ -8136,10 +8137,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::initialize(InnerContext *ctx)
+    void FrameOp::initialize(InnerContext *ctx, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      FenceOp::initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      FenceOp::initialize(ctx,EXECUTION_FENCE,false/*need future*/,provenance);
       parent_ctx->issue_frame(this, completion_event); 
     }
 
@@ -9009,7 +9010,8 @@ namespace Legion {
       assert(creator != NULL);
 #endif
       // We never track internal operations
-      initialize_operation(creator->get_context(), false/*track*/);
+      initialize_operation(creator->get_context(), false/*track*/,
+                           1/*regions*/, creator->get_provenance().c_str());
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
@@ -10055,7 +10057,7 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
       initialize_memoizable();
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -10950,7 +10952,7 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 
                              1/*num region requirements*/,
                              launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
       initialize_memoizable();
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -12598,7 +12600,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/,
+          launcher.provenance.c_str());
       // Make a new future map for storing our results
       // We'll fill it in later
       result_map = FutureMap(new FutureMapImpl(ctx, this, 
@@ -14165,11 +14168,11 @@ namespace Legion {
                                                    FieldID fid,
                                                    MapperID id, MappingTagID t,
                                                    const UntypedBuffer &marg,
-                                                   const UntypedBuffer &prov)
+                                                   const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov); 
+      initialize_operation(ctx, true/*track*/, 0, prov); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -14230,11 +14233,11 @@ namespace Legion {
                                           LogicalRegion parent, FieldID fid,
                                           MapperID id, MappingTagID t,
                                           const UntypedBuffer &marg,
-                                          const UntypedBuffer &prov) 
+                                          const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -14298,11 +14301,11 @@ namespace Legion {
                                                 FieldID fid, MapperID id,
                                                 MappingTagID t,
                                                 const UntypedBuffer &marg,
-                                                const UntypedBuffer &prov) 
+                                                const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -14363,12 +14366,11 @@ namespace Legion {
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t,
-                                    const UntypedBuffer &marg,
-                                    const UntypedBuffer &prov)
+                                    const UntypedBuffer &marg, const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -14427,12 +14429,11 @@ namespace Legion {
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t,
-                                    const UntypedBuffer &marg,
-                                    const UntypedBuffer &prov)
+                                    const UntypedBuffer &marg, const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -14489,13 +14490,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_association(InnerContext *ctx,
                         LogicalRegion domain, LogicalRegion domain_parent, 
-                        FieldID fid, IndexSpace range, 
-                        MapperID id, MappingTagID t, const UntypedBuffer &marg,
-                        const UntypedBuffer &prov)
+                        FieldID fid, IndexSpace range, MapperID id,
+                        MappingTagID t, const UntypedBuffer &marg, 
+                        const char *prov)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       // start-off with non-projection requirement
       requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
                                       LEGION_EXCLUSIVE, domain_parent);
@@ -15779,7 +15780,8 @@ namespace Legion {
                                     const DomainPoint &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(own->get_context(), false/*track*/, 1/*size*/);
+      initialize_operation(own->get_context(), false/*track*/, 1/*size*/,
+          own->get_provenance().c_str());
       index_point = p;
       owner = own;
       context_index = owner->get_ctx_index();
@@ -16059,7 +16061,7 @@ namespace Legion {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
       initialize_memoizable();
       requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
                                       LEGION_EXCLUSIVE, launcher.parent);
@@ -16800,7 +16802,7 @@ namespace Legion {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
-                             launcher.predicate, launcher.provenance);
+                             launcher.predicate, launcher.provenance.c_str());
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
 #endif
@@ -17304,7 +17306,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Initialize the operation
-      initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
+      initialize_operation(own->get_context(), false/*track*/, 1/*regions*/,
+          own->get_provenance().c_str());
       index_point = p;
       index_domain = own->index_domain; 
       owner = own;
@@ -17525,7 +17528,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 1/*regions*/, 
-                           launcher.static_dependences);
+          launcher.provenance.c_str(), launcher.static_dependences);
       resource = launcher.resource;
       footprint = launcher.footprint;
       restricted = launcher.restricted;
@@ -18347,7 +18350,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 1/*regions*/,
-                           launcher.static_dependences);
+          launcher.provenance.c_str(), launcher.static_dependences);
       // Construct the region requirement
       // Use a fake projection ID for now, we'll fill it in later during the
       // prepipeline stage before the logical dependence analysis
@@ -18982,7 +18985,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(index < launcher.handles.size());
 #endif
-      initialize_operation(ctx, false/*track*/, 1/*regions*/); 
+      initialize_operation(ctx, false/*track*/, 1/*regions*/,
+          own->get_provenance().c_str());
       owner = own;
       index_point = point;
       context_index = own->get_ctx_index();
@@ -19145,10 +19149,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future DetachOp::initialize_detach(InnerContext *ctx, PhysicalRegion region,
-                                       const bool flsh, const bool unordered)
+                  const bool flsh, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0, provenance);
       flush = flsh;
       // Get a reference to the region to keep it alive
       this->region = region; 
@@ -19573,10 +19577,11 @@ namespace Legion {
                                    ExternalResourcesImpl *external,
                                    const std::vector<FieldID> &privilege_fields,
                                    const std::vector<PhysicalRegion> &regions,
-                                   bool flush, bool unordered)
+                                   bool flush, bool unordered,
+                                   const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0, provenance);
       // Construct the region requirement
       // We'll get the projection later after we know its been written
       // in the dependence analysis stage of the pipeline
@@ -19857,7 +19862,8 @@ namespace Legion {
               const PhysicalRegion &region, const DomainPoint &point, bool flsh)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 1/*regions*/,
+          own->get_provenance().c_str());
       index_point = point;
       owner = own;
       flush = flsh;
@@ -19944,7 +19950,8 @@ namespace Legion {
                                 const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/,
+          launcher.provenance.c_str());
       measurement = launcher.measurement;
       // Only allow non-empty futures 
       if (!launcher.preconditions.empty())
@@ -20141,7 +20148,8 @@ namespace Legion {
                                  const TunableLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/,
+          launcher.provenance.c_str());
       tunable_id = launcher.tunable;
       mapper_id = launcher.mapper;
       tag = launcher.tag;
@@ -20300,10 +20308,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
-       ReductionOpID redop_id, bool is_deterministic, const UntypedBuffer &prov)
+                ReductionOpID redop_id, bool is_deterministic, const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0, NULL, &prov);
+      initialize_operation(ctx, true/*track*/, 0, prov);
       future_map = fm;
       redop = runtime->get_reduction(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,

@@ -2003,7 +2003,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::remap_unmapped_regions(LegionTrace *trace,
                             const std::vector<PhysicalRegion> &unmapped_regions,
-                            const UntypedBuffer &provenance)
+                            const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4194,7 +4194,7 @@ namespace Legion {
                                           IndexSpace range,
                                           MapperID id, MappingTagID tag,
                                           const UntypedBuffer &marg,
-                                          const UntypedBuffer &prov)
+                                          const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4324,7 +4324,7 @@ namespace Legion {
                                               MapperID id, MappingTagID tag,
                                               PartitionKind part_kind,
                                               const UntypedBuffer &marg,
-                                              const UntypedBuffer &prov)
+                                              const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4395,7 +4395,7 @@ namespace Legion {
                                                     MapperID id, 
                                                     MappingTagID tag,
                                                     const UntypedBuffer &marg,
-                                                    const UntypedBuffer &prov)
+                                                    const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4464,7 +4464,7 @@ namespace Legion {
                                                     MapperID id, 
                                                     MappingTagID tag,
                                                     const UntypedBuffer &marg,
-                                                    const UntypedBuffer &prov)
+                                                    const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4532,7 +4532,7 @@ namespace Legion {
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
                                                   const UntypedBuffer &marg,
-                                                  const UntypedBuffer &prov)
+                                                  const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4619,7 +4619,7 @@ namespace Legion {
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
                                                   const UntypedBuffer &marg,
-                                                  const UntypedBuffer &prov)
+                                                  const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -5744,7 +5744,7 @@ namespace Legion {
         epoch_launcher.add_index_task(launcher);
         FutureMap result = execute_must_epoch(epoch_launcher);
         return reduce_future_map(result, redop, deterministic,
-                                 launcher.provenance);
+                                 launcher.provenance.c_str());
       }
       AutoRuntimeCall call(this);
       // Quick out for predicate false
@@ -5784,7 +5784,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
-             ReductionOpID redop, bool deterministic, const UntypedBuffer &prov)
+                      ReductionOpID redop, bool deterministic, const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -5952,7 +5952,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent InnerContext::remap_region(const PhysicalRegion &region,
-                                       const UntypedBuffer &provenance)
+                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6057,7 +6057,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6112,7 +6112,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6149,7 +6149,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6197,7 +6197,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6233,7 +6233,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6269,7 +6269,7 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6590,7 +6590,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resource(PhysicalRegion region,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6602,7 +6602,8 @@ namespace Legion {
         unregister_inline_mapped_region(region);
       }
       DetachOp *op = runtime->get_available_detach_op();
-      Future result = op->initialize_detach(this, region, flush, unordered);
+      Future result =
+        op->initialize_detach(this, region, flush, unordered, provenance);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -6619,14 +6620,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resources(ExternalResources resources,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       if (resources.impl == NULL)
         return Future();
       IndexDetachOp *op = runtime->get_available_index_detach_op();
-      Future result = resources.impl->detach(this, op, flush, unordered);
+      Future result =
+        resources.impl->detach(this, op, flush, unordered, provenance);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -6718,7 +6720,7 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions,
-                               launcher.provenance);
+                               launcher.provenance.c_str());
       return result;
     }
 
@@ -6753,7 +6755,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::issue_mapping_fence(void)
+    Future InnerContext::issue_mapping_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6762,13 +6764,14 @@ namespace Legion {
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
+      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE,
+                                      true/*return future*/, provenance);
       add_to_dependence_queue(fence_op);
       return f;
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::issue_execution_fence(void)
+    Future InnerContext::issue_execution_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6777,13 +6780,14 @@ namespace Legion {
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
+      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE,
+                                      true/*return future*/, provenance);
       add_to_dependence_queue(fence_op);
       return f; 
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::complete_frame(void)
+    void InnerContext::complete_frame(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6792,7 +6796,7 @@ namespace Legion {
       log_run.debug("Issuing a frame in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      frame_op->initialize(this);
+      frame_op->initialize(this, provenance);
       add_to_dependence_queue(frame_op);
     }
 
@@ -8740,7 +8744,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
+        bool static_trace, const std::set<RegionTreeID> *trees,
+        bool deprecated, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -8780,14 +8785,14 @@ namespace Legion {
 
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, trace);
+      begin->initialize_begin(this, trace, provenance);
       add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, trace);
+        replay->initialize_replay(this, trace, provenance);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.exchange(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
@@ -8832,7 +8837,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::end_trace(TraceID tid, bool deprecated)
+    void InnerContext::end_trace(TraceID tid, bool deprecated,
+                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -8857,7 +8863,7 @@ namespace Legion {
       {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-        complete_op->initialize_complete(this, has_blocking_call);
+        complete_op->initialize_complete(this, has_blocking_call, provenance);
         // Remove the current trace now so we block at the end of the
         // trace in the case of program order execution
         current_trace = NULL;
@@ -8867,7 +8873,8 @@ namespace Legion {
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this, has_blocking_call, deprecated);
+        capture_op->initialize_capture(this, has_blocking_call,
+                                       deprecated, provenance);
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
         // Remove the current trace now so we block at the end of the
@@ -10627,11 +10634,8 @@ namespace Legion {
         add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
-        {
-          const std::string &prov = task->get_provenance();
-          const UntypedBuffer provenance(prov.c_str(), prov.length());
-          remap_unmapped_regions(current_trace, unmapped_regions, provenance);
-        }
+          remap_unmapped_regions(current_trace, unmapped_regions,
+                                 task->get_provenance().c_str());
       }
     }
 
@@ -11817,7 +11821,7 @@ namespace Legion {
                                          FieldID domain_fid, IndexSpace range,
                                          MapperID id, MappingTagID tag,
                                          const UntypedBuffer &marg,
-                                         const UntypedBuffer &prov)
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_ASSOCIATION,
@@ -11869,7 +11873,7 @@ namespace Legion {
                                                 MapperID id, MappingTagID tag,
                                                 PartitionKind part_kind,
                                                 const UntypedBuffer &marg,
-                                                const UntypedBuffer &prov)
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_FIELD,
@@ -11889,7 +11893,7 @@ namespace Legion {
                                               Color color,
                                               MapperID id, MappingTagID tag,
                                               const UntypedBuffer &marg,
-                                              const UntypedBuffer &prov)
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE,
@@ -11909,7 +11913,7 @@ namespace Legion {
                                               Color color,
                                               MapperID id, MappingTagID tag,
                                               const UntypedBuffer &marg,
-                                              const UntypedBuffer &prov)
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE_RANGE,
@@ -11929,7 +11933,7 @@ namespace Legion {
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
                                                 const UntypedBuffer &marg,
-                                                const UntypedBuffer &prov)
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE,
@@ -11949,7 +11953,7 @@ namespace Legion {
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
                                                 const UntypedBuffer &marg,
-                                                const UntypedBuffer &prov)
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE_RANGE,
@@ -12418,7 +12422,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
-             ReductionOpID redop, bool deterministic, const UntypedBuffer &prov)
+                ReductionOpID redop, bool deterministic, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12489,7 +12493,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent LeafContext::remap_region(const PhysicalRegion &region,
-                                      const UntypedBuffer &provenance)
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
@@ -12593,7 +12597,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     Future LeafContext::detach_resource(PhysicalRegion region, const bool flush,
-                                        const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -12604,7 +12608,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::detach_resources(ExternalResources resources,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -12653,7 +12657,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::issue_mapping_fence(void)
+    Future LeafContext::issue_mapping_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_MAPPING_FENCE_CALL,
@@ -12663,7 +12667,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::issue_execution_fence(void)
+    Future LeafContext::issue_execution_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_EXECUTION_FENCE_CALL,
@@ -12673,7 +12677,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::complete_frame(void)
+    void LeafContext::complete_frame(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_COMPLETE_FRAME_CALL,
@@ -12903,7 +12907,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
+        bool static_trace, const std::set<RegionTreeID> *trees,
+        bool deprecated, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -12912,7 +12917,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::end_trace(TraceID tid, bool deprecated)
+    void LeafContext::end_trace(TraceID tid, bool deprecated,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,

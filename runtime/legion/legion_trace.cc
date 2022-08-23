@@ -1208,10 +1208,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block,
-                                            bool remove_trace_ref)
+                                  bool remove_trace_ref, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1341,10 +1341,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block)
+    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1544,10 +1545,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace)
+    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1711,10 +1713,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace)
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif

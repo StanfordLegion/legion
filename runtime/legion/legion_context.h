@@ -189,7 +189,7 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -215,7 +215,7 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -226,7 +226,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -237,7 +237,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -248,7 +248,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -259,7 +259,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov) = 0;
+                                            const char *prov) = 0;
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -355,7 +355,7 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic) = 0; 
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic,
-                                   const UntypedBuffer &prov) = 0;
+                                   const char *prov) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -380,7 +380,7 @@ namespace Legion {
                                              bool implicit = false) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   const UntypedBuffer &provenance) = 0;
+                                   const char *provenance) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
@@ -394,18 +394,20 @@ namespace Legion {
       virtual ExternalResources attach_resources(
                                   const IndexAttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
-                                     const bool flush,const bool unordered) = 0;
+                                     const bool flush,const bool unordered,
+                                     const char *provenance = NULL) = 0;
       virtual Future detach_resources(ExternalResources resources,
-                                    const bool flush, const bool unordered) = 0;
+                                    const bool flush, const bool unordered,
+                                    const char *provenance) = 0;
       virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
                                     const TimingLauncher &launcher) = 0;
       virtual Future select_tunable_value(const TunableLauncher &launcher) = 0;
-      virtual Future issue_mapping_fence(void) = 0;
-      virtual Future issue_execution_fence(void) = 0;
-      virtual void complete_frame(void) = 0;
+      virtual Future issue_mapping_fence(const char *provenance) = 0;
+      virtual Future issue_execution_fence(const char *provenance) = 0;
+      virtual void complete_frame(const char *provenance) = 0;
       virtual Predicate create_predicate(const Future &f) = 0;
       virtual Predicate predicate_not(const Predicate &p) = 0;
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
@@ -447,8 +449,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op) = 0;
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *managed, bool dep) = 0;
-      virtual void end_trace(TraceID tid, bool deprecated) = 0;
+        bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+        const char *provenance) = 0;
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             const char *provenance) = 0;
       virtual void record_previous_trace(LegionTrace *trace) = 0;
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator) = 0;
@@ -600,7 +604,7 @@ namespace Legion {
       inline void end_task_wait(void); 
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions,
-                           const UntypedBuffer &provenance);
+                           const char *provenance);
     public:
       void* get_local_task_variable(LocalVariableID id);
       void set_local_task_variable(LocalVariableID id, const void *value,
@@ -1119,7 +1123,7 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1145,7 +1149,7 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1156,7 +1160,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1167,7 +1171,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1178,7 +1182,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1189,7 +1193,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1266,7 +1270,7 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
-                                       const UntypedBuffer &prov);
+                                       const char *prov);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -1291,7 +1295,7 @@ namespace Legion {
                                              bool implicit = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   const UntypedBuffer &provenance);
+                                   const char *provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -1309,16 +1313,18 @@ namespace Legion {
       virtual ProjectionID compute_index_attach_projection(IndexTreeNode *node,
                                         std::vector<IndexSpace> &spaces);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
+                                     const bool unordered,
+                                     const char *provenance = NULL);
       virtual Future detach_resources(ExternalResources resources,
-                                      const bool flush, const bool unordered);
+                                      const bool flush, const bool unordered,
+                                      const char *provenance);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
-      virtual void complete_frame(void);
+      virtual Future issue_mapping_fence(const char *provenance);
+      virtual Future issue_execution_fence(const char *provenance);
+      virtual void complete_frame(const char *provenance);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
@@ -1408,8 +1414,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+          const char *provenance);
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             const char *provenance);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
@@ -2002,7 +2010,7 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2028,7 +2036,7 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2039,7 +2047,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2050,7 +2058,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2061,7 +2069,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2072,7 +2080,7 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             const UntypedBuffer &marg,
-                                            const UntypedBuffer &prov);
+                                            const char *prov);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2146,7 +2154,7 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
-                                       const UntypedBuffer &prov);
+                                       const char *prov);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -2171,7 +2179,7 @@ namespace Legion {
                                              bool implicit = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
-                                   const UntypedBuffer &provenance);
+                                   const char *provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -2184,16 +2192,18 @@ namespace Legion {
       virtual ExternalResources attach_resources(
                                           const IndexAttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
+                                     const bool unordered,
+                                     const char *provenance = NULL);
       virtual Future detach_resources(ExternalResources resources,
-                                      const bool flush, const bool unordered);
+                                      const bool flush, const bool unordered,
+                                      const char *provenance);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
-      virtual void complete_frame(void);
+      virtual Future issue_mapping_fence(const char *provenance);
+      virtual Future issue_execution_fence(const char *provenance);
+      virtual void complete_frame(const char *provenance);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
@@ -2231,8 +2241,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+          const char *provenance);
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             const char *provenance);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);

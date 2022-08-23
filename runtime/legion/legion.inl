@@ -20782,7 +20782,7 @@ namespace Legion {
                                      IndexSpaceT<DIM2,T2> range,
                                      MapperID id, MappingTagID tag,
                                      UntypedBuffer marg,
-                                     UntypedBuffer provenance)
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       create_association(ctx, LogicalRegion(domain),
@@ -20801,7 +20801,7 @@ namespace Legion {
                                       FieldID range_fid,
                                       MapperID id, MappingTagID tag,
                                       UntypedBuffer marg,
-                                      UntypedBuffer provenance)
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       create_bidirectional_association(ctx, LogicalRegion(domain),
@@ -20929,7 +20929,7 @@ namespace Legion {
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     Color color, MapperID id, MappingTagID tag,
                                     PartitionKind part_kind, UntypedBuffer marg,
-                                    UntypedBuffer provenance)
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
@@ -20948,7 +20948,7 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag,
-                              UntypedBuffer marg, UntypedBuffer provenance)
+                              UntypedBuffer marg, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image(ctx,
@@ -20969,7 +20969,7 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag,
-                              UntypedBuffer marg, UntypedBuffer provenance)
+                              UntypedBuffer marg, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image_range(ctx,
@@ -20989,7 +20989,7 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag,
-                              UntypedBuffer marg, UntypedBuffer provenance)
+                              UntypedBuffer marg, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage(ctx, 
@@ -21010,7 +21010,7 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag,
-                              UntypedBuffer marg, UntypedBuffer provenance)
+                              UntypedBuffer marg, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage_range(ctx,
