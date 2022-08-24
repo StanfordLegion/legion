@@ -22292,6 +22292,7 @@ namespace Legion {
       redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
+      serdez_redop_bound = SIZE_MAX;
     }
 
     //--------------------------------------------------------------------------
@@ -22356,14 +22357,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent AllReduceOp::finalize_serdez_targets(RtEvent &protect)
+    //--------------------------------------------------------------------------
+    {
+      // Now that we've got the output instances we copy the result to
+      // each of the targets, we're done when the copies are done
+      // create an external instance for the current allocation
+      const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+      const std::vector<size_t> sizes(1, 1);
+      const int dim_order[1] = { 0 };
+      const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+      const Realm::IndexSpace<1,coord_t> rect_space(
+          Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
+            Realm::Point<1,coord_t>(future_result_size - 1)));
+      Realm::InstanceLayoutGeneric *ilg =
+        Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+            rect_space, constraints, dim_order);
+      PhysicalInstance source_instance;
+      const ApEvent src_ready(
+          PhysicalInstance::create_external_instance(
+            source_instance, runtime->runtime_system_memory, ilg, 
+            Realm::ExternalMemoryResource(
+             reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
+             future_result_size, true/*read only*/),
+            Realm::ProfilingRequestSet()));
+      FutureInstance source(serdez_redop_buffer, future_result_size, 
+          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
+          false/*own alloc*/, source_instance);
+      std::vector<ApEvent> done_events;
+      for (std::vector<FutureInstance*>::const_iterator it =
+            targets.begin(); it != targets.end(); it++)
+      {
+        ApEvent done = (*it)->copy_from(&source, this);
+        if (done.exists())
+          done_events.push_back(done);
+      }
+      if (!done_events.empty())
+      {
+        const ApEvent done = Runtime::merge_events(NULL, done_events);
+        protect = Runtime::protect_event(done);
+        source_instance.destroy(protect);
+        return done;
+      }
+      else
+      {
+        source_instance.destroy();
+        return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void AllReduceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       populate_sources();
-      std::set<RtEvent> ready_events;
+      // Invoke the mapper to do figure out where to put the data
+      std::vector<Memory> target_memories;
+      invoke_mapper(target_memories);
+      std::vector<RtEvent> ready_events;
       // Make sure we subscribe to all these futures before we are mapped
       // in case they need to make any instances
-      if (serdez_redop_fns != NULL)
+      if ((serdez_redop_fns != NULL) && (serdez_redop_bound == SIZE_MAX))
       {
         // We need to request internal buffers here since we actually
         // need to read the data
@@ -22373,7 +22427,7 @@ namespace Legion {
           it->second.impl->request_internal_buffer(this, false/*eager*/);
           const RtEvent ready = it->second.impl->subscribe();
           if (ready.exists())
-            ready_events.insert(ready);
+            ready_events.push_back(ready);
         }
         // Wait for all the local buffers to be ready before reading
         if (!ready_events.empty())
@@ -22394,19 +22448,20 @@ namespace Legion {
       }
       else
       {
-        future_result_size = redop->sizeof_rhs;
+        if (serdez_redop_fns != NULL)
+          future_result_size = serdez_redop_bound;
+        else
+          future_result_size = redop->sizeof_rhs;
         // We only need to subscribe to the futures here 
         for (std::map<DomainPoint,Future>::const_iterator it = 
               sources.begin(); it != sources.end(); it++)
         {
           const RtEvent subscribed = it->second.impl->subscribe();
           if (subscribed.exists())
-            ready_events.insert(subscribed);
+            ready_events.push_back(subscribed);
         }
       }
-      // Invoke the mapper to do figure out where to put the data
-      std::vector<Memory> target_memories;
-      invoke_mapper(target_memories);
+      
 #ifdef DEBUG_LEGION
       assert(targets.empty());
       assert(!target_memories.empty());
@@ -22415,56 +22470,14 @@ namespace Legion {
       create_future_instances(target_memories); 
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
-      if (serdez_redop_fns != NULL)
+      if ((serdez_redop_fns != NULL) && (serdez_redop_bound == SIZE_MAX))
       {
-        // Now that we've got the output instances we copy the result to
-        // each of the targets, we're done when the copies are done
-        // create an external instance for the current allocation
-        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, 1);
-        const int dim_order[1] = { 0 };
-        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-        const Realm::IndexSpace<1,coord_t> rect_space(
-            Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-              Realm::Point<1,coord_t>(future_result_size - 1)));
-        Realm::InstanceLayoutGeneric *ilg =
-          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
-              rect_space, constraints, dim_order);
-        PhysicalInstance source_instance;
-        const ApEvent src_ready(
-            PhysicalInstance::create_external_instance(
-              source_instance, runtime->runtime_system_memory, ilg, 
-              Realm::ExternalMemoryResource(
-               reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
-               future_result_size, true/*read only*/),
-              Realm::ProfilingRequestSet()));
-        FutureInstance source(serdez_redop_buffer, future_result_size, 
-            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
-            false/*own alloc*/, source_instance);
-        std::set<ApEvent> done_events;
-        for (std::vector<FutureInstance*>::const_iterator it =
-              targets.begin(); it != targets.end(); it++)
-        {
-          ApEvent done = (*it)->copy_from(&source, this);
-          if (done.exists())
-            done_events.insert(done);
-        }
-        if (!done_events.empty())
-        {
-          const ApEvent done = Runtime::merge_events(NULL, done_events);
-          const RtEvent ready = Runtime::protect_event(done);
-          source_instance.destroy(ready);
-          if (!request_early_complete(done))
-            complete_execution(ready);
-          else
-            complete_execution();
-        }
+        RtEvent protect;
+        ApEvent done = finalize_serdez_targets(protect);
+        if (!request_early_complete(done))
+          complete_execution(protect);
         else
-        {
-          source_instance.destroy();
-          request_early_complete(ApEvent::NO_AP_EVENT);
           complete_execution();
-        }
       }
       else if (!ready_events.empty())
         complete_execution(Runtime::merge_events(ready_events));
@@ -22616,6 +22629,30 @@ namespace Legion {
       RtEvent completion_precondition;
       if (serdez_redop_fns == NULL)
         completion_precondition = all_reduce_redop();
+      else if (serdez_redop_bound < SIZE_MAX)
+      {
+        future_result_size = 0;
+        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size);
+        all_reduce_serdez();
+        // Check that the result is smaller than the bound
+        if (serdez_redop_bound < future_result_size)
+        {
+          Processor exec_proc = parent_ctx->get_executing_processor();
+          MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output. Mapper %s specified an upper bound of "
+              "%zd bytes for future map all reduce in task %s (UID %lld) with "
+              "serdez redop %d. However, the actual size of the reduced value "
+              "is %zd bytes which exceeds the specified upper bound.",
+              mapper->get_mapper_name(), serdez_redop_bound, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              redop_id, serdez_redop_bound)
+        }
+        ApEvent done = finalize_serdez_targets(completion_precondition);
+        if (request_early_complete(done))
+          completion_precondition = RtEvent::NO_RT_EVENT;
+      }
       result.impl->set_results(targets);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done

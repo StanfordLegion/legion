@@ -4015,6 +4015,7 @@ namespace Legion {
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
       void invoke_mapper(std::vector<Memory> &targets);
+      ApEvent finalize_serdez_targets(RtEvent &protect);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -4036,6 +4037,7 @@ namespace Legion {
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
       void *serdez_redop_buffer;
+      size_t serdez_redop_bound;
       MapperID mapper_id;
       MappingTagID tag;
       bool deterministic;
