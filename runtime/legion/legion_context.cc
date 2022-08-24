@@ -7887,18 +7887,22 @@ namespace Legion {
       for (typename std::list<QueueEntry<T> >::iterator it =
             queue.begin(); it != queue.end(); /*nothing*/)
       {
-        if (std::binary_search(ready_events.begin(), 
-                      ready_events.end(), it->ready))
+        std::vector<RtEvent>::iterator finder = 
+          std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
+        if ((finder != ready_events.end()) && (*finder == it->ready))
         {
           to_perform.push_back(it->op);
           it = queue.erase(it);
-          // You might think you can break out early here when you've seen
-          // all the ready events once but you can't because there might
-          // be duplicates!
+          ready_events.erase(finder);
+          if (ready_events.empty())
+            break;
         }
         else
           it++;
       }
+#ifdef DEBUG_LEGION
+      assert(ready_events.empty());
+#endif
       if (!queue.empty())
       {
         next_ready = RtEvent(comp_queue.get_nonempty_event());
