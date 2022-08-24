@@ -7301,7 +7301,7 @@ namespace Legion {
       {
         std::vector<RtEvent>::iterator finder = 
           std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
-        if (finder != ready_events.end())
+        if ((finder != ready_events.end()) && (*finder == it->ready))
         {
           to_perform.push_back(it->op);
           it = queue.erase(it);
