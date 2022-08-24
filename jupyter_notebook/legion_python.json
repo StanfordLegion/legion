@@ -27,6 +27,10 @@
         "cmd": "-ll:csize", 
         "value": 256
     },
+    "numamem": {
+        "cmd": "-ll:nsize", 
+        "value": 0
+    },
     "fbmem": {
         "cmd": "-ll:fsize", 
         "value": 4096
