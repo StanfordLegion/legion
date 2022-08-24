@@ -2759,9 +2759,10 @@ namespace Legion {
                                   ApEvent precondition, bool check_source_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(source->size <= size);
-#endif
+      // Only copying the minimum size between the two, this is not very
+      // safe, but it's how we deal with upper bound instances so we're
+      // just trusing that the caller code is correct
+      const size_t copy_size = std::min(size, source->size);
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
           (use.exists() && !use.has_triggered()) ||
@@ -2778,7 +2779,7 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
         const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(source->size - 1);
+        const Point<1,coord_t> hi(copy_size - 1);
         const Rect<1,coord_t> rect(lo, hi);
         if (use.exists() && !use.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
@@ -2795,7 +2796,7 @@ namespace Legion {
       else
       {
         // We can do this as a straight memcpy, no need to offload to realm
-        memcpy(const_cast<void*>(get_data()), source->get_data(), source->size);
+        memcpy(const_cast<void*>(get_data()), source->get_data(), copy_size);
         return ApEvent::NO_AP_EVENT;
       }
     } 
@@ -2806,8 +2807,13 @@ namespace Legion {
                        bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
+      // Only copying the minimum size between the two, this is not very
+      // safe, but it's how we deal with upper bound instances so we're
+      // just trusing that the caller code is correct
+      const size_t reduce_size = redop->sizeof_rhs;
 #ifdef DEBUG_LEGION
-      assert(source->size <= size);
+      assert(reduce_size <= size);
+      assert(reduce_size <= source->size);
 #endif
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
@@ -2826,7 +2832,7 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
         const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(source->size - 1);
+        const Point<1,coord_t> hi(reduce_size - 1);
         const Rect<1,coord_t> rect(lo, hi);
         if (use.exists() && !use.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
