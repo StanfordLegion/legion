@@ -22492,9 +22492,11 @@ namespace Legion {
       Mapper::FutureMapReductionInput input;
       Mapper::FutureMapReductionOutput output;
       input.tag = tag;
+      output.serdez_upper_bound = SIZE_MAX;
       Processor exec_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
       mapper->invoke_map_future_map_reduction(this, &input, &output);
+      serdez_redop_bound = output.serdez_upper_bound;
       if (!output.destination_memories.empty())
       {
         if (output.destination_memories.size() > 1)
