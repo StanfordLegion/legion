@@ -992,6 +992,20 @@ namespace Realm {
         wait_on);
   }
 
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image_with_difference(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      const std::vector<IndexSpace<N, T>>& diff_rhs,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   return create_subspaces_by_image_with_difference(
+       DomainTransformNew<N, T, N2, T2>(field_data), sources, diff_rhs, images,
+       reqs, wait_on);
+  }
+
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>

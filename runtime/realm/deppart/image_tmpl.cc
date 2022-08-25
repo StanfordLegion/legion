@@ -46,7 +46,12 @@ namespace Realm {
   template class ImageMicroOp<N1,T1,N2,T2>;               \
   template class ImageOperation<N1,T1,N2,T2>;             \
   template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
+  template Event IndexSpace<N1, T1>::create_subspaces_by_image(               \
+      const DomainTransformNew<N1, T1, N2, T2> &, const std::vector<IndexSpace<N2, T2> > &,            \
+      std::vector<IndexSpace<N1, T1> > &, const ProfilingRequestSet &, Event) \
+      const; \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_image_with_difference( \
+      const DomainTransformNew<N1, T1, N2, T2> &, \
 									       const std::vector<IndexSpace<N2,T2> >&,	\
 									       const std::vector<IndexSpace<N1,T1> >&,	\
 									       std::vector<IndexSpace<N1,T1> >&, \
@@ -54,28 +59,5 @@ namespace Realm {
 									       Event) const;
 
   FOREACH_TT(DOIT)
-
-#define DOIT1(T1, T2)                                              \
-  template Event IndexSpace<N1, T1>::create_subspaces_by_image(               \
-      const DomainTransformNew<N1, T1, N2, T2> &, const std::vector<IndexSpace<N2, T2> > &,            \
-      std::vector<IndexSpace<N1, T1> > &, const ProfilingRequestSet &, Event) \
-      const;
-
-  FOREACH_TT(DOIT1)
-
-  /*template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
-							       const std::vector<IndexSpace<N2,T2> >&,	\
-							       std::vector<IndexSpace<N1,T1> >&, \
-							       const ProfilingRequestSet&, \
-							       Event) const; \*/
-
-
-  /*
-  template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N1,T1> > >&, \
-							       const std::vector<IndexSpace<N2,T2> >&,	\
-							       std::vector<IndexSpace<N1,T1> >&, \
-							       const ProfilingRequestSet&, \
-							       Event) const; \*/
-
 
   };  // namespace Realm

@@ -56,63 +56,10 @@ namespace Realm {
    return e;
   }
 
-  /*
   template <int N, typename T>
   template <int N2, typename T2>
-  Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
-							   const std::vector<IndexSpace<N2,T2> >& sources,
-							   std::vector<IndexSpace<N,T> >& images,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on) const
-  {
-    // output vector should start out empty
-    assert(images.empty());
-
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event e = finish_event->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-
-    size_t n = sources.size();
-    images.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
-    }
-
-    op->launch(wait_on);
-    return e;
-  }
-  */
-
- /* template <int N, typename T>
-  template <int N2, typename T2>
-  Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
-							   const std::vector<IndexSpace<N2,T2> >& sources,
-							   std::vector<IndexSpace<N,T> >& images,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on) const
-  {
-    // output vector should start out empty
-    assert(images.empty());
-
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event e = finish_event->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-
-    size_t n = sources.size();
-    images.resize(n);
-    for(size_t i = 0; i < n; i++) {
-      images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
-    }
-
-    op->launch(wait_on);
-    return e;
-  }*/
-
-  template <int N, typename T>
-  template <int N2, typename T2>
-  Event IndexSpace<N,T>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+  Event IndexSpace<N,T>::create_subspaces_by_image_with_difference(
+      const DomainTransformNew<N, T, N2, T2> &domain_transform,
 							   const std::vector<IndexSpace<N2,T2> >& sources,
 							   const std::vector<IndexSpace<N,T> >& diff_rhss,
 							   std::vector<IndexSpace<N,T> >& images,
@@ -124,7 +71,7 @@ namespace Realm {
 
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
     Event e = finish_event->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, domain_transform, reqs, finish_event, ID(e).event_generation());
 
     size_t n = sources.size();
     images.resize(n);
@@ -483,24 +430,6 @@ namespace Realm {
         domain_transform(_domain_transform) {}
 
   template <int N, typename T, int N2, typename T2>
-  ImageOperation<N, T, N2, T2>::ImageOperation(
-      const IndexSpace<N, T> &_parent,
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
-          &_field_data,
-      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
-      EventImpl::gen_t _finish_gen)
-      : PartitioningOperation(reqs, _finish_event, _finish_gen) {}
-
-  template <int N, typename T, int N2, typename T2>
-  ImageOperation<N, T, N2, T2>::ImageOperation(
-      const IndexSpace<N, T> &_parent,
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
-          &_field_data,
-      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
-      EventImpl::gen_t _finish_gen)
-      : PartitioningOperation(reqs, _finish_event, _finish_gen) {}
-
-  template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
   {}
 
@@ -521,10 +450,10 @@ namespace Realm {
     if(!source.dense())
       target_node = ID(source.sparsity).sparsity_creator_node();
     else
-      if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
+      if(!domain_transform.ptr_data.empty())
+	target_node = ID(domain_transform.ptr_data[sources.size() % domain_transform.ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
+	target_node = ID(domain_transform.range_data[sources.size() % domain_transform.range_data.size()].inst).instance_owner_node();
 
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
@@ -553,10 +482,10 @@ namespace Realm {
     if(!source.dense())
       target_node = ID(source.sparsity).sparsity_creator_node();
     else
-      if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
+      if(!domain_transform.ptr_data.empty())
+	target_node = ID(domain_transform.ptr_data[sources.size() % domain_transform.ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
+	target_node = ID(domain_transform.range_data[sources.size() % domain_transform.range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
@@ -570,6 +499,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void ImageOperation<N,T,N2,T2>::execute(void)
   {
+   // TODO(apryakhin)
    if (domain_transform.type ==
        DomainTransformNew<N, T, N2, T2>::DomainTransformType::STRUCTURED) {
     for (size_t i = 0; i < sources.size(); i++) {
@@ -594,11 +524,11 @@ namespace Realm {
       //  denser
       ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
 
-      for(size_t i = 0; i < ptr_data.size(); i++)
-	uop->add_input_space(ptr_data[i].index_space);
+      for(size_t i = 0; i < domain_transform.ptr_data.size(); i++)
+	uop->add_input_space(domain_transform.ptr_data[i].index_space);
 
-      for(size_t i = 0; i < range_data.size(); i++)
-	uop->add_input_space(range_data[i].index_space);
+      for(size_t i = 0; i < domain_transform.range_data.size(); i++)
+	uop->add_input_space(domain_transform.range_data[i].index_space);
 
       // we will ask this uop to also prefetch the sources we will intersect test against it
       for(size_t i = 0; i < sources.size(); i++)
@@ -608,14 +538,14 @@ namespace Realm {
     } else {
       // launch full cross-product of image micro ops right away
       for(size_t i = 0; i < sources.size(); i++)
-	SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(ptr_data.size() +
-								       range_data.size());
+	SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(domain_transform.ptr_data.size() +
+								       domain_transform.range_data.size());
 
-      for(size_t i = 0; i < ptr_data.size(); i++) {
+      for(size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
 	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								   ptr_data[i].index_space,
-								   ptr_data[i].inst,
-								   ptr_data[i].field_offset,
+								   domain_transform.ptr_data[i].index_space,
+								   domain_transform.ptr_data[i].inst,
+								   domain_transform.ptr_data[i].field_offset,
 								   false /*ptrs*/);
 	for(size_t j = 0; j < sources.size(); j++)
           if(diff_rhss.empty())
@@ -626,11 +556,11 @@ namespace Realm {
 	uop->dispatch(this, true /* ok to run in this thread */);
       }
 
-      for(size_t i = 0; i < range_data.size(); i++) {
+      for(size_t i = 0; i < domain_transform.range_data.size(); i++) {
 	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								   range_data[i].index_space,
-								   range_data[i].inst,
-								   range_data[i].field_offset,
+								   domain_transform.range_data[i].index_space,
+								   domain_transform.range_data[i].inst,
+								   domain_transform.range_data[i].field_offset,
 								   true /*ranges*/);
 	for(size_t j = 0; j < sources.size(); j++)
           if(diff_rhss.empty())
@@ -650,8 +580,8 @@ namespace Realm {
 
     // we asked the overlap tester to prefetch all the source data we need, so we can use it
     //  right away (and then delete it)
-    std::vector<std::set<int> > overlaps_by_field_data(ptr_data.size() +
-						       range_data.size());
+    std::vector<std::set<int> > overlaps_by_field_data(domain_transform.ptr_data.size() +
+						       domain_transform.range_data.size());
     for(size_t i = 0; i < sources.size(); i++) {
       std::set<int> overlaps_by_source;
 
@@ -669,15 +599,15 @@ namespace Realm {
     }
     delete overlap_tester;
 
-    for(size_t i = 0; i < ptr_data.size(); i++) {
+    for(size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
       const std::set<int>& overlaps = overlaps_by_field_data[i];
       size_t n = overlaps.size();
       if(n == 0) continue;
 
       ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								 ptr_data[i].index_space,
-								 ptr_data[i].inst,
-								 ptr_data[i].field_offset,
+								 domain_transform.ptr_data[i].index_space,
+								 domain_transform.ptr_data[i].inst,
+								 domain_transform.ptr_data[i].field_offset,
 								 false /*ptrs*/);
       for(std::set<int>::const_iterator it = overlaps.begin();
 	  it != overlaps.end();
@@ -691,15 +621,15 @@ namespace Realm {
       uop->dispatch(this, true /* ok to run in this thread */);
     }
 
-    for(size_t i = 0; i < range_data.size(); i++) {
-      const std::set<int>& overlaps = overlaps_by_field_data[i + ptr_data.size()];
+    for(size_t i = 0; i < domain_transform.range_data.size(); i++) {
+      const std::set<int>& overlaps = overlaps_by_field_data[i + domain_transform.ptr_data.size()];
       size_t n = overlaps.size();
       if(n == 0) continue;
 
       ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								 range_data[i].index_space,
-								 range_data[i].inst,
-								 range_data[i].field_offset,
+								 domain_transform.range_data[i].index_space,
+								 domain_transform.range_data[i].inst,
+								 domain_transform.range_data[i].field_offset,
 								 true /*ranges*/);
       for(std::set<int>::const_iterator it = overlaps.begin();
 	  it != overlaps.end();

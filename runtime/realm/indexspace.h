@@ -505,6 +505,14 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    template <int N2, typename T2>
+    Event create_subspaces_by_image_with_difference(
+        const DomainTransformNew<N, T, N2, T2>& domain_transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        const std::vector<IndexSpace<N, T>>& diff_rhs,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets can reach subsets
     //  of some other index space - the field data points from this index space to the other
     //  and is used to compute the preimage of each target - i.e. upon return (and waiting

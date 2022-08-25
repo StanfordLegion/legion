@@ -90,16 +90,6 @@ namespace Realm {
                   const ProfilingRequestSet& reqs, GenEventImpl* _finish_event,
                   EventImpl::gen_t _finish_gen);
 
-    ImageOperation(const IndexSpace<N,T>& _parent,
-		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
-		   const ProfilingRequestSet &reqs,
-		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
-
-    ImageOperation(const IndexSpace<N,T>& _parent,
-		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
-		   const ProfilingRequestSet &reqs,
-		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
-
    virtual ~ImageOperation(void);
 
    IndexSpace<N, T> add_source(const IndexSpace<N2, T2>& source);
@@ -115,8 +105,6 @@ namespace Realm {
   protected:
    DomainTransformNew<N, T, N2, T2> domain_transform;
    IndexSpace<N, T> parent;
-   std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>> ptr_data;
-   std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>> range_data;
    std::vector<IndexSpace<N2, T2>> sources;
    std::vector<IndexSpace<N, T>> diff_rhss;
    std::vector<SparsityMap<N, T>> images;
