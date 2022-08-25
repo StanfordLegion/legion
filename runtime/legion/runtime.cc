@@ -3560,7 +3560,7 @@ namespace Legion {
             wait_on.wait();
         }
       }
-      // No need for the lock since the map should be fixed at this point
+      AutoLock fm_lock(future_map_lock);
       others = futures;
     }
 
@@ -4167,7 +4167,7 @@ namespace Legion {
       has_non_trivial_call = true;
       // We know this call only comes from the application so we don't
       // need to worry about thread safety
-      if (collective_performed)
+      if (collective_performed.load())
       {
         // No need for the lock, we know we have all the futures
         others = futures;
@@ -4177,8 +4177,7 @@ namespace Legion {
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
       WrapperReferenceMutator mutator(exchange_events);
-      AutoLock f_lock(future_map_lock);
-      if (!collective_performed)
+      if (!collective_performed.load())
       { 
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
@@ -4194,14 +4193,19 @@ namespace Legion {
         get_shard_local_futures(local_futures);
         FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
         collective.exchange_future_names(local_futures);
-        // When the collective is done we can mark that we've done it
-        // and then copy the results
-        collective_performed = true;
-        if (!futures.empty())
-          futures.insert(local_futures.begin(), local_futures.end());
-        else
-          futures.swap(local_futures);
+        AutoLock f_lock(future_map_lock);
+        if (!collective_performed.load())
+        {
+          // When the collective is done we can mark that we've done it
+          // and then copy the results
+          if (!futures.empty())
+            futures.insert(local_futures.begin(), local_futures.end());
+          else
+            futures.swap(local_futures);
+          collective_performed.store(true);
+        }
       }
+      // No need for the lock, we know the futures are unchanging now
       others = futures;
     }
 
@@ -4248,23 +4252,56 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-      FutureMapImpl::get_shard_local_futures(others);
+      Domain sharding_domain;
+      shard_domain->get_launch_space_domain(sharding_domain);
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      Domain domain;
-      shard_domain->get_launch_space_domain(domain);
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      for (std::map<DomainPoint,Future>::iterator it = 
-            others.begin(); it != others.end(); /*nothing*/)
+      if (!ready_event.has_triggered())
       {
-        const ShardID shard = sharding_function->find_owner(it->first, domain);
-        if (shard != local_shard)
+        IndexSpace local_space = sharding_function->find_shard_space(
+            local_shard, future_map_domain, shard_domain->handle);
+        IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
+        Domain domain;
+        local_points->get_launch_space_domain(domain);
+        std::vector<RtEvent> ready_events;
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
         {
-          std::map<DomainPoint,Future>::iterator to_delete = it++;
-          others.erase(to_delete);
+          const ShardID shard = 
+            sharding_function->find_owner(itr.p, sharding_domain);
+          if (shard == local_shard)
+          {
+            RtEvent ready;
+            others[itr.p] = get_future(itr.p, true/*internal*/, &ready);
+            if (ready.exists())
+              ready_events.push_back(ready);
+          }
         }
-        else
-          it++;
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+      }
+      else
+      {
+        // This will just get all the local futures currently
+        FutureMapImpl::get_all_futures(others);
+        // Filter out any that are not part of our local set
+        for (std::map<DomainPoint,Future>::iterator it = 
+              others.begin(); it != others.end(); /*nothing*/)
+        {
+          const ShardID shard =
+            sharding_function->find_owner(it->first, sharding_domain);
+          if (shard != local_shard)
+          {
+            std::map<DomainPoint,Future>::iterator to_delete = it++;
+            others.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
     }
 

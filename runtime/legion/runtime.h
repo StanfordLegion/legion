@@ -756,7 +756,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
       // Whether the future map owns the sharding function
       bool own_sharding_function;
-      bool collective_performed;
+      std::atomic<bool> collective_performed;
       // For replicated future maps we track whether there have been any
       // non-triival calls to this shard of the future map. If there are
       // then we know there could be non-trivial calls in other shards.
