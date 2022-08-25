@@ -1596,6 +1596,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       CreationKind kind; 
@@ -2733,6 +2734,7 @@ namespace Legion {
                                       RegionTreeForest *forest,
                                       ShardID shard, size_t total_shards) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
+        virtual bool need_all_futures(void) const { return false; }
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
       public:
@@ -2769,6 +2771,7 @@ namespace Legion {
         { return forest->create_partition_by_weights(op, pid, weights,
                                       granularity, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp *op);
+        virtual bool need_all_futures(void) const { return true; }
       protected:
         IndexPartition pid;
         FutureMap weights;
@@ -3038,6 +3041,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:

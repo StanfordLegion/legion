@@ -1691,7 +1691,7 @@ namespace Legion {
     public:
       virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
                                           std::set<RtEvent> &ready_events);
-      virtual void trigger_complete(void);
+      virtual void trigger_execution(void);
     };
 
     /**

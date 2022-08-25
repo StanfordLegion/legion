@@ -8794,7 +8794,11 @@ namespace Legion {
             }
             else
               complete_mapping(mapping_precondition);
-            complete_execution(impl->subscribe());
+            const RtEvent ready = impl->subscribe();
+            if (ready.exists() && !ready.has_triggered())
+              parent_ctx->add_to_trigger_execution_queue(this, ready);
+            else
+              trigger_execution();
             break;
           }
         case FIELD_ALLOCATION:
@@ -8822,9 +8826,15 @@ namespace Legion {
             else
               complete_mapping(mapping_precondition);
             if (!ready_events.empty())
-              complete_execution(Runtime::merge_events(ready_events));
+            {
+              const RtEvent ready = Runtime::merge_events(ready_events);
+              if (ready.exists() && !ready.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, ready);
+              else
+                trigger_execution();
+            }
             else
-              complete_execution();
+              trigger_execution();
             break;
           }
         case FENCE_CREATION:
@@ -8840,7 +8850,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::trigger_complete(void)
+    void CreationOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> complete_preconditions;
@@ -8891,20 +8901,25 @@ namespace Legion {
           }
         case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
-          // Nothing to do here
-          break;
         default:
           assert(false);
       }
+      if (!complete_preconditions.empty())
+        complete_execution(Runtime::merge_events(complete_preconditions));
+      else
+        complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      if (!complete_preconditions.empty())
-        complete_operation(Runtime::merge_events(complete_preconditions));
-      else
-        complete_operation();
+      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -15662,11 +15677,8 @@ namespace Legion {
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      if (future_map.impl != NULL)
-        enqueue_ready_operation(future_map.impl->get_ready_event());
-      else
-        enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                                LG_THROUGHPUT_DEFERRED_PRIORITY);
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                              LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -15707,7 +15719,25 @@ namespace Legion {
       else
         complete_mapping();
       if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+          return;
+        }
+      }
+      trigger_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Perform the partitioning operation
+      const ApEvent ready_event = thunk->perform(this, runtime->forest);
+      if (!request_early_complete(ready_event))
+        complete_execution(Runtime::protect_event(ready_event));
       else
         complete_execution();
     }
@@ -15716,14 +15746,12 @@ namespace Legion {
     void PendingPartitionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      // Perform the partitioning operation
-      const ApEvent ready_event = thunk->perform(this, runtime->forest);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      complete_operation(Runtime::protect_event(ready_event));
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -22451,6 +22479,23 @@ namespace Legion {
       create_future_instances(target_memories); 
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
+      std::vector<RtEvent> ready_events;
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
+      {
+        const RtEvent ready = it->second.impl->subscribe();
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.push_back(ready);
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+          return;
+        }
+      }
       trigger_execution(); 
     }
 
