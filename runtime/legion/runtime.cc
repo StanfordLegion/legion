@@ -1236,7 +1236,7 @@ namespace Legion {
         need_subscribe = !subscription_event.exists();
       }
       if (need_subscribe)
-        return subscribe();
+        subscribe();
       return ready_event;
     }
 
@@ -1485,7 +1485,6 @@ namespace Legion {
         return;
       upper_bound_size = size;
       future_size = size;
-      __sync_synchronize();
       future_size_set = true;
       if (is_owner())
       {
@@ -1579,7 +1578,6 @@ namespace Legion {
       // must be called while we are already holding the lock
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;
       future_size_set = true;
-      __sync_synchronize();
       empty.store(false); 
       if (!pending_instances.empty())
         create_pending_instances();
@@ -1952,7 +1950,6 @@ namespace Legion {
         derez.advance_pointer(metasize);
       }
       derez.deserialize(upper_bound_size);
-      __sync_synchronize();
       empty.store(false);
       if (!pending_instances.empty())
         create_pending_instances();
