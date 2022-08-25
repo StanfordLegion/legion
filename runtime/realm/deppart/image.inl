@@ -27,83 +27,20 @@ extern Logger log_uop_timing;
 
 ////////////////////////////////////////////////////////////////////////
 //
-// class TranslateImageMicroOp<N,T,N2,T2>
+// class StructuredImageMicroOp<N,T,N2,T2>
 
 template <int N, typename T, int N2, typename T2>
-TranslateImageMicroOp<N, T, N2, T2>::TranslateImageMicroOp(
+StructuredImageMicroOp<N, T, N2, T2>::StructuredImageMicroOp(
     const IndexSpace<N, T> &_parent,
-    const std::vector<IndexSpace<N2, T2>> &_sources,
-    const TranslationTransform<N, T2> &_transform)
-    : StructuredImageMicroOpBase<N, T, N2, T2>(_parent, _sources),
-      transform(_transform) {
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N2; j++) {
-      scale[i][j] = (i == j);
-    }
-  }
-}
-
-template <int N, typename T, int N2, typename T2>
-TranslateImageMicroOp<N, T, N2, T2>::~TranslateImageMicroOp() {}
-
-template <int N, typename T, int N2, typename T2>
-inline void TranslateImageMicroOp<N, T, N2, T2>::populate(
-    std::map<int, HybridRectangleList<N, T> *> &bitmasks) {
-  std::vector<Rect<N, T>> parent_rects;
-  if (this->parent_space.dense()) {
-    parent_rects.push_back(this->parent_space.bounds);
-  } else {
-    for (IndexSpaceIterator<N, T> parent_it(this->parent_space);
-         parent_it.valid; parent_it.step()) {
-      parent_rects.push_back(parent_it.rect);
-    }
-  }
-
-  assert(!parent_rects.empty());
-  Rect<N, T> parent_bbox = parent_rects[0];
-  for (size_t i = 1; i < parent_rects.size(); i++) {
-    parent_bbox = parent_bbox.union_bbox(parent_rects[i]);
-  }
-
-  for (size_t i = 0; i < this->sources.size(); i++) {
-    for (IndexSpaceIterator<N2, T2> it2(this->sources[i]); it2.valid;
-         it2.step()) {
-      Rect<N, T> source_bbox;
-      source_bbox.lo = transform[scale * it2.rect.lo];
-      source_bbox.hi = transform[scale * it2.rect.hi];
-
-      if (parent_bbox.intersection(source_bbox).empty()) continue;
-
-      for (const auto &parent_rect : parent_rects) {
-        Rect<N, T> source_parent_isect = parent_rect.intersection(source_bbox);
-        if (!source_parent_isect.empty()) {
-          HybridRectangleList<N, T> **bmpp = 0;
-          if (!bmpp) bmpp = &bitmasks[i];
-          if (!*bmpp) *bmpp = new HybridRectangleList<N, T>;
-          (*bmpp)->add_rect(source_parent_isect);
-        }
-      }
-    }
-  }
-}
-
-////////////////////////////////////////////////////////////////////////
-//
-// class AffineImageMicroOp<N,T,N2,T2>
-
-template <int N, typename T, int N2, typename T2>
-AffineImageMicroOp<N, T, N2, T2>::AffineImageMicroOp(
-    const IndexSpace<N, T> &_parent,
-    const std::vector<IndexSpace<N2, T2>> &_sources,
-    const AffineTransform<N, N2, T2> &_transform)
-    : StructuredImageMicroOpBase<N, T, N2, T2>(_parent, _sources),
+    const StructuredTransform<N, T, N2, T2>& _transform)
+    : StructuredImageMicroOpBase<N, T, N2, T2>(_parent),
       transform(_transform) {}
 
 template <int N, typename T, int N2, typename T2>
-AffineImageMicroOp<N, T, N2, T2>::~AffineImageMicroOp() {}
+StructuredImageMicroOp<N, T, N2, T2>::~StructuredImageMicroOp() {}
 
 template <int N, typename T, int N2, typename T2>
-inline void AffineImageMicroOp<N, T, N2, T2>::populate(
+inline void StructuredImageMicroOp<N, T, N2, T2>::populate(
     std::map<int, HybridRectangleList<N, T> *> &bitmasks) {
   std::vector<Rect<N, T>> parent_rects;
   if (this->parent_space.dense()) {

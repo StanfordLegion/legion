@@ -66,6 +66,7 @@ void sigalrm_handler(int sig)
 template <int N, typename T>
 void dump_sparse_index_space(const char *pfx, IndexSpace<N,T> is)
 {
+  return;
   std::cout << pfx << ": " << is << "\n";
   if(!is.sparsity.exists()) return;
   SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();
@@ -2577,11 +2578,11 @@ TestInterface* run_structured_test(TransformType type, int argc, char **argv) {
           return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
               argc, const_cast<const char **>(argv),
               create_affine_transforms<2, int, 2, int, int>());
-    case TransformType::Translation:
+    /*case TransformType::Translation:
       return new RandomAffineTest<2, int, 2, int, int,
                                      TranslationTransform<2, int>>(
           argc, const_cast<const char **>(argv),
-          create_translate_transforms<2, int, 2, int, int>(16));
+          create_translate_transforms<2, int, 2, int, int>(16));*/
   }
   return nullptr;
 }

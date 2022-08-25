@@ -29,40 +29,41 @@ namespace Realm {
   extern Logger log_uop_timing;
 
   template <int N, typename T>
-  template <int N2, typename T2, typename TRANSFORM>
+  template <int N2, typename T2>
   Event IndexSpace<N, T>::create_subspaces_by_image(
-      const TRANSFORM &transform,
-      const std::vector<IndexSpace<N2, T2> > &sources,
-      std::vector<IndexSpace<N, T> > &images, const ProfilingRequestSet &reqs,
-      Event wait_on /*= Event::NO_EVENT*/) const {
-    // output vector should start out empty
-    assert(images.empty());
+      const DomainTransformNew<N, T, N2, T2> &domain_transform,
+      const std::vector<IndexSpace<N2, T2>> &sources,
+      std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
+      Event wait_on) const {
+   // output vector should start out empty
+   assert(images.empty());
 
-    GenEventImpl *finish_event = GenEventImpl::create_genevent();
-    Event e = finish_event->current_event();
-    StructuredImageOperation<N, T, N2, T2, TRANSFORM> *op =
-        new StructuredImageOperation<N, T, N2, T2, TRANSFORM>(
-            *this, transform, reqs, finish_event, ID(e).event_generation());
+   GenEventImpl *finish_event = GenEventImpl::create_genevent();
+   Event e = finish_event->current_event();
 
-    size_t n = sources.size();
-    images.resize(n);
-    for (size_t i = 0; i < n; i++) {
-      images[i] = op->add_source(sources[i]);
-      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> "
-                       << images[i] << " (" << e << ")";
-    }
+   ImageOperation<N, T, N2, T2> *op = new ImageOperation<N, T, N2, T2>(
+       *this, domain_transform, reqs, finish_event, ID(e).event_generation());
 
-    op->launch(wait_on);
-    return e;
+   size_t n = sources.size();
+   images.resize(n);
+   for (size_t i = 0; i < n; i++) {
+    images[i] = op->add_source(sources[i]);
+    log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> "
+                     << images[i] << " (" << e << ")";
+   }
+
+   op->launch(wait_on);
+   return e;
   }
 
+  /*
   template <int N, typename T>
   template <int N2, typename T2>
   Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
 							   const std::vector<IndexSpace<N2,T2> >& sources,
 							   std::vector<IndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/) const
+							   Event wait_on) const
   {
     // output vector should start out empty
     assert(images.empty());
@@ -81,14 +82,15 @@ namespace Realm {
     op->launch(wait_on);
     return e;
   }
+  */
 
-  template <int N, typename T>
+ /* template <int N, typename T>
   template <int N2, typename T2>
   Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
 							   const std::vector<IndexSpace<N2,T2> >& sources,
 							   std::vector<IndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/) const
+							   Event wait_on) const
   {
     // output vector should start out empty
     assert(images.empty());
@@ -106,7 +108,7 @@ namespace Realm {
 
     op->launch(wait_on);
     return e;
-  }
+  }*/
 
   template <int N, typename T>
   template <int N2, typename T2>
@@ -471,26 +473,32 @@ namespace Realm {
   // class ImageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
-					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
-					    const ProfilingRequestSet &reqs,
-					    GenEventImpl *_finish_event,
-					    EventImpl::gen_t _finish_gen)
-    : PartitioningOperation(reqs, _finish_event, _finish_gen)
-    , parent(_parent)
-    , ptr_data(_field_data)
-  {}
+  ImageOperation<N, T, N2, T2>::ImageOperation(
+      const IndexSpace<N, T> &_parent,
+      const DomainTransformNew<N, T, N2, T2> &_domain_transform,
+      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      EventImpl::gen_t _finish_gen)
+      : PartitioningOperation(reqs, _finish_event, _finish_gen),
+        parent(_parent),
+        domain_transform(_domain_transform) {}
 
   template <int N, typename T, int N2, typename T2>
-  ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
-					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
-					    const ProfilingRequestSet &reqs,
-					    GenEventImpl *_finish_event,
-					    EventImpl::gen_t _finish_gen)
-    : PartitioningOperation(reqs, _finish_event, _finish_gen)
-    , parent(_parent)
-    , range_data(_field_data)
-  {}
+  ImageOperation<N, T, N2, T2>::ImageOperation(
+      const IndexSpace<N, T> &_parent,
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>
+          &_field_data,
+      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      EventImpl::gen_t _finish_gen)
+      : PartitioningOperation(reqs, _finish_event, _finish_gen) {}
+
+  template <int N, typename T, int N2, typename T2>
+  ImageOperation<N, T, N2, T2>::ImageOperation(
+      const IndexSpace<N, T> &_parent,
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
+          &_field_data,
+      const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
+      EventImpl::gen_t _finish_gen)
+      : PartitioningOperation(reqs, _finish_event, _finish_gen) {}
 
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N,T,N2,T2>::~ImageOperation(void)
@@ -509,7 +517,7 @@ namespace Realm {
 
     // if the source has a sparsity map, use the same node - otherwise
     // get a sparsity ID by round-robin'ing across the nodes that have field data
-    int target_node;
+    int target_node = 0;
     if(!source.dense())
       target_node = ID(source.sparsity).sparsity_creator_node();
     else
@@ -517,6 +525,7 @@ namespace Realm {
 	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
       else
 	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
+
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
@@ -561,6 +570,25 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   void ImageOperation<N,T,N2,T2>::execute(void)
   {
+   if (domain_transform.type ==
+       DomainTransformNew<N, T, N2, T2>::DomainTransformType::STRUCTURED) {
+    for (size_t i = 0; i < sources.size(); i++) {
+     SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
+    }
+
+    StructuredImageMicroOpBase<N, T, N2, T2> *micro_op =
+        new StructuredImageMicroOp<N, T, N2, T2>(
+            parent, domain_transform.structured_transform);
+
+    for (size_t j = 0; j < sources.size(); j++) {
+     micro_op->add_sparsity_output(sources[j], images[j]);
+    }
+
+    micro_op->dispatch(this, /*inline_ok=*/true);
+
+    return;
+   }
+
     if(!DeppartConfig::cfg_disable_intersection_optimization) {
       // build the overlap tester based on the field index spaces - they're more likely to be known and
       //  denser
@@ -698,9 +726,8 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::StructuredImageMicroOpBase(
-      const IndexSpace<N, T> &_parent,
-      const std::vector<IndexSpace<N2, T2>> &_sources)
-      : parent_space(_parent), sources(_sources) {}
+      const IndexSpace<N, T> &_parent)
+      : parent_space(_parent) {}
 
   template <int N, typename T, int N2, typename T2>
   StructuredImageMicroOpBase<N, T, N2, T2>::~StructuredImageMicroOpBase() {}
@@ -726,8 +753,9 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   void StructuredImageMicroOpBase<N, T, N2, T2>::add_sparsity_output(
-      SparsityMap<N, T> _sparsity) {
-    sparsity_outputs.push_back(_sparsity);
+      IndexSpace<N2, T2> _source, SparsityMap<N, T> _sparsity) {
+   sources.push_back(_source);
+   sparsity_outputs.push_back(_sparsity);
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -774,70 +802,6 @@ namespace Realm {
   }
 
   ////////////////////////////////////////////////////////////////////////
-  //
-  // class StructuredImageOperation<N,T,N2,T2>
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::StructuredImageOperation(
-      const IndexSpace<N, T> &_parent, const TRANSFORM &_transform,
-      const ProfilingRequestSet &_reqs, GenEventImpl *_finish_event,
-      EventImpl::gen_t _finish_gen)
-      : PartitioningOperation(_reqs, _finish_event, _finish_gen),
-        parent(_parent),
-        transform(_transform) {}
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::~StructuredImageOperation() {}
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  IndexSpace<N, T>
-  StructuredImageOperation<N, T, N2, T2, TRANSFORM>::add_source(
-      const IndexSpace<N2, T2> &source) {
-    // try to filter out obviously empty sources
-    if (parent.empty() || source.empty()) {
-      return IndexSpace<N, T>::make_empty();
-    }
-
-    // otherwise it'll be something smaller than the current parent
-    IndexSpace<N, T> image;
-    image.bounds = parent.bounds;
-
-    int target_node = Network::my_node_id;
-    if (!source.dense()) {
-      target_node = ID(source.sparsity).sparsity_creator_node();
-    }
-    SparsityMap<N, T> sparsity = get_runtime()
-                                     ->get_available_sparsity_impl(target_node)
-                                     ->me.convert<SparsityMap<N, T>>();
-    image.sparsity = sparsity;
-
-    sources.push_back(source);
-    images.push_back(sparsity);
-
-    return image;
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::execute(void) {
-    for (size_t i = 0; i < sources.size(); i++) {
-      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
-    }
-
-    StructuredImageMicroOpBase<N, T, N2, T2> *micro_op =
-        transform.create_image_op(parent, sources);
-
-    for (size_t j = 0; j < sources.size(); j++) {
-      micro_op->add_sparsity_output(images[j]);
-    }
-
-    micro_op->dispatch(this, /*inline_ok=*/true);
-  }
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  void StructuredImageOperation<N, T, N2, T2, TRANSFORM>::print(
-      std::ostream &os) const {
-    os << "StructuredImageOperation(" << parent << ")";
-  }
 
   // instantiations of templates handled in image_tmpl.cc
 

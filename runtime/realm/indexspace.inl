@@ -48,15 +48,6 @@ namespace Realm {
     return point + offset;
   }
 
-  template <int N, typename T>
-  template <int N2, typename T2>
-  inline StructuredImageMicroOpBase<N, T2, N2, T>*
-  TranslationTransform<N, T>::create_image_op(
-        const IndexSpace<N, T2>& parent,
-        std::vector<IndexSpace<N2, T>>& sources) const {
-    return new TranslateImageMicroOp<N, T2, N2, T>(parent, sources, *this);
-  }
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class AfineTransform<M, N, T>
@@ -73,13 +64,14 @@ namespace Realm {
     return (transform * point) + offset;
   }
 
-  template <int M, int N, typename T>
-  template <typename T2>
-  inline StructuredImageMicroOpBase<M, T2, N, T>*
-  AffineTransform<M, N, T>::create_image_op(
-      const IndexSpace<M, T2>& parent,
-      std::vector<IndexSpace<N, T>>& sources) const {
-    return new AffineImageMicroOp<M, T2, N, T>(parent, sources, *this);
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class StructuredTransform<N, T, N2, T2>
+
+  template <int N, typename T, int N2, typename T2>
+  inline Point<N, T> StructuredTransform<N, T, N2, T2>::operator[](
+      const Point<N2, T>& point) const {
+    return (transform_matrix * point) + offset;
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -957,6 +949,47 @@ namespace Realm {
     Event e = create_subspaces_by_image(field_data, sources, images, reqs, wait_on);
     image = images[0];
     return e;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2, typename TRANSFORM>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const TRANSFORM& transform,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+    DomainTransformNew<N, T, N2, T2> domain_transform;
+    if (typeid(transform) == typeid(AffineTransform<N, N2, T2>)) {
+      domain_transform = DomainTransformNew<N, T, N2, T2>(
+          StructuredTransform<N, T, N2, T2>(transform));
+    }
+    return create_subspaces_by_image(domain_transform, sources, images, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+    return create_subspaces_by_image(
+        DomainTransformNew<N, T, N2, T2>(field_data), sources, images, reqs,
+        wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+    return create_subspaces_by_image(
+        DomainTransformNew<N, T, N2, T2>(field_data), sources, images, reqs,
+        wait_on);
   }
 
   // simple wrapper for the multiple subspace version

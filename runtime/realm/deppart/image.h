@@ -85,6 +85,11 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class ImageOperation : public PartitioningOperation {
   public:
+   ImageOperation(const IndexSpace<N, T>& _parent,
+                  const DomainTransformNew<N, T, N2, T2>& _domain_transform,
+                  const ProfilingRequestSet& reqs, GenEventImpl* _finish_event,
+                  EventImpl::gen_t _finish_gen);
+
     ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
@@ -95,32 +100,32 @@ namespace Realm {
 		   const ProfilingRequestSet &reqs,
 		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
-    virtual ~ImageOperation(void);
+   virtual ~ImageOperation(void);
 
-    IndexSpace<N,T> add_source(const IndexSpace<N2,T2>& source);
-    IndexSpace<N,T> add_source_with_difference(const IndexSpace<N2,T2>& source,
-                                                const IndexSpace<N,T>& diff_rhs);
+   IndexSpace<N, T> add_source(const IndexSpace<N2, T2>& source);
+   IndexSpace<N, T> add_source_with_difference(
+       const IndexSpace<N2, T2>& source, const IndexSpace<N, T>& diff_rhs);
 
-    virtual void execute(void);
+   virtual void execute(void);
 
-    virtual void print(std::ostream& os) const;
+   virtual void print(std::ostream& os) const;
 
-    virtual void set_overlap_tester(void *tester);
+   virtual void set_overlap_tester(void* tester);
 
   protected:
-    IndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > > ptr_data;
-    std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > > range_data;
-    std::vector<IndexSpace<N2,T2> > sources;
-    std::vector<IndexSpace<N,T> > diff_rhss;
-    std::vector<SparsityMap<N,T> > images;
+   DomainTransformNew<N, T, N2, T2> domain_transform;
+   IndexSpace<N, T> parent;
+   std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>> ptr_data;
+   std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>> range_data;
+   std::vector<IndexSpace<N2, T2>> sources;
+   std::vector<IndexSpace<N, T>> diff_rhss;
+   std::vector<SparsityMap<N, T>> images;
   };
 
   template <int N, typename T, int N2, typename T2>
   class StructuredImageMicroOpBase : public PartitioningMicroOp {
    public:
-    StructuredImageMicroOpBase(const IndexSpace<N, T>& _parent,
-                               const std::vector<IndexSpace<N2, T2>>& _sources);
+    StructuredImageMicroOpBase(const IndexSpace<N, T>& _parent);
 
     virtual ~StructuredImageMicroOpBase(void);
     virtual void execute(void);
@@ -128,7 +133,8 @@ namespace Realm {
     virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
     void dispatch(PartitioningOperation* op, bool inline_ok);
-    void add_sparsity_output(SparsityMap<N, T> _sparsity);
+    void add_sparsity_output(IndexSpace<N2, T2> _source,
+                             SparsityMap<N, T> _sparsity);
 
    protected:
     IndexSpace<N, T> parent_space;
@@ -137,60 +143,19 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2>
-  class TranslateImageMicroOp
-      : public StructuredImageMicroOpBase<N, T, N2, T2> {
+  class StructuredImageMicroOp : public StructuredImageMicroOpBase<N, T, N2, T2> {
    public:
-    TranslateImageMicroOp(const IndexSpace<N, T>& _parent,
-                          const std::vector<IndexSpace<N2, T2>>& _sources,
-                          const TranslationTransform<N, T2>& _transform);
+    StructuredImageMicroOp(const IndexSpace<N, T>& _parent,
+                       const StructuredTransform<N, T, N2, T2>& _transform);
 
-    virtual ~TranslateImageMicroOp(void);
+    virtual ~StructuredImageMicroOp(void);
 
     virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
 
    protected:
-    TranslationTransform<N, T2> transform;
-    Matrix<N, N2, T2> scale;
+    StructuredTransform<N, T, N2, T2> transform;
   };
 
-  template <int N, typename T, int N2, typename T2>
-  class AffineImageMicroOp : public StructuredImageMicroOpBase<N, T, N2, T2> {
-   public:
-    AffineImageMicroOp(const IndexSpace<N, T>& _parent,
-                       const std::vector<IndexSpace<N2, T2>>& _sources,
-                       const AffineTransform<N, N2, T2>& _transform);
-
-    virtual ~AffineImageMicroOp(void);
-
-    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
-
-   protected:
-    AffineTransform<N, N2, T2> transform;
-  };
-
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  class StructuredImageOperation : public PartitioningOperation {
-   public:
-    StructuredImageOperation(const IndexSpace<N, T>& _parent,
-                             const TRANSFORM& _transform,
-                             const ProfilingRequestSet& _reqs,
-                             GenEventImpl* _finish_event,
-                             EventImpl::gen_t _finish_gen);
-
-    virtual ~StructuredImageOperation(void);
-
-    IndexSpace<N, T> add_source(const IndexSpace<N2, T2>& source);
-
-    virtual void execute(void);
-
-    virtual void print(std::ostream& os) const;
-
-   protected:
-    IndexSpace<N, T> parent;
-    std::vector<IndexSpace<N2, T2>> sources;
-    std::vector<SparsityMap<N, T>> images;
-    TRANSFORM transform;
-  };
   };  // namespace Realm
 
 #include "realm/deppart/image.inl"
