@@ -32,7 +32,7 @@ extern Logger log_uop_timing;
 template <int N, typename T, int N2, typename T2>
 StructuredImageMicroOp<N, T, N2, T2>::StructuredImageMicroOp(
     const IndexSpace<N, T> &_parent,
-    const StructuredTransform<N, T, N2, T2>& _transform)
+    const StructuredTransform<N, T, N2, T2> &_transform)
     : StructuredImageMicroOpBase<N, T, N2, T2>(_parent),
       transform(_transform) {}
 
@@ -42,6 +42,10 @@ StructuredImageMicroOp<N, T, N2, T2>::~StructuredImageMicroOp() {}
 template <int N, typename T, int N2, typename T2>
 inline void StructuredImageMicroOp<N, T, N2, T2>::populate(
     std::map<int, HybridRectangleList<N, T> *> &bitmasks) {
+  // TODO(apyakhin@): Just for now we effectively defaulting to affine
+  // an transform. Consider adding both more generalized version that
+  // works for any type of structured transforms as well as specialized
+  // version.
   std::vector<Rect<N, T>> parent_rects;
   if (this->parent_space.dense()) {
     parent_rects.push_back(this->parent_space.bounds);

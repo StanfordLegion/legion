@@ -69,10 +69,45 @@ namespace Realm {
   // class StructuredTransform<N, T, N2, T2>
 
   template <int N, typename T, int N2, typename T2>
+  StructuredTransform<N, T, N2, T2>::StructuredTransform(
+      const AffineTransform<N, N2, T2>& _transform)
+      : transform_matrix(_transform.transform),
+        offset(_transform.offset),
+        type(StructuredTransformType::AFFINE) {}
+
+  template <int N, typename T, int N2, typename T2>
+  StructuredTransform<N, T, N2, T2>::StructuredTransform(
+      const TranslationTransform<N, T2>& _transform)
+      : offset(_transform.offset), type(StructuredTransformType::TRANSLATION) {}
+
+  template <int N, typename T, int N2, typename T2>
   inline Point<N, T> StructuredTransform<N, T, N2, T2>::operator[](
       const Point<N2, T>& point) const {
     return (transform_matrix * point) + offset;
   }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Domainransform<N, T, N2, T2>
+
+  template <int N, typename T, int N2, typename T2>
+  DomainTransform<N, T, N2, T2>::DomainTransform(
+      const StructuredTransform<N, T, N2, T2>& _transform)
+      : structured_transform(_transform),
+        type(DomainTransformType::STRUCTURED) {}
+
+  template <int N, typename T, int N2, typename T2>
+  DomainTransform<N, T, N2, T2>::DomainTransform(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+          _field_data)
+      : ptr_data(_field_data), type(DomainTransformType::UNSTRUCTURED_PTR) {}
+
+  template <int N, typename T, int N2, typename T2>
+  DomainTransform<N, T, N2, T2>::DomainTransform(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
+          _field_data)
+      : range_data(_field_data),
+        type(DomainTransformType::UNSTRUCTURED_RANGE) {}
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -958,12 +993,12 @@ namespace Realm {
       const std::vector<IndexSpace<N2, T2>>& sources,
       std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
       Event wait_on) const {
-    DomainTransformNew<N, T, N2, T2> domain_transform;
-    if (typeid(transform) == typeid(AffineTransform<N, N2, T2>)) {
-      domain_transform = DomainTransformNew<N, T, N2, T2>(
-          StructuredTransform<N, T, N2, T2>(transform));
-    }
-    return create_subspaces_by_image(domain_transform, sources, images, reqs, wait_on);
+   // TODO(apryakhin): For now we just support building a general structured
+   // transform from an affince transform. This will be extended later
+   // to support more transform types.
+   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>));
+   return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(transform),
+                                    sources, images, reqs, wait_on);
   }
 
   template <int N, typename T>
@@ -975,7 +1010,7 @@ namespace Realm {
       std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
       Event wait_on) const {
     return create_subspaces_by_image(
-        DomainTransformNew<N, T, N2, T2>(field_data), sources, images, reqs,
+        DomainTransform<N, T, N2, T2>(field_data), sources, images, reqs,
         wait_on);
   }
 
@@ -988,7 +1023,7 @@ namespace Realm {
       std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
       Event wait_on) const {
     return create_subspaces_by_image(
-        DomainTransformNew<N, T, N2, T2>(field_data), sources, images, reqs,
+        DomainTransform<N, T, N2, T2>(field_data), sources, images, reqs,
         wait_on);
   }
 
@@ -1002,7 +1037,7 @@ namespace Realm {
       std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
       Event wait_on) const {
    return create_subspaces_by_image_with_difference(
-       DomainTransformNew<N, T, N2, T2>(field_data), sources, diff_rhs, images,
+       DomainTransform<N, T, N2, T2>(field_data), sources, diff_rhs, images,
        reqs, wait_on);
   }
 

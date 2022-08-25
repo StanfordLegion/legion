@@ -86,7 +86,7 @@ namespace Realm {
   class ImageOperation : public PartitioningOperation {
   public:
    ImageOperation(const IndexSpace<N, T>& _parent,
-                  const DomainTransformNew<N, T, N2, T2>& _domain_transform,
+                  const DomainTransform<N, T, N2, T2>& _domain_transform,
                   const ProfilingRequestSet& reqs, GenEventImpl* _finish_event,
                   EventImpl::gen_t _finish_gen);
 
@@ -103,8 +103,8 @@ namespace Realm {
    virtual void set_overlap_tester(void* tester);
 
   protected:
-   DomainTransformNew<N, T, N2, T2> domain_transform;
    IndexSpace<N, T> parent;
+   DomainTransform<N, T, N2, T2> domain_transform;
    std::vector<IndexSpace<N2, T2>> sources;
    std::vector<IndexSpace<N, T>> diff_rhss;
    std::vector<SparsityMap<N, T>> images;

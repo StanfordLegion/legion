@@ -125,15 +125,9 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API StructuredTransform {
    public:
-    StructuredTransform() {}
-    StructuredTransform(const AffineTransform<N, N2, T2>& _transform)
-        : transform_matrix(_transform.transform),
-          offset(_transform.offset),
-          type(StructuredTransformType::AFFINE) {}
-
-    StructuredTransform(const TranslationTransform<N, T2>& _transform)
-        : offset(_transform.offset),
-          type(StructuredTransformType::TRANSLATION) {}
+    StructuredTransform() = default;
+    StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
+    StructuredTransform(const TranslationTransform<N, T2>& _transform);
 
     Point<N, T> operator[](const Point<N2, T>& point) const;
 
@@ -150,22 +144,18 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2>
-  class REALM_PUBLIC_API DomainTransformNew {
+  class REALM_PUBLIC_API DomainTransform {
    public:
-    DomainTransformNew() {}
-    DomainTransformNew(const StructuredTransform<N, T, N2, T2>& _transform)
-        : structured_transform(_transform),
-          type(DomainTransformType::STRUCTURED) {}
+    DomainTransform() = default;
+    DomainTransform(const StructuredTransform<N, T, N2, T2>& _transform);
 
-    DomainTransformNew(
+    DomainTransform(
         const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
-            _field_data)
-        : ptr_data(_field_data), type(DomainTransformType::UNSTRUCTURED_PTR) {}
+            _field_data);
 
-    DomainTransformNew(
+    DomainTransform(
       const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
-          &_field_data)
-        : range_data(_field_data), type(DomainTransformType::UNSTRUCTURED_RANGE) {}
+          &_field_data);
 
     enum DomainTransformType {
       NONE = 0,
@@ -175,10 +165,10 @@ namespace Realm {
     };
 
     // protected:
-    DomainTransformType type;
     StructuredTransform<N, T, N2, T2> structured_transform;
     std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>> ptr_data;
     std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>> range_data;
+    DomainTransformType type;
   };
 
   class IndirectionInfo;
@@ -464,7 +454,7 @@ namespace Realm {
 
     template <int N2, typename T2>
     Event create_subspaces_by_image(
-      const DomainTransformNew<N, T, N2, T2> &domain_transform,
+      const DomainTransform<N, T, N2, T2> &domain_transform,
         const std::vector<IndexSpace<N2, T2> >& sources,
         std::vector<IndexSpace<N, T> >& images, const ProfilingRequestSet& reqs,
         Event wait_on = Event::NO_EVENT) const;
@@ -507,7 +497,7 @@ namespace Realm {
 
     template <int N2, typename T2>
     Event create_subspaces_by_image_with_difference(
-        const DomainTransformNew<N, T, N2, T2>& domain_transform,
+        const DomainTransform<N, T, N2, T2>& domain_transform,
         const std::vector<IndexSpace<N2, T2>>& sources,
         const std::vector<IndexSpace<N, T>>& diff_rhs,
         std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,

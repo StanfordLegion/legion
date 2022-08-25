@@ -31,7 +31,7 @@ namespace Realm {
   template <int N, typename T>
   template <int N2, typename T2>
   Event IndexSpace<N, T>::create_subspaces_by_image(
-      const DomainTransformNew<N, T, N2, T2> &domain_transform,
+      const DomainTransform<N, T, N2, T2> &domain_transform,
       const std::vector<IndexSpace<N2, T2>> &sources,
       std::vector<IndexSpace<N, T>> &images, const ProfilingRequestSet &reqs,
       Event wait_on) const {
@@ -59,7 +59,7 @@ namespace Realm {
   template <int N, typename T>
   template <int N2, typename T2>
   Event IndexSpace<N,T>::create_subspaces_by_image_with_difference(
-      const DomainTransformNew<N, T, N2, T2> &domain_transform,
+      const DomainTransform<N, T, N2, T2> &domain_transform,
 							   const std::vector<IndexSpace<N2,T2> >& sources,
 							   const std::vector<IndexSpace<N,T> >& diff_rhss,
 							   std::vector<IndexSpace<N,T> >& images,
@@ -422,7 +422,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   ImageOperation<N, T, N2, T2>::ImageOperation(
       const IndexSpace<N, T> &_parent,
-      const DomainTransformNew<N, T, N2, T2> &_domain_transform,
+      const DomainTransform<N, T, N2, T2> &_domain_transform,
       const ProfilingRequestSet &reqs, GenEventImpl *_finish_event,
       EventImpl::gen_t _finish_gen)
       : PartitioningOperation(reqs, _finish_event, _finish_gen),
@@ -497,11 +497,9 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void ImageOperation<N,T,N2,T2>::execute(void)
-  {
-   // TODO(apryakhin)
+  void ImageOperation<N, T, N2, T2>::execute(void) {
    if (domain_transform.type ==
-       DomainTransformNew<N, T, N2, T2>::DomainTransformType::STRUCTURED) {
+       DomainTransform<N, T, N2, T2>::DomainTransformType::STRUCTURED) {
     for (size_t i = 0; i < sources.size(); i++) {
      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(1);
     }
@@ -515,62 +513,64 @@ namespace Realm {
     }
 
     micro_op->dispatch(this, /*inline_ok=*/true);
+   } else {
+    if (!DeppartConfig::cfg_disable_intersection_optimization) {
+     // build the overlap tester based on the field index spaces - they're more
+     // likely to be known and
+     //  denser
+     ComputeOverlapMicroOp<N2, T2> *uop =
+         new ComputeOverlapMicroOp<N2, T2>(this);
 
-    return;
-   }
+     for (size_t i = 0; i < domain_transform.ptr_data.size(); i++)
+      uop->add_input_space(domain_transform.ptr_data[i].index_space);
 
-    if(!DeppartConfig::cfg_disable_intersection_optimization) {
-      // build the overlap tester based on the field index spaces - they're more likely to be known and
-      //  denser
-      ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
+     for (size_t i = 0; i < domain_transform.range_data.size(); i++)
+      uop->add_input_space(domain_transform.range_data[i].index_space);
 
-      for(size_t i = 0; i < domain_transform.ptr_data.size(); i++)
-	uop->add_input_space(domain_transform.ptr_data[i].index_space);
+     // we will ask this uop to also prefetch the sources we will intersect test
+     // against it
+     for (size_t i = 0; i < sources.size(); i++)
+      uop->add_extra_dependency(sources[i]);
 
-      for(size_t i = 0; i < domain_transform.range_data.size(); i++)
-	uop->add_input_space(domain_transform.range_data[i].index_space);
+     uop->dispatch(this, true /* ok to run in this thread */);
+    } else {
+     // launch full cross-product of image micro ops right away
+     for (size_t i = 0; i < sources.size(); i++)
+      SparsityMapImpl<N, T>::lookup(images[i])->set_contributor_count(
+          domain_transform.ptr_data.size() +
+          domain_transform.range_data.size());
 
-      // we will ask this uop to also prefetch the sources we will intersect test against it
-      for(size_t i = 0; i < sources.size(); i++)
-	uop->add_extra_dependency(sources[i]);
+     for (size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
+      ImageMicroOp<N, T, N2, T2> *uop = new ImageMicroOp<N, T, N2, T2>(
+          parent, domain_transform.ptr_data[i].index_space,
+          domain_transform.ptr_data[i].inst,
+          domain_transform.ptr_data[i].field_offset, false /*ptrs*/);
+      for (size_t j = 0; j < sources.size(); j++)
+       if (diff_rhss.empty())
+        uop->add_sparsity_output(sources[j], images[j]);
+       else
+        uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j],
+                                                 images[j]);
 
       uop->dispatch(this, true /* ok to run in this thread */);
-    } else {
-      // launch full cross-product of image micro ops right away
-      for(size_t i = 0; i < sources.size(); i++)
-	SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(domain_transform.ptr_data.size() +
-								       domain_transform.range_data.size());
+     }
 
-      for(size_t i = 0; i < domain_transform.ptr_data.size(); i++) {
-	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								   domain_transform.ptr_data[i].index_space,
-								   domain_transform.ptr_data[i].inst,
-								   domain_transform.ptr_data[i].field_offset,
-								   false /*ptrs*/);
-	for(size_t j = 0; j < sources.size(); j++)
-          if(diff_rhss.empty())
-	    uop->add_sparsity_output(sources[j], images[j]);
-          else
-	    uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
+     for (size_t i = 0; i < domain_transform.range_data.size(); i++) {
+      ImageMicroOp<N, T, N2, T2> *uop = new ImageMicroOp<N, T, N2, T2>(
+          parent, domain_transform.range_data[i].index_space,
+          domain_transform.range_data[i].inst,
+          domain_transform.range_data[i].field_offset, true /*ranges*/);
+      for (size_t j = 0; j < sources.size(); j++)
+       if (diff_rhss.empty())
+        uop->add_sparsity_output(sources[j], images[j]);
+       else
+        uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j],
+                                                 images[j]);
 
-	uop->dispatch(this, true /* ok to run in this thread */);
-      }
-
-      for(size_t i = 0; i < domain_transform.range_data.size(); i++) {
-	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								   domain_transform.range_data[i].index_space,
-								   domain_transform.range_data[i].inst,
-								   domain_transform.range_data[i].field_offset,
-								   true /*ranges*/);
-	for(size_t j = 0; j < sources.size(); j++)
-          if(diff_rhss.empty())
-	    uop->add_sparsity_output(sources[j], images[j]);
-          else
-	    uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
-
-	uop->dispatch(this, true /* ok to run in this thread */);
-      }
+      uop->dispatch(this, true /* ok to run in this thread */);
+     }
     }
+   }
   }
 
   template <int N, typename T, int N2, typename T2>

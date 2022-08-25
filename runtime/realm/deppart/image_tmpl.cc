@@ -47,11 +47,11 @@ namespace Realm {
   template class ImageOperation<N1,T1,N2,T2>;             \
   template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event IndexSpace<N1, T1>::create_subspaces_by_image(               \
-      const DomainTransformNew<N1, T1, N2, T2> &, const std::vector<IndexSpace<N2, T2> > &,            \
+      const DomainTransform<N1, T1, N2, T2> &, const std::vector<IndexSpace<N2, T2> > &,            \
       std::vector<IndexSpace<N1, T1> > &, const ProfilingRequestSet &, Event) \
       const; \
   template Event IndexSpace<N1,T1>::create_subspaces_by_image_with_difference( \
-      const DomainTransformNew<N1, T1, N2, T2> &, \
+      const DomainTransform<N1, T1, N2, T2> &, \
 									       const std::vector<IndexSpace<N2,T2> >&,	\
 									       const std::vector<IndexSpace<N1,T1> >&,	\
 									       std::vector<IndexSpace<N1,T1> >&, \
