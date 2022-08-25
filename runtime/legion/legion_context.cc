@@ -19941,40 +19941,6 @@ namespace Legion {
               // Don't remove this from created regions yet,
               // That will happen when we make the deletion operation
               delete_now.push_back(*rit);
-              // Check to see if we have any latent field spaces to clean up
-              if (!latent_field_spaces.empty())
-              {
-                std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-                  latent_field_spaces.find(rit->get_field_space());
-                if (finder != latent_field_spaces.end())
-                {
-                  std::set<LogicalRegion>::iterator latent_finder =
-                    finder->second.find(*rit);
-#ifdef DEBUG_LEGION
-                  assert(latent_finder != finder->second.end());
-#endif
-                  finder->second.erase(latent_finder);
-                  if (finder->second.empty())
-                  {
-                    // Now that all the regions using this field space have
-                    // been deleted we can clean up all the created_fields
-                    for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                          created_fields.begin(); it !=
-                          created_fields.end(); /*nothing*/)
-                    {
-                      if (it->first == finder->first)
-                      {
-                        std::set<std::pair<FieldSpace,FieldID> >::iterator
-                          to_delete = it++;
-                        created_fields.erase(to_delete);
-                      }
-                      else
-                        it++;
-                    }
-                    latent_field_spaces.erase(finder);
-                  }
-                }
-              }
             }
           }
         }
