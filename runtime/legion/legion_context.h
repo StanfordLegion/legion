@@ -408,8 +408,10 @@ namespace Legion {
       virtual Future issue_mapping_fence(const char *provenance) = 0;
       virtual Future issue_execution_fence(const char *provenance) = 0;
       virtual void complete_frame(const char *provenance) = 0;
-      virtual Predicate create_predicate(const Future &f) = 0;
-      virtual Predicate predicate_not(const Predicate &p) = 0;
+      virtual Predicate create_predicate(const Future &f,
+                                         const char *provenance) = 0;
+      virtual Predicate predicate_not(const Predicate &p,
+                                      const char *provenance) = 0;
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
       virtual Future get_predicate_future(const Predicate &p) = 0;
     public:
@@ -1325,8 +1327,10 @@ namespace Legion {
       virtual Future issue_mapping_fence(const char *provenance);
       virtual Future issue_execution_fence(const char *provenance);
       virtual void complete_frame(const char *provenance);
-      virtual Predicate create_predicate(const Future &f);
-      virtual Predicate predicate_not(const Predicate &p);
+      virtual Predicate create_predicate(const Future &f,
+                                         const char *provenance);
+      virtual Predicate predicate_not(const Predicate &p,
+                                      const char *provenance);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
     public:
@@ -2204,8 +2208,10 @@ namespace Legion {
       virtual Future issue_mapping_fence(const char *provenance);
       virtual Future issue_execution_fence(const char *provenance);
       virtual void complete_frame(const char *provenance);
-      virtual Predicate create_predicate(const Future &f);
-      virtual Predicate predicate_not(const Predicate &p);
+      virtual Predicate create_predicate(const Future &f,
+                                         const char *provenance);
+      virtual Predicate predicate_not(const Predicate &p,
+                                      const char *provenance);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p);
     public:

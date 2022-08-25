@@ -94,6 +94,7 @@ namespace Legion {
       tracing = false;
       trace_local_id = (unsigned)-1;
       must_epoch = NULL;
+      provenance = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
       assert(resolved_event.exists());
@@ -135,7 +136,8 @@ namespace Legion {
         Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
-      provenance.clear();
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -365,6 +367,19 @@ namespace Legion {
                       const std::vector<StaticDependence> *dependences/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      if ((prov != NULL) && (strlen(prov) > 0))
+        initialize_operation(ctx, track, regs,new Provenance(prov),dependences);
+      else
+        initialize_operation(ctx, track, regs, (Provenance*)NULL, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::initialize_operation(InnerContext *ctx, bool track, 
+                                         unsigned regs/*= 0*/,
+                                         Provenance *prov/*= NULL*/,
+                      const std::vector<StaticDependence> *dependences/*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(completion_event.exists());
@@ -376,8 +391,9 @@ namespace Legion {
           parent_ctx->register_new_child_operation(this, dependences);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
-      if (prov != NULL)
-        provenance.assign(prov);
+      provenance = prov;
+      if (provenance != NULL)
+        provenance->add_reference();
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
     }
@@ -2322,6 +2338,34 @@ namespace Legion {
     void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
         unsigned regions, const std::vector<StaticDependence> *dependences,
         const Predicate &p, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, track, regions, provenance, dependences);
+      if (p == Predicate::TRUE_PRED)
+      {
+        speculation_state = RESOLVE_TRUE_STATE;
+        predicate = NULL;
+      }
+      else if (p == Predicate::FALSE_PRED)
+      {
+        speculation_state = RESOLVE_FALSE_STATE;
+        predicate = NULL;
+      }
+      else
+      {
+        speculation_state = PENDING_ANALYSIS_STATE;
+        predicate = p.impl;
+        predicate->add_predicate_reference();
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       predicate->get_unique_op_id());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
+        unsigned regions, const std::vector<StaticDependence> *dependences,
+        const Predicate &p, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, track, regions, provenance, dependences);
@@ -7515,7 +7559,7 @@ namespace Legion {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size(),
-          own->get_provenance().c_str());
+          own->get_provenance());
       index_point = p;
       index_domain = own->index_domain;
       owner = own;
@@ -9011,7 +9055,7 @@ namespace Legion {
 #endif
       // We never track internal operations
       initialize_operation(creator->get_context(), false/*track*/,
-                           1/*regions*/, creator->get_provenance().c_str());
+                           1/*regions*/, creator->get_provenance());
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
@@ -11984,7 +12028,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(InnerContext *ctx, Future f)
+    void FuturePredOp::initialize(InnerContext *ctx, Future f,
+                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11994,7 +12039,7 @@ namespace Legion {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
       future = f;
       if (runtime->legion_spy_enabled)
       {
@@ -12091,7 +12136,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::initialize(InnerContext *ctx, const Predicate &p)
+    void NotPredOp::initialize(InnerContext *ctx, 
+                               const Predicate &p, const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12100,7 +12146,7 @@ namespace Legion {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
       // Don't forget to reverse the values
       if (p == Predicate::TRUE_PRED)
         set_resolved_value(get_generation(), false);
@@ -12235,7 +12281,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AndPredOp::initialize(InnerContext *ctx, 
-                               const std::vector<Predicate> &predicates)
+                               const std::vector<Predicate> &predicates,
+                               const std::string &provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12244,7 +12291,7 @@ namespace Legion {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/,0/*regions*/,provenance.c_str());
       // Now do the registration
       for (std::vector<Predicate>::const_iterator it = predicates.begin();
             it != predicates.end(); it++)
@@ -12415,7 +12462,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void OrPredOp::initialize(InnerContext *ctx, 
-                              const std::vector<Predicate> &predicates)
+                              const std::vector<Predicate> &predicates,
+                              const std::string &provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12424,7 +12472,7 @@ namespace Legion {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/,0/*regions*/,provenance.c_str());
       // Now do the registration
       for (std::vector<Predicate>::const_iterator it = predicates.begin();
             it != predicates.end(); it++)
@@ -14237,7 +14285,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -14305,7 +14353,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -14370,7 +14418,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -14433,7 +14481,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -14496,7 +14544,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, prov);
       // start-off with non-projection requirement
       requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
                                       LEGION_EXCLUSIVE, domain_parent);
@@ -15781,7 +15829,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(own->get_context(), false/*track*/, 1/*size*/,
-          own->get_provenance().c_str());
+          own->get_provenance());
       index_point = p;
       owner = own;
       context_index = owner->get_ctx_index();
@@ -17307,7 +17355,7 @@ namespace Legion {
     {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/,
-          own->get_provenance().c_str());
+          own->get_provenance());
       index_point = p;
       index_domain = own->index_domain; 
       owner = own;
@@ -18986,7 +19034,7 @@ namespace Legion {
       assert(index < launcher.handles.size());
 #endif
       initialize_operation(ctx, false/*track*/, 1/*regions*/,
-          own->get_provenance().c_str());
+          own->get_provenance());
       owner = own;
       index_point = point;
       context_index = own->get_ctx_index();
@@ -19863,7 +19911,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, false/*track*/, 1/*regions*/,
-          own->get_provenance().c_str());
+          own->get_provenance());
       index_point = point;
       owner = own;
       flush = flsh;
@@ -20311,7 +20359,7 @@ namespace Legion {
                 ReductionOpID redop_id, bool is_deterministic, const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, 0, prov);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
       future_map = fm;
       redop = runtime->get_reduction(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,

@@ -2018,11 +2018,6 @@ namespace Legion {
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
-      Predicate create_predicate(Context ctx, const Future &f);
-      Predicate predicate_not(Context ctx, const Predicate &p);
-      Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
-      Future get_predicate_future(Context ctx, const Predicate &p);
-    public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       TraceID generate_dynamic_trace_id(bool check_context = true);

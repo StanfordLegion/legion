@@ -34,6 +34,20 @@ namespace Legion {
     typedef PredicateImpl PredicateOp;  
 
     /**
+     * \class Provenance
+     */
+    class Provenance : public Collectable {
+    public:
+      Provenance(const char *prov) : provenance(prov) { }
+      Provenance(const Provenance &rhs) = delete;
+      ~Provenance(void) { }
+    public:
+      Provenance& operator=(const Provenance &rhs) = delete;
+    public:
+      const std::string provenance;
+    };
+
+    /**
      * \class Operation
      * The operation class serves as the root of the tree
      * of all operations that can be performed in a Legion
@@ -204,7 +218,7 @@ namespace Legion {
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
-      inline const std::string& get_provenance(void) const 
+      inline Provenance* get_provenance(void) const 
         { return provenance; }
     public:
       // Be careful using this call as it is only valid when the operation
@@ -252,7 +266,11 @@ namespace Legion {
       // along with the number of regions this task has
       void initialize_operation(InnerContext *ctx, bool track,
                                 unsigned num_regions = 0,
-                                const char *provenance = NULL,
+                                const char *prov = NULL,
+          const std::vector<StaticDependence> *dependences = NULL);
+      void initialize_operation(InnerContext *ctx, bool track,
+                                unsigned num_regions,
+                                Provenance *provenance,
           const std::vector<StaticDependence> *dependences = NULL);
     public:
       // Inherited from ReferenceMutator
@@ -613,8 +631,8 @@ namespace Legion {
       // is always cleaned up after each operation
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
-      // The provenance string from the application
-      std::string provenance;
+      // Provenance information for this operation
+      Provenance *provenance;
     };
 
     /**
@@ -771,6 +789,9 @@ namespace Legion {
       void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
           const std::vector<StaticDependence> *dependences, const Predicate &p,
           const char *provenance);
+      void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
+          const std::vector<StaticDependence> *dependences, const Predicate &p,
+          Provenance *provenance);
       void register_predicate_dependence(void);
       virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
@@ -2194,7 +2215,7 @@ namespace Legion {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(InnerContext *ctx, Future f);
+      void initialize(InnerContext *ctx, Future f, const char *provenance);
       void resolve_future_predicate(void);
     public:
       virtual void activate(void);
@@ -2223,7 +2244,8 @@ namespace Legion {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(InnerContext *task, const Predicate &p);
+      void initialize(InnerContext *task, const Predicate &p,
+                      const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2253,7 +2275,8 @@ namespace Legion {
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
       void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates);
+                      const std::vector<Predicate> &predicates,
+                      const std::string &provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2285,7 +2308,8 @@ namespace Legion {
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
       void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates);
+                      const std::vector<Predicate> &predicates,
+                      const std::string &provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

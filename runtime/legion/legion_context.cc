@@ -6801,7 +6801,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::create_predicate(const Future &f)
+    Predicate InnerContext::create_predicate(const Future &f,
+                                             const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6813,20 +6814,21 @@ namespace Legion {
       FuturePredOp *pred_op = runtime->get_available_future_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
-      pred_op->initialize(this, f);
+      pred_op->initialize(this, f, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::predicate_not(const Predicate &p)
+    Predicate InnerContext::predicate_not(const Predicate &p,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       NotPredOp *pred_op = runtime->get_available_not_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
-      pred_op->initialize(this, p);
+      pred_op->initialize(this, p, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
@@ -6864,7 +6866,7 @@ namespace Legion {
         AndPredOp *pred_op = runtime->get_available_and_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates);
+        pred_op->initialize(this, actual_predicates, launcher.provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -6889,7 +6891,7 @@ namespace Legion {
         OrPredOp *pred_op = runtime->get_available_or_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates);
+        pred_op->initialize(this, actual_predicates, launcher.provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -10638,8 +10640,11 @@ namespace Legion {
         add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
+        {
+          Provenance *prov = task->get_provenance();
           remap_unmapped_regions(current_trace, unmapped_regions,
-                                 task->get_provenance().c_str());
+              (prov == NULL) ? (const char*)NULL : prov->provenance.c_str());
+        }
       }
     }
 
@@ -12690,7 +12695,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate LeafContext::create_predicate(const Future &f)
+    Predicate LeafContext::create_predicate(const Future &f,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (f.impl == NULL)
@@ -12708,7 +12714,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate LeafContext::predicate_not(const Predicate &p)
+    Predicate LeafContext::predicate_not(const Predicate &p,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (p == Predicate::TRUE_PRED)

@@ -729,8 +729,11 @@ namespace Legion {
                 sizeof(operation_instance.op_id));
       lp_fwrite(f, (char*)&(operation_instance.kind),
                 sizeof(operation_instance.kind));
-      lp_fwrite(f, operation_instance.provenance, 
-          strlen(operation_instance.provenance) + 1);
+      if (operation_instance.provenance != NULL)
+        lp_fwrite(f, operation_instance.provenance,
+            strlen(operation_instance.provenance) + 1);
+      else
+        lp_fwrite(f, "", 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1568,7 +1571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Operation %llu %u %s", 
-          op_inst.op_id, op_inst.kind, op_inst.provenance);
+          op_inst.op_id, op_inst.kind,
+          op_inst.provenance == NULL ? "" : op_inst.provenance);
     }
 
     //--------------------------------------------------------------------------

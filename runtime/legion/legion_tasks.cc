@@ -946,6 +946,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
+                const std::vector<StaticDependence> *dependences,
+                const Predicate &p, Processor::TaskFuncID tid, Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize_speculation(ctx, track, regions.size(), dependences, p, prov);
+      initialize_memoizable();
+      parent_task = ctx->get_task(); // initialize the parent task
+      // Fill in default values for all of the Task fields
+      orig_proc = ctx->get_executing_processor();
+      current_proc = orig_proc;
+      steal_count = 0;
+      speculated = false;
+      local_function = false;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::check_empty_field_requirements(void)
     //--------------------------------------------------------------------------
     {
@@ -8136,7 +8153,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, provenance.c_str());
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
@@ -9425,7 +9442,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, provenance.c_str());
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
@@ -9539,9 +9556,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task();
-      const UntypedBuffer prov(provenance.c_str(), provenance.length());
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-          Predicate::TRUE_PRED, this->task_id, provenance.c_str());
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;

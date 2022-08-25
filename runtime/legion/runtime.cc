@@ -13559,45 +13559,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create predicate!");
-      return ctx->create_predicate(f);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create predicate not!");
-      return ctx->predicate_not(p); 
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, 
-                                        const PredicateLauncher &launcher) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create predicate!");
-      return ctx->create_predicate(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context get predicate future!");
-      return ctx->get_predicate_future(p);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {

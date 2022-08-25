@@ -2190,6 +2190,7 @@ namespace Legion {
     public:
       bool                            and_op; // if not 'and' then 'or'
       std::vector<Predicate>          predicates;
+      std::string                     provenance;
     };
 
     /**
@@ -7092,7 +7093,8 @@ namespace Legion {
        * @param f future value to convert to a predicate
        * @return predicate value wrapping the future
        */
-      Predicate create_predicate(Context ctx, const Future &f);
+      Predicate create_predicate(Context ctx, const Future &f,
+                                 const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical 
@@ -7101,7 +7103,8 @@ namespace Legion {
        * @param p predicate value to logically negate
        * @return predicate value logically negating previous predicate
        */
-      Predicate predicate_not(Context ctx, const Predicate &p);
+      Predicate predicate_not(Context ctx, const Predicate &p,
+                              const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical
@@ -7111,8 +7114,9 @@ namespace Legion {
        * @param p2 second predicate to logically and
        * @return predicate value logically and-ing two predicates
        */
-      Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2);
+      Predicate predicate_and(Context ctx,
+                              const Predicate &p1, const Predicate &p2,
+                              const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical
@@ -7122,8 +7126,9 @@ namespace Legion {
        * @param p2 second predicate to logically or
        * @return predicate value logically or-ing two predicates
        */
-      Predicate predicate_or(Context ctx, const Predicate &p1, 
-                                          const Predicate &p2);
+      Predicate predicate_or(Context ctx,
+                             const Predicate &p1, const Predicate &p2,
+                             const char *provenance = NULL);
 
       /**
        * Generic predicate constructor for an arbitrary number of predicates

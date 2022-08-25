@@ -6024,39 +6024,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f)
+    Predicate Runtime::create_predicate(Context ctx, const Future &f,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, f);
+      return ctx->create_predicate(f, provenance);
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
+    Predicate Runtime::predicate_not(Context ctx, const Predicate &p,
+                                     const char *provenance) 
     //--------------------------------------------------------------------------
     {
-      return runtime->predicate_not(ctx, p);
+      return ctx->predicate_not(p, provenance);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_and(Context ctx, 
-                                       const Predicate &p1, const Predicate &p2)
+                                     const Predicate &p1, const Predicate &p2,
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(true/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_or(Context ctx,
-                                       const Predicate &p1, const Predicate &p2)  
+                                    const Predicate &p1, const Predicate &p2,
+                                    const char *provenance)  
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(false/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6064,14 +6072,14 @@ namespace Legion {
                                         const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, launcher);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_predicate_future(ctx, p);
+      return ctx->get_predicate_future(p);
     }
 
     //--------------------------------------------------------------------------
