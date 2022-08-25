@@ -22292,7 +22292,7 @@ namespace Legion {
       redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
-      serdez_redop_bound = SIZE_MAX;
+      serdez_upper_bound = SIZE_MAX;
     }
 
     //--------------------------------------------------------------------------
@@ -22319,7 +22319,20 @@ namespace Legion {
     void AllReduceOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      enqueue_ready_operation(future_map.impl->get_ready_event());
+      populate_sources();
+      std::vector<RtEvent> preconditions;
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
+      {
+        const RtEvent ready =
+          it->second.impl->request_internal_buffer(this, false/*eager*/);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.push_back(ready);
+      }
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -22410,33 +22423,17 @@ namespace Legion {
     void AllReduceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      populate_sources();
       // Invoke the mapper to do figure out where to put the data
       std::vector<Memory> target_memories;
       invoke_mapper(target_memories);
-      std::vector<RtEvent> ready_events;
       // Make sure we subscribe to all these futures before we are mapped
       // in case they need to make any instances
-      if ((serdez_redop_fns != NULL) && (serdez_redop_bound == SIZE_MAX))
+      if (serdez_redop_fns == NULL)
+        future_result_size = redop->sizeof_rhs;
+      else if (serdez_upper_bound < SIZE_MAX)
+        future_result_size = serdez_upper_bound;
+      else
       {
-        // We need to request internal buffers here since we actually
-        // need to read the data
-        for (std::map<DomainPoint,Future>::const_iterator it = 
-              sources.begin(); it != sources.end(); it++)
-        {
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
-          const RtEvent ready = it->second.impl->subscribe();
-          if (ready.exists())
-            ready_events.push_back(ready);
-        }
-        // Wait for all the local buffers to be ready before reading
-        if (!ready_events.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(ready_events);
-          ready_events.clear();
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
-        }
         // Serdez redop functions are nasty, we need to actually do the 
         // computation inline here to figure out how big the output buffer
         // needs to be for the future instances before we can do the
@@ -22446,22 +22443,6 @@ namespace Legion {
                                        future_result_size);
         all_reduce_serdez();
       }
-      else
-      {
-        if (serdez_redop_fns != NULL)
-          future_result_size = serdez_redop_bound;
-        else
-          future_result_size = redop->sizeof_rhs;
-        // We only need to subscribe to the futures here 
-        for (std::map<DomainPoint,Future>::const_iterator it = 
-              sources.begin(); it != sources.end(); it++)
-        {
-          const RtEvent subscribed = it->second.impl->subscribe();
-          if (subscribed.exists())
-            ready_events.push_back(subscribed);
-        }
-      }
-      
 #ifdef DEBUG_LEGION
       assert(targets.empty());
       assert(!target_memories.empty());
@@ -22470,19 +22451,48 @@ namespace Legion {
       create_future_instances(target_memories); 
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
-      if ((serdez_redop_fns != NULL) && (serdez_redop_bound == SIZE_MAX))
+      trigger_execution(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent executed;
+      if (serdez_redop_fns == NULL)
+        executed = all_reduce_redop();
+      else if (serdez_upper_bound < SIZE_MAX)
       {
-        RtEvent protect;
-        ApEvent done = finalize_serdez_targets(protect);
-        if (!request_early_complete(done))
-          complete_execution(protect);
-        else
-          complete_execution();
+        future_result_size = 0;
+        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size);
+        all_reduce_serdez();
+        // Check that the result is smaller than the bound
+        if (serdez_upper_bound < future_result_size)
+        {
+          Processor exec_proc = parent_ctx->get_executing_processor();
+          MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output. Mapper %s specified an upper bound of "
+              "%zd bytes for future map all reduce in task %s (UID %lld) with "
+              "serdez redop %d. However, the actual size of the reduced value "
+              "is %zd bytes which exceeds the specified upper bound.",
+              mapper->get_mapper_name(), serdez_upper_bound, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              redop_id, future_result_size)
+        }
+        ApEvent done = finalize_serdez_targets(executed);
+        if (request_early_complete(done))
+          executed = RtEvent::NO_RT_EVENT;
       }
-      else if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
       else
-        complete_execution();
+      {
+        ApEvent done = finalize_serdez_targets(executed);
+        if (request_early_complete(done))
+          executed = RtEvent::NO_RT_EVENT;
+      }
+      result.impl->set_results(targets);
+      complete_execution(executed);
     }
 
     //--------------------------------------------------------------------------
@@ -22496,7 +22506,7 @@ namespace Legion {
       Processor exec_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
       mapper->invoke_map_future_map_reduction(this, &input, &output);
-      serdez_redop_bound = output.serdez_upper_bound;
+      serdez_upper_bound = output.serdez_upper_bound;
       if (!output.destination_memories.empty())
       {
         if (output.destination_memories.size() > 1)
@@ -22628,40 +22638,12 @@ namespace Legion {
     void AllReduceOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      RtEvent completion_precondition;
-      if (serdez_redop_fns == NULL)
-        completion_precondition = all_reduce_redop();
-      else if (serdez_redop_bound < SIZE_MAX)
-      {
-        future_result_size = 0;
-        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
-                                       future_result_size);
-        all_reduce_serdez();
-        // Check that the result is smaller than the bound
-        if (serdez_redop_bound < future_result_size)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-              "Invalid mapper output. Mapper %s specified an upper bound of "
-              "%zd bytes for future map all reduce in task %s (UID %lld) with "
-              "serdez redop %d. However, the actual size of the reduced value "
-              "is %zd bytes which exceeds the specified upper bound.",
-              mapper->get_mapper_name(), serdez_redop_bound, 
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-              redop_id, serdez_redop_bound)
-        }
-        ApEvent done = finalize_serdez_targets(completion_precondition);
-        if (request_early_complete(done))
-          completion_precondition = RtEvent::NO_RT_EVENT;
-      }
-      result.impl->set_results(targets);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      complete_operation(completion_precondition);
+      complete_operation();
     }
 
     ///////////////////////////////////////////////////////////// 

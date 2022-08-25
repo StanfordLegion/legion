@@ -4020,6 +4020,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       // These are virtual methods to override for control replication
@@ -4037,7 +4038,7 @@ namespace Legion {
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
       void *serdez_redop_buffer;
-      size_t serdez_redop_bound;
+      size_t serdez_upper_bound;
       MapperID mapper_id;
       MappingTagID tag;
       bool deterministic;

@@ -3541,18 +3541,24 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        if (context != NULL)
+        Domain domain;
+        future_map_domain->get_launch_space_domain(domain);
+        std::vector<RtEvent> ready_events;
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          RtEvent ready;
+          get_future(itr.p, true/*internal only*/, &ready);
+          if (ready.exists())
+            ready_events.push_back(ready);
         }
-        else
-          ready_event.wait();
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
       }
       // No need for the lock since the map should be fixed at this point
       others = futures;
@@ -3587,12 +3593,7 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-      // Wait for all the futures to be ready
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-      for (std::map<DomainPoint,Future>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
-        others[it->first] = it->second;
+      get_all_futures(others);
     }
 
     //--------------------------------------------------------------------------
@@ -4172,9 +4173,6 @@ namespace Legion {
         others = futures;
         return;
       }
-      // Wait for all the local futures to be completed
-      if (!ready_event.has_triggered())
-        ready_event.wait();
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
@@ -4192,11 +4190,17 @@ namespace Legion {
           if (hasher.verify(__func__))
             break;
         }
+        std::map<DomainPoint,Future> local_futures;
+        get_shard_local_futures(local_futures);
         FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
-        collective.exchange_future_names(futures);
+        collective.exchange_future_names(local_futures);
         // When the collective is done we can mark that we've done it
         // and then copy the results
         collective_performed = true;
+        if (!futures.empty())
+          futures.insert(local_futures.begin(), local_futures.end());
+        else
+          futures.swap(local_futures);
       }
       others = futures;
     }
