@@ -30,8 +30,8 @@ enum {
 };
 
 enum TransformType {
-  Affine = 0,
-  Translation = 1,
+  AFFINE = 0,
+  TRANSLATION = 1,
 };
 
 namespace std {
@@ -2573,12 +2573,12 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
 
 TestInterface *run_structured_test(TransformType type, int argc, char **argv) {
  switch (type) {
-  case TransformType::Affine:
+  case TransformType::AFFINE:
    return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
        argc, const_cast<const char **>(argv),
        create_affine_transforms<2, int, 2, int, int>());
    break;
-  case TransformType::Translation:
+  case TransformType::TRANSLATION:
    // TODO(apryakhin): Test other structured transform types.
    /*return new RandomAffineTest<2, int, 2, int, int,
                                   TranslationTransform<2, int>>(
@@ -2644,7 +2644,7 @@ int main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[i], "affine")) {
-      TransformType type = TransformType::Affine;
+      TransformType type = TransformType::AFFINE;
       if (i < argc - 1 && !strcmp(argv[++i], "-type")) {
         type = static_cast<TransformType>(atoi(argv[++i]));
       }
