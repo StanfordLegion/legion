@@ -319,17 +319,10 @@ impl Proc {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        // BTreeMap::retain requires Rust 1.53
-        let mut removed_tasks = Vec::new();
-        for (op_id, task) in self.tasks.iter_mut() {
+        for task in self.tasks.values_mut() {
             task.trim_time_range(start, stop);
-            if task.time_range.was_removed {
-                removed_tasks.push(*op_id);
-            }
         }
-        for op_id in removed_tasks {
-            self.tasks.remove(&op_id);
-        }
+        self.tasks.retain(|_, t| !t.time_range.was_removed);
         for mapper_call in &mut self.mapper_calls {
             mapper_call.trim_time_range(start, stop);
         }
