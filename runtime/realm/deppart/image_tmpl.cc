@@ -43,6 +43,7 @@ namespace Realm {
 #define N2 INST_N2
 
 #define DOIT(T1,T2)			                                  \
+  template class StructuredImageMicroOp<N1,T1,N2,T2>;     \
   template class ImageMicroOp<N1,T1,N2,T2>;               \
   template class ImageOperation<N1,T1,N2,T2>;             \
   template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \

@@ -111,11 +111,13 @@ namespace Realm {
   };
 
   template <int N, typename T, int N2, typename T2>
-  class StructuredImageMicroOpBase : public PartitioningMicroOp {
+  class StructuredImageMicroOp : public PartitioningMicroOp {
    public:
-    StructuredImageMicroOpBase(const IndexSpace<N, T>& _parent);
+    StructuredImageMicroOp(
+        const IndexSpace<N, T>& _parent,
+        const StructuredTransform<N, T, N2, T2>& _transform);
 
-    virtual ~StructuredImageMicroOpBase(void);
+    virtual ~StructuredImageMicroOp(void);
     virtual void execute(void);
 
     virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
@@ -126,26 +128,11 @@ namespace Realm {
 
    protected:
     IndexSpace<N, T> parent_space;
+    StructuredTransform<N, T, N2, T2> transform;
     std::vector<IndexSpace<N2, T2>> sources;
     std::vector<SparsityMap<N, T>> sparsity_outputs;
   };
 
-  template <int N, typename T, int N2, typename T2>
-  class StructuredImageMicroOp : public StructuredImageMicroOpBase<N, T, N2, T2> {
-   public:
-    StructuredImageMicroOp(const IndexSpace<N, T>& _parent,
-                       const StructuredTransform<N, T, N2, T2>& _transform);
-
-    virtual ~StructuredImageMicroOp(void);
-
-    virtual void populate(std::map<int, HybridRectangleList<N, T>*>& bitmasks);
-
-   protected:
-    StructuredTransform<N, T, N2, T2> transform;
-  };
-
   };  // namespace Realm
-
-#include "realm/deppart/image.inl"
 
 #endif // REALM_DEPPART_IMAGE_H
