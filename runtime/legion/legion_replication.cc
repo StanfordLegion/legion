@@ -3856,29 +3856,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::request_future_buffers(
-              std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
+    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm)
     //--------------------------------------------------------------------------
     {
+      future_map = fm;
 #ifdef DEBUG_LEGION
+      assert(sources.empty());
       assert(future_map.impl != NULL);
 #endif
-      std::map<DomainPoint,Future> sources;
       if (thunk->need_all_futures())
         future_map.impl->get_all_futures(sources);
       else
         future_map.impl->get_shard_local_futures(sources);
-      for (std::map<DomainPoint,Future>::const_iterator it =
-            sources.begin(); it != sources.end(); it++)
-      {
-        const RtEvent mapped =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.insert(mapped);
-        const RtEvent ready = it->second.impl->subscribe();
-        if (ready.exists())
-          ready_events.insert(ready);
-      } 
     }
 
     //--------------------------------------------------------------------------

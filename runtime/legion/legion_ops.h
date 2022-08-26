@@ -3050,11 +3050,13 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
-                                          std::set<RtEvent> &ready_events);
+      virtual void populate_sources(const FutureMap &fm);
+      void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                  std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
+      std::map<DomainPoint,Future> sources;
     };
 
     /**

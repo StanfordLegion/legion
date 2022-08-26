@@ -15455,7 +15455,7 @@ namespace Legion {
 #endif
       thunk = new WeightPartitionThunk(pid, weights, granularity);
       // Also save this locally for analysis
-      future_map = weights;
+      populate_sources(weights);
       if (runtime->legion_spy_enabled)
         perform_logging();
     }
@@ -15558,7 +15558,7 @@ namespace Legion {
 #endif
       thunk = new FutureMapThunk(pid, fm, perform_intersections);
       // Also save this locally for analysis
-      future_map = fm;
+      populate_sources(fm);
 
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -15682,15 +15682,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::populate_sources(const FutureMap &fm)
+    //--------------------------------------------------------------------------
+    {
+      future_map = fm;
+#ifdef DEBUG_LEGION
+      assert(sources.empty());
+      assert(future_map.impl != NULL);
+#endif
+      future_map.impl->get_all_futures(sources);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::request_future_buffers(
               std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(future_map.impl != NULL);
-#endif
-      std::map<DomainPoint,Future> sources;
-      future_map.impl->get_all_futures(sources);
       for (std::map<DomainPoint,Future>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
@@ -15709,8 +15716,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> mapped_events, ready_events;
-      if (future_map.impl != NULL)
-        request_future_buffers(mapped_events, ready_events);
+      request_future_buffers(mapped_events, ready_events);
       // Can only marked that that this is mapped after we've requested
       // buffers for any futures in the future map we need which may
       // require performing allocations
@@ -15785,6 +15791,7 @@ namespace Legion {
         delete thunk;
       thunk = NULL;
       future_map = FutureMap(); // clear any references
+      sources.clear();
     }
 
     //--------------------------------------------------------------------------
