@@ -122,40 +122,40 @@ namespace Realm {
     Point<M, T> offset;
   };
 
+  // Represents a generic structured transform.
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API StructuredTransform {
-   public:
-    StructuredTransform() = default;
-    StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
-    StructuredTransform(const TranslationTransform<N, T2>& _transform);
+  public:
+   StructuredTransform() = default;
+   StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
+   StructuredTransform(const TranslationTransform<N, T2>& _transform);
 
-    Point<N, T> operator[](const Point<N2, T>& point) const;
+   enum StructuredTransformType {
+    NONE = 0,
+    AFFINE = 1,
+    TRANSLATION = 2,
+   };
 
-    enum StructuredTransformType {
-      NONE = 0,
-      AFFINE = 1,
-      TRANSLATION = 2,
-    };
+   Point<N, T> operator[](const Point<N2, T>& point) const;
 
-    // protected:
-    Realm::Matrix<N, N2, T2> transform_matrix;
-    Point<N, T2> offset;
-    StructuredTransformType type;
+   // protected:
+   Realm::Matrix<N, N2, T2> transform_matrix;
+   Point<N, T2> offset;
+   StructuredTransformType type;
   };
 
+  // Represents a generic domain transform.
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API DomainTransform {
    public:
     DomainTransform() = default;
     DomainTransform(const StructuredTransform<N, T, N2, T2>& _transform);
-
     DomainTransform(
         const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
             _field_data);
-
     DomainTransform(
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>
-          &_field_data);
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
+            _field_data);
 
     enum DomainTransformType {
       NONE = 0,
