@@ -954,6 +954,69 @@ namespace Realm {
     return e;
   }
 
+  template <int N, typename T>
+  template <int N2, typename T2, typename TRANSFORM>
+  inline Event IndexSpace<N, T>::create_subspace_by_image(
+      const TRANSFORM& transform, const IndexSpace<N2, T2>& source,
+      const IndexSpace<N, T>& image, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   return create_subspaces_by_image(transform, {source}, {image}, reqs,
+                                    wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2, typename TRANSFORM>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const TRANSFORM& transform,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   // TODO(apryakhin): For now we just support building a general structured
+   // transform from an affince transform. This will be extended later
+   // to support more transform types.
+   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>));
+   return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(transform),
+                                    sources, images, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(field_data),
+                                    sources, images, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(field_data),
+                                    sources, images, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event IndexSpace<N, T>::create_subspaces_by_image_with_difference(
+      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& sources,
+      const std::vector<IndexSpace<N, T>>& diff_rhs,
+      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+      Event wait_on) const {
+   return create_subspaces_by_image_with_difference(
+       DomainTransform<N, T, N2, T2>(field_data), sources, diff_rhs, images,
+       reqs, wait_on);
+  }
+
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>
@@ -984,61 +1047,6 @@ namespace Realm {
     Event e = create_subspaces_by_image(field_data, sources, images, reqs, wait_on);
     image = images[0];
     return e;
-  }
-
-  template <int N, typename T>
-  template <int N2, typename T2, typename TRANSFORM>
-  inline Event IndexSpace<N, T>::create_subspaces_by_image(
-      const TRANSFORM& transform,
-      const std::vector<IndexSpace<N2, T2>>& sources,
-      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
-      Event wait_on) const {
-   // TODO(apryakhin): For now we just support building a general structured
-   // transform from an affince transform. This will be extended later
-   // to support more transform types.
-   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>));
-   return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(transform),
-                                    sources, images, reqs, wait_on);
-  }
-
-  template <int N, typename T>
-  template <int N2, typename T2>
-  inline Event IndexSpace<N, T>::create_subspaces_by_image(
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
-          field_data,
-      const std::vector<IndexSpace<N2, T2>>& sources,
-      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
-      Event wait_on) const {
-    return create_subspaces_by_image(
-        DomainTransform<N, T, N2, T2>(field_data), sources, images, reqs,
-        wait_on);
-  }
-
-  template <int N, typename T>
-  template <int N2, typename T2>
-  inline Event IndexSpace<N, T>::create_subspaces_by_image(
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
-          field_data,
-      const std::vector<IndexSpace<N2, T2>>& sources,
-      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
-      Event wait_on) const {
-    return create_subspaces_by_image(
-        DomainTransform<N, T, N2, T2>(field_data), sources, images, reqs,
-        wait_on);
-  }
-
-  template <int N, typename T>
-  template <int N2, typename T2>
-  inline Event IndexSpace<N, T>::create_subspaces_by_image_with_difference(
-      const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
-          field_data,
-      const std::vector<IndexSpace<N2, T2>>& sources,
-      const std::vector<IndexSpace<N, T>>& diff_rhs,
-      std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
-      Event wait_on) const {
-   return create_subspaces_by_image_with_difference(
-       DomainTransform<N, T, N2, T2>(field_data), sources, diff_rhs, images,
-       reqs, wait_on);
   }
 
   // simple wrapper for the multiple subspace version

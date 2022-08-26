@@ -66,7 +66,6 @@ void sigalrm_handler(int sig)
 template <int N, typename T>
 void dump_sparse_index_space(const char *pfx, IndexSpace<N,T> is)
 {
-  return;
   std::cout << pfx << ": " << is << "\n";
   if(!is.sparsity.exists()) return;
   SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();

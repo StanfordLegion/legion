@@ -432,6 +432,27 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspace_by_image(const TRANSFORM& transform,
+                                   const IndexSpace<N2, T2>& source,
+                                   const IndexSpace<N, T>& image,
+                                   const ProfilingRequestSet& reqs,
+                                   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspaces_by_image(
+        const TRANSFORM& transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_image(
+        const DomainTransform<N, T, N2, T2>& domain_transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets are reachable from
     //  subsets of some other index space - the field data points from the other index space to
     //  ours and is used to compute the image of each source - i.e. upon return (and waiting
@@ -445,19 +466,6 @@ namespace Realm {
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2, typename TRANSFORM>
-    Event create_subspaces_by_image(
-        const TRANSFORM& transform,
-        const std::vector<IndexSpace<N2, T2> >& sources,
-        std::vector<IndexSpace<N, T> >& images, const ProfilingRequestSet& reqs,
-        Event wait_on = Event::NO_EVENT) const;
-
-    template <int N2, typename T2>
-    Event create_subspaces_by_image(
-      const DomainTransform<N, T, N2, T2> &domain_transform,
-        const std::vector<IndexSpace<N2, T2> >& sources,
-        std::vector<IndexSpace<N, T> >& images, const ProfilingRequestSet& reqs,
-        Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_image(
