@@ -969,16 +969,14 @@ impl State {
             if !chan.time_points.is_empty() {
                 if chan_id.node_id().is_some() {
                     // gathers/scatters
-                    let mut nodes  = vec![None];
-                    if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0)
-                        {
-                              nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                        }
-                    if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0)
-                        {
-                              nodes.push(chan_id.src.map(|src| src.node_id()));
-                        }
-                    &nodes.dedup();
+                    let mut nodes = vec![None];
+                    if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
+                        nodes.push(chan_id.dst.map(|dst| dst.node_id()));
+                    }
+                    if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
+                        nodes.push(chan_id.src.map(|src| src.node_id()));
+                    }
+                    nodes.dedup();
                     for node in nodes {
                         result
                             .entry(node)
@@ -1517,10 +1515,12 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let mut file = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(filename)?;
-        // FIXME: Generate other op types
-        for (proc_id, proc_record) in &proc_records {
-            let proc = state.procs.get(&proc_id).unwrap();
-            for task in proc.tasks.values() {
+        for (op_id, op) in &state.operations {
+            // Is it a task?
+            if let Some(proc_id) = state.tasks.get(&op_id) {
+                let proc = state.procs.get(&proc_id).unwrap();
+                let proc_record = proc_records.get(&proc_id).unwrap();
+                let task = proc.tasks.get(&op_id).unwrap();
                 let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
                 let variant_name = &state
                     .variants
@@ -1533,10 +1533,21 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 };
 
                 file.serialize(OpRecord {
-                    op_id: task.op_id.0,
-                    desc: &format!("{} <{}>", name, task.op_id.0),
+                    op_id: op_id.0,
+                    desc: &format!("{} <{}>", name, op_id.0),
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
+                })?;
+            } else {
+                let desc = op.kind.and_then(|k| state.op_kinds.get(&k)).map_or_else(
+                    || format!("Operation <{}>", op_id.0),
+                    |k| format!("{} Operation <{}>", k.name, op_id.0),
+                );
+                file.serialize(OpRecord {
+                    op_id: op_id.0,
+                    desc: &desc,
+                    proc: None,
+                    level: None,
                 })?;
             }
         }
