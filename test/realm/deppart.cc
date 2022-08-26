@@ -2572,21 +2572,21 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
 }
 
 TestInterface *run_structured_test(TransformType type, int argc, char **argv) {
- switch (type) {
-  case TransformType::AFFINE:
-   return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
-       argc, const_cast<const char **>(argv),
-       create_affine_transforms<2, int, 2, int, int>());
-   break;
-  case TransformType::TRANSLATION:
-   // TODO(apryakhin): Test other structured transform types.
-   /*return new RandomAffineTest<2, int, 2, int, int,
-                                  TranslationTransform<2, int>>(
-       argc, const_cast<const char **>(argv),
-       create_translate_transforms<2, int, 2, int, int>(16));*/
-   break;
- }
- return nullptr;
+  switch (type) {
+    case TransformType::AFFINE:
+      return new RandomAffineTest<2, int, 2, int, int,
+                                  AffineTransform<2, 2, int>>(
+          argc, const_cast<const char **>(argv),
+          create_affine_transforms<2, int, 2, int, int>());
+    case TransformType::TRANSLATION:
+      // TODO(apryakhin): Test other structured transform types.
+      /*return new RandomAffineTest<2, int, 2, int, int,
+                                     TranslationTransform<2, int>>(
+          argc, const_cast<const char **>(argv),
+          create_translate_transforms<2, int, 2, int, int>(16));*/
+      break;
+  }
+  return nullptr;
 }
 
 int main(int argc, char **argv) {

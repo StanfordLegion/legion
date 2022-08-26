@@ -126,7 +126,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API StructuredTransform {
   public:
-   StructuredTransform() = default;
+   StructuredTransform(void) = default;
    StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
    StructuredTransform(const TranslationTransform<N, T2>& _transform);
 
@@ -141,14 +141,14 @@ namespace Realm {
    // protected:
    Realm::Matrix<N, N2, T2> transform_matrix;
    Point<N, T2> offset;
-   StructuredTransformType type;
+   StructuredTransformType type = StructuredTransformType::NONE;
   };
 
   // Represents a generic domain transform.
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API DomainTransform {
    public:
-    DomainTransform() = default;
+    DomainTransform(void) = default;
     DomainTransform(const StructuredTransform<N, T, N2, T2>& _transform);
     DomainTransform(
         const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
@@ -168,7 +168,7 @@ namespace Realm {
     StructuredTransform<N, T, N2, T2> structured_transform;
     std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>> ptr_data;
     std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>> range_data;
-    DomainTransformType type;
+    DomainTransformType type = DomainTransformType::NONE;
   };
 
   class IndirectionInfo;
