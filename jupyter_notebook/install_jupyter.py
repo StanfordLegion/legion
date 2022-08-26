@@ -243,6 +243,8 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_d
     else:
         file_path = kernel_file_dir + "/" + kernel_filename
     shutil.copy(file_path, kernel_install_dir)
+    
+    return kernel_name
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
@@ -272,7 +274,7 @@ def parse_args(argv=None):
         "--json",
         default="legion_python.json",
         dest="json",
-        help="Wrapper of legion_python, now it supports legion_python (default) or legate",
+        help="Configuration file",
     )
     parser.add_argument(
         "--legion-prefix",
@@ -415,15 +417,18 @@ def driver(args, opts, kernel_file_dir=None):
                           kernel_name=args.kernel_name,
                           filename=args.json)
 
+    kernel_name = None
     if cmd_dict["not_control_replicable"]:
-        install_kernel_nocr(user=args.user, 
-                            prefix=args.prefix, 
-                            cmd_opts=opts,
-                            cmd_dict=cmd_dict,
-                            verbose=args.verbose,
-                            kernel_file_dir=kernel_file_dir)
+        kernel_name = install_kernel_nocr(user=args.user, 
+                                          prefix=args.prefix, 
+                                          cmd_opts=opts,
+                                          cmd_dict=cmd_dict,
+                                          verbose=args.verbose,
+                                          kernel_file_dir=kernel_file_dir)
     else:
         assert 0, "Control replication is not supported yet"
+
+    return kernel_name
 
 if __name__ == '__main__':
     args, opts = parse_args()
