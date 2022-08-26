@@ -1516,7 +1516,6 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            // Is it a task?
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
                 let proc_record = proc_records.get(&proc_id).unwrap();
@@ -1527,16 +1526,37 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                     .get(&(task.task_id, task.variant_id))
                     .unwrap()
                     .name;
-                let name = match task_name {
-                    Some(task_name) => format!("{} [{}]", task_name, variant_name),
-                    None => variant_name.clone(),
+                let desc = match task_name {
+                    Some(task_name) => {
+                        if task_name == variant_name {
+                            format!("{} <{}>", task_name, op_id.0)
+                        } else {
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
+                        }
+                    }
+                    None => format!("{} <{}>", variant_name, op_id.0),
                 };
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    desc: &format!("{} <{}>", name, op_id.0),
+                    desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
+                })?;
+            } else if let Some(task) = state.multi_tasks.get(&op_id) {
+                let task_name = state
+                    .task_kinds
+                    .get(&task.task_id)
+                    .unwrap()
+                    .name
+                    .as_ref()
+                    .unwrap();
+
+                file.serialize(OpRecord {
+                    op_id: op_id.0,
+                    desc: &format!("{} <{}>", task_name, op_id.0),
+                    proc: None,
+                    level: None,
                 })?;
             } else {
                 let desc = op.kind.and_then(|k| state.op_kinds.get(&k)).map_or_else(
