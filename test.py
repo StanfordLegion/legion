@@ -332,7 +332,7 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
     cmd([make_exe, '-C', python_dir, '-j', str(thread_count)], env=env)
     jupyter_dir = os.path.join(root_dir, 'jupyter_notebook')
-    jupyter_install_cmd = [sys.executable, './install.py', '--legion-prefix', python_dir, '--verbose']
+    jupyter_install_cmd = [sys.executable, './install_jupyter.py', '--legion-prefix', python_dir, '--verbose']
     cmd(jupyter_install_cmd, env=env, cwd=jupyter_dir)
     jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'ci_test.py')
     jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'legion_kernel_nocr', jupyter_test_file]
