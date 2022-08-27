@@ -1171,6 +1171,7 @@ namespace Realm {
   #define CUDA_RUNTIME_FNPTR(name) (name ## _fnptr)
 
   #define CUDA_DRIVER_APIS(__op__) \
+    __op__(cuModuleGetFunction);   \
     __op__(cuCtxEnablePeerAccess); \
     __op__(cuCtxGetFlags); \
     __op__(cuCtxGetStreamPriorityRange); \
