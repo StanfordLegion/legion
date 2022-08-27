@@ -3716,8 +3716,9 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
-      execution_context = inner_ctx;
       execution_context->add_reference();
+      runtime->register_local_context(inner_ctx);
+      execution_context = inner_ctx;
       return inner_ctx;
     }
 
@@ -4649,12 +4650,14 @@ namespace Legion {
       {
         const bool is_leaf_variant = variant->is_leaf();
         if (!is_leaf_variant)
+        {
+          execution_context = new LeafContext(runtime, this, inline_task);
+          // Add a reference to our execution context
+          execution_context->add_reference();
+        }
+        else // This method adds a reference to the context for us
           execution_context = 
             initialize_inner_execution_context(variant, inline_task);
-        else
-          execution_context = new LeafContext(runtime, this, inline_task);
-        // Add a reference to our execution context
-        execution_context->add_reference();
         std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
@@ -5144,6 +5147,8 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
+      inner_ctx->add_reference();
+      runtime->register_local_context(inner_ctx);
       return inner_ctx;
     }
 
@@ -8155,20 +8160,17 @@ namespace Legion {
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, unique_op_id,
             execution_fence_event, shard_manager, inline_task);
+        repl_ctx->add_reference();
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper, task_priority);
+        runtime->register_local_context(repl_ctx);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
         // Wait until all the other shards are ready too
         complete_startup_initialization();
-        // Hold a reference during this to prevent collectives 
-        // from deleting the context prematurely
-        repl_ctx->add_reference();
         // The replicate contexts all need to sync up to exchange resources 
         repl_ctx->exchange_common_resources();
-        // Remove our reference, DO NOT CHECK FOR DELETION
-        repl_ctx->remove_reference();
         return repl_ctx;
       }
       else // No control replication so do the normal thing
@@ -8184,16 +8186,15 @@ namespace Legion {
           parent_req_indexes, virtual_mapped, unique_op_id,
           execution_fence_event, shard_manager,
           false/*inline task*/, true/*implicit*/);
+      repl_ctx->add_reference();
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper, task_priority);
+      runtime->register_local_context(repl_ctx);
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
       complete_startup_initialization();
-      // Hold a reference during this to prevent collectives 
-      // from deleting the context prematurely
-      repl_ctx->add_reference();
       // The replicate contexts all need to sync up to exchange resources 
       repl_ctx->exchange_common_resources();
       return repl_ctx;

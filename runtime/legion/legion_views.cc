@@ -5640,7 +5640,7 @@ namespace Legion {
                                    const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
       : InstanceView(ctx, id, owner_proc, owner_context, register_now, mapping),
-        instances(insts), local_views(views) 
+        instances(insts), local_views(views), deletion_notified(false) 
     //--------------------------------------------------------------------------
     {
       for (std::vector<IndividualView*>::const_iterator it =
@@ -5654,7 +5654,15 @@ namespace Legion {
         assert((*it)->logical_owner == (*it)->get_manager()->owner_space);
 #endif
         (*it)->add_nested_resource_ref(did);
+        // Record ourselves with each of our local views so they can 
+        // notify us when they are deleted
+        PhysicalManager *manager = (*it)->get_manager();
+        manager->register_deletion_subscriber(this);
       }
+      // If we're the owner then the context also holds a reference to us to 
+      // keep the entire collective view alive as long as it can still match 
+      if (is_owner())
+        add_base_resource_ref(CONTEXT_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -5680,6 +5688,106 @@ namespace Legion {
       assert(contains(instance));
 #endif
       return instance->owner_space;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_instance_deletion(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      notify_instance_deletion(manager->tree_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::add_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      add_nested_resource_ref(manager->did);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::remove_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      return remove_nested_resource_ref(manager->did);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::notify_instance_deletion(RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we're the first deletion arrival
+      if (deletion_notified.exchange(true))
+        return;
+      if (is_owner())
+      {
+        // Notify the context that this can be deleted
+        // See if the context is local or not
+        const AddressSpaceID ctx_space = 
+          runtime->get_runtime_owner(owner_context);
+        if (ctx_space != local_space)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(tid);
+            rez.serialize(owner_context);
+          }
+          runtime->send_collective_view_deletion(ctx_space, rez);
+        }
+        else
+        {
+          InnerContext *context = 
+            runtime->find_context(owner_context, true/*can fail*/);
+          if (context != NULL)
+          {
+            context->notify_collective_deletion(tid, did);
+            if (context->remove_reference())
+              delete context;
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_mapping != NULL);
+        assert(collective_mapping->contains(local_space));
+#endif
+        // Send the notification down to the parent
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(tid);
+        runtime->send_collective_view_notification(
+            collective_mapping->get_parent(owner_space, local_space), rez);
+      }
+      // Unregister ourselves with all our local instances
+      for (std::vector<IndividualView*>::const_iterator it =
+            local_views.begin(); it != local_views.end(); it++)
+      {
+        PhysicalManager *manager = (*it)->get_manager();
+        manager->unregister_deletion_subscriber(this);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_collective_view_deletion(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      // Might have already received a deletion from somewhere else so 
+      // do a weak find check
+      DistributedCollectable *dc = 
+        runtime->weak_find_distributed_collectable(did);
+      if (dc == NULL)
+        return;
+      CollectiveView *view = static_cast<CollectiveView*>(dc);
+      view->notify_instance_deletion(tid);
+      if (view->remove_base_resource_ref(RUNTIME_REF))
+        delete view;
     }
 
     //--------------------------------------------------------------------------

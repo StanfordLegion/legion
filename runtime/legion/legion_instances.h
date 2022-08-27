@@ -230,6 +230,18 @@ namespace Legion {
     };
 
     /**
+     * A small interface for subscribing to notifications for
+     * when an instance is deleted
+     */
+    class InstanceDeletionSubscriber {
+    public:
+      virtual ~InstanceDeletionSubscriber(void) { }
+      virtual void notify_instance_deletion(PhysicalManager *manager) = 0;
+      virtual void add_subscriber_reference(PhysicalManager *manager) = 0;
+      virtual bool remove_subscriber_reference(PhysicalManager *manager) = 0;
+    };
+
+    /**
      * \class PhysicalManager 
      * This is an abstract intermediate class for representing an allocation
      * of data; this includes both individual instances and collective instances
@@ -437,6 +449,8 @@ namespace Legion {
       IndividualView* construct_top_view(AddressSpaceID logical_owner,
                                          DistributedID did, UniqueID uid,
                                          CollectiveMapping *mapping);
+      void register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
+      void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
@@ -518,7 +532,7 @@ namespace Legion {
       const ApEvent producer_event;
     protected:
       mutable LocalLock inst_lock;
-      std::set<InnerContext*> active_contexts;
+      std::set<InstanceDeletionSubscriber*> subscribers;
       typedef std::pair<ReplicationID,UniqueID> ContextKey;
       typedef std::pair<IndividualView*,unsigned> ViewEntry;
       std::map<ContextKey,ViewEntry> context_views;

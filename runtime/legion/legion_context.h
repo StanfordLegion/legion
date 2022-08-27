@@ -754,7 +754,7 @@ namespace Legion {
     }; 
 
     class InnerContext : public TaskContext, public Murmur3Hasher::HashVerifier,
-                         public LegionHeapify<InnerContext> {
+         public InstanceDeletionSubscriber, public LegionHeapify<InnerContext> {
     public:
       // Prepipeline stages need to hold a reference since the
       // logical analysis could clean the context up before it runs
@@ -1519,7 +1519,11 @@ namespace Legion {
                              std::set<RtEvent> &map_applied_events,
                              const void *value, const size_t value_size,
                              bool &took_ownership);
-      void notify_instance_deletion(PhysicalManager *deleted); 
+      virtual void notify_instance_deletion(PhysicalManager *deleted); 
+      virtual void add_subscriber_reference(PhysicalManager *manager) 
+        { add_reference(); }
+      virtual bool remove_subscriber_reference(PhysicalManager *manager)
+        { return remove_reference(); }
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
@@ -1615,6 +1619,7 @@ namespace Legion {
                                 CollectiveMapping *mapping = NULL);
       virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
                    const std::vector<DistributedID> &instances, RtEvent &ready);
+      void notify_collective_deletion(RegionTreeID tid, DistributedID did);
     protected:
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
@@ -1643,14 +1648,19 @@ namespace Legion {
           const FieldMaskSet<CollectiveResult> &replacements);
       CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
           const std::vector<DistributedID> &instances, bool need_lock = true);
-      RtEvent create_collective_view(
+      RtEvent create_collective_view(UniqueID ctx_uid,
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
+      static void release_collective_view(Runtime *runtime, DistributedID did);
     public:
       static void handle_finalize_collective_mapping(Deserializer &derez,
                                                      Runtime *runtime);
       static void handle_create_collective_view(Deserializer &derez,
                                                 Runtime *runtime);
+      static void handle_delete_collective_view(Deserializer &derez,
+                                                Runtime *runtime);
+      static void handle_release_collective_view(Deserializer &derez,
+                                                 Runtime *runtime);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 

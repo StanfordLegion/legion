@@ -3223,6 +3223,10 @@ namespace Legion {
       void send_collective_finalize_mapping(AddressSpaceID target,
                                             Serializer &rez);
       void send_collective_view_creation(AddressSpaceID target,Serializer &rez);
+      void send_collective_view_deletion(AddressSpaceID target,Serializer &rez);
+      void send_collective_view_release(AddressSpaceID target, Serializer &rez);
+      void send_collective_view_notification(AddressSpaceID target,
+                                             Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -3573,6 +3577,9 @@ namespace Legion {
       void handle_collective_deletion(Deserializer &derez);
       void handle_collective_finalize_mapping(Deserializer &derez);
       void handle_collective_view_creation(Deserializer &derez);
+      void handle_collective_view_deletion(Deserializer &derez);
+      void handle_collective_view_release(Deserializer &derez);
+      void handle_collective_view_notification(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -4090,7 +4097,7 @@ namespace Legion {
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
-      void register_local_context(UniqueID context_uid, InnerContext *ctx);
+      void register_local_context(InnerContext *ctx);
       void unregister_local_context(UniqueID context_uid);
       void register_remote_context(UniqueID context_uid, RemoteContext *ctx,
                                    std::set<RtEvent> &preconditions);
@@ -5707,6 +5714,12 @@ namespace Legion {
         case SEND_COLLECTIVE_FINALIZE_MAPPING:
           break;
         case SEND_COLLECTIVE_VIEW_CREATION:
+          break;
+        case SEND_COLLECTIVE_VIEW_DELETION:
+          break;
+        case SEND_COLLECTIVE_VIEW_RELEASE:
+          break;
+        case SEND_COLLECTIVE_VIEW_NOTIFICATION:
           break;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;

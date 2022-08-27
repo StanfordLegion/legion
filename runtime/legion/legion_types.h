@@ -827,6 +827,9 @@ namespace Legion {
       SEND_COLLECTIVE_DELETION,
       SEND_COLLECTIVE_FINALIZE_MAPPING,
       SEND_COLLECTIVE_VIEW_CREATION,
+      SEND_COLLECTIVE_VIEW_DELETION,
+      SEND_COLLECTIVE_VIEW_RELEASE,
+      SEND_COLLECTIVE_VIEW_NOTIFICATION,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -1071,6 +1074,9 @@ namespace Legion {
         "Send Collective Deletion",                                   \
         "Send Collective Finalize Mapping",                           \
         "Send Collective View Creation",                              \
+        "Send Collective View Deletion",                              \
+        "Send Collective View Release",                               \
+        "Send Collective View Deletion Notification",                 \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \

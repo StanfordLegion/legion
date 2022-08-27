@@ -161,6 +161,7 @@ namespace Legion {
     public:
       inline void add_reference(unsigned cnt = 1);
       inline bool remove_reference(unsigned cnt = 1);
+      inline bool check_add_reference(unsigned cnt = 1);
     protected:
       std::atomic<unsigned int> references;
     };
@@ -601,6 +602,20 @@ namespace Legion {
       // If previous is equal to count, the value is now
       // zero so it is safe to reclaim this object
       return (prev == cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool Collectable::check_add_reference(unsigned cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      unsigned current = references.load();
+      while (current > 0)
+      {
+        unsigned next = current + cnt;
+        if (references.compare_exchange_weak(current, next))
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------

@@ -12173,6 +12173,21 @@ namespace Legion {
               runtime->handle_collective_view_creation(derez);
               break;
             }
+          case SEND_COLLECTIVE_VIEW_DELETION:
+            {
+              runtime->handle_collective_view_deletion(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_RELEASE:
+            {
+              runtime->handle_collective_view_release(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_NOTIFICATION:
+            {
+              runtime->handle_collective_view_notification(derez);
+              break;
+            }
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -18020,6 +18035,7 @@ namespace Legion {
         new TopLevelContext(this, get_unique_operation_id());
       map_context->add_reference();
       map_context->set_executing_processor(proc);
+      register_local_context(map_context);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                               false/*track parent*/);
@@ -22427,6 +22443,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_deletion(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_VIEW_DELETION>(
+                                                        rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_release(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_VIEW_RELEASE>(
+                                                        rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_notification(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_VIEW_NOTIFICATION>(
+                                                        rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24638,6 +24681,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InnerContext::handle_create_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_deletion(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::handle_delete_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_release(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext::handle_release_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_notification(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_collective_view_deletion(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -28475,9 +28539,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_local_context(UniqueID context_uid,InnerContext *ctx)
+    void Runtime::register_local_context(InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
+      UniqueID context_uid = ctx->get_context_uid();
 #ifdef DEBUG_LEGION
       // sanity check
       assert((context_uid % total_address_spaces) == address_space); 
@@ -28559,6 +28624,10 @@ namespace Legion {
                                       RtEvent *wait_for /*=NULL*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Cannot support both of these concurrently
+      assert(!return_null_if_not_found || (wait_for == NULL));
+#endif
       RtEvent wait_on;
       RtUserEvent ready_event;
       RemoteContext *result = NULL;
@@ -28569,12 +28638,22 @@ namespace Legion {
         std::map<UniqueID,InnerContext*>::const_iterator
           local_finder = local_contexts.find(context_uid);
         if (local_finder != local_contexts.end())
+        {
+          if (return_null_if_not_found &&
+              !local_finder->second->check_add_reference())
+            return NULL;
           return local_finder->second;
+        }
         // Now see if it is remote
         std::map<UniqueID,RemoteContext*>::const_iterator
           remote_finder = remote_contexts.find(context_uid);
         if (remote_finder != remote_contexts.end())
+        {
+          if (return_null_if_not_found &&
+              !local_finder->second->check_add_reference())
+            return NULL;
           return remote_finder->second;
+        }
         // If we don't have it, see if we should send the response or not
         std::map<UniqueID,
                  std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
@@ -28597,6 +28676,9 @@ namespace Legion {
       }
       if (result == NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(!return_null_if_not_found);
+#endif
         // Make a remote context here in case we need to request it, 
         // we can't make it while holding the lock
         RemoteContext *temp = new RemoteContext(this, context_uid);
@@ -28632,9 +28714,6 @@ namespace Legion {
             pending_finder = pending_remote_contexts.find(context_uid);
           if (pending_finder == pending_remote_contexts.end())
           {
-#ifdef DEBUG_LEGION
-            assert(!return_null_if_not_found);
-#endif
             // Make an event to trigger for when we are done
             ready_event = Runtime::create_rt_user_event();
             pending_remote_contexts[context_uid] = 
@@ -28673,6 +28752,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(ready_event.exists());
+        assert(!return_null_if_not_found);
 #endif
         // We have to send the message
         // Figure out the target
@@ -28703,11 +28783,11 @@ namespace Legion {
       }
       else
       {
-        // Can't wait in some cases
-        if (return_null_if_not_found && !wait_on.has_triggered())
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        if (return_null_if_not_found &&
+            !result->check_add_reference())
           return NULL;
-        // We wait for the results to be ready
-        wait_on.wait();
         return result;
       }
     }
@@ -30307,6 +30387,7 @@ namespace Legion {
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
+      register_local_context(top_context);
       // Mark that this task is the top-level task
       Future result = top_task->initialize_task(top_context, launcher, 
                                 false/*track parent*/,true/*top level task*/);
@@ -30345,6 +30426,7 @@ namespace Legion {
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(proxy);
+      register_local_context(top_context);
       TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task

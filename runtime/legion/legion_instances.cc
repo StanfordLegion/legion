@@ -1208,14 +1208,14 @@ namespace Legion {
       if (key.first > 0)
         key.second = 0;
       // No matter what we're going to store the context so grab a reference
-      own_ctx->add_reference();
+      own_ctx->add_subscriber_reference(this);
       RtEvent wait_for;
       {
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         // All contexts should always be new since they should be deduplicating
         // on their side before calling this method
-        assert(active_contexts.find(own_ctx) == active_contexts.end());
+        assert(subscribers.find(own_ctx) == subscribers.end());
 #endif
         std::map<ContextKey,ViewEntry>::iterator finder =
           context_views.find(key);
@@ -1227,7 +1227,7 @@ namespace Legion {
           assert(key.first > 0);
 #endif
           // This better be a new context so bump the reference count
-          active_contexts.insert(own_ctx);
+          subscribers.insert(own_ctx);
           finder->second.second++;
           return finder->second.first;
         }
@@ -1260,7 +1260,7 @@ namespace Legion {
         assert(key.first > 0);
 #endif
         // This better be a new context so bump the reference count
-        active_contexts.insert(own_ctx);
+        subscribers.insert(own_ctx);
         finder->second.second++;
         return finder->second.first;
       }
@@ -1335,7 +1335,7 @@ namespace Legion {
       ViewEntry &entry = context_views[key];
       entry.first = result;
       entry.second = 1/*only a single initial reference*/;
-      active_contexts.insert(own_ctx);
+      subscribers.insert(own_ctx);
       if (key.first > 0)
       {
         std::map<ReplicationID,RtUserEvent>::iterator finder =
@@ -1351,6 +1351,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::register_deletion_subscriber(
+                                         InstanceDeletionSubscriber *subscriber)
+    //--------------------------------------------------------------------------
+    {
+      subscriber->add_subscriber_reference(this);
+      AutoLock inst(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(subscribers.find(subscriber) == subscribers.end());
+#endif
+      subscribers.insert(subscriber);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unregister_deletion_subscriber(
+                                         InstanceDeletionSubscriber *subscriber)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock inst(inst_lock);
+        std::set<InstanceDeletionSubscriber*>::iterator finder =
+          subscribers.find(subscriber);
+        if (finder == subscribers.end())
+          return;
+        subscribers.erase(finder);
+      }
+      if (subscriber->remove_subscriber_reference(this))
+        delete subscriber;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::unregister_active_context(InnerContext *own_ctx)
     //--------------------------------------------------------------------------
     {
@@ -1361,13 +1391,13 @@ namespace Legion {
         key.second = 0;
       {
         AutoLock inst(inst_lock);
-        std::set<InnerContext*>::iterator finder = 
-          active_contexts.find(own_ctx);
+        std::set<InstanceDeletionSubscriber*>::iterator finder = 
+          subscribers.find(own_ctx);
         // We could already have removed this context if this
         // physical instance was deleted
-        if (finder == active_contexts.end())
+        if (finder == subscribers.end())
           return;
-        active_contexts.erase(finder);
+        subscribers.erase(finder);
         // Remove the reference on the view entry and remove it from our
         // manager if it no longer has anymore active contexts
         std::map<ContextKey,ViewEntry>::iterator view_finder =
@@ -1379,7 +1409,7 @@ namespace Legion {
         if (--view_finder->second.second == 0)
           context_views.erase(view_finder);
       }
-      if (own_ctx->remove_reference())
+      if (own_ctx->remove_subscriber_reference(this))
         delete context;
     }
 
@@ -2975,8 +3005,8 @@ namespace Legion {
                        IDFMT "", instance.id, memory_manager->memory.id);
       prune_gc_events();
       // Grab the set of active contexts to notify
-      std::set<InnerContext*> to_notify;
-      to_notify.swap(active_contexts);
+      std::set<InstanceDeletionSubscriber*> to_notify;
+      to_notify.swap(subscribers);
 #ifndef LEGION_DISABLE_GC
       // If we're still active that means there are still outstanding
       // users so make an event for when we are done, not we're holding
@@ -3021,11 +3051,11 @@ namespace Legion {
       // Notify any contexts of our deletion
       if (!to_notify.empty())
       {
-        for (std::set<InnerContext*>::const_iterator it =
+        for (std::set<InstanceDeletionSubscriber*>::const_iterator it =
               to_notify.begin(); it != to_notify.end(); it++)
         {
           (*it)->notify_instance_deletion(this);
-          if ((*it)->remove_reference())
+          if ((*it)->remove_subscriber_reference(this))
             delete (*it);
         }
       }
@@ -4721,8 +4751,8 @@ namespace Legion {
       }
       prune_gc_events();
       // Grab the set of active contexts to notify
-      std::set<InnerContext*> to_notify;
-      to_notify.swap(active_contexts);
+      std::set<InstanceDeletionSubscriber*> to_notify;
+      to_notify.swap(subscribers);
       std::map<std::pair<DistributedID,DomainPoint>,
                 std::map<unsigned,Reservation> > to_destroy;
       to_destroy.swap(view_reservations);
@@ -4756,11 +4786,11 @@ namespace Legion {
       // Notify any contexts of our deletion
       if (!to_notify.empty())
       {
-        for (std::set<InnerContext*>::const_iterator it =
+        for (std::set<InstanceDeletionSubscriber*>::const_iterator it =
               to_notify.begin(); it != to_notify.end(); it++)
         {
           (*it)->notify_instance_deletion(this);
-          if ((*it)->remove_reference())
+          if ((*it)->remove_subscriber_reference(this))
             delete (*it);
         }
       }
@@ -5013,25 +5043,25 @@ namespace Legion {
       // Grab a copy of this in case we get any removal calls
       // while we are doing the deletion. We know that there
       // will be no more additions because we are being deleted
-      std::set<InnerContext*> copy_active_contexts;
+      std::set<InstanceDeletionSubscribers*> copy_subscribers;
       std::map<std::pair<DistributedID,DomainPoint>,
                 std::map<unsigned,Reservation> > copy_view_atomics;
       {
         AutoLock inst(inst_lock);
-        if (active_contexts.empty())
+        if (subscribers.empty())
           return;
-        copy_active_contexts.swap(active_contexts);
+        copy_subscribers.swap(subscribers);
         copy_view_atomics.swap(view_reservations);
 #ifdef DEBUG_LEGION
         assert(pending_views.empty());
 #endif
         context_views.clear();
       }
-      for (std::set<InnerContext*>::iterator it = copy_active_contexts.begin(); 
-            it != copy_active_contexts.end(); it++)
+      for (std::set<InstanceDeletionSubscribers*>::iterator it =
+            copy_subscribers.begin(); it != copy_subscribers.end(); it++)
       {
         (*it)->notify_instance_deletion(this);
-        if ((*it)->remove_reference())
+        if ((*it)->remove_subscriber_reference())
           delete (*it);
       }
       // Clean up any reservations that we own associated with this instance

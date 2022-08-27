@@ -2860,8 +2860,6 @@ namespace Legion {
         context_coordinates.push_back(ContextCoordinate(
               owner_task->get_context_index(), owner_task->index_point));
       }
-      if (!remote_context)
-        runtime->register_local_context(context_uid, this);
     }
 
     //--------------------------------------------------------------------------
@@ -2890,6 +2888,18 @@ namespace Legion {
         if (it->second->remove_reference())
           delete (it->second);
       traces.clear();
+      while (!collective_results.empty())
+      {
+        LegionMap<RegionTreeID,std::vector<CollectiveResult*> >::iterator
+          next = collective_results.begin();
+        for (std::vector<CollectiveResult*>::iterator it =
+              next->second.begin(); it != next->second.end(); it++)
+        {
+          release_collective_view(runtime, (*it)->collective_did);
+          delete (*it);
+        }
+        collective_results.erase(next);
+      }
       // Clean up any locks and barriers that the user
       // asked us to destroy
       while (!context_locks.empty())
@@ -2954,6 +2964,7 @@ namespace Legion {
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
       assert(invalidated_refinements.empty());
+      assert(pending_rendezvous.empty());
 #endif
       if (!remote_context)
         runtime->unregister_local_context(context_uid);
@@ -10482,8 +10493,8 @@ namespace Legion {
       const DistributedID collective_did = 
         mapping->contains(runtime->address_space) ? runtime->address_space :
         mapping->find_nearest(runtime->address_space);
-      const RtEvent ready = create_collective_view(collective_did,
-                                                   mapping, instances);
+      const RtEvent ready = create_collective_view(
+          get_context_uid(), collective_did, mapping, instances);
       CollectiveResult *result = 
         new CollectiveResult(instances, collective_did, ready);
       result->add_reference();
@@ -10813,14 +10824,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::create_collective_view(
+    RtEvent InnerContext::create_collective_view(UniqueID ctx_uid,
                       DistributedID collective_did, CollectiveMapping *mapping,
                       const std::vector<DistributedID> &individual_dids)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
         runtime->determine_owner(collective_did);
-      const UniqueID ctx_uid = get_context_uid();
       if (mapping->contains(runtime->address_space))
       {
         // Send the result out to any children and then make our local copy
@@ -10936,9 +10946,92 @@ namespace Legion {
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
       Runtime::trigger_event(done, context->create_collective_view(
-            collective_did, mapping, individual_dids));
+            ctx_uid, collective_did, mapping, individual_dids));
       if (mapping->remove_reference())
         delete mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::notify_collective_deletion(RegionTreeID tid,
+                                                  DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      bool found = false;
+      {
+        AutoLock c_lock(collective_lock); 
+        LegionMap<RegionTreeID,std::vector<CollectiveResult*> >::iterator 
+          finder = collective_results.find(tid);
+        if (finder == collective_results.end())
+          return;
+        for (std::vector<CollectiveResult*>::iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if ((*it)->collective_did != did)
+            continue;
+          found = true; 
+          delete (*it);
+          finder->second.erase(it);
+          break;
+        }
+      }
+      if (found)
+        release_collective_view(runtime, did);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_delete_collective_view(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID collective_did;
+      derez.deserialize(collective_did);
+      RegionTreeID tid;
+      derez.deserialize(tid);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
+      // The context might already be deleted so do a weak find
+      InnerContext *context = runtime->find_context(ctx_uid, true/*can fail*/);
+      if (context == NULL)
+        return;
+      context->notify_collective_deletion(tid, collective_did);
+      if (context->remove_reference())
+        delete context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::release_collective_view(Runtime *runtime,
+                                                   DistributedID collective_did)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner = runtime->determine_owner(collective_did);
+      if (owner != runtime->address_space)
+      {
+        Serializer rez;
+        rez.serialize(collective_did);
+        runtime->send_collective_view_release(owner, rez);
+      }
+      else
+      {
+        // Better be able to find it since we know that we're still holding
+        // a resource reference to it
+        CollectiveView *view = static_cast<CollectiveView*>(
+            runtime->find_distributed_collectable(collective_did));
+        // Now remove the resource reference that was added by the 
+        // constructor for the collective view
+        if (view->remove_base_resource_ref(CONTEXT_REF))
+          delete view;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_release_collective_view(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      release_collective_view(runtime, did);
     }
 
     //--------------------------------------------------------------------------
@@ -22000,7 +22093,11 @@ namespace Legion {
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
       parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
       if (parent_ctx != NULL)
+      {
         remote_task.parent_task = parent_ctx->get_task();
+        if (parent_ctx->remove_reference())
+          delete parent_ctx;
+      }
     }
 
     //--------------------------------------------------------------------------

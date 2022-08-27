@@ -378,7 +378,8 @@ namespace Legion {
      * that represents a group of instances that need to be analyzed
      * cooperatively for physical analysis.
      */
-    class CollectiveView : public InstanceView {
+    class CollectiveView : public InstanceView, 
+                           public InstanceDeletionSubscriber {
     public:
       CollectiveView(RegionTreeForest *ctx, DistributedID did,
                      AddressSpaceID owner_proc, UniqueID owner_context, 
@@ -447,6 +448,11 @@ namespace Legion {
                                         size_t local_collective_arrivals);
       RtEvent find_collective_analyses(size_t context_index, unsigned index,
                           const std::vector<CollectiveAnalysis*> *&analyses);
+    public:
+      void notify_instance_deletion(RegionTreeID tid);
+      virtual void notify_instance_deletion(PhysicalManager *manager);
+      virtual void add_subscriber_reference(PhysicalManager *manager);
+      virtual bool remove_subscriber_reference(PhysicalManager *manager);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,
@@ -497,6 +503,8 @@ namespace Legion {
       static void handle_nearest_instances_request(Runtime *runtime,
                                                    Deserializer &derez);
       static void handle_nearest_instances_response(Deserializer &derez);
+      static void handle_collective_view_deletion(Deserializer &derez,
+                                                  Runtime *runtime);
     public:
       const std::vector<DistributedID> instances;
     protected:
@@ -546,6 +554,9 @@ namespace Legion {
         bool local_initialized;
       };
       std::map<RendezvousKey,UserRendezvous> rendezvous_users;
+    private:
+      // Use this flag to deduplicate deletion notifications from our instances
+      std::atomic<bool> deletion_notified;
     };
 
     /**
