@@ -3642,7 +3642,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -3669,7 +3669,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -3773,7 +3773,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);

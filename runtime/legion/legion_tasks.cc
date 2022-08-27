@@ -4325,12 +4325,11 @@ namespace Legion {
               }
             }
           }
-
           for (std::vector<unsigned>::const_iterator it = 
                performed_regions.begin(); it != performed_regions.end(); it++)
           {
             region_preconditions[*it] = 
-              runtime->forest->physical_perform_registration(
+              runtime->forest->physical_perform_registration(reg_pre[*it],
                                     analyses[*it], 
                                     map_applied_conditions,
                                     logical_regions.is_output_created(*it));

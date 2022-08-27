@@ -3418,6 +3418,8 @@ namespace Legion {
                                                Serializer &rez);
       void send_remote_op_profiling_count_update(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_remote_op_completion_effect(AddressSpaceID target,
+                                            Serializer &rez);
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
@@ -3765,6 +3767,7 @@ namespace Legion {
       void handle_library_serdez_response(Deserializer &derez);
       void handle_remote_op_report_uninitialized(Deserializer &derez);
       void handle_remote_op_profiling_count_update(Deserializer &derez);
+      void handle_remote_op_completion_effect(Deserializer &derez);
       void handle_remote_tracing_update(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
@@ -5960,6 +5963,8 @@ namespace Legion {
         case SEND_REMOTE_OP_REPORT_UNINIT:
           break;
         case SEND_REMOTE_OP_PROFILING_COUNT_UPDATE:
+          break;
+        case SEND_REMOTE_OP_COMPLETION_EFFECT:
           break;
         case SEND_REMOTE_TRACE_UPDATE:
           return TRACING_VIRTUAL_CHANNEL;

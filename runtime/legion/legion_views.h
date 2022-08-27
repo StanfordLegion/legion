@@ -186,6 +186,7 @@ namespace Legion {
                                     RtEvent collect_event,
                                     PhysicalManager *target,
                                     size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -261,8 +262,7 @@ namespace Legion {
                                    IndexSpaceExpression *user_expr,
                                    std::vector<RtEvent> &applied) const = 0;
     public:
-      void find_atomic_reservations(PhysicalManager *manager,
-                                    const FieldMask &mask, Operation *op, 
+      void find_atomic_reservations(const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
     protected:
       void find_field_reservations(const FieldMask &mask,
@@ -285,6 +285,7 @@ namespace Legion {
                                        RtEvent collect_event,
                                        PhysicalManager *target,
                                        size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &registered_events,
                                        std::set<RtEvent> &applied_events,
                                        const PhysicalTraceInfo &trace_info,
                                        const bool symbolic);
@@ -294,7 +295,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
-                                            RtUserEvent remote_registered);
+                                            RtUserEvent remote_registered,
+                                            RtUserEvent remote_applied);
     public:
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -402,6 +404,7 @@ namespace Legion {
                                     RtEvent collect_event,
                                     PhysicalManager *target,
                                     size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -455,15 +458,17 @@ namespace Legion {
                                        RtEvent collect_event,
                                        PhysicalManager *target,
                                        size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &regsitered_events,
                                        std::set<RtEvent> &applied_events,
                                        const PhysicalTraceInfo &trace_info,
                                        const bool symbolic);
       void process_register_user_request(const size_t op_ctx_index,
                                        const unsigned index,
-                                       const RtEvent registered);
+                                       RtEvent registered, RtEvent applied);
       void process_register_user_response(const size_t op_ctx_index,
                                        const unsigned index,
-                                       const RtEvent registered);
+                                       const RtEvent registered,
+                                       const RtEvent applied);
       void finalize_collective_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     IndexSpaceNode *expr,
@@ -473,6 +478,8 @@ namespace Legion {
                                     RtEvent collect_event,
                                     RtUserEvent local_registered,
                                     RtEvent global_registered,
+                                    RtUserEvent local_applied,
+                                    RtEvent global_applied,
                                     std::vector<ApUserEvent> &ready_events,
                                     std::vector<std::vector<ApEvent> > &terms,
                                     const PhysicalTraceInfo *trace_info,
@@ -509,6 +516,8 @@ namespace Legion {
         std::vector<std::vector<ApEvent> > local_term_events;
         // events from remote nodes indicating they are registered
         std::vector<RtEvent> remote_registered;
+        // events from remote nodes indicating they are applied
+        std::vector<RtEvent> remote_applied;
         // the local set of analyses
         std::vector<CollectiveAnalysis*> analyses;
         // event for when the analyses are all registered
@@ -517,6 +526,10 @@ namespace Legion {
         RtUserEvent local_registered; 
         // event that marks when all registrations are done
         RtUserEvent global_registered;
+        // event to trigger when local effects are done
+        RtUserEvent local_applied; 
+        // event that marks when all effects are done
+        RtUserEvent global_applied;
         // Counts of remaining notficiations before registration
         unsigned remaining_local_arrivals;
         unsigned remaining_remote_arrivals;
@@ -906,6 +919,7 @@ namespace Legion {
                                     RtEvent collect_event,
                                     PhysicalManager *target,
                                     size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
@@ -1154,6 +1168,7 @@ namespace Legion {
                                     RtEvent collect_event,
                                     PhysicalManager *target,
                                     size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,

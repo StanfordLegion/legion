@@ -339,7 +339,6 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
-      LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
@@ -398,8 +397,10 @@ namespace Legion {
       LG_DEFER_REMOTE_OVERWRITE_TASK_ID,
       LG_DEFER_REMOTE_FILTER_TASK_ID,
       LG_DEFER_PERFORM_TRAVERSAL_TASK_ID,
+      LG_DEFER_PERFORM_ANALYSIS_TASK_ID,
       LG_DEFER_PERFORM_REMOTE_TASK_ID,
       LG_DEFER_PERFORM_UPDATE_TASK_ID,
+      LG_DEFER_PERFORM_REGISTRATION_TASK_ID,
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID,
@@ -464,7 +465,6 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
-        "Defer Physical Registration",                            \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Post Decrement Task",                                    \
@@ -523,8 +523,10 @@ namespace Legion {
         "Defer Remote Overwrite Equivalence Set",                 \
         "Defer Remote Filter Equivalence Set",                    \
         "Defer Physical Analysis Traversal Stage",                \
+        "Defer Physical Analysis Analyze Equivalence Set Stage",  \
         "Defer Physical Analysis Remote Stage",                   \
         "Defer Physical Analysis Update Stage",                   \
+        "Defer Physical Analysis Registration Stage",             \
         "Defer Physical Analysis Output Stage",                   \
         "Defer Physical Manager Registration",                    \
         "Defer Physical Manager Deletion",                        \
@@ -953,6 +955,7 @@ namespace Legion {
       SEND_LIBRARY_SERDEZ_RESPONSE,
       SEND_REMOTE_OP_REPORT_UNINIT,
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
+      SEND_REMOTE_OP_COMPLETION_EFFECT,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
@@ -1196,6 +1199,7 @@ namespace Legion {
         "Send Library Serdez Response",                               \
         "Remote Op Report Uninitialized",                             \
         "Remote Op Profiling Count Update",                           \
+        "Remote Op Completion Effect",                                \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \

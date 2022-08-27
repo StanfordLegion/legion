@@ -1468,10 +1468,10 @@ namespace Legion {
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                          // Used only in the case of copy-across analyses
                          RtEvent alternate_pre = RtEvent::NO_RT_EVENT);
-      CopyFillAggregator(const CopyFillAggregator &rhs);
+      CopyFillAggregator(const CopyFillAggregator &rhs) = delete;
       virtual ~CopyFillAggregator(void);
     public:
-      CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
+      CopyFillAggregator& operator=(const CopyFillAggregator &rhs) = delete;
     public:
       void record_update(InstanceView *dst_view,
                           PhysicalManager *dst_man,
@@ -1519,17 +1519,16 @@ namespace Legion {
                              EquivalenceSet *tracing_eq,
                              std::set<RtEvent> &applied,
                              CopyAcrossHelper *across_helper = NULL);
-      void issue_updates(const PhysicalTraceInfo &trace_info, 
-                         ApEvent precondition,
-                         const bool restricted_output = false,
-                         // Next args are used for across-copies
-                         // to indicate that the precondition already
-                         // describes the precondition for the 
-                         // destination instance
-                         const bool manage_dst_events = true,
-                         std::map<InstanceView*,
-                                  std::vector<ApEvent> > *dst_events = NULL);
-      ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
+      ApEvent issue_updates(const PhysicalTraceInfo &trace_info, 
+                            ApEvent precondition,
+                            const bool restricted_output = false,
+                            // Next args are used for across-copies
+                            // to indicate that the precondition already
+                            // describes the precondition for the 
+                            // destination instance
+                            const bool manage_dst_events = true,
+                            std::map<InstanceView*,
+                                     std::vector<ApEvent> > *dst_events = NULL);
     protected:
       void record_view(LogicalView *new_view);
       void resize_reductions(size_t new_size);
@@ -1610,7 +1609,9 @@ namespace Legion {
       std::set<RtEvent> effects; 
       // Events for the completion of our copies if we are supposed
       // to be tracking them
-      std::set<ApEvent> events;
+      std::vector<ApEvent> events;
+      // An event to represent the merge of all the events above
+      ApUserEvent summary_event;
     protected:
       struct SelectSourcesResult {
       public:
@@ -1645,19 +1646,30 @@ namespace Legion {
      * equivalence set trees to perform physical analyses
      */
     class PhysicalAnalysis : public Collectable, public LocalLock {
-    public:
+    private:
       struct DeferPerformTraversalArgs :
         public LgTaskArgs<DeferPerformTraversalArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_TRAVERSAL_TASK_ID;
       public:
-        DeferPerformTraversalArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
+        DeferPerformTraversalArgs(PhysicalAnalysis *ana,
+                                  const VersionInfo &info);
+      public:
+        PhysicalAnalysis *const analysis;
+        const VersionInfo *const version_info;
+        RtUserEvent done_event;
+      };
+      struct DeferPerformAnalysisArgs :
+        public LgTaskArgs<DeferPerformAnalysisArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PERFORM_ANALYSIS_TASK_ID;
+      public:
+        DeferPerformAnalysisArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
          const FieldMask &mask, RtUserEvent done, bool already_deferred = true);
       public:
         PhysicalAnalysis *const analysis;
         EquivalenceSet *const set;
         FieldMask *const mask;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
         const bool already_deferred;
       };
@@ -1669,7 +1681,6 @@ namespace Legion {
         DeferPerformRemoteArgs(PhysicalAnalysis *ana); 
       public:
         PhysicalAnalysis *const analysis;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
       };
       struct DeferPerformUpdateArgs : 
@@ -1680,20 +1691,37 @@ namespace Legion {
         DeferPerformUpdateArgs(PhysicalAnalysis *ana);
       public:
         PhysicalAnalysis *const analysis;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
+      };
+      struct DeferPerformRegistrationArgs :
+        public LgTaskArgs<DeferPerformRegistrationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PERFORM_REGISTRATION_TASK_ID;
+      public:
+        DeferPerformRegistrationArgs(PhysicalAnalysis *ana,
+            const RegionUsage &use, const PhysicalTraceInfo &trace_info,
+            ApEvent init_precondition, ApEvent termination, bool symbolic);
+      public:
+        PhysicalAnalysis *const analysis;
+        const RegionUsage usage;
+        const PhysicalTraceInfo *trace_info;
+        const ApEvent precondition;
+        const ApEvent termination;
+        const ApUserEvent instances_ready;
+        const RtUserEvent done_event;
+        const bool symbolic;
       };
       struct DeferPerformOutputArgs : 
         public LgTaskArgs<DeferPerformOutputArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_OUTPUT_TASK_ID;
       public:
-        DeferPerformOutputArgs(PhysicalAnalysis *ana, 
+        DeferPerformOutputArgs(PhysicalAnalysis *ana, bool track,
                                const PhysicalTraceInfo &trace_info);
       public:
         PhysicalAnalysis *const analysis;
         const PhysicalTraceInfo *trace_info;
-        const RtUserEvent applied_event;
+        const ApUserEvent effects_event;
       };
     public:
       // Local physical analysis
@@ -1722,33 +1750,55 @@ namespace Legion {
       inline bool is_collective_first_local(void) const
         { return collective_first_local; }
     public:
-      void traverse(EquivalenceSet *set, const FieldMask &mask, 
-                    std::set<RtEvent> &deferral_events,
-                    std::set<RtEvent> &applied_events,
-                    RtEvent precondition = RtEvent::NO_RT_EVENT,
-                    const bool already_deferred = false);
-      void defer_traversal(RtEvent precondition, EquivalenceSet *set,
+      void analyze(EquivalenceSet *set, const FieldMask &mask, 
+                   std::set<RtEvent> &deferral_events,
+                   std::set<RtEvent> &applied_events,
+                   RtEvent precondition = RtEvent::NO_RT_EVENT,
+                   const bool already_deferred = false);
+      RtEvent defer_traversal(RtEvent precondition, const VersionInfo &info,
+                              std::set<RtEvent> &applied_events);
+      void defer_analysis(RtEvent precondition, EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &deferral_events, 
               std::set<RtEvent> &applied_events,
               RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
               const bool already_deferred = true);
+      RtEvent defer_remote(RtEvent precondition, std::set<RtEvent> &applied);
+      RtEvent defer_updates(RtEvent precondition, std::set<RtEvent> &applied);
+      RtEvent defer_registration(RtEvent precondition,
+                                 const RegionUsage &usage,
+                                 std::set<RtEvent> &applied_events,
+                                 const PhysicalTraceInfo &trace_info,
+                                 ApEvent init_precondition,
+                                 ApEvent termination_event,
+                                 ApEvent &instances_ready,
+                                 bool symbolic);
+      ApEvent defer_output(RtEvent precondition, const PhysicalTraceInfo &info,
+                           bool track, std::set<RtEvent> &applied_events);
+      void record_deferred_applied_events(std::set<RtEvent> &applied);
     public:
-      virtual RtEvent start_traversal(RtEvent precondition,
-                                      const VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false) = 0;
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
       virtual RtEvent perform_updates(RtEvent precondition, 
                                       std::set<RtEvent> &applied_events,
                                       const bool already_deferred = false);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1771,8 +1821,10 @@ namespace Legion {
     public:
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
       static void handle_deferred_traversal(const void *args);
+      static void handle_deferred_analysis(const void *args);
       static void handle_deferred_remote(const void *args);
       static void handle_deferred_update(const void *args);
+      static void handle_deferred_registration(const void *args);
       static void handle_deferred_output(const void *args);
     public:
       const AddressSpaceID previous;
@@ -1802,6 +1854,16 @@ namespace Legion {
       FieldMaskSet<LogicalView> *recorded_instances;
     protected:
       CollectiveMapping *collective_mapping;
+    private:
+      // We don't want to make a separate "applied" event for every single
+      // deferred task that we need to launch. Therefore, we just make one
+      // for each analysis on the first deferred task that is launched for
+      // an analysis and record it. We then accumulate all the applied 
+      // events for all the deferred stages and when the analysis is deleted
+      // then we close the loop and merge all the accumulated events
+      // into the deferred_applied_event
+      RtUserEvent deferred_applied_event;
+      std::set<RtEvent> deferred_applied_events;
     };
 
     /**
@@ -1812,11 +1874,11 @@ namespace Legion {
     class RegistrationAnalysis : public PhysicalAnalysis {
     public:
       RegistrationAnalysis(Runtime *rt, Operation *op, unsigned index,
-                           IndexSpaceExpression *expr, bool on_heap,
+                           RegionNode *node, bool on_heap,
                            const PhysicalTraceInfo &trace_info, bool exclusive);
       RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                            Operation *op, unsigned index, 
-                           IndexSpaceExpression *expr, bool on_heap, 
+                           RegionNode *node, bool on_heap, 
                            std::vector<PhysicalManager*> &&target_insts,
                            LegionVector<
                               FieldMaskSet<InstanceView> > &&target_views,
@@ -1827,19 +1889,12 @@ namespace Legion {
       // Remote registration analysis with no views
       RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                            Operation *op, unsigned index, 
-                           IndexSpaceExpression *expr, bool on_heap, 
+                           RegionNode *node, bool on_heap, 
                            const PhysicalTraceInfo &trace_info,
                            CollectiveMapping *collective_mapping,
                            bool first_local, bool exclusive);
-    private:
-      friend class OverwriteAnalysis;
-      // Special helper constructor for overwrite analysis
-      RegistrationAnalysis(Runtime *rt, Operation *op, unsigned index,
-                           IndexSpaceExpression *expr, bool on_heap,
-                           const PhysicalTraceInfo &trace_info,
-                           CollectiveMapping *mapping, bool first_local);
     public:
-      virtual ~RegistrationAnalysis(void) { }
+      virtual ~RegistrationAnalysis(void);
     public:
       RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
           const std::vector<PhysicalManager*> *sources = NULL,
@@ -1847,9 +1902,13 @@ namespace Legion {
     public:
       virtual RtEvent perform_registration(RtEvent precondition,
                                            const RegionUsage &usage,
-                                           std::set<RtEvent> &registered_events,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
                                            bool symbolic = false);
     public:
+      RegionNode *const region;
       const size_t context_index;
       const PhysicalTraceInfo trace_info;
     public:
@@ -1873,7 +1932,7 @@ namespace Legion {
      */
     class CollectiveAnalysis {
     public:
-      virtual ~CollectiveAnalysis(void) = 0;
+      virtual ~CollectiveAnalysis(void) { }
       virtual size_t get_context_index(void) const = 0;
       virtual unsigned get_requirement_index(void) const = 0;
       virtual void pack_collective_analysis(Serializer &rez) const = 0;
@@ -1911,13 +1970,13 @@ namespace Legion {
                                        public CollectiveAnalysis {
     public:
       CollectiveCopyFillAnalysis(Runtime *rt, Operation *op, unsigned index,
-                                 IndexSpaceExpression *expr, bool on_heap,
+                                 RegionNode *node, bool on_heap,
                                  const PhysicalTraceInfo &trace_info,
                                  bool exclusive);
       CollectiveCopyFillAnalysis(Runtime *rt, 
                                  AddressSpaceID src, AddressSpaceID prev,
                                  Operation *op, unsigned index, 
-                                 IndexSpaceExpression *expr, bool on_heap, 
+                                 RegionNode *node, bool on_heap, 
                                  std::vector<PhysicalManager*> &&target_insts,
                                  LegionVector<
                                     FieldMaskSet<InstanceView> > &&target_views,
@@ -1933,9 +1992,9 @@ namespace Legion {
       virtual void add_analysis_reference(void) { add_reference(); }
       virtual bool remove_analysis_reference(void)
         { return remove_reference(); } 
-      virtual RtEvent start_traversal(RtEvent precondition,
-                                      const VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
     };
 
     /**
@@ -1955,13 +2014,13 @@ namespace Legion {
     public:
       ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1999,13 +2058,13 @@ namespace Legion {
       inline bool has_invalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2042,13 +2101,13 @@ namespace Legion {
       inline bool has_antivalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2092,22 +2151,32 @@ namespace Legion {
     public:
       UpdateAnalysis& operator=(const UpdateAnalysis &rhs) = delete;
     public:
+      bool has_output_updates(void) const 
+        { return (output_aggregator != NULL); }
+    public:
       void find_atomic_reservations(void);
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
       virtual RtEvent perform_updates(RtEvent precondition, 
                                       std::set<RtEvent> &applied_events,
                                       const bool already_deferred = false);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &registered_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2116,7 +2185,6 @@ namespace Legion {
                                         AddressSpaceID previous);
     public:
       const RegionUsage usage;
-      RegionNode *const node;
       const ApEvent precondition;
       const ApEvent term_event;
       const bool check_initialized;
@@ -2145,10 +2213,9 @@ namespace Legion {
                             public LegionHeapify<AcquireAnalysis> {
     public: 
       AcquireAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      IndexSpaceExpression *expr,
-                      const PhysicalTraceInfo &t_info);
+                      RegionNode *node, const PhysicalTraceInfo &t_info);
       AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, IndexSpaceExpression *expr,
+                      Operation *op, unsigned index, RegionNode *node,
                       AcquireAnalysis *target,
                       const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
@@ -2158,13 +2225,13 @@ namespace Legion {
     public:
       AcquireAnalysis& operator=(const AcquireAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2186,10 +2253,10 @@ namespace Legion {
                             public LegionHeapify<ReleaseAnalysis> {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      ApEvent precondition, IndexSpaceExpression *expr,
+                      ApEvent precondition, RegionNode *node,
                       const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, IndexSpaceExpression *expr,
+                      Operation *op, unsigned index, RegionNode *node,
                       ApEvent precondition, ReleaseAnalysis *target, 
                       std::vector<PhysicalManager*> &&target_instances,
                       LegionVector<FieldMaskSet<InstanceView> > &&target_views,
@@ -2201,13 +2268,13 @@ namespace Legion {
     public:
       ReleaseAnalysis& operator=(const ReleaseAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2273,13 +2340,13 @@ namespace Legion {
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       CopyFillAggregator* get_across_aggregator(void);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2333,7 +2400,7 @@ namespace Legion {
       FieldMask uninitialized;
       RtUserEvent uninitialized_reported;
       FieldMaskSet<IndexSpaceExpression> local_exprs;
-      std::set<ApEvent> copy_events;
+      std::vector<ApEvent> copy_events;
       std::set<RtEvent> guard_events;
     protected:
       CopyFillAggregator *across_aggregator;
@@ -2344,17 +2411,16 @@ namespace Legion {
      * \class OverwriteAnalysis 
      * For performing overwrite traversals on equivalence set trees
      */
-    class OverwriteAnalysis : public RegistrationAnalysis,
+    class OverwriteAnalysis : public PhysicalAnalysis,
                               public LegionHeapify<OverwriteAnalysis> {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionUsage &usage, IndexSpaceExpression *expr, 
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
                         LogicalView *view, const FieldMask &mask,
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
                         const bool add_restriction = false,
                         const bool first_local = true);
       // Also local but with a full set of instances 
@@ -2363,7 +2429,6 @@ namespace Legion {
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
                         const bool add_restriction = false);
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
@@ -2372,7 +2437,6 @@ namespace Legion {
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
                         const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index,
@@ -2384,26 +2448,25 @@ namespace Legion {
                         const PredEvent pred_guard,
                         CollectiveMapping *mapping,
                         const bool first_local,
-                        const bool track_effects,
                         const bool add_restriction);
-      OverwriteAnalysis(const OverwriteAnalysis &rhs);
+      OverwriteAnalysis(const OverwriteAnalysis &rhs) = delete;
       virtual ~OverwriteAnalysis(void);
     public:
-      OverwriteAnalysis& operator=(const OverwriteAnalysis &rhs);
+      OverwriteAnalysis& operator=(const OverwriteAnalysis &rhs) = delete;
     public:
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
     public:
-      virtual RtEvent start_traversal(RtEvent precondition,
-                                      const VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2414,20 +2477,23 @@ namespace Legion {
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
     public:
+      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets);
       static void handle_remote_overwrites(Deserializer &derez, Runtime *rt,
                                            AddressSpaceID previous); 
     public:
       const RegionUsage usage;
+      const PhysicalTraceInfo trace_info;
       FieldMaskSet<LogicalView> views;
       FieldMaskSet<InstanceView> reduction_views;
       const ApEvent precondition;
       const PredEvent pred_guard;
-      const bool track_effects;
       const bool add_restriction;
     public:
       // Can only safely be accessed when analysis is locked
       CopyFillAggregator *output_aggregator;
-      std::set<ApEvent> effects_events;
+    protected:
+      LegionVector<FieldMaskSet<InstanceView> > target_views;
+      std::map<InstanceView*,size_t> *dummy_arrivals;
     };
 
     /**
@@ -2438,11 +2504,10 @@ namespace Legion {
                            public LegionHeapify<FilterAnalysis> {
     public:
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     IndexSpaceExpression *expr, 
-                     const PhysicalTraceInfo &trace_info,
+                     RegionNode *node, const PhysicalTraceInfo &trace_info,
                      const bool remove_restriction = false);
       FilterAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, IndexSpaceExpression *expr,
+                     Operation *op, unsigned index, RegionNode *node,
                      const PhysicalTraceInfo &trace_info,
                      const FieldMaskSet<InstanceView> &filter_views,
                      CollectiveMapping *mapping, const bool first_local,
@@ -2452,16 +2517,16 @@ namespace Legion {
     public:
       FilterAnalysis& operator=(const FilterAnalysis &rhs) = delete;
     public:
-      virtual RtEvent start_traversal(RtEvent precondition,
-                                      const VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2491,13 +2556,13 @@ namespace Legion {
     public:
       CloneAnalysis& operator=(const CloneAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2711,13 +2776,13 @@ namespace Legion {
                           const InstanceSet &sources,
             const std::vector<IndividualView*> &corresponding,
                           std::set<RtEvent> &applied_events);
-      void traverse_set(PhysicalAnalysis &analysis,
-                        IndexSpaceExpression *expr,
-                        const bool expr_covers, 
-                        FieldMask traversal_mask,
-                        std::set<RtEvent> &deferral_events,
-                        std::set<RtEvent> &applied_events,
-                        const bool already_deferred);
+      void analyze(PhysicalAnalysis &analysis,
+                   IndexSpaceExpression *expr,
+                   const bool expr_covers, 
+                   FieldMask traversal_mask,
+                   std::set<RtEvent> &deferral_events,
+                   std::set<RtEvent> &applied_events,
+                   const bool already_deferred);
       void find_valid_instances(ValidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
@@ -2810,11 +2875,11 @@ namespace Legion {
                                        const FieldMask &mask,
                                        RtUserEvent ready_event);
     protected:
-      void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
-                           const FieldMask &mask,
-                           std::set<RtEvent> &deferral_events,
-                           std::set<RtEvent> &applied_events,
-                           const bool already_deferred);
+      void defer_analysis(AutoTryLock &eq, PhysicalAnalysis &analysis,
+                          const FieldMask &mask,
+                          std::set<RtEvent> &deferral_events,
+                          std::set<RtEvent> &applied_events,
+                          const bool already_deferred);
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
         RtEvent continuation_pre;

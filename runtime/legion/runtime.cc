@@ -12867,6 +12867,11 @@ namespace Legion {
               runtime->handle_remote_op_profiling_count_update(derez);
               break;
             }
+          case SEND_REMOTE_OP_COMPLETION_EFFECT:
+            {
+              runtime->handle_remote_op_completion_effect(derez);
+              break;
+            }
           case SEND_REMOTE_TRACE_UPDATE:
             {
               runtime->handle_remote_tracing_update(derez,remote_address_space);
@@ -23541,6 +23546,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_completion_effect(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_REMOTE_OP_COMPLETION_EFFECT>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_remote_trace_update(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25999,6 +26013,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteOp::handle_report_profiling_count_update(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_completion_effect(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_completion_effect(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -32057,11 +32078,6 @@ namespace Legion {
             IndexPartNode::handle_disjointness_computation(args, forest);
             break;
           }
-        case LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID:
-          {
-            runtime->forest->handle_defer_registration(args);
-            break;
-          }
         case LG_PART_INDEPENDENCE_TASK_ID:
           {
             IndexSpaceNode::handle_disjointness_test(args);
@@ -32363,6 +32379,11 @@ namespace Legion {
             PhysicalAnalysis::handle_deferred_traversal(args);
             break;
           }
+        case LG_DEFER_PERFORM_ANALYSIS_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_analysis(args);
+            break;
+          }
         case LG_DEFER_PERFORM_REMOTE_TASK_ID:
           {
             PhysicalAnalysis::handle_deferred_remote(args);
@@ -32371,6 +32392,11 @@ namespace Legion {
         case LG_DEFER_PERFORM_UPDATE_TASK_ID:
           {
             PhysicalAnalysis::handle_deferred_update(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_REGISTRATION_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_registration(args);
             break;
           }
         case LG_DEFER_PERFORM_OUTPUT_TASK_ID:

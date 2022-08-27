@@ -138,27 +138,6 @@ namespace Legion {
         const IndexPartition handle;
         const RtUserEvent ready;
       };   
-      struct DeferPhysicalRegistrationArgs : 
-        public LgTaskArgs<DeferPhysicalRegistrationArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
-      public:
-        DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
-                  RtUserEvent map_applied, ApEvent &res, bool sym)
-          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
-            analysis(ana), map_applied_done(map_applied),
-            result(res), symbolic(sym)
-          // This is kind of scary, Realm is about to make a copy of this
-          // without our knowledge, but we need to preserve the correctness
-          // of reference counting on PhysicalTraceRecorders, so just add
-          // an extra reference here that we will remove when we're handled.
-          { analysis->add_reference(); }
-      public:
-        UpdateAnalysis *const analysis;
-        RtUserEvent map_applied_done;
-        ApEvent &result;
-        const bool symbolic;
-      };
     public:
       RegionTreeForest(Runtime *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
@@ -495,14 +474,14 @@ namespace Legion {
     public: // Physical analysis methods
       void physical_premap_region(Operation *op, unsigned index,
                                   RegionRequirement &req,
-                                  VersionInfo &version_info,
+                                  const VersionInfo &version_info,
                                   InstanceSet &valid_instances,
                                   FieldMaskSet<ReplicatedView> &collectives,
                                   std::set<RtEvent> &map_applied_events);
       // Return a runtime event for when it's safe to perform
       // the registration for this equivalence set
       RtEvent physical_perform_updates(const RegionRequirement &req,
-                                VersionInfo &version_info,
+                                const VersionInfo &version_info,
                                 Operation *op, unsigned index,
                                 ApEvent precondition, ApEvent term_event,
                                 const InstanceSet &targets,
@@ -520,13 +499,14 @@ namespace Legion {
                                 const bool defer_copies = true);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
-      ApEvent physical_perform_registration(UpdateAnalysis *analysis,
+      ApEvent physical_perform_registration(RtEvent precondition,
+                               UpdateAnalysis *analysis,
                                std::set<RtEvent> &map_applied_events,
                                bool symbolic = false);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
-                                   VersionInfo &version_info,
+                                   const VersionInfo &version_info,
                                    Operation *op, unsigned index,
                                    ApEvent precondition, ApEvent term_event,
                                    const InstanceSet &targets,
@@ -540,18 +520,10 @@ namespace Legion {
                                    const bool collective_rendezvous,
                                    const bool record_valid = true,
                                    const bool check_initialized = true);
-#if 0
-      // A helper method for deferring the computation of registration
-      RtEvent defer_physical_perform_registration(RtEvent register_pre,
-                                  UpdateAnalysis *analysis,
-                                  std::set<RtEvent> &map_applied_events,
-                                  ApEvent &result, bool symbolic = false);
-#endif
-      void handle_defer_registration(const void *args);
       ApEvent acquire_restrictions(const RegionRequirement &req,
-                                   VersionInfo &version_info,
+                                   const VersionInfo &version_info,
                                    AcquireOp *op, unsigned index,
-                                   ApEvent precondition,
+                                   ApEvent precondition, ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
                                    std::set<RtEvent> &map_applied_events
@@ -561,9 +533,9 @@ namespace Legion {
 #endif
                                    );
       ApEvent release_restrictions(const RegionRequirement &req,
-                                   VersionInfo &version_info,
+                                   const VersionInfo &version_info,
                                    ReleaseOp *op, unsigned index,
-                                   ApEvent precondition,
+                                   ApEvent precondition, ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
@@ -575,8 +547,8 @@ namespace Legion {
                                    );
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                          VersionInfo &src_version_info,
-                          VersionInfo &dst_version_info,
+                          const VersionInfo &src_version_info,
+                          const VersionInfo &dst_version_info,
                           const InstanceSet &src_targets,
                           const InstanceSet &dst_targets, 
                           const std::vector<PhysicalManager*> &sources,
@@ -665,30 +637,30 @@ namespace Legion {
       void fill_fields(FillOp *op,
                        const RegionRequirement &req,
                        const unsigned index, FillView *fill_view,
-                       VersionInfo &version_info, ApEvent precondition,
-                       PredEvent true_guard,
+                       const VersionInfo &version_info,
+                       ApEvent precondition, PredEvent true_guard,
                        const PhysicalTraceInfo &trace_info,
                        std::set<RtEvent> &map_applied_events);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
       void attach_external(AttachOp *attach_op, unsigned index,
-                              const RegionRequirement &req,
-                              const InstanceSet &external_instances,
-                              ApEvent termination_event,
-                              VersionInfo &version_info,
-                              const PhysicalTraceInfo &trace_info,
-                              std::set<RtEvent> &map_applied_events,
-                              const bool restricted);
+                           const RegionRequirement &req,
+                           const InstanceSet &external_instances,
+                           const VersionInfo &version_info,
+                           const PhysicalTraceInfo &trace_info,
+                           std::set<RtEvent> &map_applied_events,
+                           const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
-                              unsigned index, VersionInfo &version_info,
+                              unsigned index, const VersionInfo &version_info,
                               const InstanceSet &target_instances,
+                              const ApEvent termination_event,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               RtEvent filter_precondition);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,
-                             VersionInfo &version_info,
+                             const VersionInfo &version_info,
                              const PhysicalTraceInfo &trace_info,
                              std::set<RtEvent> &map_applied_events,
                              CollectiveMapping *collective_mapping,

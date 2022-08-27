@@ -6428,7 +6428,14 @@ namespace Legion {
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return ctx->attach_resource(launcher);
+      if (launcher.mapped)
+      {
+        PhysicalRegion region = ctx->attach_resource(launcher);
+        ctx->remap_region(region);
+        return region;
+      }
+      else
+        return ctx->attach_resource(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6476,7 +6483,10 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
       launcher.attach_hdf5(file_name, field_map, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region);
+      return region;
     }
 
     //--------------------------------------------------------------------------
@@ -6497,7 +6507,10 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_POSIX_FILE, handle, parent);
       launcher.attach_file(file_name, field_vec, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region);
+      return region;
     }
 
     //--------------------------------------------------------------------------

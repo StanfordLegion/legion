@@ -157,7 +157,8 @@ namespace Legion {
       derez.deserialize(local_collective_arrivals);
       ApUserEvent ready_event;
       derez.deserialize(ready_event);
-      RtUserEvent applied_event;
+      RtUserEvent registered_event, applied_event;
+      derez.deserialize(registered_event);
       derez.deserialize(applied_event);
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);
@@ -170,14 +171,21 @@ namespace Legion {
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
+      std::vector<RtEvent> registered_events;
       std::set<RtEvent> applied_events;
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
                                              term_event, collect_event, 
                                              target, local_collective_arrivals,
-                                             applied_events, trace_info,source);
+                                             registered_events, applied_events,
+                                             trace_info, source);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
+      if (!registered_events.empty())
+        Runtime::trigger_event(registered_event,
+            Runtime::merge_events(registered_events));
+      else
+        Runtime::trigger_event(registered_event);
       if (!applied_events.empty())
         Runtime::trigger_event(applied_event, 
             Runtime::merge_events(applied_events));
@@ -2234,18 +2242,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndividualView::register_collective_user(const RegionUsage &usage,
-                                         const FieldMask &user_mask,
-                                         IndexSpaceNode *expr,
-                                         const UniqueID op_id,
-                                         const size_t op_ctx_index,
-                                         const unsigned index,
-                                         ApEvent term_event,
-                                         RtEvent collect_event,
-                                         PhysicalManager *target,
-                                         size_t local_collective_arrivals,
-                                         std::set<RtEvent> &applied_events,
-                                         const PhysicalTraceInfo &trace_info,
-                                         const bool symbolic)
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       ApEvent term_event,
+                                       RtEvent collect_event,
+                                       PhysicalManager *target,
+                                       size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &registered_events,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic)
     //--------------------------------------------------------------------------
     {
       // Somewhat strangely we can still get calls to this method in cases
@@ -2265,7 +2274,7 @@ namespace Legion {
         collective_mapping->contains(logical_owner) ? logical_owner : 
         collective_mapping->find_nearest(logical_owner);
       ApUserEvent result;
-      RtUserEvent registered;
+      RtUserEvent applied, registered;
       std::vector<ApEvent> term_events;
       PhysicalTraceInfo *result_info = NULL;
       const RendezvousKey key(op_ctx_index, index);
@@ -2288,6 +2297,7 @@ namespace Legion {
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
           rendezvous.registered = Runtime::create_rt_user_event();
+          rendezvous.applied = Runtime::create_rt_user_event();
         }
         else if (!finder->second.local_initialized)
         {
@@ -2316,7 +2326,9 @@ namespace Legion {
         result = finder->second.ready_event;
         result_info = finder->second.trace_info;
         registered = finder->second.registered;
-        applied_events.insert(registered);
+        registered_events.push_back(registered);
+        applied = finder->second.applied;
+        applied_events.insert(applied);
         if (term_event.exists())
           finder->second.term_events.push_back(term_event);
 #ifdef DEBUG_LEGION
@@ -2342,18 +2354,6 @@ namespace Legion {
               finder->second.collect_event = collect_event;
               finder->second.symbolic = symbolic;
             }
-            else
-            {
-              finder->second.applied = Runtime::create_rt_user_event();
-              applied_events.insert(finder->second.applied);
-            }
-          }
-          else if (local_space != origin)
-          {
-#ifdef DEBUG_LEGION
-            assert(finder->second.applied.exists());
-#endif
-            applied_events.insert(finder->second.applied);
           }
           return result;
         }
@@ -2381,22 +2381,29 @@ namespace Legion {
           rez.serialize(term_event);
           rez.serialize(result);
           rez.serialize(registered);
+          rez.serialize(applied);
         }
         runtime->send_collective_individual_register_user(parent, rez);
       }
       else
       {
-        std::set<RtEvent> registered_events; 
+        std::vector<RtEvent> local_registered;
+        std::set<RtEvent> local_applied; 
         const ApEvent ready = register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, term_event, collect_event, target, 
-            0/*no collective arrivals*/, registered_events, *result_info,
-            runtime->address_space, symbolic);
+            0/*no collective arrivals*/, local_registered, local_applied,
+            *result_info, runtime->address_space, symbolic);
         Runtime::trigger_event(result_info, result, ready);
-        if (!registered_events.empty())
+        if (!local_registered.empty())
           Runtime::trigger_event(registered,
-              Runtime::merge_events(registered_events));
+              Runtime::merge_events(local_registered));
         else
           Runtime::trigger_event(registered);
+        if (!local_applied.empty())
+          Runtime::trigger_event(applied,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(applied);
       }
       delete result_info;
       return result;
@@ -2410,7 +2417,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
-                                            RtUserEvent remote_registered)
+                                            RtUserEvent remote_registered,
+                                            RtUserEvent remote_applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2436,10 +2444,12 @@ namespace Legion {
           // Don't make the ready event, that needs to be done with a
           // local trace_info
           rendezvous.registered = Runtime::create_rt_user_event();
+          rendezvous.applied = Runtime::create_rt_user_event();
         }
         if (remote_term_event.exists())
           finder->second.term_events.push_back(remote_term_event);
         Runtime::trigger_event(remote_registered, finder->second.registered);
+        Runtime::trigger_event(remote_applied, finder->second.applied);
         if (!finder->second.ready_event.exists())
           finder->second.remote_ready_events[remote_ready_event] =
             new PhysicalTraceInfo(trace_info);
@@ -2486,6 +2496,7 @@ namespace Legion {
           rez.serialize(term_event);
           rez.serialize(to_perform.ready_event);
           rez.serialize(to_perform.registered);
+          rez.serialize(to_perform.applied);
         }
         runtime->send_collective_individual_register_user(parent, rez);
         if (!applied_events.empty())
@@ -2499,11 +2510,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!to_perform.applied.exists());
 #endif
-        std::set<RtEvent> registered_events;
+        std::vector<RtEvent> registered_events;
+        std::set<RtEvent> applied_events;
         const ApEvent ready = register_user(to_perform.usage,
             *to_perform.mask, to_perform.expr, to_perform.op_id, op_ctx_index,
             index, term_event, to_perform.collect_event, manager,
-            0/*no collective arrivals*/, registered_events,
+            0/*no collective arrivals*/, registered_events, applied_events,
             *to_perform.trace_info, runtime->address_space,to_perform.symbolic);
         Runtime::trigger_event(to_perform.trace_info, 
                       to_perform.ready_event, ready);
@@ -2512,6 +2524,11 @@ namespace Legion {
               Runtime::merge_events(registered_events));
         else
           Runtime::trigger_event(to_perform.registered);
+        if (!applied_events.empty())
+          Runtime::trigger_event(to_perform.applied,
+              Runtime::merge_events(applied_events));
+        else
+          Runtime::trigger_event(to_perform.applied);
         if (to_perform.expr->remove_nested_expression_reference(did))
           delete to_perform.expr;
         delete to_perform.mask;
@@ -2542,24 +2559,22 @@ namespace Legion {
       derez.deserialize(term_event);
       ApUserEvent ready_event;
       derez.deserialize(ready_event);
-      RtUserEvent registered_event;
+      RtUserEvent registered_event, applied_event;
       derez.deserialize(registered_event);
+      derez.deserialize(applied_event);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 
       view->process_collective_user_registration(op_ctx_index, index, origin,
-                      trace_info, term_event, ready_event, registered_event);
+          trace_info, term_event, ready_event, registered_event, applied_event);
     }
 
     //--------------------------------------------------------------------------
-    void IndividualView::find_atomic_reservations(PhysicalManager *instance,
-                const FieldMask &mask, Operation *op, unsigned index, bool excl)
+    void IndividualView::find_atomic_reservations(const FieldMask &mask, 
+                                       Operation *op, unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(instance == manager);
-#endif
       std::vector<Reservation> reservations;
       find_field_reservations(mask, reservations); 
       for (unsigned idx = 0; idx < reservations.size(); idx++)
@@ -3076,6 +3091,7 @@ namespace Legion {
                                          RtEvent collect_event,
                                          PhysicalManager *target,
                                          size_t local_collective_arrivals,
+                                         std::vector<RtEvent> &registered,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
@@ -3089,8 +3105,8 @@ namespace Legion {
       if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
-              target, local_collective_arrivals, applied_events,
-              trace_info, symbolic);
+              target, local_collective_arrivals, registered,
+              applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -3106,6 +3122,7 @@ namespace Legion {
           // to do the analysis and provide a user event to trigger
           // with the precondition
           ready_event = Runtime::create_ap_user_event(&trace_info);
+          RtUserEvent registered_event = Runtime::create_rt_user_event();
           RtUserEvent applied_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
@@ -3122,6 +3139,7 @@ namespace Legion {
             rez.serialize(collect_event);
             rez.serialize(local_collective_arrivals);
             rez.serialize(ready_event);
+            rez.serialize(registered_event);
             rez.serialize(applied_event);
             trace_info.pack_trace_info(rez, applied_events);
           }
@@ -3130,6 +3148,7 @@ namespace Legion {
           WrapperReferenceMutator mutator(applied_events);
           add_base_valid_ref(REMOTE_DID_REF, &mutator);
           runtime->send_view_register_user(logical_owner, rez);
+          registered.push_back(registered_event);
           applied_events.insert(applied_event);
         }
 #ifdef ENABLE_VIEW_REPLICATION
@@ -3228,6 +3247,7 @@ namespace Legion {
               if (!overlap)
                 continue;
               // Send the update to the remote node
+              RtUserEvent registered_event = Runtime::create_rt_user_event();
               RtUserEvent applied_event = Runtime::create_rt_user_event();
               Serializer rez;
               {
@@ -3244,10 +3264,12 @@ namespace Legion {
                 rez.serialize(collect_event);
                 rez.serialize(local_collective_arrivals);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
+                rez.seriliaze(registered_event);
                 rez.serialize(applied_event);
                 trace_info.pack_trace_info(rez, applied_events);
               }
               runtime->send_view_register_user(it->first, rez);
+              registered_events.push_back(registered_event);
               applied_events.insert(applied_event);
             }
           }
@@ -4875,6 +4897,7 @@ namespace Legion {
                                          RtEvent collect_event,
                                          PhysicalManager *target,
                                          size_t local_collective_arrivals,
+                                         std::vector<RtEvent> &registered,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
@@ -4889,8 +4912,8 @@ namespace Legion {
       if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
-              target, local_collective_arrivals, applied_events,
-              trace_info, symbolic);
+              target, local_collective_arrivals, registered,
+              applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -4900,6 +4923,7 @@ namespace Legion {
         // to do the analysis and provide a user event to trigger
         // with the precondition
         ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
+        RtUserEvent registered_event = Runtime::create_rt_user_event();
         RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -4916,6 +4940,7 @@ namespace Legion {
           rez.serialize(collect_event);
           rez.serialize(local_collective_arrivals);
           rez.serialize(ready_event);
+          rez.serialize(registered_event);
           rez.serialize(applied_event);
           trace_info.pack_trace_info(rez, applied_events);
         }
@@ -4924,6 +4949,7 @@ namespace Legion {
         WrapperReferenceMutator mutator(applied_events);
         add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_register_user(logical_owner, rez);
+        registered.push_back(registered_event);
         applied_events.insert(applied_event);
         return ready_event;
       }
@@ -5757,6 +5783,7 @@ namespace Legion {
                                           RtEvent collect_event,
                                           PhysicalManager *target,
                                           size_t local_collective_arrivals,
+                                          std::vector<RtEvent> &registered,
                                           std::set<RtEvent> &applied_events,
                                           const PhysicalTraceInfo &trace_info,
                                           const AddressSpaceID source,
@@ -5769,6 +5796,7 @@ namespace Legion {
         if (!target->is_owner())
         {
           ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
+          RtUserEvent registered_event = Runtime::create_rt_user_event();
           RtUserEvent applied_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
@@ -5785,18 +5813,20 @@ namespace Legion {
             rez.serialize(collect_event);
             rez.serialize(local_collective_arrivals);
             rez.serialize(ready_event);
+            rez.serialize(registered_event);
             rez.serialize(applied_event);
             trace_info.pack_trace_info(rez, applied_events);
           }
           runtime->send_view_register_user(target->owner_space, rez);
+          registered.push_back(registered_event);
           applied_events.insert(applied_event);
           return ready_event;
         }
         else
           return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
-              target, local_collective_arrivals, applied_events,
-              trace_info, symbolic);
+              target, local_collective_arrivals, registered,
+              applied_events, trace_info, symbolic);
       }
 #ifdef DEBUG_LEGION
       assert(target->is_owner());
@@ -5807,7 +5837,7 @@ namespace Legion {
           return local_views[idx]->register_user(usage, user_mask, 
               user_expr, op_id, op_ctx_index, index, term_event,
               collect_event, target, local_collective_arrivals,
-              applied_events, trace_info, source, symbolic);
+              registered, applied_events, trace_info, source, symbolic);
       // Should never get here
       assert(false);
       return ApEvent::NO_AP_EVENT;
@@ -6525,6 +6555,8 @@ namespace Legion {
           collective_mapping->count_children(owner_space, local_space);
         rendezvous.local_registered = Runtime::create_rt_user_event();
         rendezvous.global_registered = Runtime::create_rt_user_event();
+        rendezvous.local_applied = Runtime::create_rt_user_event();
+        rendezvous.global_applied = Runtime::create_rt_user_event();
       }
       // Perform the registration
       if (finder->second.analyses.empty())
@@ -6570,6 +6602,8 @@ namespace Legion {
           collective_mapping->count_children(owner_space, local_space);
         rendezvous.local_registered = Runtime::create_rt_user_event();
         rendezvous.global_registered = Runtime::create_rt_user_event();
+        rendezvous.local_applied = Runtime::create_rt_user_event();
+        rendezvous.global_applied = Runtime::create_rt_user_event();
       }
       analyses = &finder->second.analyses;
       if ((finder->second.analyses.empty() || 
@@ -6581,18 +6615,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveView::register_collective_user(const RegionUsage &usage,
-                                         const FieldMask &user_mask,
-                                         IndexSpaceNode *expr,
-                                         const UniqueID op_id,
-                                         const size_t op_ctx_index,
-                                         const unsigned index,
-                                         ApEvent term_event,
-                                         RtEvent collect_event,
-                                         PhysicalManager *target,
-                                         size_t local_collective_arrivals,
-                                         std::set<RtEvent> &applied_events,
-                                         const PhysicalTraceInfo &trace_info,
-                                         const bool symbolic)
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       ApEvent term_event,
+                                       RtEvent collect_event,
+                                       PhysicalManager *target,
+                                       size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &registered_events,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6626,7 +6661,8 @@ namespace Legion {
       // the same across all points and the index of our region requirement
       PhysicalTraceInfo *result_info;
       RtUserEvent local_registered, global_registered;
-      std::vector<RtEvent> remote_registered;
+      RtUserEvent local_applied, global_applied;
+      std::vector<RtEvent> remote_registered, remote_applied;
       std::vector<ApUserEvent> local_ready_events;
       std::vector<std::vector<ApEvent> > local_term_events;
       std::vector<CollectiveAnalysis*> analyses;
@@ -6658,6 +6694,8 @@ namespace Legion {
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
           rendezvous.local_registered = Runtime::create_rt_user_event();
           rendezvous.global_registered = Runtime::create_rt_user_event();
+          rendezvous.local_applied = Runtime::create_rt_user_event();
+          rendezvous.global_applied = Runtime::create_rt_user_event();
         }
         else if (!finder->second.local_initialized)
         {
@@ -6680,7 +6718,8 @@ namespace Legion {
         if (term_event.exists())
           finder->second.local_term_events[target_index].push_back(term_event);
         // Record the applied events
-        applied_events.insert(finder->second.global_registered);
+        registered_events.push_back(finder->second.global_registered);
+        applied_events.insert(finder->second.global_applied);
         // The result will be the ready event
         ApEvent result = finder->second.ready_events[target_index];
         result_info = finder->second.trace_info;
@@ -6719,6 +6758,13 @@ namespace Legion {
                 registered =
                   Runtime::merge_events(finder->second.remote_registered);
               }
+              RtEvent applied = finder->second.local_applied;
+              if (!finder->second.remote_applied.empty())
+              {
+                finder->second.remote_applied.push_back(applied);
+                applied =
+                  Runtime::merge_events(finder->second.remote_applied);
+              }
               const AddressSpaceID parent = 
                 collective_mapping->get_parent(owner_space, local_space);
               Serializer rez;
@@ -6728,6 +6774,7 @@ namespace Legion {
                 rez.serialize(op_ctx_index);
                 rez.serialize(index);
                 rez.serialize(registered);
+                rez.serialize(applied);
               }
               runtime->send_collective_register_user_request(parent, rez);
               return result;
@@ -6740,8 +6787,11 @@ namespace Legion {
               // We're going to fall through so grab the state
               // that we need to do the finalization now
               remote_registered.swap(finder->second.remote_registered);
+              remote_applied.swap(finder->second.remote_applied);
               local_registered = finder->second.local_registered;
               global_registered = finder->second.global_registered;
+              local_applied = finder->second.local_applied;
+              global_applied = finder->second.global_applied;
               local_ready_events.swap(finder->second.ready_events);
               local_term_events.swap(finder->second.local_term_events);
               analyses.swap(finder->second.analyses);
@@ -6760,8 +6810,8 @@ namespace Legion {
 #endif
       finalize_collective_user(usage, user_mask, expr, op_id, op_ctx_index, 
           index, collect_event, local_registered, global_registered,
-          local_ready_events, local_term_events, result_info, 
-          analyses, symbolic);
+          local_applied, global_applied, local_ready_events, 
+          local_term_events, result_info, analyses, symbolic);
       RtEvent all_registered = local_registered;
       if (!remote_registered.empty())
       {
@@ -6769,12 +6819,20 @@ namespace Legion {
         all_registered = Runtime::merge_events(remote_registered);
       }
       Runtime::trigger_event(global_registered, all_registered); 
+      RtEvent all_applied = local_applied;
+      if (!remote_applied.empty())
+      {
+        remote_applied.push_back(all_applied);
+        all_applied = Runtime::merge_events(remote_applied);
+      }
+      Runtime::trigger_event(global_applied, all_applied);
       return local_ready_events[target_index];
     }
 
     //--------------------------------------------------------------------------
     void CollectiveView::process_register_user_request(
-            const size_t op_ctx_index, const unsigned index, RtEvent registered)
+                                const size_t op_ctx_index, const unsigned index,
+                                RtEvent registered, RtEvent applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6799,8 +6857,11 @@ namespace Legion {
             collective_mapping->count_children(owner_space, local_space);
           rendezvous.local_registered = Runtime::create_rt_user_event();
           rendezvous.global_registered = Runtime::create_rt_user_event();
+          rendezvous.local_applied = Runtime::create_rt_user_event();
+          rendezvous.global_applied = Runtime::create_rt_user_event();
         }
         finder->second.remote_registered.push_back(registered);
+        finder->second.remote_applied.push_back(applied);
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_remote_arrivals > 0);
 #endif
@@ -6819,6 +6880,12 @@ namespace Legion {
             registered =
               Runtime::merge_events(finder->second.remote_registered);
           }
+          applied = finder->second.local_applied;
+          if (!finder->second.remote_applied.empty())
+          {
+            finder->second.remote_applied.push_back(applied);
+            applied = Runtime::merge_events(finder->second.remote_applied);
+          }
           const AddressSpaceID parent = 
             collective_mapping->get_parent(owner_space, local_space);
           Serializer rez;
@@ -6828,6 +6895,7 @@ namespace Legion {
             rez.serialize(op_ctx_index);
             rez.serialize(index);
             rez.serialize(registered);
+            rez.serialize(applied);
           }
           runtime->send_collective_register_user_request(parent, rez);
           return;
@@ -6847,7 +6915,8 @@ namespace Legion {
       finalize_collective_user(to_perform.usage, *(to_perform.mask),
           to_perform.expr, to_perform.op_id, op_ctx_index, index, 
           to_perform.collect_event, to_perform.local_registered,
-          to_perform.global_registered, to_perform.ready_events, 
+          to_perform.global_registered, to_perform.local_applied,
+          to_perform.global_applied, to_perform.ready_events, 
           to_perform.local_term_events, to_perform.trace_info,
           to_perform.analyses, to_perform.symbolic);
       RtEvent all_registered = to_perform.local_registered;
@@ -6857,6 +6926,13 @@ namespace Legion {
         all_registered = Runtime::merge_events(to_perform.remote_registered);
       }
       Runtime::trigger_event(to_perform.global_registered, all_registered);
+      RtEvent all_applied = to_perform.local_applied;
+      if (!to_perform.remote_applied.empty())
+      {
+        to_perform.remote_applied.push_back(all_applied);
+        all_applied = Runtime::merge_events(to_perform.remote_applied);
+      }
+      Runtime::trigger_event(to_perform.global_applied, all_applied);
       if (to_perform.expr->remove_nested_expression_reference(did))
         delete to_perform.expr;
       delete to_perform.mask;
@@ -6877,17 +6953,20 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
-      RtEvent registered;
+      RtEvent registered, applied;
       derez.deserialize(registered);
+      derez.deserialize(applied);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->process_register_user_request(op_ctx_index, index, registered);
+      view->process_register_user_request(op_ctx_index, index,
+                                          registered, applied);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveView::process_register_user_response(
-            const size_t op_ctx_index, const unsigned index, RtEvent registered)
+            const size_t op_ctx_index, const unsigned index, 
+            const RtEvent registered, const RtEvent applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6913,10 +6992,12 @@ namespace Legion {
       finalize_collective_user(to_perform.usage, *(to_perform.mask),
           to_perform.expr, to_perform.op_id, op_ctx_index, index,
           to_perform.collect_event, to_perform.local_registered, 
-          to_perform.global_registered, to_perform.ready_events,
+          to_perform.global_registered, to_perform.local_applied,
+          to_perform.global_applied, to_perform.ready_events,
           to_perform.local_term_events, to_perform.trace_info,
           to_perform.analyses, to_perform.symbolic);
       Runtime::trigger_event(to_perform.global_registered, registered);
+      Runtime::trigger_event(to_perform.global_applied, applied);
       if (to_perform.expr->remove_nested_expression_reference(did))
         delete to_perform.expr;
       delete to_perform.mask;
@@ -6937,12 +7018,14 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
-      RtEvent registered;
+      RtEvent registered, applied;
       derez.deserialize(registered);
+      derez.deserialize(applied);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->process_register_user_response(op_ctx_index, index, registered);
+      view->process_register_user_response(op_ctx_index, index, 
+                                           registered, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -6956,6 +7039,8 @@ namespace Legion {
                                 RtEvent collect_event,
                                 RtUserEvent local_registered,
                                 RtEvent global_registered,
+                                RtUserEvent local_applied,
+                                RtEvent global_applied,
                                 std::vector<ApUserEvent> &ready_events,
                                 std::vector<std::vector<ApEvent> > &term_events,
                                 const PhysicalTraceInfo *trace_info,
@@ -6976,6 +7061,7 @@ namespace Legion {
           rez.serialize(op_ctx_index);
           rez.serialize(index);
           rez.serialize(global_registered);
+          rez.serialize(global_applied);
         }
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
@@ -6986,7 +7072,8 @@ namespace Legion {
       assert(local_views.size() == ready_events.size());
 #endif
       // Perform the registration on the local views
-      std::set<RtEvent> registered_events;
+      std::vector<RtEvent> registered_events;
+      std::set<RtEvent> applied_events;
       for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
         const ApEvent term_event = 
@@ -6994,7 +7081,8 @@ namespace Legion {
         const ApEvent ready = local_views[idx]->register_user(usage, user_mask,
             expr, op_id, op_ctx_index, index, term_event, collect_event,
             local_views[idx]->get_manager(), 0/*no collective arrivals*/,
-            registered_events, *trace_info, runtime->address_space, symbolic);
+            registered_events, applied_events, *trace_info,
+            runtime->address_space, symbolic);
         Runtime::trigger_event(trace_info, ready_events[idx], ready);
       }
       if (!registered_events.empty())
@@ -7002,6 +7090,11 @@ namespace Legion {
             Runtime::merge_events(registered_events));
       else
         Runtime::trigger_event(local_registered);
+      if (!applied_events.empty())
+        Runtime::trigger_event(local_applied,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(local_applied);
       // Remove any references on the analyses
       for (std::vector<CollectiveAnalysis*>::const_iterator it =
             analyses.begin(); it != analyses.end(); it++)

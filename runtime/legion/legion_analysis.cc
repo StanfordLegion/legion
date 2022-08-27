@@ -4174,19 +4174,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CopyFillAggregator::CopyFillAggregator(const CopyFillAggregator &rhs)
-      : WrapperReferenceMutator(effects), CopyFillGuard(rhs), 
-        forest(rhs.forest), local_space(rhs.local_space), op(rhs.op),
-        src_index(rhs.src_index), dst_index(rhs.dst_index), 
-        guard_precondition(rhs.guard_precondition),
-        predicate_guard(rhs.predicate_guard), track_events(rhs.track_events)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     CopyFillAggregator::~CopyFillAggregator(void)
     //--------------------------------------------------------------------------
     {
@@ -4222,16 +4209,6 @@ namespace Legion {
             delete it->first;
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    CopyFillAggregator& CopyFillAggregator::operator=(
-                                                  const CopyFillAggregator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -4917,7 +4894,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
+    ApEvent CopyFillAggregator::issue_updates(
+                      const PhysicalTraceInfo &trace_info,
                       ApEvent precondition, const bool restricted_output,
                       const bool manage_dst_events,
                       std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
@@ -4928,12 +4906,14 @@ namespace Legion {
 #endif
       if (guard_precondition.exists() && !guard_precondition.has_triggered())
       {
+        if (track_events && !summary_event.exists())
+          summary_event = Runtime::create_ap_user_event(&trace_info);
         CopyFillAggregation args(this, trace_info, precondition,
                                  manage_dst_events, restricted_output,
                                  op->get_unique_op_id(), dst_events);
         op->runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
-        return;
+        return summary_event;
       }
 #ifdef DEBUG_LEGION
       assert(!guard_precondition.exists() || 
@@ -4988,20 +4968,20 @@ namespace Legion {
       else
         Runtime::trigger_event(effects_applied);
 #endif
-    } 
-
-    //--------------------------------------------------------------------------
-    ApEvent CopyFillAggregator::summarize(const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(track_events);
-#endif
-      if (!events.empty())
-        return Runtime::merge_events(&info, events);
+      if (track_events)
+      {
+        const ApEvent summary = Runtime::merge_events(&trace_info, events);
+        if (summary_event.exists())
+        {
+          Runtime::trigger_event(&trace_info, summary_event, summary);
+          return summary_event;
+        }
+        else
+          return summary;
+      }
       else
         return ApEvent::NO_AP_EVENT;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_view(LogicalView *new_view)
@@ -5160,7 +5140,7 @@ namespace Legion {
         if (result.exists())
         {
           if (track_events)
-            events.insert(result);
+            events.push_back(result);
           if (dst_events != NULL)
             dst_events->push_back(result);
         }
@@ -5210,7 +5190,7 @@ namespace Legion {
           if (result.exists())
           {
             if (track_events)
-              events.insert(result);
+              events.push_back(result);
             if (dst_events != NULL)
               dst_events->push_back(result);
           }
@@ -5274,7 +5254,7 @@ namespace Legion {
           if (result.exists())
           {
             if (track_events)
-              events.insert(result);
+              events.push_back(result);
             if (dst_events != NULL)
               dst_events->push_back(result);
           }
@@ -5331,7 +5311,7 @@ namespace Legion {
             if (result.exists())
             {
               if (track_events)
-                events.insert(result);
+                events.push_back(result);
               if (dst_events != NULL)
                 dst_events->push_back(result);
             }
@@ -5394,6 +5374,22 @@ namespace Legion {
     PhysicalAnalysis::~PhysicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      if (deferred_applied_event.exists())
+      {
+        if (!deferred_applied_events.empty())
+        {
+          Runtime::trigger_event(deferred_applied_event,
+              Runtime::merge_events(deferred_applied_events));
+#ifdef DEBUG_LEGION
+          deferred_applied_events.clear();
+#endif
+        }
+        else
+          Runtime::trigger_event(deferred_applied_event);
+      }
+#ifdef DEBUG_LEGION
+      assert(deferred_applied_events.empty());
+#endif
       if (analysis_expr->remove_base_expression_reference(
                                     PHYSICAL_ANALYSIS_REF))
         delete analysis_expr;
@@ -5407,19 +5403,19 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::traverse(EquivalenceSet *set,
-                                    const FieldMask &mask,
-                                    std::set<RtEvent> &deferral_events,
-                                    std::set<RtEvent> &applied_events,
-                                    RtEvent precondition/*= NO_EVENT*/,
-                                    const bool already_deferred /* = false*/)
+    void PhysicalAnalysis::analyze(EquivalenceSet *set,
+                                   const FieldMask &mask,
+                                   std::set<RtEvent> &deferral_events,
+                                   std::set<RtEvent> &applied_events,
+                                   RtEvent precondition/*= NO_EVENT*/,
+                                   const bool already_deferred /* = false*/)
     //--------------------------------------------------------------------------
     {
       if (!precondition.exists() || precondition.has_triggered())
       {
         if (set->set_expr == analysis_expr)
-          set->traverse_set(*this, analysis_expr, true/*covers*/, mask,
-                            deferral_events, applied_events, already_deferred);
+          set->analyze(*this, analysis_expr, true/*covers*/, mask,
+                       deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
           IndexSpaceExpression *expr = 
@@ -5429,56 +5425,168 @@ namespace Legion {
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
           if (expr->get_volume() == set->set_expr->get_volume())
-            set->traverse_set(*this, set->set_expr, true/*covers*/, mask,
-                              deferral_events, applied_events,already_deferred);
+            set->analyze(*this, set->set_expr, true/*covers*/, mask,
+                         deferral_events, applied_events, already_deferred);
           else
-            set->traverse_set(*this, expr, false/*covers*/, mask,
-                              deferral_events, applied_events,already_deferred);
+            set->analyze(*this, expr, false/*covers*/, mask,
+                         deferral_events, applied_events, already_deferred);
         }
         else
-          set->traverse_set(*this, set->set_expr, true/*covers*/, mask,
-                            deferral_events, applied_events, already_deferred);
+          set->analyze(*this, set->set_expr, true/*covers*/, mask,
+                       deferral_events, applied_events, already_deferred);
       }
       else
         // This has to be the first time through and isn't really
         // a deferral of an the traversal since we haven't even
         // started the traversal yet
-        defer_traversal(precondition, set, mask, deferral_events,
+        defer_analysis(precondition, set, mask, deferral_events,
             applied_events, RtUserEvent::NO_RT_USER_EVENT, already_deferred);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::defer_traversal(RtEvent precondition,
-                                           EquivalenceSet *set,
-                                           const FieldMask &mask,
-                                           std::set<RtEvent> &deferral_events,
-                                           std::set<RtEvent> &applied_events,
-                                           RtUserEvent deferral_event,
-                                           const bool already_deferred)
+    RtEvent PhysicalAnalysis::defer_traversal(RtEvent precondition,
+                                              const VersionInfo &version_info,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      // Make sure that we record that this has parallel traversals
-      const DeferPerformTraversalArgs args(this, set, mask, 
-                                           deferral_event, already_deferred);
-      runtime->issue_runtime_meta_task(args, 
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformTraversalArgs args(this, version_info);
+      runtime->issue_runtime_meta_task(args,
           LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
-      deferral_events.insert(args.done_event);
-      applied_events.insert(args.applied_event);
+      return args.done_event;
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalAnalysis::perform_traversal(EquivalenceSet *set,
-                                             IndexSpaceExpression *expr,
-                                             const bool expr_covers,
-                                             const FieldMask &mask,
-                                             std::set<RtEvent> &deferral_events,
-                                             std::set<RtEvent> &applied_events,
-                                             const bool already_deferred)
+    void PhysicalAnalysis::defer_analysis(RtEvent precondition,
+                                          EquivalenceSet *set,
+                                          const FieldMask &mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          RtUserEvent deferral_event,
+                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // only called by derived classes
-      assert(false);
-      return false;
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformAnalysisArgs args(this, set, mask, 
+                                          deferral_event, already_deferred);
+      runtime->issue_runtime_meta_task(args, 
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      deferral_events.insert(args.done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalAnalysis::defer_remote(RtEvent precondition,
+                                           std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformRemoteArgs args(this);
+      runtime->issue_runtime_meta_task(args,
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      return args.done_event;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalAnalysis::defer_updates(RtEvent precondition,
+                                            std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformUpdateArgs args(this);
+      runtime->issue_runtime_meta_task(args,
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      return args.done_event;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalAnalysis::defer_registration(RtEvent precondition,
+                                const RegionUsage &usage,
+                                std::set<RtEvent> &applied_events,
+                                const PhysicalTraceInfo &trace_info,
+                                ApEvent init_precondition, ApEvent termination,
+                                ApEvent &instances_ready, bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformRegistrationArgs args(this, usage, trace_info,
+                            init_precondition, termination, symbolic);
+      runtime->issue_runtime_meta_task(args,
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      instances_ready = args.instances_ready;
+      return args.done_event;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalAnalysis::defer_output(RtEvent precondition,
+                                           const PhysicalTraceInfo &trace_info,
+                                           bool track_effects,
+                                           std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we have a deferred applied event yet
+      if (!deferred_applied_event.exists())
+      {
+        deferred_applied_event = Runtime::create_rt_user_event();
+        applied_events.insert(deferred_applied_event);
+      }
+      const DeferPerformOutputArgs args(this, track_effects, trace_info);
+      runtime->issue_runtime_meta_task(args,
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      return args.effects_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::record_deferred_applied_events(
+                                                     std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(*this);
+      if (!deferred_applied_events.empty())
+        deferred_applied_events.insert(applied.begin(), applied.end());
+      else
+        deferred_applied_events.swap(applied);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalAnalysis::perform_traversal(RtEvent precondition,
+                     const VersionInfo &info, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_traversal(precondition, info, applied_events);
+      std::set<RtEvent> deferral_events;
+      const FieldMaskSet<EquivalenceSet> &eq_sets = info.get_equivalence_sets();
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        analyze(it->first, it->second, deferral_events, applied_events);
+      if (!deferral_events.empty())
+        return Runtime::merge_events(deferral_events);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5496,6 +5604,19 @@ namespace Legion {
     RtEvent PhysicalAnalysis::perform_updates(RtEvent precondition,
                                               std::set<RtEvent> &applied_events,
                                               const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      // only called by derived classes
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalAnalysis::perform_registration(RtEvent precondition,
+                                const RegionUsage &usage,
+                                std::set<RtEvent> &applied_events,
+                                ApEvent init_precondition, ApEvent termination,
+                                ApEvent &instances_ready, bool symbolic)
     //--------------------------------------------------------------------------
     {
       // only called by derived classes
@@ -5694,11 +5815,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformTraversalArgs::DeferPerformTraversalArgs(
+        PhysicalAnalysis *ana, const VersionInfo &info)
+      : LgTaskArgs<DeferPerformTraversalArgs>(ana->op->get_unique_op_id()),
+        analysis(ana), version_info(&info), 
+        done_event(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+      if (analysis->on_heap)
+        analysis->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void PhysicalAnalysis::handle_deferred_traversal(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPerformTraversalArgs *dargs =
+        (const DeferPerformTraversalArgs*)args;
+      std::set<RtEvent> applied_events;
+      Runtime::trigger_event(dargs->done_event,
+          dargs->analysis->perform_traversal(RtEvent::NO_RT_EVENT,
+            *(dargs->version_info), applied_events));
+      if (!applied_events.empty())
+        dargs->analysis->record_deferred_applied_events(applied_events);
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+        delete dargs->analysis;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalAnalysis::DeferPerformAnalysisArgs::DeferPerformAnalysisArgs(
         PhysicalAnalysis *ana, EquivalenceSet *s, const FieldMask &m, 
         RtUserEvent done, bool def)
-      : LgTaskArgs<DeferPerformTraversalArgs>(ana->op->get_unique_op_id()),
+      : LgTaskArgs<DeferPerformAnalysisArgs>(ana->op->get_unique_op_id()),
         analysis(ana), set(s), mask(new FieldMask(m)), 
-        applied_event(Runtime::create_rt_user_event()),
         done_event(done.exists() ? done : Runtime::create_rt_user_event()), 
         already_deferred(def)
     //--------------------------------------------------------------------------
@@ -5709,15 +5857,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/void PhysicalAnalysis::handle_deferred_traversal(const void *args)
+    /*static*/ void PhysicalAnalysis::handle_deferred_analysis(const void *args)
     //--------------------------------------------------------------------------
     {
-      const DeferPerformTraversalArgs *dargs = 
-        (const DeferPerformTraversalArgs*)args;
+      const DeferPerformAnalysisArgs *dargs = 
+        (const DeferPerformAnalysisArgs*)args;
       // Get this before doing anything
       const bool on_heap = dargs->analysis->on_heap;
       std::set<RtEvent> deferral_events, applied_events;
-      dargs->analysis->traverse(dargs->set, *(dargs->mask), 
+      dargs->analysis->analyze(dargs->set, *(dargs->mask), 
           deferral_events, applied_events, RtEvent::NO_RT_EVENT, 
           dargs->already_deferred);
       if (!deferral_events.empty())
@@ -5726,10 +5874,7 @@ namespace Legion {
       else
         Runtime::trigger_event(dargs->done_event);
       if (!applied_events.empty())
-        Runtime::trigger_event(dargs->applied_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->applied_event);
+        dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
       delete dargs->mask;
@@ -5739,8 +5884,7 @@ namespace Legion {
     PhysicalAnalysis::DeferPerformRemoteArgs::DeferPerformRemoteArgs(
                                                           PhysicalAnalysis *ana)
       : LgTaskArgs<DeferPerformRemoteArgs>(ana->op->get_unique_op_id()), 
-        analysis(ana), applied_event(Runtime::create_rt_user_event()),
-        done_event(Runtime::create_rt_user_event())
+        analysis(ana), done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5759,10 +5903,7 @@ namespace Legion {
                                       applied_events, true/*already deferred*/);
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
-        Runtime::trigger_event(dargs->applied_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->applied_event);
+        dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
@@ -5771,8 +5912,7 @@ namespace Legion {
     PhysicalAnalysis::DeferPerformUpdateArgs::DeferPerformUpdateArgs(
                                                           PhysicalAnalysis *ana)
       : LgTaskArgs<DeferPerformUpdateArgs>(ana->op->get_unique_op_id()), 
-        analysis(ana), applied_event(Runtime::create_rt_user_event()),
-        done_event(Runtime::create_rt_user_event())
+        analysis(ana), done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5791,20 +5931,53 @@ namespace Legion {
                                       applied_events, true/*already deferred*/); 
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
-        Runtime::trigger_event(dargs->applied_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->applied_event);
+        dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
     //--------------------------------------------------------------------------
+    PhysicalAnalysis::DeferPerformRegistrationArgs::
+      DeferPerformRegistrationArgs(PhysicalAnalysis *ana, 
+          const RegionUsage &use, const PhysicalTraceInfo &info,
+          ApEvent pre, ApEvent term, bool symb)
+      : LgTaskArgs<DeferPerformRegistrationArgs>(ana->op->get_unique_op_id()),
+        analysis(ana), usage(use), trace_info(&info), precondition(pre),
+        termination(term),instances_ready(Runtime::create_ap_user_event(&info)),
+        done_event(Runtime::create_rt_user_event()), symbolic(symb)
+    //--------------------------------------------------------------------------
+    {
+      if (analysis->on_heap)
+        analysis->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalAnalysis::handle_deferred_registration(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPerformRegistrationArgs *dargs =
+        (const DeferPerformRegistrationArgs*)args;
+      ApEvent insts_ready;
+      std::set<RtEvent> applied_events;
+      const RtEvent done = dargs->analysis->perform_registration(
+        RtEvent::NO_RT_EVENT, dargs->usage, applied_events,
+        dargs->precondition, dargs->termination, insts_ready, dargs->symbolic);
+      Runtime::trigger_event(dargs->trace_info,
+          dargs->instances_ready, insts_ready);
+      Runtime::trigger_event(dargs->done_event, done);
+      if (!applied_events.empty())
+        dargs->analysis->record_deferred_applied_events(applied_events);
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+        delete dargs->analysis;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformOutputArgs::DeferPerformOutputArgs(
-                           PhysicalAnalysis *ana, const PhysicalTraceInfo &info)
+               PhysicalAnalysis *ana, bool track, const PhysicalTraceInfo &info)
       : LgTaskArgs<DeferPerformOutputArgs>(ana->op->get_unique_op_id()), 
-        analysis(ana), trace_info(&info),
-        applied_event(Runtime::create_rt_user_event())
+        analysis(ana), trace_info(&info), effects_event(track ?
+          Runtime::create_ap_user_event(&info) : ApUserEvent::NO_AP_USER_EVENT)
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5818,13 +5991,13 @@ namespace Legion {
       const DeferPerformOutputArgs *dargs = (const DeferPerformOutputArgs*)args;
       std::set<RtEvent> applied_events;
       const bool on_heap = dargs->analysis->on_heap;
-      dargs->analysis->perform_output(
-          RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
+      const ApEvent result =
+        dargs->analysis->perform_output(
+            RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
+      if (dargs->effects_event.exists())
+        Runtime::trigger_event(dargs->trace_info, dargs->effects_event, result);
       if (!applied_events.empty())
-        Runtime::trigger_event(dargs->applied_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->applied_event);
+        dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
@@ -5836,20 +6009,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegistrationAnalysis::RegistrationAnalysis(
                                Runtime *rt, Operation *op, unsigned index,
-                               IndexSpaceExpression *expr, bool on_heap,
+                               RegionNode *node, bool on_heap,
                                const PhysicalTraceInfo &t_info, bool exclusive)
-      : PhysicalAnalysis(rt, op, index, expr, on_heap, false/*immutable*/,
-                         exclusive), 
-        context_index(op->get_ctx_index()), trace_info(t_info)
+      : PhysicalAnalysis(rt, op, index, node->row_source, on_heap,
+                         false/*immutable*/, exclusive), 
+        region(node), context_index(op->get_ctx_index()), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
+      region->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
     }
 
     //--------------------------------------------------------------------------
     RegistrationAnalysis::RegistrationAnalysis(Runtime *rt,
                                 AddressSpaceID src, AddressSpaceID prev,
                                 Operation *op, unsigned index,
-                                IndexSpaceExpression *expr, bool on_heap, 
+                                RegionNode *node, bool on_heap, 
                                 std::vector<PhysicalManager*> &&target_insts,
                                 LegionVector<
                                    FieldMaskSet<InstanceView> > &&target_vws,
@@ -5857,9 +6031,9 @@ namespace Legion {
                                 const PhysicalTraceInfo &t_info,
                                 CollectiveMapping *mapping, bool first_local,
                                 bool exclusive)
-      : PhysicalAnalysis(rt, src, prev, op, index, expr, on_heap, 
+      : PhysicalAnalysis(rt, src, prev, op, index, node->row_source, on_heap, 
                          false/*immutable*/, mapping, exclusive, first_local),
-        context_index(op->get_ctx_index()), trace_info(t_info),
+        region(node), context_index(op->get_ctx_index()), trace_info(t_info),
         target_instances(target_insts), target_views(target_vws), 
         source_views(source_vws)
     //--------------------------------------------------------------------------
@@ -5868,19 +6042,34 @@ namespace Legion {
       assert(on_heap);
       assert(target_instances.size() == target_views.size());
 #endif
+      region->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
     }
 
     //--------------------------------------------------------------------------
-    RegistrationAnalysis::RegistrationAnalysis(
-                               Runtime *rt, Operation *op, unsigned index,
-                               IndexSpaceExpression *expr, bool on_heap,
-                               const PhysicalTraceInfo &t_info,
-                               CollectiveMapping *mapping, bool first_local)
-      : PhysicalAnalysis(rt, op, index, expr, on_heap, false/*immutable*/,
-                         true/*exclusive*/, mapping, first_local), 
-        context_index(op->get_ctx_index()), trace_info(t_info)
+    RegistrationAnalysis::RegistrationAnalysis(Runtime *rt,
+                                AddressSpaceID src, AddressSpaceID prev,
+                                Operation *op, unsigned index,
+                                RegionNode *node, bool on_heap, 
+                                const PhysicalTraceInfo &t_info,
+                                CollectiveMapping *mapping, bool first_local,
+                                bool exclusive)
+      : PhysicalAnalysis(rt, src, prev, op, index, node->row_source, on_heap, 
+                         false/*immutable*/, mapping, exclusive, first_local),
+        region(node), context_index(op->get_ctx_index()), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(on_heap);
+#endif
+      region->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RegistrationAnalysis::~RegistrationAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (region->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
+        delete region;
     }
 
     //--------------------------------------------------------------------------
@@ -5922,6 +6111,102 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent RegistrationAnalysis::perform_registration(RtEvent precondition,
+                                const RegionUsage &usage,
+                                std::set<RtEvent> &applied_events,
+                                ApEvent init_precondition, ApEvent termination,
+                                ApEvent &instances_ready, bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(region != NULL);
+      assert(termination.exists());
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_registration(precondition, usage, applied_events,
+         trace_info, init_precondition, termination, instances_ready, symbolic);
+      const RtEvent collect_event = trace_info.get_collect_event();
+      // Perform the registration
+      const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
+      const AddressSpaceID local_space = runtime->address_space;
+      // We know this cast is safe from type argument in non-remote constructor
+#ifdef DEBUG_LEGION
+      IndexSpaceNode *expr_node = dynamic_cast<IndexSpaceNode*>(analysis_expr);
+      assert(expr_node != NULL);
+#else
+      IndexSpaceNode *expr_node = static_cast<IndexSpaceNode*>(analysis_expr);
+#endif
+      std::vector<RtEvent> registered_events;
+      for (unsigned idx = 0; idx < target_views.size(); idx++)
+      {
+        if (target_views[idx].size() > 1)
+        {
+          std::vector<ApEvent> ready_events;
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                target_views[idx].begin(); it != target_views[idx].end(); it++)
+          {
+            size_t view_collective_arrivals = 0;
+            if (!collective_arrivals.empty())
+            {
+              std::map<InstanceView*,size_t>::const_iterator finder =
+                collective_arrivals.find(it->first->as_collective_view());
+#ifdef DEBUG_LEGION
+              assert(finder != collective_arrivals.end()); 
+#endif
+              view_collective_arrivals = finder->second;
+            }
+            const ApEvent ready = it->first->register_user(usage, it->second,
+                expr_node, op_id, op_ctx_index, index, termination,
+                collect_event, target_instances[idx], 
+                view_collective_arrivals, registered_events, applied_events,
+                trace_info, local_space, symbolic);
+            if (ready.exists())
+              ready_events.push_back(ready);
+          }
+          if (!ready_events.empty())
+            instances_ready = Runtime::merge_events(&trace_info, ready_events);
+        }
+        else
+        {
+          FieldMaskSet<InstanceView>::const_iterator it =
+            target_views[idx].begin();
+          size_t view_collective_arrivals = 0;
+          if (!collective_arrivals.empty())
+          {
+            std::map<InstanceView*,size_t>::const_iterator finder =
+              collective_arrivals.find(it->first->as_collective_view());
+#ifdef DEBUG_LEGION
+            assert(finder != collective_arrivals.end()); 
+#endif
+            view_collective_arrivals = finder->second;
+          }
+          instances_ready = it->first->register_user(usage, it->second,
+              expr_node, op_id, op_ctx_index, index, termination, 
+              collect_event, target_instances[idx], 
+              view_collective_arrivals, registered_events, applied_events,
+              trace_info, local_space, symbolic);
+        }
+      }
+      if (!trace_info.recording)
+      {
+        InnerContext *context = op->find_physical_context(index);
+        std::vector<IndividualView*> individual_views;
+        context->convert_individual_views(target_instances, individual_views);
+        for (unsigned idx = 0; idx < individual_views.size(); idx++)
+        {
+          const UniqueInst unique_inst(individual_views[idx],
+                                       target_instances[idx]);
+          trace_info.record_op_inst(usage, target_views[idx].get_valid_mask(),
+                                    unique_inst, region, applied_events);
+        }
+      }
+      if (!registered_events.empty())
+        return Runtime::merge_events(registered_events);
+      return RtEvent::NO_RT_EVENT;
+    }
+
     /////////////////////////////////////////////////////////////
     // CollectiveCopyFillAnalysis
     /////////////////////////////////////////////////////////////
@@ -5929,42 +6214,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CollectiveCopyFillAnalysis::CollectiveCopyFillAnalysis(
                                Runtime *rt, Operation *op, unsigned index,
-                               IndexSpaceExpression *expr, bool on_heap,
+                               RegionNode *node, bool on_heap,
                                const PhysicalTraceInfo &t_info, bool exclusive)
-      : RegistrationAnalysis(rt, op, index, expr, on_heap, t_info, exclusive)
+      : RegistrationAnalysis(rt, op, index, node, on_heap, t_info, exclusive)
     //--------------------------------------------------------------------------
     {
-#if 0
-      // Record ourselves with any collective target views
-      for (unsigned idx = 0; idx < target_views.size(); idx++)
-      {
-#ifdef DEBUG_LEGION
-        assert(target_views[idx].get_valid_mask() == 
-                target_insts[idx].get_valid_fields());
-#endif
-        PhysicalManager *manager = target_instances[idx];
-        for (FieldMaskSet<InstanceView>::const_iterator it =
-              target_views[idx].begin(); it != target_views[idx].end(); it++)
-        {
-          if (!it->first->is_collective_view())
-            continue;
-          CollectiveView *collective = it->first->as_collective_view();
-          std::map<InstanceView*,size_t>::const_iterator finder =
-            arrivals.find(collective);
-#ifdef DEBUG_LEGION
-          assert(finder != arrivals.end());
-#endif
-          collective->register_collective_analysis(manager,this,finder->second);
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
     CollectiveCopyFillAnalysis::CollectiveCopyFillAnalysis(Runtime *rt,
                                 AddressSpaceID src, AddressSpaceID prev,
                                 Operation *op, unsigned index,
-                                IndexSpaceExpression *expr, bool on_heap, 
+                                RegionNode *node, bool on_heap, 
                                 std::vector<PhysicalManager*> &&target_insts,
                                 LegionVector<
                                    FieldMaskSet<InstanceView> > &&target_vws,
@@ -5972,7 +6233,7 @@ namespace Legion {
                                 const PhysicalTraceInfo &t_info,
                                 CollectiveMapping *mapping, bool first_local,
                                 bool exclusive)
-      : RegistrationAnalysis(rt, src, prev, op, index, expr, on_heap,
+      : RegistrationAnalysis(rt, src, prev, op, index, node, on_heap,
           std::move(target_insts), std::move(target_vws), std::move(source_vws),
           t_info, mapping, first_local, exclusive)
     //--------------------------------------------------------------------------
@@ -5983,6 +6244,47 @@ namespace Legion {
 #endif
       // Remote case so no registration to perform
     } 
+
+    //--------------------------------------------------------------------------
+    void CollectiveCopyFillAnalysis::pack_collective_analysis(
+                                                          Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(get_context_index());
+      rez.serialize(get_requirement_index());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveCopyFillAnalysis::perform_traversal(
+                          RtEvent precondition, const VersionInfo &version_info,
+                          std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_traversal(precondition, version_info, applied_events);
+      // Record ourselves with any collective target views before doing
+      // the traversal so that we will be available for collective copies
+      for (unsigned idx = 0; idx < target_views.size(); idx++)
+      {
+        PhysicalManager *manager = target_instances[idx];
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              target_views[idx].begin(); it != target_views[idx].end(); it++)
+        {
+          if (!it->first->is_collective_view())
+            continue;
+          CollectiveView *collective = it->first->as_collective_view();
+          std::map<InstanceView*,size_t>::const_iterator finder =
+            collective_arrivals.find(collective);
+#ifdef DEBUG_LEGION
+          assert(finder != collective_arrivals.end());
+#endif
+          collective->register_collective_analysis(manager, this,
+                                                   finder->second);
+        }
+      }
+      return RegistrationAnalysis::perform_traversal(precondition,
+                                    version_info, applied_events);
+    }
 
     /////////////////////////////////////////////////////////////
     // Valid Inst Analysis
@@ -6014,7 +6316,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ValidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool ValidInstAnalysis::perform_analysis(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6037,14 +6339,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if we don't have remote sets
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -6093,14 +6388,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       if (recorded_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -6179,7 +6467,7 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx],
+        analysis->analyze(eq_sets[idx], eq_masks[idx],
             deferral_events, applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -6239,7 +6527,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InvalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool InvalidInstAnalysis::perform_analysis(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6262,14 +6550,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if we don't have remote sets
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -6324,14 +6605,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       if (recorded_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -6422,8 +6696,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -6482,7 +6756,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AntivalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool AntivalidInstAnalysis::perform_analysis(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6505,14 +6779,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if we don't have remote sets
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -6568,14 +6835,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       if (recorded_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -6666,8 +6926,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -6703,9 +6963,9 @@ namespace Legion {
                     const RegionRequirement &req, RegionNode *rn,
                     const PhysicalTraceInfo &t_info, const ApEvent pre,
                     const ApEvent term, const bool check, const bool record)
-      : CollectiveCopyFillAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
+      : CollectiveCopyFillAnalysis(rt, o, idx, rn, true/*on heap*/,
                                    t_info, IS_WRITE(req)),
-        usage(req), node(rn), precondition(pre), term_event(term),
+        usage(req), precondition(pre), term_event(term),
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
         record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -6723,10 +6983,10 @@ namespace Legion {
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool check, 
                      const bool record, const bool first_local)
-      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, rn->row_source,
+      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, rn,
           true/*on heap*/, std::move(target_insts), std::move(target_vws), 
           std::move(source_vws), info, mapping, first_local, IS_WRITE(use)),
-        usage(use), node(rn), precondition(pre), term_event(term),
+        usage(use), precondition(pre), term_event(term),
         check_initialized(check), record_valid(record),
         output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
@@ -6756,13 +7016,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool UpdateAnalysis::perform_traversal(EquivalenceSet *set,
-                                           IndexSpaceExpression *expr,
-                                           const bool expr_covers,
-                                           const FieldMask &mask,
-                                           std::set<RtEvent> &deferral_events,
-                                           std::set<RtEvent> &applied_events,
-                                           const bool already_deferred)
+    bool UpdateAnalysis::perform_analysis(EquivalenceSet *set,
+                                          IndexSpaceExpression *expr,
+                                          const bool expr_covers,
+                                          const FieldMask &mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->update_set(*this, expr, expr_covers, mask, deferral_events, 
@@ -6779,14 +7039,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if we don't have any remote sets
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -6827,7 +7080,7 @@ namespace Legion {
           }
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
-          rez.serialize(node->handle);
+          rez.serialize(region->handle);
           rez.serialize(usage);
           rez.serialize<size_t>(target_instances.size());
           for (unsigned idx = 0; idx < target_instances.size(); idx++)
@@ -6878,14 +7131,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       // Report any uninitialized data now that we know the traversal is done
       if (!!uninitialized)
       {
@@ -6893,8 +7139,8 @@ namespace Legion {
         assert(check_initialized);
         assert(uninitialized_reported.exists());
 #endif
-        node->report_uninitialized_usage(op, index, usage, uninitialized,
-                                         uninitialized_reported);
+        region->report_uninitialized_usage(op, index, usage, uninitialized,
+                                           uninitialized_reported);
       }
       if (!input_aggregators.empty())
       {
@@ -6932,6 +7178,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent UpdateAnalysis::perform_registration(RtEvent precondition,
+                                const RegionUsage &usage,
+                                std::set<RtEvent> &applied_events,
+                                ApEvent init_precondition, ApEvent termination,
+                                ApEvent &instances_ready, bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(usage == this->usage);
+      // Should always be local
+      assert(original_source == runtime->address_space);
+      assert(user_registered.exists());
+#endif
+      if (precondition.exists() && ! precondition.has_triggered())
+        return defer_registration(precondition, usage, applied_events,
+         trace_info, init_precondition, termination, instances_ready, symbolic);
+      // Invoke the base implementation to see if we actually do it now
+      const RtEvent registered = 
+        CollectiveCopyFillAnalysis::perform_registration(precondition,
+                              usage, applied_events, init_precondition,
+                              termination, instances_ready, symbolic);
+      Runtime::trigger_event(user_registered, registered);
+      return registered;
+    }
+
+    //--------------------------------------------------------------------------
+    void UpdateAnalysis::find_atomic_reservations(void)
+    //--------------------------------------------------------------------------
+    {
+      // Find any atomic locks we need to take for these instances
+      // Note that for now we also treat exclusive-reductions as
+      // needing to be atomic since we don't have a semantics for
+      // what exclusive reductions mean today
+      if (IS_ATOMIC(usage) || (IS_REDUCE(usage) && IS_EXCLUSIVE(usage)))
+      {
+        InnerContext *context = op->find_physical_context(index);
+        std::vector<IndividualView*> individual_views;
+        context->convert_individual_views(target_instances, individual_views);
+        const bool exclusive = HAS_WRITE(usage);
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+          individual_views[idx]->find_atomic_reservations(
+              target_views[idx].get_valid_mask(), op, index, exclusive);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent UpdateAnalysis::perform_output(RtEvent perform_precondition,
                                            std::set<RtEvent> &applied_events,
                                            const bool already_deferred)
@@ -6939,35 +7231,24 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this, trace_info);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return instances_ready;
-      }
+        return defer_output(perform_precondition, trace_info,
+            false/*track*/, applied_events);
       if (output_aggregator != NULL)
       {
-        output_aggregator->issue_updates(trace_info, term_event,
-                                         true/*restricted output*/);
-        // We need to wait for the aggregator updates to be applied
-        // here before we can summarize the output
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-        if (!output_aggregator->effects_applied.has_triggered())
-          output_aggregator->effects_applied.wait();
-#else
-        if (!output_aggregator->guard_postcondition.has_triggered())
-          output_aggregator->guard_postcondition.wait();
-        if (!output_aggregator->effects_applied.has_triggered())
-          applied_events.insert(output_aggregator->effects_applied);
+#ifdef DEBUG_LEGION
+        assert(output_aggregator->track_events);
 #endif
-        op->record_completion_effect(
-            output_aggregator->summarize(trace_info), applied_events);
+        const ApEvent effect =
+          output_aggregator->issue_updates(trace_info, term_event,
+                                           true/*restricted output*/);
+        if (effect.exists())
+          op->record_completion_effect(effect, applied_events);
+        if (output_aggregator->effects_applied.has_triggered())
+          applied_events.insert(output_aggregator->effects_applied);
         if (output_aggregator->release_guards(op->runtime, applied_events))
           delete output_aggregator;
       }
-      return instances_ready;
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -7079,8 +7360,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       std::set<RtEvent> update_events;
@@ -7123,9 +7404,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                                     IndexSpaceExpression *expr,
+                                     RegionNode *node,
                                      const PhysicalTraceInfo &t_info)
-      : RegistrationAnalysis(rt, o, idx, expr, true/*on heap*/, t_info, 
+      : RegistrationAnalysis(rt, o, idx, node, true/*on heap*/, t_info, 
                              true/*exclusive*/), target_analysis(this)
     //--------------------------------------------------------------------------
     {
@@ -7134,10 +7415,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, AddressSpaceID src, 
                       AddressSpaceID prev, Operation *o, unsigned idx, 
-                      IndexSpaceExpression *expr, AcquireAnalysis *t,
+                      RegionNode *node, AcquireAnalysis *t,
                       const PhysicalTraceInfo &t_info,
                       CollectiveMapping *mapping, bool first_local)
-      : RegistrationAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
+      : RegistrationAnalysis(rt, src, prev, o, idx, node, true/*on heap*/,
           t_info, mapping, first_local, true/*exclusive*/), target_analysis(t)
     //--------------------------------------------------------------------------
     {
@@ -7150,13 +7431,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireAnalysis::perform_traversal(EquivalenceSet *set,
-                                            IndexSpaceExpression *expr,
-                                            const bool expr_covers,
-                                            const FieldMask &mask,
-                                            std::set<RtEvent> &deferral_events,
-                                            std::set<RtEvent> &applied_events,
-                                            const bool already_deferred)
+    bool AcquireAnalysis::perform_analysis(EquivalenceSet *set,
+                                           IndexSpaceExpression *expr,
+                                           const bool expr_covers,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &deferral_events,
+                                           std::set<RtEvent> &applied_events,
+                                           const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->acquire_restrictions(*this, expr, expr_covers, mask, deferral_events,
@@ -7173,14 +7454,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      } 
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if there is nothing to do
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -7206,7 +7480,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          analysis_expr->pack_expression(rez, target);
+          rez.serialize(region->handle);
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(returned);
@@ -7239,14 +7513,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       if (recorded_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -7300,8 +7567,9 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionNode *region = runtime->forest->get_node(handle);
       RemoteOp *op = 
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
@@ -7324,7 +7592,7 @@ namespace Legion {
 
       // This takes ownership of the operation
       AcquireAnalysis *analysis = new AcquireAnalysis(runtime, original_source,
-          previous, op, index, expr, target, trace_info, mapping, first_local);
+         previous, op, index, region, target, trace_info, mapping, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -7332,8 +7600,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -7366,9 +7634,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                               ApEvent pre, IndexSpaceExpression *expr,
+                               ApEvent pre, RegionNode *node,
                                const PhysicalTraceInfo &t_info)
-      : CollectiveCopyFillAnalysis(rt, o, idx, expr, true/*on heap*/,
+      : CollectiveCopyFillAnalysis(rt, o, idx, node, true/*on heap*/,
                                    t_info, true/*exclusive*/),
         precondition(pre), target_analysis(this), release_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -7378,13 +7646,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, AddressSpaceID src, 
           AddressSpaceID prev, Operation *o, unsigned idx, 
-          IndexSpaceExpression *expr, ApEvent pre, ReleaseAnalysis *t, 
+          RegionNode *node, ApEvent pre, ReleaseAnalysis *t, 
           std::vector<PhysicalManager*> &&target_insts,
           LegionVector<FieldMaskSet<InstanceView> > &&target_vws,
           std::vector<IndividualView*> &&source_vws,
           const PhysicalTraceInfo &info,
           CollectiveMapping *mapping, const bool first)
-      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
+      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, node, true/*on heap*/,
                                    std::move(target_insts),
                                    std::move(target_vws), std::move(source_vws),
                                    info, mapping, first, true/*exclusive*/),
@@ -7400,13 +7668,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseAnalysis::perform_traversal(EquivalenceSet *set,
-                                            IndexSpaceExpression *expr,
-                                            const bool expr_covers,
-                                            const FieldMask &mask,
-                                            std::set<RtEvent> &deferral_events,
-                                            std::set<RtEvent> &applied_events,
-                                            const bool already_deferred)
+    bool ReleaseAnalysis::perform_analysis(EquivalenceSet *set,
+                                           IndexSpaceExpression *expr,
+                                           const bool expr_covers,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &deferral_events,
+                                           std::set<RtEvent> &applied_events,
+                                           const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->release_restrictions(*this, expr, expr_covers, mask, deferral_events,
@@ -7423,14 +7691,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // Easy out if there is nothing to do
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -7472,7 +7733,7 @@ namespace Legion {
           for (std::vector<IndividualView*>::const_iterator it =
                 source_views.begin(); it != source_views.end(); it++)
             rez.serialize((*it)->did);
-          analysis_expr->pack_expression(rez, target);
+          rez.serialize(region->handle);
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(precondition);
@@ -7507,14 +7768,7 @@ namespace Legion {
       // Defer this if necessary
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // See if we have any instance names to send back
       if ((target_analysis != this) && (recorded_instances != NULL))
       {
@@ -7632,8 +7886,9 @@ namespace Legion {
         if (ready.exists())
           ready_events.insert(ready);
       }
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionNode *region = runtime->forest->get_node(handle);
       RemoteOp *op = 
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
@@ -7657,7 +7912,7 @@ namespace Legion {
         derez.deserialize<bool>(first_local);
 
       ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, original_source,
-          previous, op, index, expr, precondition, target, std::move(targets),
+          previous, op, index, region, precondition, target, std::move(targets),
           std::move(target_views), std::move(source_views), trace_info, 
           mapping, first_local);
       analysis->add_reference();
@@ -7667,8 +7922,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -7810,7 +8065,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    bool CopyAcrossAnalysis::perform_traversal(EquivalenceSet *set,
+    bool CopyAcrossAnalysis::perform_analysis(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -7833,14 +8088,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
@@ -7911,7 +8159,7 @@ namespace Legion {
         }
         runtime->send_equivalence_set_remote_copies_across(target, rez);
         applied_events.insert(applied);
-        copy_events.insert(copy);
+        copy_events.push_back(copy);
       }
       // Filter all the remote expressions from the local ones here
       filter_remote_expressions(local_exprs);
@@ -7926,14 +8174,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       // Report any uninitialized data now that we know the traversal is done
       if (!!uninitialized)
       {
@@ -7948,6 +8189,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(aggregator_guard.exists());
+        assert(across_aggregator->track_events);
 #endif
         // Trigger the guard event for the aggregator once all the 
         // actual guard events are done. Note that this is safe for
@@ -7975,24 +8217,15 @@ namespace Legion {
         // This is a copy-across aggregator so the destination events
         // are being handled by the copy operation that mapped the
         // target instance for us
-        across_aggregator->issue_updates(trace_info, precondition,
-            false/*restricted*/, false/*manage dst events*/, &dst_events);
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-        if (!across_aggregator->effects_applied.has_triggered())
-          return across_aggregator->effects_applied;
-#else
-        if (!across_aggregator->effects_applied.has_triggered())
-        {
-          if (original_source == runtime->address_space)
-          {
-            applied_events.insert(across_aggregator->effects_applied);
-            if (!across_aggregator->guard_postcondition.has_triggered())
-              return across_aggregator->guard_postcondition;
-          }
-          else
-            return across_aggregator->effects_applied;
-        }
-#endif
+        const ApEvent effect = 
+          across_aggregator->issue_updates(trace_info, precondition,
+              false/*restricted*/, false/*manage dst events*/, &dst_events);
+        if (effect.exists())
+          copy_events.push_back(effect);
+        if (across_aggregator->effects_applied.has_triggered())
+          applied_events.insert(across_aggregator->effects_applied);
+        if (across_aggregator->release_guards(op->runtime, applied_events))
+          delete across_aggregator;
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -8005,22 +8238,8 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this, trace_info);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.effects_event;
-      }
-      if (across_aggregator != NULL)
-      {
-        const ApEvent result = across_aggregator->summarize(trace_info);
-        if (result.exists())
-          copy_events.insert(result);
-        if (across_aggregator->release_guards(op->runtime, applied_events))
-          delete across_aggregator;
-      }
+        return defer_output(perform_precondition, trace_info,
+                            true/*track*/, applied_events);
       if (!copy_events.empty())
         return Runtime::merge_events(&trace_info, copy_events);
       else
@@ -8154,8 +8373,8 @@ namespace Legion {
           redop, src_indexes, dst_indexes, trace_info, perfect);
       analysis->add_reference();
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events,
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events,
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       // Start with the source mask here in case we need to filter which
@@ -8226,12 +8445,13 @@ namespace Legion {
                         IndexSpaceExpression *expr, LogicalView *view, 
                         const FieldMask &mask, const PhysicalTraceInfo &t_info,
                         CollectiveMapping *mapping, const ApEvent pre,
-                        const PredEvent pred, const bool track,
-                        const bool restriction, const bool first_local)
-      : RegistrationAnalysis(rt, o, idx, expr, true/*on heap*/, t_info,
-                             mapping, first_local),
-        usage(use), precondition(pre), pred_guard(pred), track_effects(track),
-        add_restriction(restriction), output_aggregator(NULL)
+                        const PredEvent pred, const bool restriction,
+                        const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
+                         true/*exclusive*/, mapping, first_local),
+        usage(use), trace_info(t_info), precondition(pre), pred_guard(pred),
+        add_restriction(restriction), output_aggregator(NULL),
+        dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
       if (view != NULL)
@@ -8246,14 +8466,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
-                        IndexSpaceExpression *e,
+                        IndexSpaceExpression *expr,
                         const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const PredEvent pred, 
-                        const bool track, const bool restriction)
-      : RegistrationAnalysis(rt, o, idx, e, true/*on heap*/, t_info,
-                             true/*exclusive*/), usage(use),
-        precondition(pre), pred_guard(pred), track_effects(track),
-        add_restriction(restriction), output_aggregator(NULL)
+                        const bool restriction)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
+                         true/*exclusive*/), usage(use), trace_info(t_info),
+        precondition(pre), pred_guard(pred), add_restriction(restriction),
+        output_aggregator(NULL), dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8265,11 +8485,11 @@ namespace Legion {
                         const FieldMaskSet<LogicalView> &overwrite_views,
                         const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const PredEvent pred,
-                        const bool track, const bool restriction)
-      : RegistrationAnalysis(rt, o, idx, expr, true/*on heap*/, t_info,
-          true/*exclusive*/), usage(use), precondition(pre), pred_guard(pred),
-        track_effects(track), add_restriction(restriction),
-        output_aggregator(NULL)
+                        const bool restriction)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
+          true/*exclusive*/), usage(use), trace_info(t_info), precondition(pre),
+        pred_guard(pred), add_restriction(restriction), output_aggregator(NULL),
+        dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -8291,13 +8511,13 @@ namespace Legion {
                         const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const PredEvent pred,
                         CollectiveMapping *mapping, const bool first_local,
-                        const bool track, const bool restriction)
-      : RegistrationAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
-                        t_info, mapping, first_local, true/*exclusive*/),
-        usage(use), views(vws,true/*copy*/),
-        reduction_views(reductions,true/*copy*/),
-        precondition(pre), pred_guard(pred), track_effects(track),
-        add_restriction(restriction), output_aggregator(NULL)
+                        const bool restriction)
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
+          false/*immutable*/, mapping, true/*exclusive*/, first_local),
+        usage(use), trace_info(t_info), views(vws, true/*copy*/),
+        reduction_views(reductions, true/*copy*/),
+        precondition(pre), pred_guard(pred), add_restriction(restriction),
+        output_aggregator(NULL), dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8309,7 +8529,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool OverwriteAnalysis::perform_traversal(EquivalenceSet *set,
+    RtEvent OverwriteAnalysis::convert_views(LogicalRegion region,
+                                             const InstanceSet &targets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(targets.size() == 1);
+#endif
+      InnerContext *context = op->find_physical_context(index);
+      if (op->perform_collective_analysis(collective_mapping,
+                                          collective_first_local))
+      {
+        if (collective_mapping != NULL)
+        {
+          std::vector<IndividualView*> indiv(targets.size());
+          context->convert_individual_views(targets, indiv, collective_mapping);
+          target_views.resize(indiv.size());
+          for (unsigned idx = 0; idx < indiv.size(); idx++)
+            target_views[idx].insert(indiv[idx],
+                targets[idx].get_valid_fields());
+        }
+        else
+        {
+          dummy_arrivals = new std::map<InstanceView*,size_t>();
+          return context->convert_collective_views(op, index, region, targets,
+                                  collective_mapping, collective_first_local,
+                                  target_views, *dummy_arrivals);
+        }
+      }
+      else
+        context->convert_analysis_views(targets, target_views);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent OverwriteAnalysis::perform_traversal(RtEvent precondition,
+            const VersionInfo &version_info, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_traversal(precondition, version_info, applied_events);
+      if (!target_views.empty())
+      {
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              target_views[0].begin(); it != target_views[0].end(); it++)
+        {
+          if (it->first->is_reduction_view())
+            reduction_views.insert(it->first->as_reduction_view(), it->second);
+          else
+            views.insert(it->first, it->second);
+        }
+        target_views.clear();
+      }
+      if (dummy_arrivals != NULL)
+      {
+        delete dummy_arrivals;
+        dummy_arrivals = NULL;
+      }
+      return PhysicalAnalysis::perform_traversal(precondition,
+                                version_info, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    bool OverwriteAnalysis::perform_analysis(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -8332,14 +8614,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // If there are no sets we're done
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -8353,9 +8628,6 @@ namespace Legion {
 #endif
         const AddressSpace target = rit->first;
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
         {
           RezCheck z(rez);
@@ -8406,12 +8678,9 @@ namespace Legion {
           else
             rez.serialize<size_t>(0);
           rez.serialize(applied);
-          rez.serialize(effects);
         }
         runtime->send_equivalence_set_remote_overwrites(target, rez);
         applied_events.insert(applied);
-        if (track_effects)
-          effects_events.insert(effects);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -8424,14 +8693,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformUpdateArgs args(this);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_updates(perform_precondition, applied_events);
       if (output_aggregator != NULL)
       {
         output_aggregator->issue_updates(trace_info, precondition, 
@@ -8465,26 +8727,24 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this, trace_info);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.effects_event;
-      }
+        return defer_output(perform_precondition, trace_info,
+                            false/*track*/, applied_events);
       if (output_aggregator != NULL)
       {
-        const ApEvent result = output_aggregator->summarize(trace_info); 
-        if (result.exists() && track_effects)
-          effects_events.insert(result);
+#ifdef DEBUG_LEGION
+        assert(output_aggregator->track_events);
+#endif
+        const ApEvent effect =
+          output_aggregator->issue_updates(trace_info, precondition,
+                                           true/*restricted output*/);
+        if (effect.exists())
+          op->record_completion_effect(effect, applied_events);
+        if (output_aggregator->effects_applied.has_triggered())
+          applied_events.insert(output_aggregator->effects_applied);
         if (output_aggregator->release_guards(op->runtime, applied_events))
           delete output_aggregator;
       }
-      if (!effects_events.empty())
-        return Runtime::merge_events(&trace_info, effects_events);
-      else
-        return ApEvent::NO_AP_EVENT;
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8565,14 +8825,12 @@ namespace Legion {
         derez.deserialize<bool>(first_local);
       RtUserEvent applied;
       derez.deserialize(applied);
-      ApUserEvent effects;
-      derez.deserialize(effects);
 
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
           original_source, previous, op, index, expr, usage, views, 
           reductions, trace_info, precondition, pred_guard, 
-          collective_mapping, first_local, effects.exists(), add_restriction);
+          collective_mapping, first_local, add_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -8580,8 +8838,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -8592,10 +8850,8 @@ namespace Legion {
       if (traversal_done.exists() || analysis->has_output_updates())
         output_ready = 
           analysis->perform_updates(traversal_done, applied_events);
-      const ApEvent result = analysis->perform_output(
+      analysis->perform_output(
          Runtime::merge_events(remote_ready, output_ready), applied_events);
-      if (effects.exists())
-        Runtime::trigger_event(NULL, effects, result);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -8611,10 +8867,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                              IndexSpaceExpression *expr,
-                              const PhysicalTraceInfo &t_info,
+                              RegionNode *node, const PhysicalTraceInfo &t_info,
                               const bool remove_restrict)
-      : RegistrationAnalysis(rt, o, idx, expr, true/*on heap*/,
+      : RegistrationAnalysis(rt, o, idx, node, true/*on heap*/,
                              t_info, true/*exclusive*/),
         remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
@@ -8624,12 +8879,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(Runtime *rt, AddressSpaceID src, 
                               AddressSpaceID prev, Operation *o, unsigned idx, 
-                              IndexSpaceExpression *expr,
-                              const PhysicalTraceInfo &t_info,
+                              RegionNode *node, const PhysicalTraceInfo &t_info,
                               const FieldMaskSet<InstanceView> &views,
                               CollectiveMapping *mapping, const bool first,
                               const bool remove_restrict)
-      : RegistrationAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
+      : RegistrationAnalysis(rt, src, prev, o, idx, node, true/*on heap*/,
           t_info, mapping, first, true/*exclusive*/),
         filter_views(views), remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
@@ -8643,13 +8897,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FilterAnalysis::perform_traversal(EquivalenceSet *set,
-                                           IndexSpaceExpression *expr,
-                                           const bool expr_covers,
-                                           const FieldMask &mask,
-                                           std::set<RtEvent> &deferral_events,
-                                           std::set<RtEvent> &applied_events,
-                                           const bool already_deferred)
+    RtEvent FilterAnalysis::perform_traversal(RtEvent precondition,
+                     const VersionInfo &info, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_traversal(precondition, info, applied_events);
+#ifdef DEBUG_LEGION
+      assert(target_views.size() == 1);
+#endif
+      filter_views = target_views.back();
+      return RegistrationAnalysis::perform_traversal(precondition,
+                                                     info, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    bool FilterAnalysis::perform_analysis(EquivalenceSet *set,
+                                          IndexSpaceExpression *expr,
+                                          const bool expr_covers,
+                                          const FieldMask &mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->filter_set(*this, expr, expr_covers, mask, deferral_events, 
@@ -8666,14 +8935,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       WrapperReferenceMutator mutator(applied_events);
@@ -8697,7 +8959,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          analysis_expr->pack_expression(rez, target);
+          rez.serialize(region->handle);
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(filter_views.size());
@@ -8751,8 +9013,9 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
-      IndexSpaceExpression *expr =
-        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionNode *region = runtime->forest->get_node(handle);
       RemoteOp *op = 
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
@@ -8789,7 +9052,7 @@ namespace Legion {
 
       // This takes ownership of the remote operation
       FilterAnalysis *analysis = new FilterAnalysis(runtime, original_source,
-          previous, op, index, expr, trace_info, filter_views, 
+          previous, op, index, region, trace_info, filter_views, 
           collective_mapping, first_local, remove_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
@@ -8798,8 +9061,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -8853,13 +9116,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CloneAnalysis::perform_traversal(EquivalenceSet *set,
-                                          IndexSpaceExpression *expr,
-                                          const bool expr_covers,
-                                          const FieldMask &mask,
-                                          std::set<RtEvent> &deferral_events,
-                                          std::set<RtEvent> &applied_events,
-                                          const bool already_deferred)
+    bool CloneAnalysis::perform_analysis(EquivalenceSet *set,
+                                         IndexSpaceExpression *expr,
+                                         const bool expr_covers,
+                                         const FieldMask &mask,
+                                         std::set<RtEvent> &deferral_events,
+                                         std::set<RtEvent> &applied_events,
+                                         const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->clone_set(*this, expr, expr_covers, mask, deferral_events,
@@ -8876,14 +9139,7 @@ namespace Legion {
     {
       if (perform_precondition.exists() && 
           !perform_precondition.has_triggered())
-      {
-        // Defer this until the precondition is met
-        DeferPerformRemoteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.done_event;
-      }
+        return defer_remote(perform_precondition, applied_events);
       // If there are no sets we're done
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -8983,8 +9239,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
-                           applied_events, ready_event);
+        analysis->analyze(eq_sets[idx], eq_masks[idx], deferral_events, 
+                          applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -9372,13 +9628,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::traverse_set(PhysicalAnalysis &analysis,
-                                      IndexSpaceExpression *expr,
-                                      const bool expr_covers,
-                                      FieldMask traversal_mask,
-                                      std::set<RtEvent> &deferral_events,
-                                      std::set<RtEvent> &applied_events,
-                                      const bool already_deferred)
+    void EquivalenceSet::analyze(PhysicalAnalysis &analysis,
+                                 IndexSpaceExpression *expr,
+                                 const bool expr_covers,
+                                 FieldMask traversal_mask,
+                                 std::set<RtEvent> &deferral_events,
+                                 std::set<RtEvent> &applied_events,
+                                 const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       // This block of code is the same across all traversals so we ensure
@@ -9386,8 +9642,8 @@ namespace Legion {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
       {
-        defer_traversal(eq, analysis, traversal_mask, deferral_events,
-                        applied_events, already_deferred);
+        defer_analysis(eq, analysis, traversal_mask, deferral_events,
+                       applied_events, already_deferred);
         return;
       }
       if (is_remote_analysis(analysis, traversal_mask, deferral_events,
@@ -9397,7 +9653,7 @@ namespace Legion {
       // Should only be here if we're the owner
       assert(is_logical_owner());
 #endif
-      if (analysis.perform_traversal(this, expr, expr_covers, traversal_mask,
+      if (analysis.perform_analysis(this, expr, expr_covers, traversal_mask,
                           deferral_events, applied_events, already_deferred))
         check_for_migration(analysis, applied_events, expr_covers); 
     }
@@ -9412,7 +9668,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       if (analysis.redop != 0)
@@ -10539,7 +10795,7 @@ namespace Legion {
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
@@ -10674,7 +10930,7 @@ namespace Legion {
                                             const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
@@ -10782,7 +11038,7 @@ namespace Legion {
                                     const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       WrapperReferenceMutator mutator(applied_events);
       // Now that we're ready to perform the analysis 
       // we need to lock the analysis 
@@ -11641,12 +11897,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::defer_traversal(AutoTryLock &eq,
-                                         PhysicalAnalysis &analysis,
-                                         const FieldMask &mask,
-                                         std::set<RtEvent> &deferral_events,
-                                         std::set<RtEvent> &applied_events,
-                                         const bool already_deferred)
+    void EquivalenceSet::defer_analysis(AutoTryLock &eq,
+                                        PhysicalAnalysis &analysis,
+                                        const FieldMask &mask,
+                                        std::set<RtEvent> &deferral_events,
+                                        std::set<RtEvent> &applied_events,
+                                        const bool already_deferred)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11657,12 +11913,12 @@ namespace Legion {
       {
         const RtUserEvent deferral_event = Runtime::create_rt_user_event();
         const RtEvent precondition = chain_deferral_events(deferral_event);
-        analysis.defer_traversal(precondition, this, mask, deferral_events, 
-                                 applied_events, deferral_event);
+        analysis.defer_analysis(precondition, this, mask, deferral_events, 
+                                applied_events, deferral_event);
       }
       else
-        analysis.defer_traversal(eq.try_next(), this, mask, deferral_events, 
-                                 applied_events);
+        analysis.defer_analysis(eq.try_next(), this, mask, deferral_events, 
+                                applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -11684,8 +11940,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(replicated_owner_state->ready.exists());
 #endif
-          analysis.defer_traversal(replicated_owner_state->ready, this, mask,
-                                   deferral_events, applied_events);
+          analysis.defer_analysis(replicated_owner_state->ready, this, mask,
+                                  deferral_events, applied_events);
           return true;
         }
         // Now figure out which analysis is going to perform the traversal
@@ -13958,7 +14214,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       std::vector<IndexSpaceExpression*> to_delete;
       WrapperReferenceMutator mutator(applied_events);
       std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
@@ -14154,7 +14410,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       WrapperReferenceMutator mutator(applied_events);
       FieldMaskSet<IndexSpaceExpression> to_update;
       // We need to lock the analysis at this point
@@ -15272,7 +15528,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       // While you might think this could a read-only lock since
       // we're just reading meta-data, that's not quite right because
       // we need exclusive access to data structures in check_for_migration
@@ -15409,7 +15665,7 @@ namespace Legion {
                                        const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       WrapperReferenceMutator mutator(applied_events);
       // Now that we're ready to perform the analysis 
       // we need to lock the analysis 
@@ -15534,7 +15790,7 @@ namespace Legion {
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       // No need to lock the analysis here since we're not going to change it
       WrapperReferenceMutator mutator(applied_events);
       FieldMaskSet<InstanceView> refined_views;
@@ -15847,7 +16103,7 @@ namespace Legion {
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      // Already holding the eq_lock from EquivalenceSet::traverse_set method
+      // Already holding the eq_lock from EquivalenceSet::analyze method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
       {

@@ -4083,9 +4083,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
-      ApEvent termination_event;
       bool restricted;
-      bool mapping;
       bool perform_attach;
     };
 
@@ -4523,6 +4521,7 @@ namespace Legion {
                          Runtime *runtime, std::set<RtEvent> &ready_events);
       static void handle_report_uninitialized(Deserializer &derez);
       static void handle_report_profiling_count_update(Deserializer &derez);
+      static void handle_completion_effect(Deserializer &derez);
     public:
       // This is a pointer to an operation on a remote node
       // it should never be dereferenced

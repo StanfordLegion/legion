@@ -60,7 +60,7 @@ namespace Legion {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,
       VERSION_MANAGER_REF = 2,
-      PHYSICAL_ANALYIS_REF = 3,
+      PHYSICAL_ANALYSIS_REF = 3,
       PENDING_UNBOUND_REF = 4,
       PHYSICAL_REGION_REF = 5,
       PENDING_GC_REF = 6,
@@ -90,8 +90,7 @@ namespace Legion {
       CANONICAL_REF = 30,
       DISJOINT_COMPLETE_REF = 31,
       REPLICATION_REF = 32,
-      PHYSICAL_ANALYSIS_REF = 33,
-      LAST_SOURCE_REF = 34,
+      LAST_SOURCE_REF = 33,
     };
 
     enum ReferenceKind {

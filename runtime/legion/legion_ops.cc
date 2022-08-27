@@ -12293,16 +12293,8 @@ namespace Legion {
           parent_ctx->owner_task, parent_idx, std::move(sources));
       analysis->add_reference();
       
-      std::set<RtEvent> deferral_events;
-      const FieldMaskSet<EquivalenceSet> &dst_equivalence_sets =
-        target_version_info->get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =  
-            dst_equivalence_sets.begin(); it != 
-            dst_equivalence_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_conditions);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, *target_version_info, map_applied_conditions);
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_conditions);
       if (analysis->remove_reference())
@@ -13568,17 +13560,19 @@ namespace Legion {
       if (restricted_region.impl != NULL)
         restricted_region.impl->get_references(restricted_instances);
       const ApEvent init_precondition = compute_init_precondition(trace_info);
+      ApUserEvent acquire_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent acquire_complete = 
         runtime->forest->acquire_restrictions(requirement, version_info,
                                               this, 0/*idx*/, init_precondition,
-                                              restricted_instances,
+                                              acquire_post,restricted_instances,
                                               trace_info, map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
-      record_completion_effect(acquire_complete);
+      Runtime::trigger_event(&trace_info, acquire_post, acquire_complete);
+      record_completion_effect(acquire_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -14481,11 +14475,12 @@ namespace Legion {
       InstanceSet restricted_instances;
       if (restricted_region.impl != NULL)
         restricted_region.impl->get_references(restricted_instances); 
-      ApEvent init_precondition = compute_init_precondition(trace_info); 
+      const ApEvent init_precondition = compute_init_precondition(trace_info); 
+      ApUserEvent release_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent release_complete = 
         runtime->forest->release_restrictions(requirement, version_info,
                                               this, 0/*idx*/, init_precondition,
-                                              restricted_instances, 
+                                              release_post,restricted_instances,
                                               source_instances, trace_info,
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
@@ -14493,7 +14488,8 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      record_completion_effect(release_complete);
+      Runtime::trigger_event(&trace_info, release_post, release_complete);
+      record_completion_effect(release_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -21503,7 +21499,6 @@ namespace Legion {
       resource = launcher.resource;
       footprint = launcher.footprint;
       restricted = launcher.restricted;
-      mapping = launcher.mapped;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -21641,20 +21636,10 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      if (mapping)
-      {
-        const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
-        region = PhysicalRegion(new PhysicalRegionImpl(requirement,mapped_event,
-              get_completion_event(), term_event, true/*mapped*/, ctx,
-              0/*map id*/, 0/*tag*/, false/*leaf*/, false/*virtual mapped*/, 
-              launcher.collective, runtime));
-        termination_event = term_event;
-      }
-      else
-        region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-          mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT, 
-          false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-          false/*virtual mapped*/, launcher.collective, runtime)); 
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
+        mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT, 
+        false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
+        false/*virtual mapped*/, launcher.collective, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, restricted);
@@ -21668,7 +21653,6 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       footprint = 0;
-      termination_event = ApEvent::NO_AP_EVENT;
       restricted = true;
       perform_attach = true;
     }
@@ -21855,9 +21839,6 @@ namespace Legion {
         runtime->forest->attach_external(this, 0/*idx*/,
                                          requirement,
                                          external_instances,
-                                         mapping ?
-                                           termination_event :
-                                           ApEvent::NO_AP_EVENT,
                                          version_info,
                                          trace_info,
                                          map_applied_conditions,
@@ -22969,7 +22950,6 @@ namespace Legion {
       if (index < launcher.footprint.size())
         footprint = launcher.footprint[index];
       restricted = launcher.restricted;
-      mapping = false;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -23322,20 +23302,22 @@ namespace Legion {
       // not going to invalidate the existing data. Don't register ourselves
       // either since we'll get all the preconditions for detaching it
       // as part of the detach_external call
+      ApUserEvent detach_post = Runtime::create_ap_user_event(&trace_info);
       RtEvent filter_precondition;
       if (flush)
       {
         requirement.privilege = LEGION_READ_ONLY;
         std::vector<PhysicalManager*> dummy_sources;
-        std::set<RtEvent> filter_preconditions;
-        runtime->forest->physical_perform_updates_and_registration(
+        UpdateAnalysis *analysis = NULL;
+        filter_precondition = runtime->forest->physical_perform_updates(
                                                 requirement, version_info,
                                                 this, 0/*idx*/, 
                                                 ApEvent::NO_AP_EVENT, 
-                                                ApEvent::NO_AP_EVENT,
+                                                detach_post,
                                                 references, dummy_sources,
                                                 trace_info,
-                                                filter_preconditions,
+                                                map_applied_conditions,
+                                                analysis,
 #ifdef DEBUG_LEGION
                                                 get_logging_name(),
                                                 unique_op_id,
@@ -23343,17 +23325,18 @@ namespace Legion {
                                                 true/*check collectives*/,
                                                 false/*record valid*/,
                                                 false/*check initialized*/);
+        if (analysis->remove_reference())
+          delete analysis;
         requirement.privilege = LEGION_READ_WRITE;
-        if (!filter_preconditions.empty())
-          filter_precondition = Runtime::merge_events(filter_preconditions);
       }
       
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, references, 
+                                         version_info, references, detach_post,
                                          trace_info, map_applied_conditions,
                                          filter_precondition);
-      record_completion_effect(detach_event);
+      Runtime::trigger_event(&trace_info, detach_post, detach_event);
+      record_completion_effect(detach_post);
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
                                               requirement, references);
@@ -24950,6 +24933,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteOp::record_completion_effect(ApEvent effect,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (source != runtime->address_space)
+      {
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_ptr);
+          rez.serialize(effect);
+          rez.serialize(applied);
+        }
+        runtime->send_remote_op_completion_effect(source, rez);
+        applied_events.insert(applied);
+      }
+      else
+        remote_ptr->record_completion_effect(effect, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteOp::record_completion_effects(const std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
@@ -25094,6 +25099,26 @@ namespace Legion {
 #endif
       op->handle_profiling_update(update_count);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_completion_effect(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *op;
+      derez.deserialize(op);
+      ApEvent effect;
+      derez.deserialize(effect);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::set<RtEvent> applied_events;
+      op->record_completion_effect(effect, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done);
     }
 
     ///////////////////////////////////////////////////////////// 
