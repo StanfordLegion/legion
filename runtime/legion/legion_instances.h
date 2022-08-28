@@ -949,7 +949,6 @@ namespace Legion {
                                  std::map<DomainPoint,Memory> &results,
                                  bool bandwidth) const;
     public:
-      AddressSpaceID select_source_space(AddressSpaceID destination) const;
       inline AddressSpaceID select_origin_space(void) const
         { return (collective_mapping->contains(local_space) ? local_space :
                   collective_mapping->find_nearest(local_space)); }
@@ -1002,22 +1001,7 @@ namespace Legion {
                                 ApUserEvent all_done, ApBarrier all_bar,
                                 ShardID owner_shard, AddressSpaceID origin,
                                 const uint64_t allreduce_tag,
-                                const bool copy_restricted);
-      void perform_collective_reduction(InstanceView *src_view,
-                                const std::vector<CopySrcDstField> &dst_fields,
-                                const std::vector<Reservation> &reservations,
-                                ApEvent precondition,
-                                PredEvent predicate_guard,
-                                IndexSpaceExpression *copy_expresison,
-                                Operation *op, const unsigned index,
-                                const FieldMask &copy_mask,
-                                const FieldMask &dst_mask,
-                                const DomainPoint &src_point,
-                                const UniqueInst &dst_inst,
-                                const PhysicalTraceInfo &trace_info,
-                                std::set<RtEvent> &recorded_events,
-                                std::set<RtEvent> &applied_events,
-                                ApUserEvent result, AddressSpaceID origin);
+                                const bool copy_restricted); 
       void perform_collective_broadcast(InstanceView *dst_view,
                                 const std::vector<CopySrcDstField> &src_fields,
                                 ApEvent precondition,

@@ -11930,8 +11930,9 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), dynamic_id_allocator_shard(0),
-        equivalence_set_allocator_shard(0), next_available_collective_index(0),
-        next_logical_collective_index(1), next_physical_template_index(0), 
+        equivalence_set_allocator_shard(0), fill_view_allocator_shard(0),
+        next_available_collective_index(0), next_logical_collective_index(1),
+        next_physical_template_index(0), 
         sharding_launch_space(IndexSpace::NO_SPACE),
         collective_map_launch_space(IndexSpace::NO_SPACE),
         next_replicate_bar_index(0), next_logical_bar_index(0),
@@ -13176,6 +13177,70 @@ namespace Legion {
     {
       InnerContext::receive_created_region_contexts(ctx, created_state,
                                             applied_events, num_shards);
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* ReplicateContext::find_or_create_fill_view(FillOp *op, 
+                                     std::set<RtEvent> &map_applied_events,
+                                     const void *value, const size_t value_size,
+                                     bool &took_ownership)
+    //--------------------------------------------------------------------------
+    {
+      // Two versions of this method depending on whether we are doing 
+      // Legion Spy or not, Legion Spy wants to know exactly which op
+      // made each fill view so we can't cache them
+      WrapperReferenceMutator mutator(map_applied_events);
+#ifndef LEGION_SPY
+      // See if we can find this in the cache first
+      AutoLock f_lock(fill_view_lock);
+      for (std::list<FillView*>::iterator it = 
+            fill_view_cache.begin(); it != fill_view_cache.end(); it++)
+      {
+        if (!(*it)->value->matches(value, value_size))
+          continue;
+        // Record a reference on it and then return
+        FillView *result = (*it);
+        // Move it back to the front of the list
+        fill_view_cache.erase(it);
+        fill_view_cache.push_front(result);
+        result->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        took_ownership = false;
+        return result;
+      }
+      // At this point we have to make it since we couldn't find it
+#endif
+      // Have to make a new one, get a new distributed ID for fill views
+      DistributedID did;
+      if (owner_shard->shard_id == fill_view_allocator_shard)
+      {
+        did = runtime->get_available_distributed_id();
+        ValueBroadcast<DistributedID> collective(this, COLLECTIVE_LOC_77); 
+        collective.broadcast(did);
+      }
+      else
+      {
+        ValueBroadcast<DistributedID> collective(this, 
+            fill_view_allocator_shard, COLLECTIVE_LOC_77);
+        did = collective.get_value();
+      }
+      if (++fill_view_allocator_shard == total_shards)
+        fill_view_allocator_shard = 0;
+      FillView *fill_view = shard_manager->deduplicate_fill_view_creation(did,
+                                        op, value, value_size, took_ownership);
+      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+#ifndef LEGION_SPY
+      // Add it to the cache since we're not doing Legion Spy
+      fill_view->add_base_valid_ref(CONTEXT_REF, &mutator);
+      fill_view_cache.push_front(fill_view);
+      if (fill_view_cache.size() > MAX_FILL_VIEW_CACHE_SIZE)
+      {
+        FillView *oldest = fill_view_cache.back();
+        fill_view_cache.pop_back();
+        if (oldest->remove_base_valid_ref(CONTEXT_REF))
+          delete oldest;
+      }
+#endif
+      return fill_view;
     }
 
     //--------------------------------------------------------------------------

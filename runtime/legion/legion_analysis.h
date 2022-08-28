@@ -1935,6 +1935,8 @@ namespace Legion {
       virtual ~CollectiveAnalysis(void) { }
       virtual size_t get_context_index(void) const = 0;
       virtual unsigned get_requirement_index(void) const = 0;
+      virtual Operation* get_operation(void) const = 0;
+      virtual const PhysicalTraceInfo& get_trace_info(void) const = 0;
       virtual void pack_collective_analysis(Serializer &rez) const = 0;
       virtual void add_analysis_reference(void) = 0;
       virtual bool remove_analysis_reference(void) = 0;
@@ -1951,6 +1953,8 @@ namespace Legion {
       virtual ~RemoteCollectiveAnalysis(void);
       virtual size_t get_context_index(void) const;
       virtual unsigned get_requirement_index(void) const;
+      virtual Operation* get_operation(void) const;
+      virtual const PhysicalTraceInfo& get_trace_info(void) const;
       virtual void pack_collective_analysis(Serializer &rez) const;
       virtual void add_analysis_reference(void) { add_reference(); }
       virtual bool remove_analysis_reference(void) 
@@ -1988,6 +1992,9 @@ namespace Legion {
     public:
       virtual size_t get_context_index(void) const { return context_index; }
       virtual unsigned get_requirement_index(void) const { return index; }
+      virtual Operation* get_operation(void) const { return op; }
+      virtual const PhysicalTraceInfo& get_trace_info(void) const 
+        { return trace_info; }
       virtual void pack_collective_analysis(Serializer &rez) const;
       virtual void add_analysis_reference(void) { add_reference(); }
       virtual bool remove_analysis_reference(void)

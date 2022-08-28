@@ -24520,7 +24520,7 @@ namespace Legion {
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_fill(this, source, derez);
+      CollectiveView::handle_distribute_fill(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24528,7 +24528,7 @@ namespace Legion {
                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_point(this, source, derez);
+      CollectiveView::handle_distribute_point(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24544,7 +24544,7 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_reduction(this, source, derez);
+      AllreduceView::handle_distribute_reduction(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24552,7 +24552,7 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_broadcast(this, source, derez);
+      CollectiveView::handle_distribute_broadcast(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24560,7 +24560,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_reducecast(this, source, derez);
+      CollectiveView::handle_distribute_reducecast(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24568,7 +24568,7 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_hourglass(this, source, derez);
+      CollectiveView::handle_distribute_hourglass(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24584,7 +24584,7 @@ namespace Legion {
                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_hammer_reduction(this, source, derez);
+      AllreduceView::handle_hammer_reduction(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

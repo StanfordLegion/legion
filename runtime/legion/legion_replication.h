@@ -2810,6 +2810,8 @@ namespace Legion {
                                                   LogicalRegion region);
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
                                             DistributedID did, bool &first);
+      FillView* deduplicate_fill_view_creation(DistributedID did, FillOp *op,
+          const void *value, const size_t value_size, bool &took_ownership);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space
@@ -3000,6 +3002,8 @@ namespace Legion {
     protected:
       std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
                                         created_equivalence_sets;
+      std::map<DistributedID,std::pair<FillView*,size_t> > 
+                                        created_fill_views;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
     protected:

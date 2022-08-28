@@ -2209,6 +2209,11 @@ namespace Legion {
                           std::set<RtEvent> &applied_events, size_t num_shards);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
+    public:
+      virtual FillView* find_or_create_fill_view(FillOp *op, 
+                             std::set<RtEvent> &map_applied_events,
+                             const void *value, const size_t value_size,
+                             bool &took_ownership);
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
@@ -2734,6 +2739,7 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
+      ShardID fill_view_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;

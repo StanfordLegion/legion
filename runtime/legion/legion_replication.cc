@@ -10402,6 +10402,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FillView* ShardManager::deduplicate_fill_view_creation(DistributedID did,
+         FillOp *op, const void *value, size_t value_size, bool &took_ownership)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shards.size() > 1)
+      {
+        FillView *result = NULL;
+        AutoLock m_lock(manager_lock);
+        // See if we already have this here or not
+        std::map<DistributedID,std::pair<FillView*,size_t> >::iterator
+          finder = created_fill_views.find(did);
+        if (finder != created_fill_views.end())
+        {
+          result = finder->second.first;
+#ifdef DEBUG_LEGION
+          assert(finder->second.second > 0);
+#endif
+          if (--finder->second.second == 0)
+            created_fill_views.erase(finder);
+          took_ownership = false;
+          return result;
+        }
+        const AddressSpaceID owner_space = runtime->determine_owner(did);
+        FillView::FillViewValue *fill_value = 
+          new FillView::FillViewValue(value, value_size);
+        result = new FillView(runtime->forest, did, owner_space,
+                       fill_value, true/*register now*/,
+#ifdef LEGION_SPY
+                       op->get_unique_op_id(),
+#endif
+                       collective_mapping);
+        took_ownership = true;
+        // Record it for the shards that come later
+        std::pair<FillView*,size_t> &pending = created_fill_views[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+        return result;
+      }
+      else
+      {
+        const AddressSpaceID owner_space = runtime->determine_owner(did);
+        FillView::FillViewValue *fill_value = 
+          new FillView::FillViewValue(value, value_size);
+        FillView *fill_view = 
+          new FillView(runtime->forest, did, owner_space,
+                       fill_value, true/*register now*/,
+#ifdef LEGION_SPY
+                       op->get_unique_op_id(),
+#endif
+                       collective_mapping);
+        took_ownership = true;
+        return fill_view;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::deduplicate_attaches(const IndexAttachLauncher &launcher,
                                             std::vector<unsigned> &indexes)
     //--------------------------------------------------------------------------
