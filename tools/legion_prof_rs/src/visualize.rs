@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpaceID, Inst,
     Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
-    ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    ProcKind, ProcPoint, State, TimePoint, Timestamp, Operation,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -73,6 +73,7 @@ struct DataRecord<'a> {
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
     op_id: u64,
+    parent_id: u64,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
@@ -203,7 +204,10 @@ impl Proc {
         let color = format!("#{:06x}", color);
 
         let initiation = match point.entry {
-            ProcEntry::Task(_) => None,
+            ProcEntry::Task(op_id) => {
+                let op = state.operations.get(&op_id);
+                Some(op.unwrap().parent_id.0)
+            }
             ProcEntry::MetaTask(op_id, variant_id, idx) => {
                 let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
                 Some(task.deps.op_id.0)
@@ -1534,6 +1538,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
+            let parent_id = op.parent_id;
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
@@ -1558,6 +1563,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
@@ -1574,6 +1580,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
@@ -1587,6 +1594,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &desc,
                     proc: None,
                     level: None,

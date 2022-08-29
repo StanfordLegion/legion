@@ -108,7 +108,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "IndexSpaceSizeDesc": re.compile(prefix + r'Index Space Size Desc (?P<unique_id>[0-9]+) (?P<dense_size>[0-9]+) (?P<sparse_size>[0-9]+) (?P<is_sparse>[0-1])'),
         "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+) (?P<overwrite>[0-1])'),
         "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+)'),
-        "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[a-zA-Z0-9_ ]*)'),
+        "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<parent_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[a-zA-Z0-9_ ]*)'),
         "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
         "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),

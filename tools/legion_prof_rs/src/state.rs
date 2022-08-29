@@ -1443,6 +1443,7 @@ impl OpKind {
 pub struct Operation {
     base: Base,
     op_id: OpID,
+    pub parent_id: OpID,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
     // owner: Option<OpID>,
@@ -1453,10 +1454,19 @@ impl Operation {
         Operation {
             base,
             op_id,
+            parent_id: OpID(0),
             kind: None,
             provenance: None,
             // owner: None,
         }
+    }
+    fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
+        if parent_id == OpID(std::u64::MAX) {
+            self.parent_id = OpID(0)
+        } else {
+            self.parent_id = parent_id;
+        }
+        self
     }
     fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
         assert_eq!(self.kind, None);
@@ -2411,10 +2421,10 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Variant::new(*variant_id, false, false, name))
                 .set_task(*task_id);
         }
-        Record::OperationInstance { op_id, kind, provenance } => {
+        Record::OperationInstance { op_id, parent_id, kind, provenance } => {
             let kind = OpKindID(*kind);
-            // TODO: set provenance
-            state.create_op(*op_id).set_kind(kind)
+            state.create_op(*op_id).set_parent_id(*parent_id)
+                                   .set_kind(kind)
                                    .set_provenance(provenance);
         }
         Record::MultiTask { op_id, task_id } => {
