@@ -466,20 +466,6 @@ namespace Realm {
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
-    template <int N2, typename T2, typename TRANSFORM>
-    Event create_subspace_by_image(const TRANSFORM& transform,
-				   const IndexSpace<N2,T2>& source,
-				   IndexSpace<N,T>& image,
-				   const ProfilingRequestSet &reqs,
-				   Event wait_on = Event::NO_EVENT) const;
-
-    template <int N2, typename T2, typename TRANSFORM>
-    Event create_subspaces_by_image(
-        const TRANSFORM& transform,
-        const std::vector<IndexSpace<N2, T2> >& sources,
-        std::vector<IndexSpace<N, T> >& images, const ProfilingRequestSet& reqs,
-        Event wait_on = Event::NO_EVENT) const;
-
     template <int N2, typename T2>
     Event create_subspaces_by_image(
         const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
@@ -524,6 +510,27 @@ namespace Realm {
         std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
         Event wait_on = Event::NO_EVENT) const;
 
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspace_by_preimage(const TRANSFORM& transform,
+                                      const IndexSpace<N2, T2>& target,
+                                      IndexSpace<N, T>& preimage,
+                                      const ProfilingRequestSet& reqs,
+                                      Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspaces_by_preimage(
+        const TRANSFORM& transform,
+        const std::vector<IndexSpace<N2, T2>>& targets,
+        std::vector<IndexSpace<N, T>>& preimages,
+        const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_preimage(
+        const DomainTransform<N, T, N2, T2>& domain_transform,
+        const std::vector<IndexSpace<N2, T2>>& targets,
+        std::vector<IndexSpace<N, T>>& preimages,
+        const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets can reach subsets
     //  of some other index space - the field data points from this index space to the other
     //  and is used to compute the preimage of each target - i.e. upon return (and waiting
@@ -536,13 +543,6 @@ namespace Realm {
 				      IndexSpace<N,T>& preimage,
 				      const ProfilingRequestSet &reqs,
 				      Event wait_on = Event::NO_EVENT) const;
-
-    template <int N2, typename T2, typename TRANSFORM>
-    Event create_subspaces_by_preimage(
-        const TRANSFORM& transform,
-        const std::vector<IndexSpace<N2, T2> >& targets,
-        std::vector<IndexSpace<N, T> >& preimages,
-        const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
     Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,

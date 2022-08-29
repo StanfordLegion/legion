@@ -1033,20 +1033,6 @@ namespace Realm {
     return e;
   }
 
-  template <int N, typename T>
-  template <int N2, typename T2, typename TRANSFORM>
-  inline Event IndexSpace<N, T>::create_subspace_by_image(
-      const TRANSFORM& transform, const IndexSpace<N2, T2>& source,
-      IndexSpace<N, T>& image, const ProfilingRequestSet& reqs,
-      Event wait_on /*= Event::NO_EVENT*/) const {
-    std::vector<IndexSpace<N2, T2> > sources(1, source);
-    std::vector<IndexSpace<N, T> > images;
-    Event e =
-        create_subspaces_by_image(transform, sources, images, reqs, wait_on);
-    image = images[0];
-    return e;
-  }
-
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>
