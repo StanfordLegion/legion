@@ -1049,6 +1049,47 @@ namespace Realm {
     return e;
   }
 
+  template <int N, typename T>
+  template <int N2, typename T2, typename TRANSFORM>
+  Event IndexSpace<N, T>::create_subspaces_by_preimage(
+      const TRANSFORM& transform,
+      const std::vector<IndexSpace<N2, T2>>& targets,
+      std::vector<IndexSpace<N, T>>& preimages, const ProfilingRequestSet& reqs,
+      Event wait_on /*= Event::NO_EVENT*/) const {
+   // TODO(apryakhin): For now we just support building a general structured
+   // transform from an affince transform. This will be extended later
+   // to support more transform types.
+   assert(typeid(transform) == typeid(AffineTransform<N2, N, T>));
+   return create_subspaces_by_preimage(DomainTransform<N2, T2, N, T>(transform),
+                                       targets, preimages, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  Event IndexSpace<N, T>::create_subspaces_by_preimage(
+      const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Point<N2, T2>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& targets,
+      std::vector<IndexSpace<N, T>>& preimages, const ProfilingRequestSet& reqs,
+      Event wait_on /*= Event::NO_EVENT*/) const {
+   return create_subspaces_by_preimage(
+       DomainTransform<N2, T2, N, T>(field_data), targets, preimages, reqs,
+       wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  Event IndexSpace<N, T>::create_subspaces_by_preimage(
+      const std::vector<FieldDataDescriptor<IndexSpace<N, T>, Rect<N2, T2>>>&
+          field_data,
+      const std::vector<IndexSpace<N2, T2>>& targets,
+      std::vector<IndexSpace<N, T>>& preimages, const ProfilingRequestSet& reqs,
+      Event wait_on /*= Event::NO_EVENT*/) const {
+    return create_subspaces_by_preimage(
+        DomainTransform<N2, T2, N, T>(field_data), targets, preimages, reqs,
+        wait_on);
+  }
+
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>

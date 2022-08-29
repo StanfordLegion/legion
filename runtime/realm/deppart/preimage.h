@@ -77,15 +77,11 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    PreimageOperation(const IndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
-		      const ProfilingRequestSet &reqs,
-		      GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
-
-    PreimageOperation(const IndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
-		      const ProfilingRequestSet &reqs,
-		      GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
+    PreimageOperation(const IndexSpace<N, T> &_parent,
+                      const DomainTransform<N2, T2, N, T> &_domain_transform,
+                      const ProfilingRequestSet &reqs,
+                      GenEventImpl *_finish_event,
+                      EventImpl::gen_t _finish_gen);
 
     virtual ~PreimageOperation(void);
 
@@ -101,12 +97,11 @@ namespace Realm {
 
   protected:
     static ActiveMessageHandlerReg<ApproxImageResponseMessage<PreimageOperation<N,T,N2,T2> > > areg;
-    
-    IndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > > ptr_data;
-    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > > range_data;
-    std::vector<IndexSpace<N2,T2> > targets;
-    std::vector<SparsityMap<N,T> > preimages;
+
+    IndexSpace<N, T> parent;
+    DomainTransform<N2, T2, N, T> domain_transform;
+    std::vector<IndexSpace<N2, T2> > targets;
+    std::vector<SparsityMap<N, T> > preimages;
     Mutex mutex;
     OverlapTester<N2,T2> *overlap_tester;
     std::map<int, std::vector<Rect<N2,T2> > > pending_sparse_images;
@@ -125,7 +120,7 @@ namespace Realm {
 			       const void *data, size_t datalen);
   };
 
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
+  template <int N, typename T, int N2, typename T2>
   class StructuredPreimageMicroOp : public PartitioningMicroOp {
   public:
     static const int DIM = N;
@@ -133,7 +128,7 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    StructuredPreimageMicroOp(const TRANSFORM &_transform,
+    StructuredPreimageMicroOp(const StructuredTransform<N2, T2, N, T> &_transform,
                               IndexSpace<N, T> _parent_space);
 
     virtual ~StructuredPreimageMicroOp(void);
@@ -149,41 +144,12 @@ namespace Realm {
    template <typename BM>
    void populate_bitmasks(std::map<int, BM *> &bitmasks);
 
-   TRANSFORM transform;
+   StructuredTransform<N2, T2, N, T> transform;
    IndexSpace<N, T> parent_space;
    std::vector<IndexSpace<N2, T2> > targets;
    std::vector<SparsityMap<N, T> > sparsity_outputs;
   };
 
-  template <int N, typename T, int N2, typename T2, typename TRANSFORM>
-  class StructuredPreimageOperation : public PartitioningOperation {
-   public:
-    static const int DIM = N;
-    typedef T IDXTYPE;
-    static const int DIM2 = N2;
-    typedef T2 IDXTYPE2;
-
-    StructuredPreimageOperation(const IndexSpace<N, T> &_parent,
-                                const TRANSFORM &_transform,
-                                const ProfilingRequestSet &reqs,
-                                GenEventImpl *_finish_event,
-                                EventImpl::gen_t _finish_gen);
-
-    virtual ~StructuredPreimageOperation(void);
-
-    IndexSpace<N, T> add_target(const IndexSpace<N2, T2> &target);
-
-    virtual void execute(void);
-
-    virtual void print(std::ostream &os) const;
-
-   protected:
-    IndexSpace<N, T> parent;
-    TRANSFORM transform;
-    std::vector<IndexSpace<N2, T2> > targets;
-    std::vector<SparsityMap<N, T> > preimages;
-    std::vector<atomic<int> > contrib_counts;
-  };
   };  // namespace Realm
 
 #endif // REALM_DEPPART_PREIMAGE_H

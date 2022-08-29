@@ -526,7 +526,7 @@ namespace Realm {
 
     template <int N2, typename T2>
     Event create_subspaces_by_preimage(
-        const DomainTransform<N, T, N2, T2>& domain_transform,
+        const DomainTransform<N2, T2, N, T>& domain_transform,
         const std::vector<IndexSpace<N2, T2>>& targets,
         std::vector<IndexSpace<N, T>>& preimages,
         const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
