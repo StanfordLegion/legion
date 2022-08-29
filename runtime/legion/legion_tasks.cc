@@ -6055,8 +6055,14 @@ namespace Legion {
       // Figure out what our parent context is
       RtEvent ctx_ready;
       parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      {
+        // Wait if the profiler is going to ask for the context
+        if (runtime->profiler != NULL)
+          ctx_ready.wait();
+        else
+          ready_events.insert(ctx_ready);
+      }
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Have to do this before resolving speculation in case
@@ -9288,8 +9294,14 @@ namespace Legion {
       {
         RtEvent ctx_ready;
         parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-        if (ctx_ready.exists())
-          ready_events.insert(ctx_ready);
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        {
+          // Need to wait if the profiler is going to want to check this
+          if (runtime->profiler != NULL)
+            ctx_ready.wait();
+          else
+            ready_events.insert(ctx_ready);
+        }
       }
       else
         parent_ctx = index_owner->parent_ctx;

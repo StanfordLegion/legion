@@ -127,6 +127,7 @@ namespace Legion {
       operation_instances.push_back(OperationInstance());
       OperationInstance &inst = operation_instances.back();
       inst.op_id = op->get_unique_op_id();
+      inst.parent_id = op->get_context()->get_unique_id();
       inst.kind = op->get_operation_kind();
       Provenance *prov = op->get_provenance();
       if (prov != NULL)

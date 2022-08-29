@@ -220,9 +220,10 @@ namespace Legion {
          << "}" << std::endl;
 
       ss << "OperationInstance {"
-         << "id:" << OPERATION_INSTANCE_ID        << delim
-         << "op_id:UniqueID:" << sizeof(UniqueID) << delim
-         << "kind:unsigned:"  << sizeof(unsigned) << delim
+         << "id:" << OPERATION_INSTANCE_ID            << delim
+         << "op_id:UniqueID:" << sizeof(UniqueID)     << delim
+         << "parent_id:UniqueID:" << sizeof(UniqueID) << delim
+         << "kind:unsigned:"  << sizeof(unsigned)     << delim
          << "provenance:string:"
          << "}" << std::endl;
 
@@ -727,6 +728,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(operation_instance.op_id), 
                 sizeof(operation_instance.op_id));
+      lp_fwrite(f, (char*)&(operation_instance.parent_id),
+                sizeof(operation_instance.parent_id));
       lp_fwrite(f, (char*)&(operation_instance.kind),
                 sizeof(operation_instance.kind));
       if (operation_instance.provenance != NULL)
@@ -1570,8 +1573,8 @@ namespace Legion {
                            const LegionProfInstance::OperationInstance& op_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Operation %llu %u %s", 
-          op_inst.op_id, op_inst.kind,
+      log_prof.print("Prof Operation %llu %llu %u %s", 
+          op_inst.op_id, op_inst.parent_id, op_inst.kind,
           op_inst.provenance == NULL ? "" : op_inst.provenance);
     }
 
