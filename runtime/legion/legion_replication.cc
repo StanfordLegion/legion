@@ -1240,6 +1240,9 @@ namespace Legion {
           continue;
         IndexSpaceNode *parent = forest->get_node(
             output_regions[idx].parent.get_index_space());
+#ifdef DEBUG_LEGION
+        validate_output_sizes(idx, output_regions[idx], all_output_sizes[idx]);
+#endif
         if (options.global_indexing())
         {
           // For globally indexed output regions, we need to check

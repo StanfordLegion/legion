@@ -1118,7 +1118,8 @@ namespace Legion {
      *    complete partition. The color space of the partition is identical to
      *    to the launch domain by default, but must be explicitly specified
      *    if the output requirement uses a non-identity projection functor.
-     *    (see `set_projection`)
+     *    (see `set_projection`) Any projection functor associated with an
+     *    output requirement must be bijective.
      *
      * 1) When the global indexing is requested, the dimension of the output
      *    region must be the same as the color space. The index space is
@@ -1179,6 +1180,9 @@ namespace Legion {
       void set_type_tag();
       // Specifies a projection functor id for this requirement.
       // For a projection output requirement, a color space must be specified.
+      // The projection functor must be a bijective mapping from the launch
+      // domain to the color space. This implies that the launch domain's
+      // volume must be the same as the color space's.
       void set_projection(ProjectionID projection, IndexSpace color_space);
     public:
       TypeTag type_tag;

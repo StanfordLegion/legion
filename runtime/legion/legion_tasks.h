@@ -1137,6 +1137,9 @@ namespace Legion {
                                           IndexPartNode *part,
                                           const SizeMap& output_sizes,
                                           const SizeMap& local_sizes);
+      void validate_output_sizes(unsigned index,
+                                 const OutputRequirement& output_requirement,
+                                 const SizeMap& output_sizes) const;
       virtual void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const
