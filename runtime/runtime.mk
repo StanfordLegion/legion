@@ -641,7 +641,7 @@ endif
 # finally, convert space-or-comma separated list of architectures (e.g. 35,50)
 #  into nvcc -gencode arguments
 ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
-NVCC_FLAGS += $(foreach X, -gpu=cc$(X))
+NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gpu=cc$(X))
 else
 COMMA=,
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))

@@ -82,6 +82,95 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
+  // a FieldDataDescriptor is used to describe field data provided for partitioning
+  //  operations - it is templated on the dimensionality (N) and base type (T) of the
+  //  index space that defines the domain over which the data is defined, and the
+  //  type of the data contained in the field (FT)
+  template <typename IS, typename FT>
+  struct FieldDataDescriptor {
+    IS index_space;
+    RegionInstance inst;
+    size_t field_offset;
+  };
+
+  template <int N, typename T = int>
+  class REALM_PUBLIC_API TranslationTransform {
+   public:
+    TranslationTransform(void) = default;
+    TranslationTransform(const Point<N, T>& _offset);
+
+    template <typename T2>
+    Realm::Point<N, T> operator[](const Realm::Point<N, T2>& point) const;
+
+    Point<N, T> offset;
+  };
+
+  // AffineTransform is used to describe an affine transformation
+  // Ax + b on point where A is a transform matrix and b is an offset
+  // vector.
+  template <int M, int N, typename T = int>
+  class REALM_PUBLIC_API AffineTransform {
+   public:
+    AffineTransform(void) = default;
+    AffineTransform(const Realm::Matrix<M, N, T>& _transform,
+                    const Point<M, T>& _offset);
+
+    template <typename T2>
+    Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
+
+    Realm::Matrix<M, N, T> transform;
+    Point<M, T> offset;
+  };
+
+  // Represents a generic structured transform.
+  template <int N, typename T, int N2, typename T2>
+  class REALM_PUBLIC_API StructuredTransform {
+  public:
+   StructuredTransform(void) = default;
+   StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
+   StructuredTransform(const TranslationTransform<N, T2>& _transform);
+
+   enum StructuredTransformType {
+    NONE = 0,
+    AFFINE = 1,
+    TRANSLATION = 2,
+   };
+
+   Point<N, T> operator[](const Point<N2, T>& point) const;
+
+   // protected:
+   Realm::Matrix<N, N2, T2> transform_matrix;
+   Point<N, T2> offset;
+   StructuredTransformType type = StructuredTransformType::NONE;
+  };
+
+  // Represents a generic domain transform.
+  template <int N, typename T, int N2, typename T2>
+  class REALM_PUBLIC_API DomainTransform {
+   public:
+    DomainTransform(void) = default;
+    DomainTransform(const StructuredTransform<N, T, N2, T2>& _transform);
+    DomainTransform(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+            _field_data);
+    DomainTransform(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>>&
+            _field_data);
+
+    enum DomainTransformType {
+      NONE = 0,
+      STRUCTURED = 1,
+      UNSTRUCTURED_PTR = 2,
+      UNSTRUCTURED_RANGE = 3,
+    };
+
+    // protected:
+    StructuredTransform<N, T, N2, T2> structured_transform;
+    std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>> ptr_data;
+    std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Rect<N, T>>> range_data;
+    DomainTransformType type = DomainTransformType::NONE;
+  };
+
   class IndirectionInfo;
 
   template <int N, typename T = int>
@@ -132,17 +221,6 @@ namespace Realm {
       REALM_INTERNAL_API_EXTERNAL_LINKAGE
       virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
     };
-  };
-
-  // a FieldDataDescriptor is used to describe field data provided for partitioning
-  //  operations - it is templated on the dimensionality (N) and base type (T) of the
-  //  index space that defines the domain over which the data is defined, and the
-  //  type of the data contained in the field (FT)
-  template <typename IS, typename FT>
-  struct FieldDataDescriptor {
-    IS index_space;
-    RegionInstance inst;
-    size_t field_offset;
   };
 
   // an IndexSpace is a POD type that contains a bounding rectangle and an optional SparsityMap - the
@@ -354,11 +432,33 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspace_by_image(const TRANSFORM& transform,
+                                   const IndexSpace<N2, T2>& source,
+                                   const IndexSpace<N, T>& image,
+                                   const ProfilingRequestSet& reqs,
+                                   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2, typename TRANSFORM>
+    Event create_subspaces_by_image(
+        const TRANSFORM& transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_image(
+        const DomainTransform<N, T, N2, T2>& domain_transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets are reachable from
     //  subsets of some other index space - the field data points from the other index space to
     //  ours and is used to compute the image of each source - i.e. upon return (and waiting
     //  for the finish event), the following invariant holds:
     //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
+
     template <int N2, typename T2>
     Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
 				   const IndexSpace<N2,T2>& source,
@@ -366,12 +466,15 @@ namespace Realm {
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
+
     template <int N2, typename T2>
-    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
-				    const std::vector<IndexSpace<N2,T2> >& sources,
-				    std::vector<IndexSpace<N,T> >& images,
-				    const ProfilingRequestSet &reqs,
-				    Event wait_on = Event::NO_EVENT) const;
+    Event create_subspaces_by_image(
+        const std::vector<FieldDataDescriptor<IndexSpace<N2, T2>, Point<N, T>>>&
+            field_data,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
+
     // range versions
     template <int N2, typename T2>
     Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
@@ -399,6 +502,14 @@ namespace Realm {
 				    std::vector<IndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_image_with_difference(
+        const DomainTransform<N, T, N2, T2>& domain_transform,
+        const std::vector<IndexSpace<N2, T2>>& sources,
+        const std::vector<IndexSpace<N, T>>& diff_rhs,
+        std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
+        Event wait_on = Event::NO_EVENT) const;
 
     // computes subspaces of this index space by determining what subsets can reach subsets
     //  of some other index space - the field data points from this index space to the other
