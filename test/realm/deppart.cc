@@ -2226,9 +2226,10 @@ class RandomAffineTest : public TestInterface {
 
   void fill_instance_data(IndexSpace<N1, T1> ibounds, RegionInstance inst);
 
-  int verify_results(const IndexSpace<N2, T2> &root,
-                     const TRANSFORM &transform,
-                     const std::vector<IndexSpace<N2, T1>> &images);
+  int verify_results(
+      const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
+      const std::vector<std::vector<IndexSpace<N2, T1>>> &images,
+      const std::vector<std::vector<IndexSpace<N1, T1>>> &preimages);
 
  protected:
   std::vector<TRANSFORM> transforms;
@@ -2243,6 +2244,9 @@ class RandomAffineTest : public TestInterface {
 
   std::vector<IndexSpace<N1, T1>> ss_by_color;
 
+  std::vector<std::vector<IndexSpace<N1, T1>>> dense_preimages;
+  std::vector<std::vector<IndexSpace<N1, T1>>> sparse_preimages;
+
   Rect<N1, T1> bounds1;
   Rect<N2, T2> bounds2;
   IndexSpace<N1, T1> root1;
@@ -2252,6 +2256,7 @@ class RandomAffineTest : public TestInterface {
   std::vector<RegionInstance> ri_data1;
   std::vector<FieldDataDescriptor<IndexSpace<N1, T1>, FT>> fd_vals1;
 };
+
 
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
@@ -2282,11 +2287,14 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
   }
 
   colors.resize(num_colors);
-  for(int i = 0; i < num_colors; i++)
-    colors[i] = randval<FT>(rs);
+
+  for (int i = 0; i < num_colors; i++) colors[i] = randval<FT>(rs);
 
   dense_images.resize(transforms.size());
   sparse_images.resize(transforms.size());
+
+  dense_preimages.resize(transforms.size());
+  sparse_preimages.resize(transforms.size());
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT,
@@ -2432,8 +2440,32 @@ Event RandomAffineTest<N1, T1, N2, T2, FT,TRANSFORM>::perform_partitioning(void)
                     << (Clock::current_time_in_nanoseconds() - start_time);
 
     for (int i = 0; i < num_pieces; i++) {
-      log_app.debug() << "image1[" << i << "] = " << sparse_images[idx][i];
+      log_app.debug() << "sparse_image1[" << i
+                      << "] = " << sparse_images[idx][i];
       dump_sparse_index_space("", sparse_images[idx][i]);
+    }
+
+    // preimages
+    Event e4 = root1.create_subspaces_by_preimage(
+        transforms[idx], dense_images[idx], dense_preimages[idx],
+        ProfilingRequestSet(), e3);
+    e4.wait();
+
+    for (int i = 0; i < num_pieces; i++) {
+      log_app.debug() << "dense_preimage[" << i
+                      << "] = " << dense_preimages[idx][i];
+      dump_sparse_index_space("", dense_preimages[idx][i]);
+    }
+
+    Event e5 = root1.create_subspaces_by_preimage(
+        transforms[idx], sparse_images[idx], sparse_preimages[idx],
+        ProfilingRequestSet(), e4);
+    e5.wait();
+
+    for (int i = 0; i < num_pieces; i++) {
+      log_app.debug() << "sparse_preimage[" << i
+                      << "] = " << sparse_preimages[idx][i];
+      dump_sparse_index_space("", sparse_preimages[idx][i]);
     }
   }
 
@@ -2450,44 +2482,55 @@ int RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::perform_dynamic_checks(void)
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
-    const IndexSpace<N2, T2> &root,
-    const TRANSFORM& transform,
-    const std::vector<IndexSpace<N2, T1>> &images) {
-  int image_points = 0;
-  for (const auto &image : images) {
-    image_points += image.volume();
-  }
-  // Verify the result of an image operation.
-  for (const auto &source : ss_by_color) {
-    for (IndexSpaceIterator<N1, T1> it(source); it.valid; it.step()) {
-      for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
-           point.step()) {
-        auto target_point = transform[point.p];
-        if (root.contains(target_point)) {
-          bool found = false;
-          for (const auto image : images) {
-            if (image.contains(target_point)) {
-              image_points--;
-              found = true;
-              break;
+    const IndexSpace<N2, T2> &root, const TRANSFORM &transform,
+    const std::vector<std::vector<IndexSpace<N2, T1>>> &images,
+    const std::vector<std::vector<IndexSpace<N1, T1>>> &preimages) {
+  for (size_t idx = 0; idx < transforms.size(); idx++) {
+    assert(ss_by_color.size() == images[idx].size() &&
+           images[idx].size() == preimages[idx].size());
+    int image_total = 0;
+    for (const auto &image : images[idx]) {
+      for (IndexSpaceIterator<N2, T2> it2(image); it2.valid; it2.step()) {
+        image_total += it2.rect.volume();
+      }
+    }
+
+    int preimage_total = 0;
+    for (const auto &preimage : preimages[idx]) {
+      for (IndexSpaceIterator<N1, T1> it2(preimage); it2.valid; it2.step()) {
+        preimage_total += it2.rect.volume();
+      }
+    }
+
+    if (image_total != preimage_total) return 1;
+
+    for (size_t i = 0; i < ss_by_color.size(); i++) {
+      for (IndexSpaceIterator<N1, T1> it(ss_by_color[i]); it.valid; it.step()) {
+        for (PointInRectIterator<N1, T1> point(it.rect); point.valid;
+             point.step()) {
+          auto target_point = transforms[idx][point.p];
+          if (root.contains(target_point)) {
+            if (!images[idx][i].contains(target_point)) {
+              return 1;
             }
-          }
-          if (!found) {
-            return 1;
+            if (!preimages[idx][i].contains(point.p)) {
+              return 1;
+            }
           }
         }
       }
     }
   }
-  return !(image_points == 0);
+  return 0;
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
   for (size_t i = 0; i < transforms.size(); i++) {
-    if (verify_results(root2, transforms[i], dense_images[i]) ||
-        verify_results(root2_sparse, transforms[i], sparse_images[i])) {
+    if (verify_results(root2, transforms[i], dense_images, dense_preimages) ||
+        verify_results(root2_sparse, transforms[i], sparse_images,
+                       sparse_preimages)) {
       return 1;
     }
   }
@@ -2566,27 +2609,26 @@ std::vector<AffineTransform<N2, N1, T2>> create_affine_transforms() {
       }
     }
     reflect.offset = Point<N2, T2>::ZEROES();
-    transforms.push_back(reflect);
+    //transforms.push_back(reflect);
   }
   return transforms;
 }
 
 TestInterface *run_structured_test(TransformType type, int argc, char **argv) {
-  switch (type) {
-    case TransformType::AFFINE:
-      return new RandomAffineTest<2, int, 2, int, int,
-                                  AffineTransform<2, 2, int>>(
-          argc, const_cast<const char **>(argv),
-          create_affine_transforms<2, int, 2, int, int>());
-    case TransformType::TRANSLATION:
-      // TODO(apryakhin): Test other structured transform types.
-      /*return new RandomAffineTest<2, int, 2, int, int,
-                                     TranslationTransform<2, int>>(
-          argc, const_cast<const char **>(argv),
-          create_translate_transforms<2, int, 2, int, int>(16));*/
-      break;
-  }
-  return nullptr;
+ switch (type) {
+  case TransformType::AFFINE:
+   return new RandomAffineTest<2, int, 2, int, int, AffineTransform<2, 2, int>>(
+       argc, const_cast<const char **>(argv),
+       create_affine_transforms<2, int, 2, int, int>());
+  case TransformType::TRANSLATION:
+   // TODO(apryakhin): Test other structured transform types.
+   /*return new RandomAffineTest<2, int, 2, int, int,
+                                  TranslationTransform<2, int>>(
+       argc, const_cast<const char **>(argv),
+       create_translate_transforms<2, int, 2, int, int>(16));*/
+   break;
+ }
+ return nullptr;
 }
 
 int main(int argc, char **argv) {
