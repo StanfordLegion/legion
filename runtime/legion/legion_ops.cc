@@ -22469,6 +22469,16 @@ namespace Legion {
         future_result_size = serdez_upper_bound;
       else
       {
+        // Need to do our subscriptions now
+        std::vector<RtEvent> ready_events;
+        for (std::map<DomainPoint,Future>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+        {
+          FutureImpl *impl = it->second.impl;
+          const RtEvent ready = impl->subscribe();
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
         // Serdez redop functions are nasty, we need to actually do the 
         // computation inline here to figure out how big the output buffer
         // needs to be for the future instances before we can do the
@@ -22476,6 +22486,13 @@ namespace Legion {
         future_result_size = 0;
         (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
                                        future_result_size);
+        // Wait for the subscriptions to be ready
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && ! wait_on.has_triggered())
+            wait_on.wait();
+        }
         all_reduce_serdez();
       }
 #ifdef DEBUG_LEGION
