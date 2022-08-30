@@ -1051,6 +1051,16 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2, typename TRANSFORM>
+  Event IndexSpace<N, T>::create_subspace_by_preimage(
+      const TRANSFORM& transform, const IndexSpace<N2, T2>& target,
+      IndexSpace<N, T>& preimage, const ProfilingRequestSet& reqs,
+      Event wait_on /*= Event::NO_EVENT*/) const {
+   return create_subspaces_by_preimage(DomainTransform<N2, T2, N, T>(transform),
+                                       {target}, {preimage}, reqs, wait_on);
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2, typename TRANSFORM>
   Event IndexSpace<N, T>::create_subspaces_by_preimage(
       const TRANSFORM& transform,
       const std::vector<IndexSpace<N2, T2>>& targets,
