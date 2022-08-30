@@ -2732,7 +2732,7 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2804,13 +2804,10 @@ namespace Legion {
                        bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
-      // Only copying the minimum size between the two, this is not very
-      // safe, but it's how we deal with upper bound instances so we're
-      // just trusing that the caller code is correct
-      const size_t reduce_size = redop->sizeof_rhs;
+      // All future instances for reductions should always have a known size
 #ifdef DEBUG_LEGION
-      assert(reduce_size <= size);
-      assert(reduce_size <= source->size);
+      assert(size == redop->sizeof_rhs);
+      assert(source->size == redop->sizeof_rhs);
 #endif
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
@@ -2820,17 +2817,16 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, 1);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        src.set_field(source->get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/, exclusive);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(reduce_size - 1);
-        const Rect<1,coord_t> rect(lo, hi);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
         if (use.exists() && !use.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
