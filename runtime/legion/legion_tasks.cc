@@ -194,6 +194,7 @@ namespace Legion {
       rez.serialize(req.field_space);
       rez.serialize(req.global_indexing);
       rez.serialize(req.valid_requirement);
+      rez.serialize(req.color_space);
     }
 
     //--------------------------------------------------------------------------
@@ -207,6 +208,7 @@ namespace Legion {
       derez.deserialize(req.field_space);
       derez.deserialize(req.global_indexing);
       derez.deserialize(req.valid_requirement);
+      derez.deserialize(req.color_space);
     }
 
     /////////////////////////////////////////////////////////////
