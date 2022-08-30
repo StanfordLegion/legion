@@ -304,7 +304,7 @@ extern "C" {
 
     wi->work_item->schedule.start_dynamic(start, end, incr, chunk);
     int64_t span_start, span_end;
-    long stride = 0; // not used
+    int64_t stride = 0; // not used
     bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
     if(more) {
       *istart = span_start;
@@ -340,7 +340,7 @@ extern "C" {
 
     wi->work_item->schedule.start_dynamic(start_shifted, end_shifted, incr, chunk);
     int64_t span_start, span_end;
-    long stride = 0; // not used
+    int64_t stride = 0; // not used
     bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
     if(more) {
       // shift from int64_t back to uint64_t range
