@@ -972,7 +972,13 @@ namespace Legion {
             "requested type is %zd bytes. (UID %lld)", 
             future_size, extent_in_bytes, (producer_op == NULL) ? 0 :
             producer_op->get_unique_op_id())
-      const PhysicalInstance result = instance->get_instance();
+      bool dummy_owner = true;
+      const PhysicalInstance result =
+        instance->get_instance(instance->size, dummy_owner);
+#ifdef DEBUG_LEGION
+      // Should never be set to true here
+      assert(!dummy_owner);
+#endif
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
       {
@@ -2721,9 +2727,6 @@ namespace Legion {
     ApEvent FutureInstance::initialize(const ReductionOp *redop, Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(size == redop->sizeof_rhs);
-#endif
       // Check to see if this is visible or not
       const RtEvent use = use_event.load();
       if (!is_meta_visible || (use.exists() && !use.has_triggered()))
@@ -2732,7 +2735,9 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        bool own_inst = false;
+        PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_inst);
+        dst.set_field(dst_inst, 0/*field id*/, size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2742,6 +2747,13 @@ namespace Legion {
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result(rect.copy(srcs, dsts, requests, use_event));
         free(buffer);
+        if (own_inst)
+        {
+          if (result.exists())
+            dst_inst.destroy(Runtime::protect_event(result));
+          else
+            dst_inst.destroy();
+        }
         return result;
       }
       else
@@ -2768,27 +2780,53 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, 1);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        bool own_src = false, own_dst = false;
+        PhysicalInstance src_inst = source->get_instance(copy_size, own_src);
+        PhysicalInstance dst_inst = get_instance(copy_size, own_dst);
+        src.set_field(src_inst, 0/*field id*/, copy_size);
+        dst.set_field(dst_inst, 0/*field id*/, copy_size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(copy_size - 1);
-        const Rect<1,coord_t> rect(lo, hi);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        ApEvent result;
         if (use.exists() && !use.has_triggered())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(check_source_ready),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
             Runtime::merge_events(NULL, precondition,
               source->get_ready(check_source_ready))));
         else
-          return ApEvent(rect.copy(srcs, dsts, requests, 
+          result = ApEvent(rect.copy(srcs, dsts, requests, 
                   source->get_ready(check_source_ready)));
+        RtEvent protect;
+        if (own_src)
+        {
+          if (result.exists())
+          {
+            protect = Runtime::protect_event(result);
+            src_inst.destroy(protect);
+          }
+          else
+            src_inst.destroy();
+        }
+        if (own_dst)
+        {
+          if (result.exists())
+          {
+            if (!protect.exists())
+              protect = Runtime::protect_event(result);
+            dst_inst.destroy(protect);
+          }
+          else
+            dst_inst.destroy();
+        }
+        return result;
       }
       else
       {
@@ -2804,11 +2842,6 @@ namespace Legion {
                        bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
-      // All future instances for reductions should always have a known size
-#ifdef DEBUG_LEGION
-      assert(size == redop->sizeof_rhs);
-      assert(source->size == redop->sizeof_rhs);
-#endif
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
           (use.exists() && !use.has_triggered()) ||
@@ -2817,8 +2850,12 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        bool own_src = false, own_dst = false;
+        PhysicalInstance src_inst = 
+          source->get_instance(redop->sizeof_rhs, own_src);
+        PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_dst);
+        src.set_field(src_inst, 0/*field id*/, size);
+        dst.set_field(dst_inst, 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/, exclusive);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
@@ -2827,15 +2864,39 @@ namespace Legion {
           runtime->profiler->add_copy_request(requests, op);
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
+        ApEvent result;
         if (use.exists() && !use.has_triggered())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(), precondition)));
         else
-          return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+          result = ApEvent(rect.copy(srcs, dsts, requests,source->get_ready()));
+        RtEvent protect;
+        if (own_src)
+        {
+          if (result.exists())
+          {
+            protect = Runtime::protect_event(result);
+            src_inst.destroy(protect);
+          }
+          else
+            src_inst.destroy();
+        }
+        if (own_dst)
+        {
+          if (result.exists())
+          {
+            if (!protect.exists())
+              protect = Runtime::protect_event(result);
+            dst_inst.destroy(protect);
+          }
+          else
+            dst_inst.destroy();
+        }
+        return result;
       }
       else
       {
@@ -2914,13 +2975,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance FutureInstance::get_instance(void)
+    PhysicalInstance FutureInstance::get_instance(size_t needed, bool &own_inst)
     //--------------------------------------------------------------------------
     {
-      if (!instance.load().exists())
+      if (needed != size)
+      {
+        // The unusual case where we need to make a new instance to reflect
+        // a different size than the original
+#ifdef DEBUG_LEGION
+        assert(needed < size);
+#endif
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        const Realm::ExternalInstanceResource *alt_resource = resource;
+        // Check to see if we already have a resource or not
+        if (alt_resource == NULL)
+        {
+          const PhysicalInstance inst = get_instance(size, own_inst); 
+          alt_resource =
+            inst.generate_resource_info(rect_space,0/*fid*/,false/*read only*/);
+#ifdef DEBUG_LEGION
+          // Note that if you hit this then that likely means that Realm 
+          // doesn't support 'generate_resource_info' yet for that kind of
+          // memory and it probably just needs to be implemented
+          assert(alt_resource != NULL);
+#endif
+        }
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, needed);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        Realm::InstanceLayoutGeneric *ilg =
+            Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+                rect_space, constraints, dim_order);
+        PhysicalInstance result;
+        const RtEvent inst_ready(PhysicalInstance::create_external_instance(
+             result, memory, ilg, *alt_resource, Realm::ProfilingRequestSet()));
+        own_inst = true;
+        if (resource == NULL)
+          delete alt_resource;
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          inst_ready.wait();
+        return result;
+      }
+      else if (!instance.load().exists())
       {
 #ifdef DEBUG_LEGION
         assert(external_allocation);
+        assert(resource != NULL);
 #endif
         RtEvent wait_on;
         const RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -2930,21 +3033,18 @@ namespace Legion {
         {
           // Make our instance and see if we lost the race
           const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-          const std::vector<size_t> sizes(1, 1);
+          const std::vector<size_t> sizes(1, size);
           const int dim_order[1] = { 0 };
           const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-          const Point<1,coord_t> lo(0);
-          const Point<1,coord_t> hi(size - 1);
+          const Point<1,coord_t> zero(0);
           const Realm::IndexSpace<1,coord_t> rect_space(
-                        Realm::Rect<1,coord_t>(lo, hi));
+                        Realm::Rect<1,coord_t>(zero, zero));
           Realm::InstanceLayoutGeneric *ilg =
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
           PhysicalInstance result;
           RtEvent inst_ready(PhysicalInstance::create_external_instance(
-                result, memory, ilg, Realm::ExternalMemoryResource(
-                  reinterpret_cast<uintptr_t>(get_data()), size,
-                  false/*read only*/), Realm::ProfilingRequestSet()));
+                result, memory, ilg, *resource, Realm::ProfilingRequestSet()));
           instance.store(result);
           own_instance.store(true);
           Runtime::trigger_event(ready_event, inst_ready);
@@ -2963,6 +3063,7 @@ namespace Legion {
             wait_on.wait(); 
         }
       }
+      own_inst = false;
       return instance.load();
     }
 
@@ -3037,7 +3138,12 @@ namespace Legion {
       {
         rez.serialize<bool>(false); // by value
         rez.serialize(data);
-        rez.serialize(get_instance());
+        bool dummy_owner = true;
+        rez.serialize(get_instance(size, dummy_owner));
+#ifdef DEBUG_LEGION
+        // should never end up owning this instance
+        assert(!dummy_owner);
+#endif
         if (other_ready)
           rez.serialize(ready);
         else
@@ -10363,12 +10469,12 @@ namespace Legion {
       }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-      const std::vector<size_t> sizes(1, 1);
+      const std::vector<size_t> sizes(1, size);
       const int dim_order[1] = { 0 };
+      const Realm::Point<1,coord_t> zero(0);
       const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
       const Realm::IndexSpace<1,coord_t> rect_space(
-          Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                 Realm::Point<1,coord_t>(size-1)));
+                                     Realm::Rect<1,coord_t>(zero, zero));
       Realm::InstanceLayoutGeneric *ilg =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
