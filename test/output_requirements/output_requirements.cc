@@ -28,6 +28,8 @@ using namespace Legion::Mapping;
 
 #define SIZE 10
 
+static Logger log_test("out_req_test");
+
 enum FIDs
 {
   FID_X = 100,
@@ -44,6 +46,8 @@ enum TaskIDs
   TID_CONSUMER_GLOBAL = 103,
   TID_CONSUMER_LOCAL = 104,
   TID_CONDITION = 105,
+  TID_PRODUCER_PROJ = 106,
+  TID_CONSUMER_PROJ = 107,
 };
 
 enum MappingTags
@@ -52,6 +56,14 @@ enum MappingTags
   TAG_CREATE_NEW = 101,
   TAG_LOCAL_PROCESSOR = 102,
 };
+
+enum ProjectionIDs
+{
+  PID_ROW_MAJOR = 100,
+  PID_COL_MAJOR = 101,
+};
+
+static int32_t DIM_SIZE = 3;
 
 class OutReqTestMapper : public DefaultMapper
 {
@@ -321,6 +333,46 @@ struct TestArgs {
   bool replicate;
 };
 
+struct RowMajorTransform : public ProjectionFunctor {
+  RowMajorTransform(Runtime* rt) : ProjectionFunctor(rt) { }
+  virtual bool is_functional(void) const { return true; }
+  virtual bool is_exclusive(void) const { return true; }
+  virtual unsigned get_depth(void) const { return 0; }
+
+  virtual LogicalRegion project(LogicalPartition upper_bound,
+                                const DomainPoint& point,
+                                const Domain& launch_domain)
+  {
+    assert(point.dim == 1);
+    DomainPoint result;
+    result.dim = 2;
+    result[0] = point[0] % DIM_SIZE;
+    result[1] = point[0] / DIM_SIZE;
+    assert(runtime->has_logical_subregion_by_color(upper_bound, result));
+    return runtime->get_logical_subregion_by_color(upper_bound, result);
+  }
+};
+
+struct ColMajorTransform : public ProjectionFunctor {
+  ColMajorTransform(Runtime* rt) : ProjectionFunctor(rt) { }
+  virtual bool is_functional(void) const { return true; }
+  virtual bool is_exclusive(void) const { return true; }
+  virtual unsigned get_depth(void) const { return 0; }
+
+  virtual LogicalRegion project(LogicalPartition upper_bound,
+                                const DomainPoint& point,
+                                const Domain& launch_domain)
+  {
+    assert(point.dim == 1);
+    DomainPoint result;
+    result.dim = 2;
+    result[0] = point[0] / DIM_SIZE;
+    result[1] = point[0] % DIM_SIZE;
+    assert(runtime->has_logical_subregion_by_color(upper_bound, result));
+    return runtime->get_logical_subregion_by_color(upper_bound, result);
+  }
+};
+
 bool condition_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
                      Context ctx,
@@ -467,8 +519,8 @@ void consumer_global_task(const Task *task,
   TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
 
   Rect<DIM, int32_t> r(regions[0]);
-  std::cerr << "[Consumer " << task->index_point
-            << ", global indexing] region: " << r << std::endl;
+  log_test.print() << "[Consumer " << task->index_point
+                   << ", global indexing] region: " << r;
 
   if (args->empty || args->predicate)
   {
@@ -527,8 +579,8 @@ void consumer_local_task(const Task *task,
     static constexpr int DIM = 3;
 
     Rect<DIM, int32_t> r(regions[0]);
-    std::cerr << "[Consumer " << task->index_point
-              << ", local indexing] region: " << r << std::endl;
+    log_test.print() << "[Consumer " << task->index_point
+                     << ", local indexing] region: " << r;
     if (args->empty || args->predicate)
     {
       assert(r.empty());
@@ -594,27 +646,66 @@ void consumer_local_task(const Task *task,
   }
 }
 
-void main_task(const Task *task,
-               const std::vector<PhysicalRegion> &regions,
-               Context ctx,
-               Runtime *runtime)
+void producer_proj_task(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx,
+                        Runtime *runtime)
 {
-  const InputArgs &command_args = Runtime::get_input_args();
-  char **argv = command_args.argv;
-  int argc = command_args.argc;
+  int32_t value = task->index_point[0];
 
-  TestArgs args;
+  Point<2, int32_t> extents(1, 1);
 
-  for (int i = 0; i < argc; ++i)
-    if (strcmp(argv[i], "-index") == 0)
-      args.index_launch = true;
-    else if (strcmp(argv[i], "-predicate") == 0)
-      args.predicate = true;
-    else if (strcmp(argv[i], "-empty") == 0)
-      args.empty = true;
-    else if (strcmp(argv[i], "-replicate") == 0)
-      args.replicate = true;
+  std::vector<OutputRegion> outputs;
+  runtime->get_output_regions(ctx, outputs);
 
+  DeferredBuffer<int64_t, 2, int32_t> buf0 =
+    outputs[0].create_buffer<int64_t, 2>(extents, FID_X, NULL, true);
+  DeferredBuffer<int64_t, 2, int32_t> buf1 =
+    outputs[1].create_buffer<int64_t, 2>(extents, FID_X, NULL, true);
+
+  buf0[Point<2, int32_t>(0, 0)] = value;
+  buf1[Point<2, int32_t>(0, 0)] = value;
+}
+
+void consumer_proj_task(const Task *task,
+                        const std::vector<PhysicalRegion> &regions,
+                        Context ctx,
+                        Runtime *runtime)
+{
+  int32_t dim_size = DIM_SIZE;
+
+  Int64Accessor2D acc0(regions[0], FID_X);
+  Int64Accessor2D acc1(regions[1], FID_X);
+
+  {
+    std::stringstream ss;
+    int32_t counter = 0;
+    for (int32_t col = 0; col < dim_size; ++col)
+      for (int32_t row = 0; row < dim_size; ++row)
+      {
+        Point<2, int32_t> p(row, col);
+        assert(acc0[p] == counter++);
+        ss << p << " ";
+      }
+    log_test.print() << "[Consumer, projection] row major order: " << ss.str();
+  }
+
+  {
+    std::stringstream ss;
+    int32_t counter = 0;
+    for (int32_t row = 0; row < dim_size; ++row)
+      for (int32_t col = 0; col < dim_size; ++col)
+      {
+        Point<2, int32_t> p(row, col);
+        assert(acc1[p] == counter++);
+        ss << p << " ";
+      }
+    log_test.print() << "[Consumer, projection] column major order: " << ss.str();
+  }
+}
+
+void basic_test(const TestArgs& args, Context ctx, Runtime *runtime)
+{
   Predicate pred = Predicate::TRUE_PRED;
   if (args.predicate)
   {
@@ -745,15 +836,90 @@ void main_task(const Task *task,
   }
 }
 
-static void create_mappers(Machine machine, Runtime *runtime, const std::set<Processor> &local_procs)
+void projection_test(const TestArgs& args, Context ctx, Runtime *runtime)
+{
+  FieldSpace fs = runtime->create_field_space(ctx);
+  FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
+  allocator.allocate_field(sizeof(int64_t), FID_X);
+
+  Rect<2> colors(Point<2>(0, 0), Point<2>(DIM_SIZE - 1, DIM_SIZE - 1));
+  IndexSpace color_space = runtime->create_index_space(ctx, colors);
+
+  std::set<FieldID> field_set{FID_X};
+
+  std::vector<OutputRequirement> out_reqs;
+  out_reqs.push_back(OutputRequirement(fs, {FID_X}, 2, true));
+  out_reqs.back().set_type_tag<2, int32_t>();
+  out_reqs.back().set_projection(PID_ROW_MAJOR, color_space);
+  out_reqs.push_back(OutputRequirement(fs, {FID_X}, 2, true));
+  out_reqs.back().set_type_tag<2, int32_t>();
+  out_reqs.back().set_projection(PID_COL_MAJOR, color_space);
+
+  TaskArgument task_args(&args, sizeof(args));
+
+  {
+    Domain launch_domain(Rect<1>(Point<1>(0), Point<1>(DIM_SIZE * DIM_SIZE - 1)));
+    IndexTaskLauncher launcher(
+        TID_PRODUCER_PROJ, launch_domain, task_args, ArgumentMap());
+    runtime->execute_index_space(ctx, launcher, &out_reqs);
+  }
+
+  {
+    TaskLauncher launcher(TID_CONSUMER_PROJ, task_args);
+    RegionRequirement req0(
+        out_reqs[0].parent, READ_ONLY, EXCLUSIVE, out_reqs[0].parent);
+    req0.add_field(FID_X);
+    launcher.add_region_requirement(req0);
+    RegionRequirement req1(
+        out_reqs[1].parent, READ_ONLY, EXCLUSIVE, out_reqs[1].parent);
+    req1.add_field(FID_X);
+    launcher.add_region_requirement(req1);
+    runtime->execute_task(ctx, launcher);
+  }
+}
+
+void main_task(const Task *task,
+               const std::vector<PhysicalRegion> &regions,
+               Context ctx,
+               Runtime *runtime)
+{
+  const InputArgs &command_args = Runtime::get_input_args();
+  char **argv = command_args.argv;
+  int argc = command_args.argc;
+
+  TestArgs args;
+
+  for (int i = 0; i < argc; ++i)
+    if (strcmp(argv[i], "-index") == 0)
+      args.index_launch = true;
+    else if (strcmp(argv[i], "-predicate") == 0)
+      args.predicate = true;
+    else if (strcmp(argv[i], "-empty") == 0)
+      args.empty = true;
+    else if (strcmp(argv[i], "-replicate") == 0)
+      args.replicate = true;
+
+  basic_test(args, ctx, runtime);
+  runtime->issue_execution_fence(ctx);
+  projection_test(args, ctx, runtime);
+}
+
+static void create_mappers(Machine machine,
+                           Runtime *runtime,
+                           const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
     OutReqTestMapper* mapper = new OutReqTestMapper(
-      runtime->get_mapper_runtime(), machine, *it, "output_requirement_test_mapper");
+      runtime->get_mapper_runtime(), machine, *it, "out_req_test_mapper");
     runtime->replace_default_mapper(mapper, *it);
   }
+
+  runtime->register_projection_functor(
+      PID_ROW_MAJOR, new RowMajorTransform(runtime), true /*silence warnings*/);
+  runtime->register_projection_functor(
+      PID_COL_MAJOR, new ColMajorTransform(runtime), true /*silence warnings*/);
 }
 
 int main(int argc, char **argv)
@@ -802,6 +968,20 @@ int main(int argc, char **argv)
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf(true);
     Runtime::preregister_task_variant<bool, condition_task>(registrar, "condition");
+  }
+  {
+    TaskVariantRegistrar registrar(TID_PRODUCER_PROJ, "producer_projection");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf(true);
+    registrar.set_inner(false);
+    Runtime::preregister_task_variant<producer_proj_task>(registrar, "producer_proj");
+  }
+  {
+    TaskVariantRegistrar registrar(TID_CONSUMER_PROJ, "consumer_projection");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf(true);
+    registrar.set_inner(false);
+    Runtime::preregister_task_variant<consumer_proj_task>(registrar, "consumer_proj");
   }
   Runtime::add_registration_callback(create_mappers);
 
