@@ -1145,7 +1145,6 @@ namespace Legion {
                                                   piece_list, piece_list_size);
     }
 
-
     //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -3028,6 +3027,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndividualManager::meets_expression(IndexSpaceExpression *space_expr,
+                                             bool tight_bounds) const
+    //--------------------------------------------------------------------------
+    {
+      // Can't do this test if the instance domain isn't resolved yet
+      if (kind.load() == UNBOUND_INSTANCE_KIND)
+        return (instance_domain == space_expr);
+      return instance_domain->meets_layout_expression(space_expr, tight_bounds,
+                                                  piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualManager::update_physical_instance(
                                                   PhysicalInstance new_instance,
                                                   InstanceKind new_kind,
@@ -3042,7 +3053,7 @@ namespace Legion {
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
-        kind = new_kind;
+        kind.store(new_kind);
         external_pointer = new_pointer;
 #ifdef DEBUG_LEGION
         assert(external_pointer != -1UL);

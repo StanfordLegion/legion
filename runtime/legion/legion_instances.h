@@ -343,7 +343,7 @@ namespace Legion {
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
                          bool tight_region_bounds = false) const;
-      bool meets_expression(IndexSpaceExpression *expr, 
+      virtual bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false) const;
     protected:
       void prune_gc_events(void);
@@ -585,6 +585,8 @@ namespace Legion {
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
       virtual Memory get_memory(void) const;
+      virtual bool meets_expression(IndexSpaceExpression *expr, 
+                            bool tight_bounds = false) const;
     public:
       inline bool is_unbound() const 
         { return kind == UNBOUND_INSTANCE_KIND; }
@@ -604,7 +606,7 @@ namespace Legion {
       ApUserEvent use_event;
       // Event that signifies if the instance name is available
       RtUserEvent instance_ready;
-      InstanceKind kind;
+      std::atomic<InstanceKind> kind;
       // Keep the pointer for owned external instances
       uintptr_t external_pointer;
       // Completion event of the task that sets a realm instance
