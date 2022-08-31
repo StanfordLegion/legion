@@ -341,6 +341,7 @@ struct RowMajorTransform : public ProjectionFunctor {
   virtual bool is_exclusive(void) const { return true; }
   virtual unsigned get_depth(void) const { return 0; }
 
+  using ProjectionFunctor::project;
   virtual LogicalRegion project(LogicalPartition upper_bound,
                                 const DomainPoint& point,
                                 const Domain& launch_domain)
@@ -361,6 +362,7 @@ struct ColMajorTransform : public ProjectionFunctor {
   virtual bool is_exclusive(void) const { return true; }
   virtual unsigned get_depth(void) const { return 0; }
 
+  using ProjectionFunctor::project;
   virtual LogicalRegion project(LogicalPartition upper_bound,
                                 const DomainPoint& point,
                                 const Domain& launch_domain)
