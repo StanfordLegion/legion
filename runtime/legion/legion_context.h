@@ -144,45 +144,52 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color, 
-                                            bool dominates) = 0;
+                                            bool dominates,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
@@ -198,14 +205,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            const char *provenance) = 0;
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -522,7 +531,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count) = 0;
-      virtual Future get_dynamic_collective_result(DynamicCollective dc) = 0;
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   const char *provenance) = 0;
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc) = 0;
     public:
@@ -1080,45 +1090,52 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
-                                            bool dominates);
+                                            bool dominates,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
@@ -1134,14 +1151,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -1505,7 +1524,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   const char *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
     public:
@@ -1969,45 +1989,52 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
-                                            bool dominates);
+                                            bool dominates,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
@@ -2023,14 +2050,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            const char *provenance);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -2309,7 +2338,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   const char *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
     protected:

@@ -11839,10 +11839,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future DynamicCollectiveOp::initialize(InnerContext *ctx, 
-                                           const DynamicCollective &dc)
+                            const DynamicCollective &dc, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
@@ -13729,10 +13729,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_equal_partition(InnerContext *ctx,
                                                         IndexPartition pid, 
-                                                        size_t granularity)
+                                                        size_t granularity,
+                                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13743,10 +13744,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_weight_partition(InnerContext *ctx,
-               IndexPartition pid, const FutureMap &weights, size_t granularity)
+                                   IndexPartition pid, const FutureMap &weights,
+                                   size_t granularity, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13761,10 +13763,11 @@ namespace Legion {
     void PendingPartitionOp::initialize_union_partition(InnerContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
-                                                        IndexPartition h2)
+                                                        IndexPartition h2,
+                                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13778,10 +13781,11 @@ namespace Legion {
                                                             InnerContext *ctx,
                                                             IndexPartition pid,
                                                             IndexPartition h1,
-                                                            IndexPartition h2)
+                                                            IndexPartition h2,
+                                                            const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13795,10 +13799,11 @@ namespace Legion {
                                                            InnerContext *ctx,
                                                            IndexPartition pid,
                                                            IndexPartition part,
-                                                           const bool dominates)
+                                                           const bool dominates,
+                                                           const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13811,10 +13816,11 @@ namespace Legion {
     void PendingPartitionOp::initialize_difference_partition(InnerContext *ctx,
                                                              IndexPartition pid,
                                                              IndexPartition h1,
-                                                             IndexPartition h2)
+                                                             IndexPartition h2,
+                                                             const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13829,10 +13835,11 @@ namespace Legion {
                                                           const void *transform,
                                                           size_t transform_size,
                                                           const void *extent,
-                                                          size_t extent_size)
+                                                          size_t extent_size,
+                                                          const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13846,10 +13853,11 @@ namespace Legion {
     void PendingPartitionOp::initialize_by_domain(InnerContext *ctx,
                                                   IndexPartition pid,
                                                   const FutureMap &fm,
-                                                  bool perform_intersections)
+                                                  bool perform_intersections,
+                                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13865,10 +13873,11 @@ namespace Legion {
     void PendingPartitionOp::initialize_cross_product(InnerContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
-                                                      LegionColor part_color)
+                                                      LegionColor part_color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif

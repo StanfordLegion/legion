@@ -20622,12 +20622,12 @@ namespace Legion {
     IndexPartitionT<DIM,T> Runtime::create_equal_partition(Context ctx,
                               IndexSpaceT<DIM,T> parent,
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              size_t granularity, Color color)
+                              size_t granularity, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_equal_partition(ctx,
                                     IndexSpace(parent), IndexSpace(color_space),
-                                    granularity, color));
+                                    granularity, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20636,7 +20636,7 @@ namespace Legion {
                           IndexSpaceT<DIM,T> parent,
                           const std::map<Point<COLOR_DIM,COLOR_T>,int> &weights,
                           IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                          size_t granularity, Color color)
+                          size_t granularity, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,int> untyped_weights;
@@ -20644,8 +20644,8 @@ namespace Legion {
             weights.begin(); it != weights.end(); it++)
         untyped_weights[DomainPoint(it->first)] = it->second;
       return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
-                                IndexSpace(parent), untyped_weights, 
-                                IndexSpace(color_space), granularity, color));
+                            IndexSpace(parent), untyped_weights, 
+                            IndexSpace(color_space), granularity, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20654,7 +20654,7 @@ namespace Legion {
                        IndexSpaceT<DIM,T> parent,
                        const std::map<Point<COLOR_DIM,COLOR_T>,size_t> &weights,
                        IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                       size_t granularity, Color color)
+                       size_t granularity, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,size_t> untyped_weights;
@@ -20662,8 +20662,8 @@ namespace Legion {
             it = weights.begin(); it != weights.end(); it++)
         untyped_weights[DomainPoint(it->first)] = it->second;
       return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
-                                IndexSpace(parent), untyped_weights, 
-                                IndexSpace(color_space), granularity, color));
+                            IndexSpace(parent), untyped_weights, 
+                            IndexSpace(color_space), granularity, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20672,12 +20672,13 @@ namespace Legion {
                                      IndexSpaceT<DIM,T> parent,
                                      const FutureMap &weights,
                                      IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                                     size_t granularity, Color color)
+                                     size_t granularity, Color color,
+                                     const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
-                                IndexSpace(parent), weights, 
-                                IndexSpace(color_space), granularity, color));
+                            IndexSpace(parent), weights, 
+                            IndexSpace(color_space), granularity, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20687,12 +20688,14 @@ namespace Legion {
                               IndexPartitionT<DIM,T> handle1,
                               IndexPartitionT<DIM,T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_union(ctx,
            IndexSpace(parent), IndexPartition(handle1),
-           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+           IndexPartition(handle2), IndexSpace(color_space),
+           part_kind, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20703,12 +20706,14 @@ namespace Legion {
                               IndexPartitionT<DIM,T> handle1,
                               IndexPartitionT<DIM,T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_intersection(ctx,
            IndexSpace(parent), IndexPartition(handle1),
-           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+           IndexPartition(handle2), IndexSpace(color_space),
+           part_kind, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20718,12 +20723,13 @@ namespace Legion {
                                               IndexSpaceT<DIM,T> parent,
                                               IndexPartitionT<DIM,T> partition,
                                               PartitionKind part_kind, 
-                                              Color color, bool safe)
+                                              Color color, bool safe,
+                                              const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_intersection(ctx,
                         IndexSpace(parent), IndexPartition(partition),
-                        part_kind, color, safe));
+                        part_kind, color, safe, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20733,12 +20739,14 @@ namespace Legion {
                               IndexPartitionT<DIM,T> handle1,
                               IndexPartitionT<DIM,T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_difference(ctx,
            IndexSpace(parent), IndexPartition(handle1),
-           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+           IndexPartition(handle2), IndexSpace(color_space),
+           part_kind, color, prov));
     }
 
     //--------------------------------------------------------------------------
@@ -20749,7 +20757,8 @@ namespace Legion {
                                       typename std::map<
                                         IndexSpaceT<DIM,T>,
                                         IndexPartitionT<DIM,T> > &handles,
-                                      PartitionKind part_kind, Color color)
+                                      PartitionKind part_kind, Color color,
+                                      const char *prov)
     //--------------------------------------------------------------------------
     {
       std::map<IndexSpace,IndexPartition> untyped_handles;
@@ -20758,7 +20767,7 @@ namespace Legion {
             handles.begin(); it != handles.end(); it++)
         untyped_handles[it->first] = IndexPartition::NO_PART;
       Color result = create_cross_product_partitions(ctx, handle1, handle2, 
-                                        untyped_handles, part_kind, color);
+                                  untyped_handles, part_kind, color, prov);
       for (typename std::map<IndexSpaceT<DIM,T>,
                              IndexPartitionT<DIM,T> >::iterator it =
             handles.begin(); it != handles.end(); it++)
@@ -20818,12 +20827,13 @@ namespace Legion {
                                       IndexSpaceT<COLOR_DIM,T> color_space,
                                       Transform<DIM,COLOR_DIM,T> transform,
                                       Rect<DIM,T> extent,
-                                      PartitionKind part_kind, Color color)
+                                      PartitionKind part_kind, Color color,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_restricted_partition(ctx,
         parent, color_space, &transform, sizeof(transform), 
-        &extent, sizeof(extent), part_kind, color));
+        &extent, sizeof(extent), part_kind, color, provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -20831,14 +20841,14 @@ namespace Legion {
     IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
                                       IndexSpaceT<DIM,T> parent,
                                       Point<DIM,T> blocking_factor,
-                                      Color color)
+                                      Color color, const char *provenance)
     //--------------------------------------------------------------------------
     {
       Point<DIM,T> origin; 
       for (int i = 0; i < DIM; i++)
         origin[i] = 0;
       return create_partition_by_blockify<DIM,T>(ctx, parent, blocking_factor,
-                                                 origin, color);
+                                                 origin, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -20847,7 +20857,7 @@ namespace Legion {
                                       IndexSpaceT<DIM,T> parent,
                                       Point<DIM,T> blocking_factor,
                                       Point<DIM,T> origin,
-                                      Color color)
+                                      Color color, const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Get the domain of the color space to partition
@@ -20881,8 +20891,7 @@ namespace Legion {
       const Rect<DIM,T> extent(origin, origin + blocking_factor - ones);
       // Then do the create partition by restriction call
       return create_partition_by_restriction(ctx, parent, color_space,
-                                             transform, extent,
-                                             LEGION_DISJOINT_KIND, color);
+            transform, extent, LEGION_DISJOINT_KIND, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -20893,7 +20902,8 @@ namespace Legion {
                                                    DomainT<DIM,T> > &domains,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     bool perform_intersections,
-                                    PartitionKind part_kind, Color color)
+                                    PartitionKind part_kind, Color color,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,Domain> converted_domains;
@@ -20902,7 +20912,7 @@ namespace Legion {
         converted_domains[DomainPoint(it->first)] = Domain(it->second);
       return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), converted_domains, IndexSpace(color_space),
-              perform_intersections, part_kind, color));
+              perform_intersections, part_kind, color, provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -20912,12 +20922,13 @@ namespace Legion {
                                     const FutureMap &domain_future_map,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     bool perform_intersections,
-                                    PartitionKind part_kind, Color color)
+                                    PartitionKind part_kind, Color color,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), domain_future_map, IndexSpace(color_space),
-              perform_intersections, part_kind, color));
+              perform_intersections, part_kind, color, provenance));
     }
 
     //--------------------------------------------------------------------------

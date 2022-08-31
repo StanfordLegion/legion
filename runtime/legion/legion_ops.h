@@ -2165,7 +2165,8 @@ namespace Legion {
     public:
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, const DynamicCollective &dc);
+      Future initialize(InnerContext *ctx, const DynamicCollective &dc,
+                        const char *provenance);
     public:
       virtual const VersionInfo& get_version_info(unsigned idx) const
         { assert(false); return *(new VersionInfo()); }
@@ -2788,37 +2789,45 @@ namespace Legion {
     public:
       PendingPartitionOp& operator=(const PendingPartitionOp &rhs);
     public:
-      void initialize_equal_partition(InnerContext *ctx,
-                                      IndexPartition pid, size_t granularity);
+      void initialize_equal_partition(InnerContext *ctx, IndexPartition pid,
+                                      size_t granularity, const char *prov);
       void initialize_weight_partition(InnerContext *ctx, IndexPartition pid,
-                                const FutureMap &weights, size_t granularity);
+                                const FutureMap &weights, size_t granularity,
+                                const char *provenance);
       void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
-                                      IndexPartition handle2);
+                                      IndexPartition handle2,
+                                      const char *provenance);
       void initialize_intersection_partition(InnerContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition handle1,
-                                             IndexPartition handle2);
+                                             IndexPartition handle2,
+                                             const char *provenance);
       void initialize_intersection_partition(InnerContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition part,
-                                             const bool dominates);
+                                             const bool dominates,
+                                             const char *provenance);
       void initialize_difference_partition(InnerContext *ctx,
                                            IndexPartition pid, 
                                            IndexPartition handle1,
-                                           IndexPartition handle2);
+                                           IndexPartition handle2,
+                                           const char *provenance);
       void initialize_restricted_partition(InnerContext *ctx,
                                            IndexPartition pid,
                                            const void *transform,
                                            size_t transform_size,
                                            const void *extent,
-                                           size_t extent_size);
+                                           size_t extent_size,
+                                           const char *provenance);
       void initialize_by_domain(InnerContext *ctx, IndexPartition pid,
                                 const FutureMap &future_map,
-                                bool perform_intersections);
+                                bool perform_intersections,
+                                const char *provenance);
       void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
-                                    IndexPartition source, LegionColor color);
+                                    IndexPartition source, LegionColor color,
+                                    const char *provenance);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 

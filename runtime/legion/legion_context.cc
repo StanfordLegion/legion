@@ -3743,7 +3743,8 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       size_t granularity,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
@@ -3760,7 +3761,7 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_equal_partition(this, pid, granularity);
+      part_op->initialize_equal_partition(this, pid, granularity, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
@@ -3778,7 +3779,8 @@ namespace Legion {
     IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights, 
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
@@ -3795,7 +3797,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      part_op->initialize_weight_partition(this, pid, weights, 
+                                           granularity, provenance);
       const ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RegionTreeForest *forest = runtime->forest;
@@ -3816,7 +3819,8 @@ namespace Legion {
                                           IndexPartition handle1,
                                           IndexPartition handle2,
                                           IndexSpace color_space,
-                                          PartitionKind kind, Color color)
+                                          PartitionKind kind, Color color,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3846,7 +3850,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_union_partition(this, pid, handle1, handle2);
+      part_op->initialize_union_partition(this, pid, handle1, 
+                                          handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -3897,7 +3902,8 @@ namespace Legion {
                                               IndexPartition handle1,
                                               IndexPartition handle2,
                                               IndexSpace color_space,
-                                              PartitionKind kind, Color color)
+                                              PartitionKind kind, Color color,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3927,7 +3933,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
+      part_op->initialize_intersection_partition(this, pid, handle1, 
+                                                 handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -3976,7 +3983,8 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexPartition partition,
                                               PartitionKind kind, Color color,
-                                              bool dominates)
+                                              bool dominates,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4001,7 +4009,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_intersection_partition(this,pid,partition,dominates);
+      part_op->initialize_intersection_partition(this, pid, partition,
+                                                 dominates, provenance);
       ApEvent term_event = part_op->get_completion_event();
       IndexPartNode *part_node = runtime->forest->get_node(partition);
       // See if we can determine disjointness if we weren't told
@@ -4039,7 +4048,8 @@ namespace Legion {
                                                   IndexPartition handle2,
                                                   IndexSpace color_space,
                                                   PartitionKind kind, 
-                                                  Color color)
+                                                  Color color,
+                                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4071,7 +4081,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_difference_partition(this, pid, handle1, handle2);
+      part_op->initialize_difference_partition(this, pid, handle1, 
+                                               handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -4108,7 +4119,8 @@ namespace Legion {
                                                       IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
                                                       PartitionKind kind,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4135,7 +4147,8 @@ namespace Legion {
       std::set<RtEvent> safe_events;
       runtime->forest->create_pending_cross_product(this, handle1, handle2, 
                   handles, kind, partition_color, term_event, safe_events);
-      part_op->initialize_cross_product(this, handle1, handle2,partition_color);
+      part_op->initialize_cross_product(this, handle1, handle2,
+                                        partition_color, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       if (!safe_events.empty())
@@ -4238,7 +4251,8 @@ namespace Legion {
                                               const void *extent,
                                               size_t extent_size,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4258,7 +4272,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_restricted_partition(this, pid, transform, 
-                                transform_size, extent, extent_size);
+                    transform_size, extent, extent_size, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
@@ -4280,7 +4294,8 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4299,7 +4314,8 @@ namespace Legion {
         part_color = color; 
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_by_domain(this, pid, domains, perform_intersections);
+      part_op->initialize_by_domain(this, pid, domains, 
+                      perform_intersections, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
@@ -9289,7 +9305,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc,
+                                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -9299,7 +9316,7 @@ namespace Legion {
 #endif
       DynamicCollectiveOp *collective = 
         runtime->get_available_dynamic_collective_op();
-      Future result = collective->initialize(this, dc);
+      Future result = collective->initialize(this, dc, provenance);
       add_to_dependence_queue(collective);
       return result;
     }
@@ -11728,7 +11745,8 @@ namespace Legion {
     IndexPartition LeafContext::create_equal_partition(
                                              IndexSpace parent,
                                              IndexSpace color_space,
-                                             size_t granularity, Color color)
+                                             size_t granularity, Color color,
+                                             const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
@@ -11741,7 +11759,8 @@ namespace Legion {
     IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
@@ -11756,7 +11775,8 @@ namespace Legion {
                                           IndexPartition handle1,
                                           IndexPartition handle2,
                                           IndexSpace color_space,
-                                          PartitionKind kind, Color color)
+                                          PartitionKind kind, Color color,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNION_PARTITION_CREATION,
@@ -11771,7 +11791,8 @@ namespace Legion {
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color)
+                                                PartitionKind kind, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERSECTION_PARTITION_CREATION,
@@ -11785,7 +11806,8 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexPartition partition,
                                                 PartitionKind kind, Color color,
-                                                bool dominates)
+                                                bool dominates,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERSECTION_PARTITION_CREATION,
@@ -11801,7 +11823,8 @@ namespace Legion {
                                                       IndexPartition handle2,
                                                       IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DIFFERENCE_PARTITION_CREATION,
@@ -11815,7 +11838,8 @@ namespace Legion {
                                                        IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
                                                        PartitionKind kind,
-                                                       Color color)
+                                                       Color color,
+                                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_CROSS_PRODUCT_PARTITION,
@@ -11847,7 +11871,8 @@ namespace Legion {
                                                 const void *extent,
                                                 size_t extent_size,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_RESTRICTED_PARTITION,
@@ -11863,7 +11888,8 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
@@ -13327,7 +13353,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
+    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
