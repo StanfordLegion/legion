@@ -3339,7 +3339,8 @@ namespace Legion {
                                           0/*fid*/, true/*read only*/);
       }
       (*(fargs->freefunc))(*resource);
-      fargs->instance.destroy(fargs->precondition);
+      if (fargs->instance.exists())
+        fargs->instance.destroy(fargs->precondition);
       if (fargs->resource == NULL)
         delete resource;
     }
