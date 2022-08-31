@@ -8474,7 +8474,13 @@ namespace Legion {
                                           const SizeMap& output_sizes) const
     //--------------------------------------------------------------------------
     {
-      if (output_sizes.size() == total_points) return;
+      size_t num_tasks = 0;
+      if (sharding_space.exists())
+        num_tasks = runtime->forest->get_domain_volume(sharding_space);
+      else
+        num_tasks = launch_space->get_volume();
+
+      if (output_sizes.size() == num_tasks) return;
 
       REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
         "A projection functor for every output requirement must be "
