@@ -1824,6 +1824,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       CreationKind kind; 
@@ -2981,6 +2982,7 @@ namespace Legion {
                                       RegionTreeForest *forest,
                                       ShardID shard, size_t total_shards) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
+        virtual bool need_all_futures(void) const { return false; }
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
       public:
@@ -3017,6 +3019,7 @@ namespace Legion {
         { return forest->create_partition_by_weights(op, pid, weights,
                                       granularity, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp *op);
+        virtual bool need_all_futures(void) const { return true; }
       protected:
         IndexPartition pid;
         FutureMap weights;
@@ -3286,6 +3289,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
@@ -3294,11 +3298,13 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
-                                          std::set<RtEvent> &ready_events);
+      virtual void populate_sources(const FutureMap &fm);
+      void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                  std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
+      std::map<DomainPoint,Future> sources;
     };
 
     /**
@@ -4361,10 +4367,12 @@ namespace Legion {
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
       void invoke_mapper(std::vector<Memory> &targets);
+      ApEvent finalize_serdez_targets(RtEvent &protect);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_execution(void);
       virtual void trigger_complete(void);
     protected:
       // These are virtual methods to override for control replication
@@ -4382,6 +4390,7 @@ namespace Legion {
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
       void *serdez_redop_buffer;
+      size_t serdez_upper_bound;
       MapperID mapper_id;
       MappingTagID tag;
       bool deterministic;

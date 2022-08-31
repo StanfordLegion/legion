@@ -972,7 +972,13 @@ namespace Legion {
             "requested type is %zd bytes. (UID %lld)", 
             future_size, extent_in_bytes, (producer_op == NULL) ? 0 :
             producer_op->get_unique_op_id())
-      const PhysicalInstance result = instance->get_instance();
+      bool dummy_owner = true;
+      const PhysicalInstance result =
+        instance->get_instance(instance->size, dummy_owner);
+#ifdef DEBUG_LEGION
+      // Should never be set to true here
+      assert(!dummy_owner);
+#endif
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
       {
@@ -1236,7 +1242,7 @@ namespace Legion {
         need_subscribe = !subscription_event.exists();
       }
       if (need_subscribe)
-        return subscribe();
+        subscribe();
       return ready_event;
     }
 
@@ -1485,7 +1491,6 @@ namespace Legion {
         return;
       upper_bound_size = size;
       future_size = size;
-      __sync_synchronize();
       future_size_set = true;
       if (is_owner())
       {
@@ -1579,7 +1584,6 @@ namespace Legion {
       // must be called while we are already holding the lock
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;
       future_size_set = true;
-      __sync_synchronize();
       empty.store(false); 
       if (!pending_instances.empty())
         create_pending_instances();
@@ -1952,7 +1956,6 @@ namespace Legion {
         derez.advance_pointer(metasize);
       }
       derez.deserialize(upper_bound_size);
-      __sync_synchronize();
       empty.store(false);
       if (!pending_instances.empty())
         create_pending_instances();
@@ -2663,7 +2666,7 @@ namespace Legion {
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.load().exists() || external_allocation);
       assert((data.load() != NULL) || instance.load().exists());
-      assert(resource != NULL);
+      assert((resource != NULL) || inst.exists());
 #endif
     }
 
@@ -2676,28 +2679,33 @@ namespace Legion {
       {
         if (external_allocation)
         {
-          // Destroy the external instance if it exists
-          const PhysicalInstance inst = instance.load();
-          if (inst.exists())
-            inst.destroy(ready_event);
           void *tofree = const_cast<void*>(data.load());
           // Check to see if we have a freefunc or not
-          if (freefunc != NULL)
-            runtime->free_external_allocation(freeproc, resource, freefunc);
-          else if (memory.address_space() != runtime->address_space)
+          if (freefunc == NULL)
           {
-            // Send this to the target node with a NO_PROC which will
-            // be the sign it can delete it immediately
-            Serializer rez;
+            if (memory.address_space() != runtime->address_space)
             {
-              RezCheck z(rez);
-              rez.serialize(Processor::NO_PROC);
-              rez.serialize(tofree);
+              // Send this to the target node with a NO_PROC which will
+              // be the sign it can delete it immediately
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(Processor::NO_PROC);
+                rez.serialize(tofree);
+              }
+              runtime->send_free_external_allocation(memory.address_space(), 
+                                                     rez);
             }
-            runtime->send_free_external_allocation(memory.address_space(), rez);
+            else // this has to be a local allocation so we can free it
+              free(tofree);
+            // Destroy the external instance if it exists
+            const PhysicalInstance inst = instance.load();
+            if (inst.exists())
+              inst.destroy(ready_event);
           }
-          else // this has to be a local allocation so we can free it
-            free(tofree);
+          else
+            free_external_allocation(runtime, freeproc, freefunc, instance,
+                                     use_event, ready_event, resource);
         }
         else
         {
@@ -2715,8 +2723,7 @@ namespace Legion {
 #endif
         inst.destroy(ready_event);
       }
-      if ((resource != NULL) && 
-          (!own_allocation || !external_allocation || (freefunc == NULL)))
+      if (resource != NULL)
         delete resource;
     }
 
@@ -2724,9 +2731,6 @@ namespace Legion {
     ApEvent FutureInstance::initialize(const ReductionOp *redop, Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(size == redop->sizeof_rhs);
-#endif
       // Check to see if this is visible or not
       const RtEvent use = use_event.load();
       if (!is_meta_visible || (use.exists() && !use.has_triggered()))
@@ -2735,7 +2739,9 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        bool own_inst = false;
+        PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_inst);
+        dst.set_field(dst_inst, 0/*field id*/, size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2745,6 +2751,13 @@ namespace Legion {
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result(rect.copy(srcs, dsts, requests, use_event));
         free(buffer);
+        if (own_inst)
+        {
+          if (result.exists())
+            dst_inst.destroy(Runtime::protect_event(result));
+          else
+            dst_inst.destroy();
+        }
         return result;
       }
       else
@@ -2759,9 +2772,10 @@ namespace Legion {
                                   ApEvent precondition, bool check_source_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(source->size <= size);
-#endif
+      // Only copying the minimum size between the two, this is not very
+      // safe, but it's how we deal with upper bound instances so we're
+      // just trusing that the caller code is correct
+      const size_t copy_size = std::min(size, source->size);
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
           (use.exists() && !use.has_triggered()) ||
@@ -2770,32 +2784,58 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, 1);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        bool own_src = false, own_dst = false;
+        PhysicalInstance src_inst = source->get_instance(copy_size, own_src);
+        PhysicalInstance dst_inst = get_instance(copy_size, own_dst);
+        src.set_field(src_inst, 0/*field id*/, copy_size);
+        dst.set_field(dst_inst, 0/*field id*/, copy_size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(source->size - 1);
-        const Rect<1,coord_t> rect(lo, hi);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        ApEvent result;
         if (use.exists() && !use.has_triggered())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(check_source_ready),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
             Runtime::merge_events(NULL, precondition,
               source->get_ready(check_source_ready))));
         else
-          return ApEvent(rect.copy(srcs, dsts, requests, 
+          result = ApEvent(rect.copy(srcs, dsts, requests, 
                   source->get_ready(check_source_ready)));
+        RtEvent protect;
+        if (own_src)
+        {
+          if (result.exists())
+          {
+            protect = Runtime::protect_event(result);
+            src_inst.destroy(protect);
+          }
+          else
+            src_inst.destroy();
+        }
+        if (own_dst)
+        {
+          if (result.exists())
+          {
+            if (!protect.exists())
+              protect = Runtime::protect_event(result);
+            dst_inst.destroy(protect);
+          }
+          else
+            dst_inst.destroy();
+        }
+        return result;
       }
       else
       {
         // We can do this as a straight memcpy, no need to offload to realm
-        memcpy(const_cast<void*>(get_data()), source->get_data(), source->size);
+        memcpy(const_cast<void*>(get_data()), source->get_data(), copy_size);
         return ApEvent::NO_AP_EVENT;
       }
     } 
@@ -2806,9 +2846,6 @@ namespace Legion {
                        bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(source->size <= size);
-#endif
       const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
           (use.exists() && !use.has_triggered()) ||
@@ -2817,26 +2854,53 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, 1);
-        dst.set_field(get_instance(), 0/*field id*/, 1);
+        bool own_src = false, own_dst = false;
+        PhysicalInstance src_inst = 
+          source->get_instance(redop->sizeof_rhs, own_src);
+        PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_dst);
+        src.set_field(src_inst, 0/*field id*/, size);
+        dst.set_field(dst_inst, 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/, exclusive);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> lo(0);
-        const Point<1,coord_t> hi(source->size - 1);
-        const Rect<1,coord_t> rect(lo, hi);
+        const Point<1,coord_t> zero(0);
+        const Rect<1,coord_t> rect(zero, zero);
+        ApEvent result;
         if (use.exists() && !use.has_triggered())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
                     precondition, ApEvent(use_event))));
         else if (precondition.exists())
-          return ApEvent(rect.copy(srcs, dsts, requests,
+          result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(), precondition)));
         else
-          return ApEvent(rect.copy(srcs, dsts, requests, source->get_ready()));
+          result = ApEvent(rect.copy(srcs, dsts, requests,source->get_ready()));
+        RtEvent protect;
+        if (own_src)
+        {
+          if (result.exists())
+          {
+            protect = Runtime::protect_event(result);
+            src_inst.destroy(protect);
+          }
+          else
+            src_inst.destroy();
+        }
+        if (own_dst)
+        {
+          if (result.exists())
+          {
+            if (!protect.exists())
+              protect = Runtime::protect_event(result);
+            dst_inst.destroy(protect);
+          }
+          else
+            dst_inst.destroy();
+        }
+        return result;
       }
       else
       {
@@ -2915,13 +2979,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance FutureInstance::get_instance(void)
+    PhysicalInstance FutureInstance::get_instance(size_t needed, bool &own_inst)
     //--------------------------------------------------------------------------
     {
-      if (!instance.load().exists())
+      if (needed != size)
+      {
+        // The unusual case where we need to make a new instance to reflect
+        // a different size than the original
+#ifdef DEBUG_LEGION
+        assert(needed < size);
+#endif
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        const Realm::ExternalInstanceResource *alt_resource = resource;
+        // Check to see if we already have a resource or not
+        if (alt_resource == NULL)
+        {
+          const PhysicalInstance inst = get_instance(size, own_inst); 
+          const RtEvent wait_on = use_event.load();
+          // Need to make sure the instance is valid before we use it
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+          alt_resource =
+            inst.generate_resource_info(rect_space,0/*fid*/,false/*read only*/);
+#ifdef DEBUG_LEGION
+          // Note that if you hit this then that likely means that Realm 
+          // doesn't support 'generate_resource_info' yet for that kind of
+          // memory and it probably just needs to be implemented
+          assert(alt_resource != NULL);
+#endif
+        }
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, needed);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        Realm::InstanceLayoutGeneric *ilg =
+            Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+                rect_space, constraints, dim_order);
+        PhysicalInstance result;
+        const RtEvent inst_ready(PhysicalInstance::create_external_instance(
+             result, memory, ilg, *alt_resource, Realm::ProfilingRequestSet()));
+        own_inst = true;
+        if (resource == NULL)
+          delete alt_resource;
+        if (inst_ready.exists() && !inst_ready.has_triggered())
+          inst_ready.wait();
+        return result;
+      }
+      else if (!instance.load().exists())
       {
 #ifdef DEBUG_LEGION
         assert(external_allocation);
+        assert(resource != NULL);
 #endif
         RtEvent wait_on;
         const RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -2931,21 +3041,18 @@ namespace Legion {
         {
           // Make our instance and see if we lost the race
           const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-          const std::vector<size_t> sizes(1, 1);
+          const std::vector<size_t> sizes(1, size);
           const int dim_order[1] = { 0 };
           const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-          const Point<1,coord_t> lo(0);
-          const Point<1,coord_t> hi(size - 1);
+          const Point<1,coord_t> zero(0);
           const Realm::IndexSpace<1,coord_t> rect_space(
-                        Realm::Rect<1,coord_t>(lo, hi));
+                        Realm::Rect<1,coord_t>(zero, zero));
           Realm::InstanceLayoutGeneric *ilg =
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
           PhysicalInstance result;
           RtEvent inst_ready(PhysicalInstance::create_external_instance(
-                result, memory, ilg, Realm::ExternalMemoryResource(
-                  reinterpret_cast<uintptr_t>(get_data()), size,
-                  false/*read only*/), Realm::ProfilingRequestSet()));
+                result, memory, ilg, *resource, Realm::ProfilingRequestSet()));
           instance.store(result);
           own_instance.store(true);
           Runtime::trigger_event(ready_event, inst_ready);
@@ -2964,6 +3071,7 @@ namespace Legion {
             wait_on.wait(); 
         }
       }
+      own_inst = false;
       return instance.load();
     }
 
@@ -3038,7 +3146,12 @@ namespace Legion {
       {
         rez.serialize<bool>(false); // by value
         rez.serialize(data);
-        rez.serialize(get_instance());
+        bool dummy_owner = true;
+        rez.serialize(get_instance(size, dummy_owner));
+#ifdef DEBUG_LEGION
+        // should never end up owning this instance
+        assert(!dummy_owner);
+#endif
         if (other_ready)
           rez.serialize(ready);
         else
@@ -3056,7 +3169,6 @@ namespace Legion {
         if (external_allocation)
         {
           rez.serialize<bool>(true); // external allocation
-          rez.serialize(resource);
           rez.serialize(freefunc);
           rez.serialize(freeproc);
         }
@@ -3102,14 +3214,12 @@ namespace Legion {
       derez.deserialize<bool>(external_allocation);
       if (external_allocation)
       {
-        const Realm::ExternalInstanceResource *resource;
-        derez.deserialize(resource);
         void (*freefunc)(const Realm::ExternalInstanceResource&);
         derez.deserialize(freefunc);
         Processor proc;
         derez.deserialize(proc);
         return new FutureInstance(data, size, ready, runtime, own_allocation,
-                              resource, freefunc, proc, instance, use_event);
+                      NULL/*resource*/, freefunc, proc, instance, use_event);
       }
       else
       {
@@ -3166,6 +3276,73 @@ namespace Legion {
       }
       return new FutureInstance(value, size, ApEvent::NO_AP_EVENT,
                                 runtime, false/*eager*/, true/*external*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::free_external_allocation(
+                       Runtime *runtime, Processor proc,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&),
+                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
+                       const Realm::ExternalInstanceResource *resource)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(freefunc != NULL);
+#endif
+      // Check see if this is local, if not, send a message
+      const AddressSpaceID target_space = proc.address_space();
+      if (target_space != runtime->address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(proc);
+          rez.serialize(freefunc);
+          rez.serialize(inst);
+          rez.serialize(precondition);
+        }
+        runtime->send_free_external_allocation(target_space, rez);
+      }
+      else
+      {
+        // Dispatch this on the target processor
+        FreeExternalArgs args(resource, freefunc, inst, precondition);
+        runtime->issue_application_processor_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, proc, use); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance::FreeExternalArgs::FreeExternalArgs(
+                          const Realm::ExternalInstanceResource *r,
+                          void (*func)(const Realm::ExternalInstanceResource&),
+                          PhysicalInstance inst, ApEvent pre)
+      : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
+        resource((r == NULL) ? r : r->clone()), freefunc(func),
+        instance(inst), precondition(pre)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::handle_free_external(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
+      const Realm::ExternalInstanceResource *resource = fargs->resource;
+      if (resource == NULL)
+      {
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        resource = fargs->instance.generate_resource_info(rect_space,
+                                          0/*fid*/, true/*read only*/);
+      }
+      (*(fargs->freefunc))(*resource);
+      if (fargs->instance.exists())
+        fargs->instance.destroy(fargs->precondition);
+      if (fargs->resource == NULL)
+        delete resource;
     }
 
     //--------------------------------------------------------------------------
@@ -3535,20 +3712,26 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        if (context != NULL)
+        Domain domain;
+        future_map_domain->get_launch_space_domain(domain);
+        std::vector<RtEvent> ready_events;
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          RtEvent ready;
+          get_future(itr.p, true/*internal only*/, &ready);
+          if (ready.exists())
+            ready_events.push_back(ready);
         }
-        else
-          ready_event.wait();
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
       }
-      // No need for the lock since the map should be fixed at this point
+      AutoLock fm_lock(future_map_lock);
       others = futures;
     }
 
@@ -3581,12 +3764,7 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-      // Wait for all the futures to be ready
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-      for (std::map<DomainPoint,Future>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
-        others[it->first] = it->second;
+      get_all_futures(others);
     }
 
     //--------------------------------------------------------------------------
@@ -4160,21 +4338,17 @@ namespace Legion {
       has_non_trivial_call = true;
       // We know this call only comes from the application so we don't
       // need to worry about thread safety
-      if (collective_performed)
+      if (collective_performed.load())
       {
         // No need for the lock, we know we have all the futures
         others = futures;
         return;
       }
-      // Wait for all the local futures to be completed
-      if (!ready_event.has_triggered())
-        ready_event.wait();
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
       WrapperReferenceMutator mutator(exchange_events);
-      AutoLock f_lock(future_map_lock);
-      if (!collective_performed)
+      if (!collective_performed.load())
       { 
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
@@ -4186,12 +4360,23 @@ namespace Legion {
           if (hasher.verify(__func__))
             break;
         }
+        std::map<DomainPoint,Future> local_futures;
+        get_shard_local_futures(local_futures);
         FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
-        collective.exchange_future_names(futures);
-        // When the collective is done we can mark that we've done it
-        // and then copy the results
-        collective_performed = true;
+        collective.exchange_future_names(local_futures);
+        AutoLock f_lock(future_map_lock);
+        if (!collective_performed.load())
+        {
+          // When the collective is done we can mark that we've done it
+          // and then copy the results
+          if (!futures.empty())
+            futures.insert(local_futures.begin(), local_futures.end());
+          else
+            futures.swap(local_futures);
+          collective_performed.store(true);
+        }
       }
+      // No need for the lock, we know the futures are unchanging now
       others = futures;
     }
 
@@ -4238,23 +4423,56 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-      FutureMapImpl::get_shard_local_futures(others);
+      Domain sharding_domain;
+      shard_domain->get_launch_space_domain(sharding_domain);
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      Domain domain;
-      shard_domain->get_launch_space_domain(domain);
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      for (std::map<DomainPoint,Future>::iterator it = 
-            others.begin(); it != others.end(); /*nothing*/)
+      if (!ready_event.has_triggered())
       {
-        const ShardID shard = sharding_function->find_owner(it->first, domain);
-        if (shard != local_shard)
+        IndexSpace local_space = sharding_function->find_shard_space(
+            local_shard, future_map_domain, shard_domain->handle);
+        IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
+        Domain domain;
+        local_points->get_launch_space_domain(domain);
+        std::vector<RtEvent> ready_events;
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
         {
-          std::map<DomainPoint,Future>::iterator to_delete = it++;
-          others.erase(to_delete);
+          const ShardID shard = 
+            sharding_function->find_owner(itr.p, sharding_domain);
+          if (shard == local_shard)
+          {
+            RtEvent ready;
+            others[itr.p] = get_future(itr.p, true/*internal*/, &ready);
+            if (ready.exists())
+              ready_events.push_back(ready);
+          }
         }
-        else
-          it++;
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+      }
+      else
+      {
+        // This will just get all the local futures currently
+        FutureMapImpl::get_all_futures(others);
+        // Filter out any that are not part of our local set
+        for (std::map<DomainPoint,Future>::iterator it = 
+              others.begin(); it != others.end(); /*nothing*/)
+        {
+          const ShardID shard =
+            sharding_function->find_owner(it->first, sharding_domain);
+          if (shard != local_shard)
+          {
+            std::map<DomainPoint,Future>::iterator to_delete = it++;
+            others.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
     }
 
@@ -5465,10 +5683,17 @@ namespace Legion {
       assert(cons->ordering_constraint.ordering.size() > 1);
       assert(cons->ordering_constraint.ordering.back() == LEGION_DIM_F);
 #endif
-      int32_t ndim = cons->ordering_constraint.ordering.size() - 1;
+      int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
+      DimensionKind max_dim =
+        static_cast<DimensionKind>(static_cast<int32_t>(LEGION_DIM_X) + ndim);
       ordering.resize(ndim);
-      for (int32_t idx = 0; idx < ndim; ++idx)
-        ordering[idx] = cons->ordering_constraint.ordering[idx];
+      uint32_t idx = 0;
+      for (std::vector<DimensionKind>::const_iterator it =
+           cons->ordering_constraint.ordering.begin(); it !=
+           cons->ordering_constraint.ordering.end(); ++it)
+      {
+        if (*it < max_dim) ordering[idx++] = *it;
+      }
 
       for (std::vector<AlignmentConstraint>::const_iterator it =
            cons->alignment_constraints.begin(); it !=
@@ -5667,19 +5892,20 @@ namespace Legion {
         {
           if (!global_indexing)
           {
-            DomainPoint index_point = context->owner_task->index_point;
-            domain.dim = index_point.dim + extents.dim;
+            DomainPoint color_point =
+              node->row_source->get_domain_point_color();
+            domain.dim = color_point.dim + extents.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
 #endif
-            for (int idx = 0; idx < index_point.dim; ++idx)
+            for (int idx = 0; idx < color_point.dim; ++idx)
             {
-              domain.rect_data[idx] = index_point[idx];
-              domain.rect_data[idx + domain.dim] = index_point[idx];
+              domain.rect_data[idx] = color_point[idx];
+              domain.rect_data[idx + domain.dim] = color_point[idx];
             }
             for (int idx = 0; idx < extents.dim; ++idx)
             {
-              int off = index_point.dim + idx;
+              int off = color_point.dim + idx;
               domain.rect_data[off] = 0;
               domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }
@@ -10577,12 +10803,12 @@ namespace Legion {
       }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-      const std::vector<size_t> sizes(1, 1);
+      const std::vector<size_t> sizes(1, size);
       const int dim_order[1] = { 0 };
+      const Realm::Point<1,coord_t> zero(0);
       const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
       const Realm::IndexSpace<1,coord_t> rect_space(
-          Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                 Realm::Point<1,coord_t>(size-1)));
+                                     Realm::Rect<1,coord_t>(zero, zero));
       Realm::InstanceLayoutGeneric *ilg =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
@@ -13658,11 +13884,15 @@ namespace Legion {
       // which means we can just free this here now
       if (proc.exists())
       {
-        const Realm::ExternalInstanceResource *resource;
-        derez.deserialize(resource);
         void (*freefunc)(const Realm::ExternalInstanceResource&);
         derez.deserialize(freefunc);
-        free_external_allocation(proc, resource, freefunc);
+        PhysicalInstance instance;
+        derez.deserialize(instance);
+        ApEvent precondition;
+        derez.deserialize(precondition);
+        const RtEvent use_event(instance.fetch_metadata(proc));
+        FutureInstance::free_external_allocation(this, proc, freefunc,
+            instance, use_event, precondition, NULL/*resource*/);
       }
       else
       {
@@ -21480,39 +21710,7 @@ namespace Legion {
       // Just use the standard translation for now
       AddressSpaceID result = handle.address_space();
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_external_allocation(Processor proc,
-                       const Realm::ExternalInstanceResource *resource,
-                       void (*freefunc)(const Realm::ExternalInstanceResource&))
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(resource != NULL);
-      assert(freefunc != NULL);
-#endif
-      // Check see if this is local, if not, send a message
-      const AddressSpaceID target_space = proc.address_space();
-      if (target_space != address_space)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(proc);
-          rez.serialize(resource);
-          rez.serialize(freefunc);
-        }
-        send_free_external_allocation(target_space, rez);
-      }
-      else
-      {
-        // Dispatch this on the target processor
-        FreeExternalArgs args(resource, freefunc);
-        issue_application_processor_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, proc); 
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::acquire_collective_allocation_privileges(
@@ -33063,9 +33261,7 @@ namespace Legion {
           }
         case LG_FREE_EXTERNAL_TASK_ID:
           {
-            const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
-            (*(fargs->freefunc))(*fargs->resource);
-            delete fargs->resource;
+            FutureInstance::handle_free_external(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

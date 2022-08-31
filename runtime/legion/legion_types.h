@@ -187,6 +187,7 @@ namespace Legion {
   class Fill;
   class Partition;
   class MustEpoch;
+  class PointTransformFunctor;
   class Runtime;
   class LegionHandshake;
   class MPILegionHandshake;

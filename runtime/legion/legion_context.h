@@ -281,7 +281,8 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            bool trust = false) = 0;
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
@@ -1270,7 +1271,8 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
@@ -2400,7 +2402,8 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
@@ -2713,6 +2716,8 @@ namespace Legion {
           const std::vector<IndexSpaceRequirement> &index_requirements);
       static void hash_region_requirements(Murmur3Hasher &hasher,
           const std::vector<RegionRequirement> &region_requirements);
+      static void hash_output_requirements(Murmur3Hasher &hasher,
+          const std::vector<OutputRequirement> &output_requirements);
       static void hash_grants(Murmur3Hasher &hasher, 
           const std::vector<Grant> &grants);
       static void hash_phase_barriers(Murmur3Hasher &hasher,
@@ -3217,7 +3222,8 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,

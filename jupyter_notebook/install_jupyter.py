@@ -36,7 +36,10 @@ kernel_json = {"argv": [],
 kernel_json_suffix_nocr = ["legion_kernel_nocr.py", "-f", "{connection_file}"]
 
 
-required_cmd_dict_key = ["name", "kernel_name", "legion_prefix", "exe", "cpus", "gpus", "openmp", "ompthreads", "utility", "sysmem", "fbmem", "zcmem", "regmem", "not_control_replicable"]
+required_cmd_dict_key = ["name", "kernel_name", "legion_prefix", "exe", 
+                         "cpus", "gpus", "openmp", "ompthreads", "utility", 
+                         "sysmem", "numamem", "fbmem", "zcmem", "regmem", 
+                         "not_control_replicable"]
 
 # This internal method is used to delete a kernel specified by kernel_name
 def _delete_kernel(ksm, kernel_name, mute=True):
@@ -72,6 +75,7 @@ def parse_json(legion_prefix,
                utility,
                sysmem,
                fbmem,
+               numamem,
                zcmem,
                regmem,
                launcher,
@@ -164,6 +168,12 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_d
         if cmd_dict["ompthreads"]["value"] > 0:
             kernel_json["argv"] += cmd_dict["openmp"]["cmd"], str(cmd_dict["openmp"]["value"])
             kernel_json["argv"] += cmd_dict["ompthreads"]["cmd"], str(cmd_dict["ompthreads"]["value"])
+            # numemem
+            if cmd_dict["launcher"]["type"] != "legate":
+                if cmd_dict["numamem"]["value"] > 0:
+                    kernel_json["argv"] += "-ll:onuma", "1"
+                else:
+                    kernel_json["argv"] += "-ll:onuma", "0"
         else:
             print(
                 "WARNING: ignore request for "
@@ -178,6 +188,10 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_d
     # system memory
     if cmd_dict["sysmem"]["value"] > 0:
         kernel_json["argv"] += cmd_dict["sysmem"]["cmd"], str(cmd_dict["sysmem"]["value"])
+
+    # numa memory
+    if cmd_dict["numamem"]["value"] > 0:
+        kernel_json["argv"] += cmd_dict["numamem"]["cmd"], str(cmd_dict["numamem"]["value"])
     
     # register memory
     if cmd_dict["regmem"]["value"] > 0:
@@ -229,6 +243,8 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_d
     else:
         file_path = kernel_file_dir + "/" + kernel_filename
     shutil.copy(file_path, kernel_install_dir)
+    
+    return kernel_name
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
@@ -258,7 +274,7 @@ def parse_args(argv=None):
         "--json",
         default="legion_python.json",
         dest="json",
-        help="Wrapper of legion_python, now it supports legion_python (default) or legate",
+        help="Configuration file",
     )
     parser.add_argument(
         "--legion-prefix",
@@ -309,6 +325,13 @@ def parse_args(argv=None):
         help="Amount of DRAM memory per rank (in MBs)",
     )
     parser.add_argument(
+        "--numamem",
+        type=int,
+        default=0,
+        dest="numamem",
+        help="Amount of DRAM memory per NUMA domain per rank (in MBs)",
+    )
+    parser.add_argument(
         "--fbmem",
         type=int,
         default=4000,
@@ -346,7 +369,7 @@ def parse_args(argv=None):
         choices=["mpirun", "jsrun", "srun", "none"],
         default="none",
         help='launcher program to use (set to "none" for local runs, or if '
-        "the launch has already happened by the time legate is invoked)",
+        "the launch has already happened by the time legion is invoked)",
     )
     parser.add_argument(
         "--nodes",
@@ -383,6 +406,7 @@ def driver(args, opts, kernel_file_dir=None):
                           ompthreads=args.ompthreads,
                           utility=args.utility,
                           sysmem=args.sysmem,
+                          numamem=args.numamem,
                           fbmem=args.fbmem,
                           zcmem=args.zcmem,
                           regmem=args.regmem,
@@ -393,15 +417,18 @@ def driver(args, opts, kernel_file_dir=None):
                           kernel_name=args.kernel_name,
                           filename=args.json)
 
+    kernel_name = None
     if cmd_dict["not_control_replicable"]:
-        install_kernel_nocr(user=args.user, 
-                            prefix=args.prefix, 
-                            cmd_opts=opts,
-                            cmd_dict=cmd_dict,
-                            verbose=args.verbose,
-                            kernel_file_dir=kernel_file_dir)
+        kernel_name = install_kernel_nocr(user=args.user, 
+                                          prefix=args.prefix, 
+                                          cmd_opts=opts,
+                                          cmd_dict=cmd_dict,
+                                          verbose=args.verbose,
+                                          kernel_file_dir=kernel_file_dir)
     else:
         assert 0, "Control replication is not supported yet"
+
+    return kernel_name
 
 if __name__ == '__main__':
     args, opts = parse_args()

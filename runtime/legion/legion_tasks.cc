@@ -194,6 +194,7 @@ namespace Legion {
       rez.serialize(req.field_space);
       rez.serialize(req.global_indexing);
       rez.serialize(req.valid_requirement);
+      rez.serialize(req.color_space);
     }
 
     //--------------------------------------------------------------------------
@@ -207,6 +208,7 @@ namespace Legion {
       derez.deserialize(req.field_space);
       derez.deserialize(req.global_indexing);
       derez.deserialize(req.valid_requirement);
+      derez.deserialize(req.color_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8667,6 +8669,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::validate_output_sizes(unsigned index,
+                                          const OutputRequirement& req,
+                                          const SizeMap& output_sizes) const
+    //--------------------------------------------------------------------------
+    {
+      size_t num_tasks = 0;
+      if (sharding_space.exists())
+        num_tasks = runtime->forest->get_domain_volume(sharding_space);
+      else
+        num_tasks = launch_space->get_volume();
+
+      if (output_sizes.size() == num_tasks) return;
+
+      REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+        "A projection functor for every output requirement must be "
+        "bijective, but projection functor %u for output requirement %u "
+        "in task %s (UID: %lld) mapped more than one point in the launch "
+        "domain to the same subregion.",
+        req.projection, index, get_task_name(), get_unique_op_id());
+    }
+
+    //--------------------------------------------------------------------------
     Domain IndexTask::compute_global_output_ranges(IndexSpaceNode *parent,
                                                    IndexPartNode *part,
                                                    const SizeMap& output_sizes,
@@ -8677,16 +8701,20 @@ namespace Legion {
 
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
+      ApEvent ready = ApEvent::NO_AP_EVENT;
+      Domain color_space = part->color_space->get_domain(ready, true);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
 #ifdef DEBUG_LEGION
-      assert(index_domain.dense());
+      assert(color_space.dense());
 #endif
-      int32_t ndim = index_domain.dim;
-      DomainPoint launch_extents = index_domain.hi() - index_domain.lo() + 1;
+      int32_t ndim = color_space.dim;
+      DomainPoint color_extents = color_space.hi() - color_space.lo() + 1;
 
       // Initialize the vector of extents with -1
       std::vector<std::vector<coord_t>> all_extents(ndim);
       for (int32_t dim = 0; dim < ndim; ++dim)
-        all_extents[dim].resize(launch_extents[dim] + 1, -1);
+        all_extents[dim].resize(color_extents[dim] + 1, -1);
 
       // Check the alignment while populating the extent vector
       for (SizeMap::const_iterator it = output_sizes.begin();
@@ -8775,6 +8803,9 @@ namespace Legion {
           continue;
         IndexSpaceNode *parent= forest->get_node(
             output_regions[idx].parent.get_index_space());
+#ifdef DEBUG_LEGION
+        validate_output_sizes(idx, output_regions[idx], all_output_sizes[idx]);
+#endif
         if (options.global_indexing())
         {
           // For globally indexed output regions, we need to check
@@ -9159,12 +9190,53 @@ namespace Legion {
                std::vector<OutputRequirement> &outputs, IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      size_t num_tasks = runtime->forest->get_domain_volume(launch_space);
+#endif
       output_region_options.resize(outputs.size());
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
         output_region_options[idx] = 
           OutputOptions(req.global_indexing, req.valid_requirement);
+
+        IndexSpace color_space = launch_space;
+        if (req.projection != 0) {
+          color_space = req.color_space;
+
+          if (!color_space.exists())
+            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+              "Output region %u of task %s (UID: %lld) requests projection "
+              "of ID %u but no color space is specified. "
+              "Every output requirement with a non-identity projection must "
+              "have a color space set.",
+              idx, get_task_name(), get_unique_op_id(), req.projection);
+
+#ifdef DEBUG_LEGION
+          ApEvent ready = ApEvent::NO_AP_EVENT;
+          IndexSpaceNode* node = runtime->forest->get_node(color_space);
+          Domain color_domain = node->get_domain(ready, true);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+
+          if (req.global_indexing && !color_domain.dense())
+            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+              "The global indexing mode requires the color space of an "
+              "output requirement to be dense, but a sparse color space is "
+              "assigned to output requirement %u of task %s (UID: %lld).",
+              idx, get_task_name(), get_unique_op_id());
+
+          if (color_domain.get_volume() != num_tasks)
+            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+              "Output region %u of task %s (UID: %lld) requests projection "
+              "but the volume of the color space is different from the total "
+              "number of point tasks. "
+              "The mapping between the launch domain and the subregions must "
+              "be bijective.",
+              idx, get_task_name(), get_unique_op_id());
+#endif
+        }
+        int color_dim = color_space.get_dim();
 
         if (!req.valid_requirement)
         {
@@ -9173,12 +9245,12 @@ namespace Legion {
             Internal::NT_TemplateHelper::get_dim(req.type_tag);
           if (req.global_indexing)
           {
-            if (launch_space.get_dim() != requested_dim)
+            if (color_dim != requested_dim)
               REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
                 "Output region %u of task %s (UID: %lld) is requested to have "
-                "%d dimensions, but the launch domain has %d dimensions. "
+                "%d dimensions, but the color space has %d dimensions. "
                 "Dimensionalities of output regions must be the same as the "
-                "launch domain's in global indexing mode.",
+                "color space's in global indexing mode.",
                 idx, get_task_name(), get_unique_op_id(), requested_dim,
                 launch_space.get_dim());
 
@@ -9187,19 +9259,19 @@ namespace Legion {
           else
           {
             // When local indexing is used for the output region,
-            // we create an (N+1)-D index space when the launch domain is N-D.
+            // we create an (N+1)-D index space when the color domain is N-D.
 
             // Before creating the index space, we make sure that
             // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
-            if (launch_space.get_dim() + requested_dim > LEGION_MAX_DIM)
+            if (color_dim + requested_dim > LEGION_MAX_DIM)
               REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
                 "Dimensionality of output region %u of task %s (UID: %lld) "
                 "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
                 "bigger LEGION_MAX_DIM value or reduce dimensionality of "
-                "either the launch domain or the output region.",
+                "either the color space or the output region.",
                 idx, get_task_name(), get_unique_op_id());
 
-            OutputRegionTagCreator creator(&type_tag, launch_space.get_dim());
+            OutputRegionTagCreator creator(&type_tag, color_dim);
             Internal::NT_TemplateHelper::demux<OutputRegionTagCreator>(
                 req.type_tag, &creator);
           }
@@ -9209,11 +9281,10 @@ namespace Legion {
             parent_ctx->create_unbound_index_space(type_tag);
 
           // Create a pending partition using the launch domain as the color space
-          IndexSpace color_space = launch_space;
           IndexPartition pid = parent_ctx->create_pending_partition(
               index_space, color_space,
               LEGION_DISJOINT_COMPLETE_KIND,
-              LEGION_AUTO_GENERATE_ID);
+              LEGION_AUTO_GENERATE_ID, true/*trust partitioning*/);
 
           // Create an output region and a partition
           LogicalRegion region = parent_ctx->create_logical_region(
@@ -10201,7 +10272,22 @@ namespace Legion {
                  sit != it->second.end(); ++sit)
             {
 #ifdef DEBUG_LEGION
-              assert(output_sizes.find(sit->first) == output_sizes.end());
+              if (output_sizes.find(sit->first) != output_sizes.end()) {
+                const DomainPoint& color = sit->first;
+                const OutputRequirement& req = output_regions[it->first];
+                std::stringstream ss;
+                ss << "(" << color[0];
+                for (int dim = 1; dim < color.dim; ++dim)
+                  ss << "," << color[dim];
+                ss << ")";
+                REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+                  "A projection functor for every output requirement must be "
+                  "bijective, but projection functor %u for output requirement "
+                  "%u in task %s (UID: %lld) mapped more than one point "
+                  "in the launch domain to the same subregion of color %s.",
+                  req.projection,it->first, get_task_name(), get_unique_op_id(),
+                  ss.str().c_str());
+              }
 #endif
               output_sizes[sit->first] = sit->second;
             }
@@ -10902,6 +10988,8 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       origin_mapped = false;
       origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT;
+      // Slice tasks always already have their options selected
+      options_selected = true;
     }
 
     //--------------------------------------------------------------------------
@@ -11836,11 +11924,35 @@ namespace Legion {
       {
         if (output_region_options[idx].valid_requirement())
           continue;
-        IndexTask::SizeMap &output_sizes= all_output_sizes[idx];
+        IndexTask::SizeMap &output_sizes = all_output_sizes[idx];
+        const OutputRequirement &req = outputs[idx].impl->get_requirement();
+        if (req.projection == 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(output_sizes.find(point) == output_sizes.end());
+          assert(output_sizes.find(point) == output_sizes.end());
 #endif
-        output_sizes[point] = outputs[idx].impl->get_extents();
+          output_sizes[point] = outputs[idx].impl->get_extents();
+        }
+        else
+        {
+          DomainPoint color =
+            runtime->get_logical_region_color_point(req.region);
+          if (output_sizes.find(color) != output_sizes.end())
+          {
+            std::stringstream ss;
+            ss << "(" << color[0];
+            for (int dim = 1; dim < color.dim; ++dim) ss << "," << color[dim];
+            ss << ")";
+            REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+              "A projection functor for every output requirement must be "
+              "bijective, but projection functor %u for output requirement %u "
+              "in task %s (UID: %lld) mapped more than one point in the launch "
+              "domain to the same subregion of color %s.",
+              req.projection, idx, get_task_name(), get_unique_op_id(),
+              ss.str().c_str());
+          }
+          output_sizes[color] = outputs[idx].impl->get_extents();
+        }
       }
     }
 

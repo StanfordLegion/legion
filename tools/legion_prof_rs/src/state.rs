@@ -319,17 +319,10 @@ impl Proc {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        // BTreeMap::retain requires Rust 1.53
-        let mut removed_tasks = Vec::new();
-        for (op_id, task) in self.tasks.iter_mut() {
+        for task in self.tasks.values_mut() {
             task.trim_time_range(start, stop);
-            if task.time_range.was_removed {
-                removed_tasks.push(*op_id);
-            }
         }
-        for op_id in removed_tasks {
-            self.tasks.remove(&op_id);
-        }
+        self.tasks.retain(|_, t| !t.time_range.was_removed);
         for mapper_call in &mut self.mapper_calls {
             mapper_call.trim_time_range(start, stop);
         }
@@ -1415,6 +1408,18 @@ impl Task {
     }
 }
 
+#[derive(Debug)]
+pub struct MultiTask {
+    pub op_id: OpID,
+    pub task_id: TaskID,
+}
+
+impl MultiTask {
+    fn new(op_id: OpID, task_id: TaskID) -> Self {
+        MultiTask { op_id, task_id }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OpKindID(u32);
 
@@ -1797,6 +1802,7 @@ pub struct State {
     pub operations: BTreeMap<OpID, Operation>,
     prof_uid_map: BTreeMap<u64, u64>,
     pub tasks: BTreeMap<OpID, ProcID>,
+    pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
@@ -2403,9 +2409,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let kind = OpKindID(*kind);
             state.create_op(*op_id).set_kind(kind);
         }
-        Record::MultiTask { op_id, .. } => {
+        Record::MultiTask { op_id, task_id } => {
             state.create_op(*op_id);
-            // .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
+            state
+                .multi_tasks
+                .entry(*op_id)
+                .or_insert_with(|| MultiTask::new(*op_id, *task_id));
         }
         Record::SliceOwner { parent_id, op_id } => {
             let parent_id = OpID(*parent_id);

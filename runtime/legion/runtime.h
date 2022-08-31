@@ -462,6 +462,19 @@ namespace Legion {
       public:
         FutureInstance *const instance;
       };
+      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
+      public:
+        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
+            void (*func)(const Realm::ExternalInstanceResource&),
+            PhysicalInstance inst, ApEvent precondition);
+      public:
+        const Realm::ExternalInstanceResource *const resource;
+        void (*const freefunc)(const Realm::ExternalInstanceResource&);
+        const PhysicalInstance instance;
+        const ApEvent precondition;
+      };
     public:
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
@@ -494,7 +507,11 @@ namespace Legion {
       const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
       ApEvent get_ready(bool check_ready_event = true);
-      PhysicalInstance get_instance(void);
+      // This method will return an instance that represents the
+      // data for this future instance of a given size, if the needed size
+      // does not match the base size then a fresh instance will be returned
+      // which will be the responsibility of the caller to destroy
+      PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
       bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
@@ -507,6 +524,11 @@ namespace Legion {
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
+      static void free_external_allocation(Runtime *runtime, Processor proc,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&),
+                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
+                       const Realm::ExternalInstanceResource *resource);
+      static void handle_free_external(const void *args);
       static void handle_deferred_delete(const void *args);
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
@@ -524,6 +546,8 @@ namespace Legion {
     protected:
       bool own_allocation;
       std::atomic<const void*> data;
+      // This instance always has a domain of [0,0] and a field
+      // size == `size` for the future instance
       std::atomic<PhysicalInstance> instance;
       std::atomic<RtEvent> use_event;
       std::atomic<bool> own_instance;
@@ -756,7 +780,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
       // Whether the future map owns the sharding function
       bool own_sharding_function;
-      bool collective_performed;
+      std::atomic<bool> collective_performed;
       // For replicated future maps we track whether there have been any
       // non-triival calls to this shard of the future map. If there are
       // then we know there could be non-trivial calls in other shards.
@@ -2620,18 +2644,6 @@ namespace Legion {
       public:
         TopLevelContext *const ctx;
       };
-      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
-      public:
-        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
-            void (*func)(const Realm::ExternalInstanceResource&))
-          : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
-            resource(r), freefunc(func) { }
-      public:
-        const Realm::ExternalInstanceResource *const resource;
-        void (*const freefunc)(const Realm::ExternalInstanceResource&);
-      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -3087,9 +3099,6 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
-      void free_external_allocation(Processor proc,
-          const Realm::ExternalInstanceResource *resource, 
-          void (*freefunc)(const Realm::ExternalInstanceResource&));
       void acquire_collective_allocation_privileges(
           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
       void release_collective_allocation_privileges(Memory target);

@@ -5226,12 +5226,12 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
@@ -5251,7 +5251,7 @@ namespace Legion {
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -7890,18 +7890,22 @@ namespace Legion {
       for (typename std::list<QueueEntry<T> >::iterator it =
             queue.begin(); it != queue.end(); /*nothing*/)
       {
-        if (std::binary_search(ready_events.begin(), 
-                      ready_events.end(), it->ready))
+        std::vector<RtEvent>::iterator finder = 
+          std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
+        if ((finder != ready_events.end()) && (*finder == it->ready))
         {
           to_perform.push_back(it->op);
           it = queue.erase(it);
-          // You might think you can break out early here when you've seen
-          // all the ready events once but you can't because there might
-          // be duplicates!
+          ready_events.erase(finder);
+          if (ready_events.empty())
+            break;
         }
         else
           it++;
       }
+#ifdef DEBUG_LEGION
+      assert(ready_events.empty());
+#endif
       if (!queue.empty())
       {
         next_ready = RtEvent(comp_queue.get_nonempty_event());
@@ -12520,6 +12524,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_output_requirements(
+           Murmur3Hasher &hasher, const std::vector<OutputRequirement> &outputs)
+    //--------------------------------------------------------------------------
+    {
+      if (outputs.empty())
+        return;
+      Serializer rez;
+      for (std::vector<OutputRequirement>::const_iterator it =
+            outputs.begin(); it != outputs.end(); it++)
+        ExternalTask::pack_output_requirement(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "output requirement");
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_grants(Murmur3Hasher &hasher,
                                                const std::vector<Grant> &grants)
     //--------------------------------------------------------------------------
@@ -15202,11 +15220,11 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       PartitionKind part_kind,
-                                                      Color color)
+                                                      Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+      for (int i = 0; runtime->safe_control_replication && !trust && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
@@ -15219,7 +15237,7 @@ namespace Legion {
           break;
       }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
@@ -15260,7 +15278,7 @@ namespace Legion {
             part_color, color_generated, disjoint_result, partition_ready))
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -17308,6 +17326,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_TASK, __func__);
         hash_task_launcher(hasher, runtime->safe_control_replication, launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17368,6 +17387,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE, __func__);
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17432,6 +17452,7 @@ namespace Legion {
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
         hasher.hash(redop, "redop");
         hasher.hash<bool>(deterministic, "deterministic");
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -20192,40 +20213,6 @@ namespace Legion {
               // Don't remove this from created regions yet,
               // That will happen when we make the deletion operation
               delete_now.push_back(*rit);
-              // Check to see if we have any latent field spaces to clean up
-              if (!latent_field_spaces.empty())
-              {
-                std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-                  latent_field_spaces.find(rit->get_field_space());
-                if (finder != latent_field_spaces.end())
-                {
-                  std::set<LogicalRegion>::iterator latent_finder =
-                    finder->second.find(*rit);
-#ifdef DEBUG_LEGION
-                  assert(latent_finder != finder->second.end());
-#endif
-                  finder->second.erase(latent_finder);
-                  if (finder->second.empty())
-                  {
-                    // Now that all the regions using this field space have
-                    // been deleted we can clean up all the created_fields
-                    for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                          created_fields.begin(); it !=
-                          created_fields.end(); /*nothing*/)
-                    {
-                      if (it->first == finder->first)
-                      {
-                        std::set<std::pair<FieldSpace,FieldID> >::iterator
-                          to_delete = it++;
-                        created_fields.erase(to_delete);
-                      }
-                      else
-                        it++;
-                    }
-                    latent_field_spaces.erase(finder);
-                  }
-                }
-              }
             }
           }
         }
@@ -22545,7 +22532,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_PENDING_PARTITION,

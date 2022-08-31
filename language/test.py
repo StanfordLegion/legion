@@ -163,9 +163,7 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
     return result_dir
 
 def compare_prof_results(verbose, py_exe_path, profile_dirs):
-    cmd = ['diff', '-r', '-u',
-           '--exclude', 'legion_prof_ops.tsv',
-           ] + profile_dirs
+    cmd = ['diff', '-r', '-u'] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,

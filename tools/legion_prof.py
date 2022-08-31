@@ -3926,7 +3926,7 @@ class State(object):
 
         ops_file = open(ops_file_name, "w")
         ops_file.write("op_id\tdesc\tproc\tlevel\n")
-        for op_id, operation in iteritems(self.operations):
+        for op_id, operation in sorted(iteritems(self.operations)):
             if operation.is_trimmed():
                 continue
             proc = ""
