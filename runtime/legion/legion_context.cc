@@ -12395,6 +12395,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_output_requirements(
+           Murmur3Hasher &hasher, const std::vector<OutputRequirement> &outputs)
+    //--------------------------------------------------------------------------
+    {
+      if (outputs.empty())
+        return;
+      Serializer rez;
+      for (std::vector<OutputRequirement>::const_iterator it =
+            outputs.begin(); it != outputs.end(); it++)
+        ExternalTask::pack_output_requirement(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "output requirement");
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ReplicateContext::hash_grants(Murmur3Hasher &hasher,
                                                const std::vector<Grant> &grants)
     //--------------------------------------------------------------------------
@@ -17175,6 +17189,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_TASK, __func__);
         hash_task_launcher(hasher, runtime->safe_control_replication, launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17235,6 +17250,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE, __func__);
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17299,6 +17315,7 @@ namespace Legion {
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
         hasher.hash(redop, "redop");
         hasher.hash<bool>(deterministic, "deterministic");
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
