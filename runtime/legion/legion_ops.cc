@@ -23292,6 +23292,7 @@ namespace Legion {
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
       input.is_src = false;
       input.is_dst = false;
       input.is_src_indirect = false;
