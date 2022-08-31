@@ -177,7 +177,7 @@ task make_private_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -197,7 +197,7 @@ task make_interior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -226,7 +226,7 @@ task make_exterior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -256,11 +256,9 @@ function make_ghost_x_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
@@ -289,11 +287,9 @@ function make_ghost_y_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
