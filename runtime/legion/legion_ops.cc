@@ -20984,15 +20984,42 @@ namespace Legion {
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
-      prepare_for_mapping(target, input.target);
-      input.is_src = (index < src_requirements.size());
-      if (input.is_src)
-        input.region_req_index = index;
+      input.is_src = false;
+      input.is_dst = false;
+      input.is_src_indirect = false;
+      input.is_dst_indirect = false;
+      unsigned mod_index = index;
+      if (mod_index < src_requirements.size())
+      {
+        input.region_req_index = mod_index;
+        input.is_src = true;
+      }
       else
-        input.region_req_index = index - src_requirements.size();
+      {
+        mod_index -= src_requirements.size();
+        if (mod_index < dst_requirements.size())
+        {
+          input.region_req_index = mod_index;
+          input.is_dst = true;
+        }
+        else
+        {
+          mod_index -= dst_requirements.size();
+          if (mod_index < src_indirect_requirements.size())
+          {
+            input.region_req_index = mod_index;
+            input.is_src_indirect = true;
+          }
+          else
+          {
+            mod_index -= src_indirect_requirements.size();
 #ifdef DEBUG_LEGION
-      assert(input.region_req_index < dst_requirements.size());
+            assert(mod_index < dst_indirect_requirements.size());
 #endif
+            input.is_dst_indirect = true;
+          }
+        }
+      }
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);
