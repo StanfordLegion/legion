@@ -3626,7 +3626,7 @@ namespace Realm {
       //  that name a symbol that does not actually exist in the module - since
       //  we are doing eager lookup, we need to tolerate CUDA_ERROR_NOT_FOUND
       //  results here
-      CUresult res = cuModuleGetFunction(&f, module, func->device_fun);
+      CUresult res = CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&f, module, func->device_fun);
       switch(res) {
       case CUDA_SUCCESS:
         {
@@ -3644,8 +3644,8 @@ namespace Realm {
       default:
         {
           const char *name, *str;
-          cuGetErrorName(res, &name);
-          cuGetErrorString(res, &str);
+          CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &name);
+          CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &str);
           log_gpu.fatal() << "unexpected error when looking up device function '"
                           << func->device_fun << "' in module " << module
                           << ": " << str << " (" << name << ")";

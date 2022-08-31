@@ -494,7 +494,11 @@ namespace Legion {
       const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
       ApEvent get_ready(bool check_ready_event = true);
-      PhysicalInstance get_instance(void);
+      // This method will return an instance that represents the
+      // data for this future instance of a given size, if the needed size
+      // does not match the base size then a fresh instance will be returned
+      // which will be the responsibility of the caller to destroy
+      PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
       bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
@@ -524,6 +528,8 @@ namespace Legion {
     protected:
       bool own_allocation;
       std::atomic<const void*> data;
+      // This instance always has a domain of [0,0] and a field
+      // size == `size` for the future instance
       std::atomic<PhysicalInstance> instance;
       std::atomic<RtEvent> use_event;
       std::atomic<bool> own_instance;
