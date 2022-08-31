@@ -1114,8 +1114,12 @@ namespace Legion {
      * whose construction is controlled by the indexing mode specified
      * the output requirement:
      *
-     * 0) For either indexing mode, the output partition is a disjoint
-     *    partition whose color space is identical to the launch domain.
+     * 0) For either indexing mode, the output partition is always a disjoint
+     *    complete partition. The color space of the partition is identical to
+     *    to the launch domain by default, but must be explicitly specified
+     *    if the output requirement uses a non-identity projection functor.
+     *    (see `set_projection`) Any projection functor associated with an
+     *    output requirement must be bijective.
      *
      * 1) When the global indexing is requested, the dimension of the output
      *    region must be the same as the color space. The index space is
@@ -1174,11 +1178,18 @@ namespace Legion {
     public:
       template <int DIM, typename COORD_T>
       void set_type_tag();
+      // Specifies a projection functor id for this requirement.
+      // For a projection output requirement, a color space must be specified.
+      // The projection functor must be a bijective mapping from the launch
+      // domain to the color space. This implies that the launch domain's
+      // volume must be the same as the color space's.
+      void set_projection(ProjectionID projection, IndexSpace color_space);
     public:
       TypeTag type_tag;
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
       bool valid_requirement; /**< indicate requirement is valid */
+      IndexSpace color_space; /**< color space for the output partition */
     };
 
     /**
@@ -3685,13 +3696,6 @@ namespace Legion {
                       std::vector<DimensionKind> &ordering,
                       size_t &alignment) const;
     public:
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
-                       void *ptr,
-                       size_t alignment = 0);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments = NULL);
       template<typename T,
                int DIM,
                typename COORD_T = coord_t,

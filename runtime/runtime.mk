@@ -641,7 +641,7 @@ endif
 # finally, convert space-or-comma separated list of architectures (e.g. 35,50)
 #  into nvcc -gencode arguments
 ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
-NVCC_FLAGS += $(foreach X, -gpu=cc$(X))
+NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gpu=cc$(X))
 else
 COMMA=,
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
@@ -961,7 +961,8 @@ endif
 endif
 ifeq ($(strip $(USE_HIP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/hip/hip_module.cc \
-               $(LG_RT_DIR)/realm/hip/hip_internal.cc
+                   $(LG_RT_DIR)/realm/hip/hip_access.cc \
+                   $(LG_RT_DIR)/realm/hip/hip_internal.cc
 ifeq ($(strip $(USE_HIP_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/hip/hip_hijack.cc
 endif

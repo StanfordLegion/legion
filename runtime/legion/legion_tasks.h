@@ -100,16 +100,6 @@ namespace Legion {
       public:
         TaskOp *const op;
       };
-      struct DeferDistributeArgs : public LgTaskArgs<DeferDistributeArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_DISTRIBUTE_TASK_ID;
-      public:
-        DeferDistributeArgs(TaskOp *op)
-          : LgTaskArgs<DeferDistributeArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        TaskOp *const proxy_this;
-      };
       struct DeferMappingArgs : public LgTaskArgs<DeferMappingArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
@@ -129,28 +119,6 @@ namespace Legion {
         const unsigned invocation_count;
         std::vector<unsigned> *const performed_regions;
         std::vector<ApEvent> *const effects;
-      };
-      struct DeferLaunchArgs : public LgTaskArgs<DeferLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_LAUNCH_TASK_ID;
-      public:
-        DeferLaunchArgs(TaskOp *op)
-          : LgTaskArgs<DeferLaunchArgs>(op->get_unique_op_id()),
-            proxy_this(op) { }
-      public:
-        TaskOp *const proxy_this;
-      };
-      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
-      public:
-        DeferredEnqueueArgs(ProcessorManager *man, TaskOp *t, bool select)
-          : LgTaskArgs<DeferredEnqueueArgs>(t->get_unique_op_id()),
-            manager(man), task(t), select_options(select) { }
-      public:
-        ProcessorManager *const manager;
-        TaskOp *const task;
-        const bool select_options;
       };
     public:
       TaskOp(Runtime *rt);
@@ -248,14 +216,13 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions) = 0;
     public:
-      RtEvent defer_distribute_task(RtEvent precondition);
+      void defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
                                     const DeferMappingArgs *args,
                                     unsigned invocation_count,
                                     std::vector<unsigned> *performed = NULL,
                                     std::vector<ApEvent> *effects = NULL);
-      RtEvent defer_launch_task(RtEvent precondition);
-    protected:
+      void defer_launch_task(RtEvent precondition);
       void enqueue_ready_task(bool use_target_processor,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
     public:
@@ -1132,12 +1099,12 @@ namespace Legion {
     private:
       struct OutputRegionTagCreator {
       public:
-        OutputRegionTagCreator(TypeTag *_type_tag, int _launch_ndim)
-          : type_tag(_type_tag), launch_ndim(_launch_ndim) { }
+        OutputRegionTagCreator(TypeTag *_type_tag, int _color_ndim)
+          : type_tag(_type_tag), color_ndim(_color_ndim) { }
         template<typename DIM, typename COLOR_T>
         static inline void demux(OutputRegionTagCreator *creator)
         {
-          switch (DIM::N + creator->launch_ndim)
+          switch (DIM::N + creator->color_ndim)
           {
 #define DIMFUNC(DIM)                                             \
             case DIM:                                            \
@@ -1154,7 +1121,7 @@ namespace Legion {
         }
       private:
         TypeTag *type_tag;
-        int launch_ndim;
+        int color_ndim;
       };
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
@@ -1197,6 +1164,9 @@ namespace Legion {
                                           IndexPartNode *part,
                                           const SizeMap& output_sizes,
                                           const SizeMap& local_sizes);
+      void validate_output_sizes(unsigned index,
+                                 const OutputRequirement& output_requirement,
+                                 const SizeMap& output_sizes) const;
       virtual void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const

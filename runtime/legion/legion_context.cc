@@ -2070,7 +2070,7 @@ namespace Legion {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
       if (!inline_task)
-        pending_done = find_parent_context()->decrement_pending(owner_task);
+        find_parent_context()->decrement_pending(owner_task);
       return physical_regions;
     }
 
@@ -2232,12 +2232,7 @@ namespace Legion {
       if (!task_local_instances.empty())
         release_task_local_instances();
       // Mark that we are done executing this operation
-      // We're not actually done until we have registered our pending
-      // decrement of our parent task and recorded any profiling
-      if (!pending_done.has_triggered())
-        owner_task->complete_execution(pending_done);
-      else
-        owner_task->complete_execution();
+      owner_task->complete_execution();
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
@@ -2362,7 +2357,7 @@ namespace Legion {
       {
         // Make a simple memory copy here now
         void *buffer = malloc(source->size);
-        memcpy(buffer, source->data, source->size);
+        memcpy(buffer, source->get_data(), source->size);
         return new FutureInstance(buffer, source->size, ApEvent::NO_AP_EVENT,
             runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
       }
@@ -2414,7 +2409,7 @@ namespace Legion {
     {
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      pending_done = owner_task->get_context()->decrement_pending(owner_task);
+      owner_task->get_context()->decrement_pending(owner_task);
     }
 
     //--------------------------------------------------------------------------
@@ -2813,6 +2808,17 @@ namespace Legion {
         total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
+        ready_comp_queue(CompletionQueue::NO_QUEUE),
+        enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
+        distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
+        launch_task_comp_queue(CompletionQueue::NO_QUEUE),
+        resolution_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_execution_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_execution_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_completion_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_completion_comp_queue(CompletionQueue::NO_QUEUE),
+        trigger_commit_comp_queue(CompletionQueue::NO_QUEUE),
+        deferred_commit_comp_queue(CompletionQueue::NO_QUEUE),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
         physical_trace_replay_status(0), valid_wait_event(false), 
@@ -2881,6 +2887,28 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         free_remote_contexts();
+      if (ready_comp_queue.exists())
+        ready_comp_queue.destroy();
+      if (enqueue_task_comp_queue.exists())
+        enqueue_task_comp_queue.destroy();
+      if (distribute_task_comp_queue.exists())
+        distribute_task_comp_queue.destroy();
+      if (launch_task_comp_queue.exists())
+        launch_task_comp_queue.destroy();
+      if (resolution_comp_queue.exists())
+        resolution_comp_queue.destroy();
+      if (trigger_execution_comp_queue.exists())
+        trigger_execution_comp_queue.destroy();
+      if (deferred_execution_comp_queue.exists())
+        deferred_execution_comp_queue.destroy();
+      if (trigger_completion_comp_queue.exists())
+        trigger_completion_comp_queue.destroy();
+      if (deferred_completion_comp_queue.exists())
+        deferred_completion_comp_queue.destroy();
+      if (trigger_commit_comp_queue.exists())
+        trigger_commit_comp_queue.destroy();
+      if (deferred_commit_comp_queue.exists())
+        deferred_commit_comp_queue.destroy();
       if (post_task_comp_queue.exists())
         post_task_comp_queue.destroy();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = 
@@ -5207,12 +5235,12 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
@@ -5232,7 +5260,7 @@ namespace Legion {
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -7802,6 +7830,426 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, typename ARGS, bool HAS_BOUND>
+    void InnerContext::add_to_queue(QueueEntry<T> entry, LocalLock &lock,
+                  std::list<QueueEntry<T> > &queue, CompletionQueue &comp_queue)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(entry.ready.exists());
+#endif
+      bool issue_task = false;
+      RtEvent precondition;
+      {
+        AutoLock l_lock(lock);
+        // Issue a task if there isn't one running right now
+        if (queue.empty())
+        {
+          issue_task = true;
+          // Add a reference to the context the first time we defer this
+          add_reference();
+          // Make the queue the first time if necessary
+          if (!comp_queue.exists())
+            comp_queue = CompletionQueue::create_completion_queue(
+                HAS_BOUND ? context_configuration.max_window_size : 0);
+        }
+        queue.push_back(entry);
+        comp_queue.add_event(entry.ready);
+        if (issue_task)
+          precondition = RtEvent(comp_queue.get_nonempty_event());
+      }
+      if (issue_task)
+      {
+        ARGS args(entry.op, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_ready_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerReadyArgs,true/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), ready_lock,
+          ready_queue, ready_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    T InnerContext::process_queue(LocalLock &lock, RtEvent &next_ready, 
+                                  std::list<QueueEntry<T> > &queue,
+                                  CompletionQueue &comp_queue,
+                                  std::vector<T> &to_perform) const
+    //--------------------------------------------------------------------------
+    {
+      T next{};
+      const size_t vector_width = context_configuration.meta_task_vector_width;
+      to_perform.reserve(vector_width);
+      AutoLock l_lock(lock);
+      std::vector<RtEvent> ready_events(vector_width);
+      size_t num_ready =
+        comp_queue.pop_events(&ready_events.front(), vector_width);
+#ifdef DEBUG_LEGION
+      assert(num_ready > 0);
+#endif
+      ready_events.resize(num_ready);
+      std::sort(ready_events.begin(), ready_events.end());
+      // Find the entries
+      for (typename std::list<QueueEntry<T> >::iterator it =
+            queue.begin(); it != queue.end(); /*nothing*/)
+      {
+        std::vector<RtEvent>::iterator finder = 
+          std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
+        if ((finder != ready_events.end()) && (*finder == it->ready))
+        {
+          to_perform.push_back(it->op);
+          it = queue.erase(it);
+          ready_events.erase(finder);
+          if (ready_events.empty())
+            break;
+        }
+        else
+          it++;
+      }
+#ifdef DEBUG_LEGION
+      assert(ready_events.empty());
+#endif
+      if (!queue.empty())
+      {
+        next_ready = RtEvent(comp_queue.get_nonempty_event());
+        next = queue.front().op;
+      }
+      return next;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_ready_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(ready_lock, precondition,
+                                 ready_queue, ready_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerReadyArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_ready();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredEnqueueTaskArgs,false/*has bounds*/>(
+          QueueEntry<TaskOp*>(task, ready), enqueue_task_lock,
+          enqueue_task_queue, enqueue_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_enqueue_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(enqueue_task_lock, precondition,
+                    enqueue_task_queue, enqueue_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredEnqueueTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->enqueue_ready_task(false/*use target*/);
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_distribute_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredDistributeTaskArgs,false/*has bounds*/>(
+          QueueEntry<TaskOp*>(task, ready), distribute_task_lock,
+          distribute_task_queue, distribute_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_distribute_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(distribute_task_lock, precondition,
+                distribute_task_queue, distribute_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredDistributeTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        if ((*it)->distribute_task())
+          (*it)->launch_task();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_launch_task_queue(TaskOp *task, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<TaskOp*,DeferredLaunchTaskArgs,false/*has bounds*/>(
+          QueueEntry<TaskOp*>(task, ready), launch_task_lock,
+          launch_task_queue, launch_task_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_launch_task_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<TaskOp*> to_perform;
+      TaskOp *next = process_queue<TaskOp*>(launch_task_lock, precondition,
+                    launch_task_queue, launch_task_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredLaunchTaskArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<TaskOp*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->launch_task();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_resolution_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerResolutionArgs,true/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), resolution_lock,
+          resolution_queue, resolution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_resolution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(resolution_lock, precondition,
+                           resolution_queue, resolution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerResolutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_resolution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_execution_queue(Operation *op, 
+                                                      RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerExecutionArgs,false/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), trigger_execution_lock,
+          trigger_execution_queue, trigger_execution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_execution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_execution_lock,
+          precondition, trigger_execution_queue, 
+          trigger_execution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerExecutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_execution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_execution_queue(Operation *op,
+                                                       RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,DeferredExecutionArgs,false/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), deferred_execution_lock,
+          deferred_execution_queue, deferred_execution_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_execution_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(deferred_execution_lock,
+          precondition, deferred_execution_queue, 
+          deferred_execution_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredExecutionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->complete_execution();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_completion_queue(Operation *op,
+                                                       RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerCompletionArgs,false/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready),
+          trigger_completion_lock, trigger_completion_queue,
+          trigger_completion_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_completion_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_completion_lock,
+          precondition, trigger_completion_queue,
+          trigger_completion_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerCompletionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_complete();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_completion_queue(Operation *op,
+                                                        RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,DeferredCompletionArgs,false/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), deferred_completion_lock,
+          deferred_completion_queue, deferred_completion_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_completion_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(deferred_completion_lock,
+          precondition, deferred_completion_queue,
+          deferred_completion_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        DeferredCompletionArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->complete_operation();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_trigger_commit_queue(Operation *op, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<Operation*,TriggerCommitArgs,false/*has bounds*/>(
+          QueueEntry<Operation*>(op, ready), trigger_commit_lock,
+          trigger_commit_queue, trigger_commit_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_trigger_commit_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<Operation*> to_perform;
+      Operation *next = process_queue<Operation*>(trigger_commit_lock,
+          precondition, trigger_commit_queue,
+          trigger_commit_comp_queue, to_perform);
+      if (next != NULL)
+      {
+        TriggerCommitArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<Operation*>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        (*it)->trigger_commit();
+      return (next == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::add_to_deferred_commit_queue(Operation *op,
+                                                 RtEvent ready, bool deactivate)
+    //--------------------------------------------------------------------------
+    {
+      add_to_queue<std::pair<Operation*,bool>,
+          DeferredCommitArgs,false/*has bounds*/>(
+            QueueEntry<std::pair<Operation*,bool> >(std::pair<Operation*,bool>(
+              op, deactivate), ready), deferred_commit_lock,
+          deferred_commit_queue, deferred_commit_comp_queue);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::process_deferred_commit_queue(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      std::vector<std::pair<Operation*,bool> > to_perform;
+      std::pair<Operation*,bool> next =
+        process_queue<std::pair<Operation*,bool> >(deferred_commit_lock,
+          precondition, deferred_commit_queue, 
+          deferred_commit_comp_queue, to_perform);
+      if (next.first != NULL)
+      {
+        DeferredCommitArgs args(next, this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+      }
+      for (std::vector<std::pair<Operation*,bool> >::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+        it->first->commit_operation(it->second);
+      return (next.first == NULL);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                               FutureInstance *instance,
                                               FutureFunctor *callback_functor,
@@ -9088,6 +9536,9 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
+        // Remove the current trace now so we block at the end of the
+        // trace in the case of program order execution
+        current_trace = NULL;
         add_to_dependence_queue(complete_op);
       }
       else
@@ -9097,10 +9548,11 @@ namespace Legion {
         capture_op->initialize_capture(this, has_blocking_call, deprecated);
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
+        // Remove the current trace now so we block at the end of the
+        // trace in the case of program order execution
+        current_trace = NULL;
         add_to_dependence_queue(capture_op);
       }
-      // We no longer have a trace that we're executing 
-      current_trace = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -9194,31 +9646,19 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      if (!currently_active_context && (outstanding_subtasks == 0) && 
+          (((context_configuration.min_tasks_to_schedule > 0) && 
+            (pending_subtasks < 
+             context_configuration.min_tasks_to_schedule)) ||
+           ((context_configuration.min_frames_to_schedule > 0) &&
+            (pending_frames < 
+             context_configuration.min_frames_to_schedule))))
       {
-        AutoLock child_lock(child_op_lock);
-        if (!currently_active_context && (outstanding_subtasks == 0) && 
-            (((context_configuration.min_tasks_to_schedule > 0) && 
-              (pending_subtasks < 
-               context_configuration.min_tasks_to_schedule)) ||
-             ((context_configuration.min_frames_to_schedule > 0) &&
-              (pending_frames < 
-               context_configuration.min_frames_to_schedule))))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-        outstanding_subtasks++;
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = true;
         runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
+      outstanding_subtasks++;
     }
 
     //--------------------------------------------------------------------------
@@ -9231,33 +9671,21 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(outstanding_subtasks > 0);
+      assert(outstanding_subtasks > 0);
 #endif
-        outstanding_subtasks--;
-        if (currently_active_context && (outstanding_subtasks == 0) && 
-            (((context_configuration.min_tasks_to_schedule > 0) &&
-              (pending_subtasks < 
-               context_configuration.min_tasks_to_schedule)) ||
-             ((context_configuration.min_frames_to_schedule > 0) &&
-              (pending_frames < 
-               context_configuration.min_frames_to_schedule))))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
+      outstanding_subtasks--;
+      if (currently_active_context && (outstanding_subtasks == 0) && 
+          (((context_configuration.min_tasks_to_schedule > 0) &&
+            (pending_subtasks < 
+             context_configuration.min_tasks_to_schedule)) ||
+           ((context_configuration.min_frames_to_schedule > 0) &&
+            (pending_frames < 
+             context_configuration.min_frames_to_schedule))))
       {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -9268,78 +9696,40 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped frames
       if (context_configuration.min_tasks_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      pending_subtasks++;
+      if (currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_subtasks == context_configuration.min_tasks_to_schedule))
       {
-        AutoLock child_lock(child_op_lock);
-        pending_subtasks++;
-        if (currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_subtasks == context_configuration.min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(TaskOp *child)
+    void InnerContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduled by frames
-      if (context_configuration.min_tasks_to_schedule == 0)
-        return RtEvent::NO_RT_EVENT;
-      return decrement_pending(true/*need deferral*/);
+      if (context_configuration.min_tasks_to_schedule > 0)
+        decrement_pending(true/*need deferral*/);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(bool need_deferral)
+    void InnerContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(pending_subtasks > 0);
+      assert(pending_subtasks > 0);
 #endif
-        pending_subtasks--;
-        if (!currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_subtasks < context_configuration.min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-      }
-      // Do anything that we need to do
-      if (to_trigger.exists())
+      pending_subtasks--;
+      if (!currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_subtasks < context_configuration.min_tasks_to_schedule))
       {
-        if (need_deferral)
-        {
-          PostDecrementArgs post_decrement_args(this);
-          RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-              LG_LATENCY_WORK_PRIORITY, wait_on); 
-          Runtime::trigger_event(to_trigger, done);
-          return to_trigger;
-        }
-        else
-        {
-          wait_on.wait();
-          runtime->activate_context(this);
-          Runtime::trigger_event(to_trigger);
-        }
+        currently_active_context = true;
+        runtime->activate_context(this);
       }
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9349,25 +9739,13 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
+      AutoLock child_lock(child_op_lock);
+      pending_frames++;
+      if (currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_frames == context_configuration.min_frames_to_schedule))
       {
-        AutoLock child_lock(child_op_lock);
-        pending_frames++;
-        if (currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_frames == context_configuration.min_frames_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = false;
-        }
-      }
-      if (to_trigger.exists())
-      {
-        wait_on.wait();
+        currently_active_context = false;
         runtime->deactivate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -9378,28 +9756,16 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock child_lock(child_op_lock);
+      AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(pending_frames > 0);
+      assert(pending_frames > 0);
 #endif
-        pending_frames--;
-        if (!currently_active_context && (outstanding_subtasks > 0) &&
-            (pending_frames < context_configuration.min_frames_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = Runtime::create_rt_user_event();
-          context_order_event = to_trigger;
-          currently_active_context = true;
-        }
-      }
-      if (to_trigger.exists())
+      pending_frames--;
+      if (!currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_frames < context_configuration.min_frames_to_schedule))
       {
-        wait_on.wait();
+        currently_active_context = true;
         runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -11527,6 +11893,123 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_ready_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerReadyArgs *targs = (const TriggerReadyArgs*)args;
+      if (targs->context->process_ready_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_enqueue_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredEnqueueTaskArgs *dargs = 
+        (const DeferredEnqueueTaskArgs*)args;
+      if (dargs->context->process_enqueue_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_distribute_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredDistributeTaskArgs *dargs = 
+        (const DeferredDistributeTaskArgs*)args;
+      if (dargs->context->process_distribute_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_launch_task_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredLaunchTaskArgs *dargs = 
+        (const DeferredLaunchTaskArgs*)args;
+      if (dargs->context->process_launch_task_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_resolution_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerResolutionArgs *targs = (const TriggerResolutionArgs*)args;
+      if (targs->context->process_resolution_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_execution_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerExecutionArgs *targs = (const TriggerExecutionArgs*)args;
+      if (targs->context->process_trigger_execution_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_execution_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredExecutionArgs *dargs = (const DeferredExecutionArgs*)args;
+      if (dargs->context->process_deferred_execution_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_completion_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerCompletionArgs *targs = (const TriggerCompletionArgs*)args;
+      if (targs->context->process_trigger_completion_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_completion_queue(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredCompletionArgs *dargs = (const DeferredCompletionArgs*)args;
+      if (dargs->context->process_deferred_completion_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_trigger_commit_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TriggerCommitArgs *targs = (const TriggerCommitArgs*)args;
+      if (targs->context->process_trigger_commit_queue() &&
+          targs->context->remove_reference())
+        delete targs->context;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InnerContext::handle_deferred_commit_queue(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredCommitArgs *dargs = (const DeferredCommitArgs*)args;
+      if (dargs->context->process_deferred_commit_queue() &&
+          dargs->context->remove_reference())
+        delete dargs->context;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void InnerContext::handle_post_end_task(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -12858,6 +13341,20 @@ namespace Legion {
             regions.begin(); it != regions.end(); it++)
         ExternalMappable::pack_region_requirement(*it, rez);
       hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "region requirement");
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_output_requirements(
+           Murmur3Hasher &hasher, const std::vector<OutputRequirement> &outputs)
+    //--------------------------------------------------------------------------
+    {
+      if (outputs.empty())
+        return;
+      Serializer rez;
+      for (std::vector<OutputRequirement>::const_iterator it =
+            outputs.begin(); it != outputs.end(); it++)
+        ExternalTask::pack_output_requirement(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "output requirement");
     }
 
     //--------------------------------------------------------------------------
@@ -15607,11 +16104,11 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       PartitionKind part_kind,
-                                                      Color color)
+                                                      Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+      for (int i = 0; runtime->safe_control_replication && !trust && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
@@ -15624,7 +16121,7 @@ namespace Legion {
           break;
       }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
@@ -15665,7 +16162,7 @@ namespace Legion {
             part_color, color_generated, disjoint_result, partition_ready))
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      if (runtime->verify_partitions)
+      if (runtime->verify_partitions && !trust)
       {
         // We can't block to check this here because the user needs 
         // control back in order to fill in the pieces of the partitions
@@ -17713,6 +18210,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_TASK, __func__);
         hash_task_launcher(hasher, runtime->safe_control_replication, launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17773,6 +18271,7 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE, __func__);
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -17837,6 +18336,7 @@ namespace Legion {
         hash_index_launcher(hasher, runtime->safe_control_replication,launcher);
         hasher.hash(redop, "redop");
         hasher.hash<bool>(deterministic, "deterministic");
+        if (outputs != NULL) hash_output_requirements(hasher, *outputs);
         if (hasher.verify(__func__))
           break;
       }
@@ -20597,40 +21097,6 @@ namespace Legion {
               // Don't remove this from created regions yet,
               // That will happen when we make the deletion operation
               delete_now.push_back(*rit);
-              // Check to see if we have any latent field spaces to clean up
-              if (!latent_field_spaces.empty())
-              {
-                std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-                  latent_field_spaces.find(rit->get_field_space());
-                if (finder != latent_field_spaces.end())
-                {
-                  std::set<LogicalRegion>::iterator latent_finder =
-                    finder->second.find(*rit);
-#ifdef DEBUG_LEGION
-                  assert(latent_finder != finder->second.end());
-#endif
-                  finder->second.erase(latent_finder);
-                  if (finder->second.empty())
-                  {
-                    // Now that all the regions using this field space have
-                    // been deleted we can clean up all the created_fields
-                    for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
-                          created_fields.begin(); it !=
-                          created_fields.end(); /*nothing*/)
-                    {
-                      if (it->first == finder->first)
-                      {
-                        std::set<std::pair<FieldSpace,FieldID> >::iterator
-                          to_delete = it++;
-                        created_fields.erase(to_delete);
-                      }
-                      else
-                        it++;
-                    }
-                    latent_field_spaces.erase(finder);
-                  }
-                }
-              }
             }
           }
         }
@@ -22944,7 +23410,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color, bool trust)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_PENDING_PARTITION,
@@ -24043,19 +24509,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(TaskOp *child)
+    void LeafContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(bool need_deferral)
+    void LeafContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

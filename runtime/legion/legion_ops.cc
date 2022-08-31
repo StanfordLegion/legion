@@ -1041,7 +1041,16 @@ namespace Legion {
     {
       // Mark that we finished mapping
       complete_mapping();
-      // If we have nothing to do also mark that we have completed execution
+      // The execution stage only gets invoked if you call it explicitly
+      // We do so here to ensure that we call the complete execution method
+      trigger_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that we finished execution
       complete_execution();
     }
     
@@ -1064,35 +1073,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       commit_operation(true/*deactivate*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    {
-      // should only be called if overridden
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::deferred_commit_trigger(GenerationID our_gen)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(our_gen <= gen); // better not be ahead of where we are now
-#endif
-        if ((our_gen == gen) && !trigger_commit_invoked)
-        {
-          trigger_commit_invoked = true;
-          need_trigger = true;
-        }
-      }
-      if (need_trigger)
-        trigger_commit();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Operation::report_interfering_requirements(unsigned idx1,unsigned idx2)
@@ -1392,8 +1373,8 @@ namespace Legion {
                            LgPriority priority/*= LG_THROUGHPUT_WORK_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
-      Processor p = parent_ctx->get_executing_processor();
-      runtime->add_to_local_queue(p, this, priority, wait_on);
+      TriggerOpArgs args(this);
+      runtime->issue_runtime_meta_task(args, priority, wait_on); 
     }
 
     //--------------------------------------------------------------------------
@@ -1414,9 +1395,7 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         // We have to defer the execution of this operation
-        DeferredExecArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_execution_queue(this, wait_on);
         return;
       }
       // Tell our parent context that we are done mapping
@@ -1433,9 +1412,10 @@ namespace Legion {
       {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
-        TriggerCompleteArgs args(this);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         trigger_pre);
+        if (trigger_pre.exists() && !trigger_pre.has_triggered())
+          parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
+        else
+          trigger_complete();
       }
       else // Do the trigger now
         trigger_complete();
@@ -1458,9 +1438,7 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCompleteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_completion_queue(this, wait_on);
         return;
       }
       bool need_trigger = false;
@@ -1614,9 +1592,7 @@ namespace Legion {
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
-        DeferredCommitArgs args(this, do_deactivate);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+        parent_ctx->add_to_deferred_commit_queue(this, wait_on, do_deactivate);
         return;
       }
       // Tell our parent context that we are committed
@@ -1630,10 +1606,12 @@ namespace Legion {
         // Inner task completion also relies upon this to work correctly
         if (!completion_event.has_triggered_faultignorant())
         {
-          DeferredCommitArgs args(this, do_deactivate);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(completion_event));
-          return;
+          const RtEvent safe = Runtime::protect_event(completion_event);
+          if (safe.exists() && !safe.has_triggered())
+          {
+            parent_ctx->add_to_deferred_commit_queue(this, safe, do_deactivate);
+            return;
+          }
         }
         parent_ctx->register_child_commit(this);
       }
@@ -2264,15 +2242,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool resolve_now = true;
+      bool trigger_now = false;
       RtEvent map_precondition;
       if (!mapping_dependences.empty())
         map_precondition = Runtime::merge_events(mapping_dependences);
       if (must_epoch == NULL)
       {
-        // We always launch the task to avoid expensive recursive calls
-        DeferredReadyArgs args(op);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         map_precondition);
+        if (map_precondition.exists() && !map_precondition.has_triggered())
+          op->get_context()->add_to_ready_queue(op, map_precondition);
+        else
+          trigger_now = true;
       }
       else if (!map_precondition.has_triggered())
         must_epoch->add_mapping_dependence(map_precondition);
@@ -2283,14 +2262,14 @@ namespace Legion {
           Runtime::merge_events(resolution_dependences);
         if (!resolve_precondition.has_triggered())
         {
-          DeferredResolutionArgs args(op);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           resolve_precondition);
+          op->get_context()->add_to_resolution_queue(op, resolve_precondition);
           resolve_now = false;
         }
       }
       if (resolve_now)
         op->trigger_resolution();
+      if (trigger_now)
+        op->trigger_ready();
     }
     
     //--------------------------------------------------------------------------
@@ -2303,9 +2282,8 @@ namespace Legion {
         RtEvent commit_precondition = Runtime::merge_events(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
-          DeferredCommitTriggerArgs args(op);
-          runtime->issue_runtime_meta_task(args,LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                           commit_precondition);
+          op->get_context()->add_to_trigger_commit_queue(op,
+                                        commit_precondition);
           return false;
         }
       }
@@ -10595,7 +10573,11 @@ namespace Legion {
             }
             else
               complete_mapping(mapping_precondition);
-            complete_execution(impl->subscribe());
+            const RtEvent ready = impl->subscribe();
+            if (ready.exists() && !ready.has_triggered())
+              parent_ctx->add_to_trigger_execution_queue(this, ready);
+            else
+              trigger_execution();
             break;
           }
         case FIELD_ALLOCATION:
@@ -10623,9 +10605,15 @@ namespace Legion {
             else
               complete_mapping(mapping_precondition);
             if (!ready_events.empty())
-              complete_execution(Runtime::merge_events(ready_events));
+            {
+              const RtEvent ready = Runtime::merge_events(ready_events);
+              if (ready.exists() && !ready.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, ready);
+              else
+                trigger_execution();
+            }
             else
-              complete_execution();
+              trigger_execution();
             break;
           }
         case FENCE_CREATION:
@@ -10641,7 +10629,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::trigger_complete(void)
+    void CreationOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> complete_preconditions;
@@ -10692,8 +10680,6 @@ namespace Legion {
           }
         case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
-          // Nothing to do here
-          break;
         default:
           assert(false);
       }
@@ -15143,21 +15129,22 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
       if (!barrier.has_triggered_faultignorant())
       {
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
-                                         Runtime::protect_event(barrier));
+        const RtEvent safe = Runtime::protect_event(barrier);
+        if (safe.exists() && !safe.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, safe);
+        else
+          trigger_execution();
       }
       else
-        deferred_execute();
-      complete_mapping();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::deferred_execute(void)
+    void DynamicCollectiveOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
@@ -15285,17 +15272,13 @@ namespace Legion {
           future.impl->request_internal_buffer(this, false/*eager*/));
       const RtEvent ready = future.impl->subscribe();
       if (ready.exists() && !ready.has_triggered())
-      {
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                        LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::deferred_execute(void)
+    void FuturePredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       // See if we have a value
@@ -16036,6 +16019,8 @@ namespace Legion {
       output.constraint_mappings.clear();
       slice_version_events.clear();
       completion_preconditions.clear();
+      commit_preconditions.clear();
+      completion_effects.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -16995,7 +16980,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::notify_subop_commit(Operation *op)
+    void MustEpochOp::notify_subop_commit(Operation *op, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       bool need_commit;
@@ -17004,11 +16989,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
+        if (precondition.exists())
+          commit_preconditions.insert(precondition);
         remaining_subop_commits--;
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation(true/*deactivate*/);
+      {
+        RtEvent commit_precondition;
+        if (!commit_preconditions.empty())
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        commit_operation(true/*deactivate*/, commit_precondition);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17130,7 +17122,7 @@ namespace Legion {
 #endif
       thunk = new WeightPartitionThunk(pid, weights, granularity);
       // Also save this locally for analysis
-      future_map = weights;
+      populate_sources(weights);
       if (runtime->legion_spy_enabled)
         perform_logging();
     }
@@ -17233,7 +17225,7 @@ namespace Legion {
 #endif
       thunk = new FutureMapThunk(pid, fm, perform_intersections);
       // Also save this locally for analysis
-      future_map = fm;
+      populate_sources(fm);
 
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -17352,11 +17344,20 @@ namespace Legion {
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      if (future_map.impl != NULL)
-        enqueue_ready_operation(future_map.impl->get_ready_event());
-      else
-        enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                                LG_THROUGHPUT_DEFERRED_PRIORITY);
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                              LG_THROUGHPUT_DEFERRED_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::populate_sources(const FutureMap &fm)
+    //--------------------------------------------------------------------------
+    {
+      future_map = fm;
+#ifdef DEBUG_LEGION
+      assert(sources.empty());
+      assert(future_map.impl != NULL);
+#endif
+      future_map.impl->get_all_futures(sources);
     }
 
     //--------------------------------------------------------------------------
@@ -17364,11 +17365,6 @@ namespace Legion {
               std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(future_map.impl != NULL);
-#endif
-      std::map<DomainPoint,Future> sources;
-      future_map.impl->get_all_futures(sources);
       for (std::map<DomainPoint,Future>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
@@ -17387,8 +17383,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> mapped_events, ready_events;
-      if (future_map.impl != NULL)
-        request_future_buffers(mapped_events, ready_events);
+      request_future_buffers(mapped_events, ready_events);
       // Can only marked that that this is mapped after we've requested
       // buffers for any futures in the future map we need which may
       // require performing allocations
@@ -17397,19 +17392,26 @@ namespace Legion {
       else
         complete_mapping();
       if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
-      else
-        complete_execution();
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+          return;
+        }
+      }
+      trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::trigger_complete(void)
+    void PendingPartitionOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
       const ApEvent ready_event = thunk->perform(this, runtime->forest);
-      record_completion_effect(ready_event);
-      complete_operation();
+      if (ready_event.exists())
+        record_completion_effect(ready_event);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17443,6 +17445,7 @@ namespace Legion {
         delete thunk;
       thunk = NULL;
       future_map = FutureMap(); // clear any references
+      sources.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -20280,19 +20283,14 @@ namespace Legion {
         // If we have a future value see if its event has triggered
         const RtEvent future_ready_event = future.impl->subscribe(); 
         if (!future_ready_event.has_triggered())
-        {
-          // Launch a task to handle the deferred complete
-          DeferredExecuteArgs deferred_execute_args(this);
-          runtime->issue_runtime_meta_task(deferred_execute_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, future_ready_event);
-        }
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
         else
-          deferred_execute(); // can do the completion now
+          trigger_execution(); // can do the completion now
       }
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deferred_execute(void)
+    void FillOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -24041,17 +24039,13 @@ namespace Legion {
         wait_on = Runtime::protect_event(
             Runtime::merge_events(NULL, pre_events));
       if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        DeferredExecuteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, wait_on);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void TimingOp::deferred_execute(void)
+    void TimingOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       switch (measurement)
@@ -24244,17 +24238,13 @@ namespace Legion {
         ready = Runtime::protect_event(
             Runtime::merge_events(NULL, pre_events));
       if (ready.exists() && !ready.has_triggered())
-      {
-        DeferredExecuteArgs args(this);
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
-      }
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
       else
-        deferred_execute();
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::deferred_execute(void)
+    void TunableOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       MapperManager *mapper =
@@ -24402,6 +24392,7 @@ namespace Legion {
       redop_id = 0;
       future_result_size = 0;
       serdez_redop_buffer = NULL;
+      serdez_upper_bound = SIZE_MAX;
     }
 
     //--------------------------------------------------------------------------
@@ -24428,7 +24419,20 @@ namespace Legion {
     void AllReduceOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      enqueue_ready_operation(future_map.impl->get_ready_event());
+      populate_sources();
+      std::vector<RtEvent> preconditions;
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
+      {
+        const RtEvent ready =
+          it->second.impl->request_internal_buffer(this, false/*eager*/);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.push_back(ready);
+      }
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -24466,32 +24470,79 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent AllReduceOp::finalize_serdez_targets(RtEvent &protect)
+    //--------------------------------------------------------------------------
+    {
+      // Now that we've got the output instances we copy the result to
+      // each of the targets, we're done when the copies are done
+      // create an external instance for the current allocation
+      const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+      const std::vector<size_t> sizes(1, 1);
+      const int dim_order[1] = { 0 };
+      const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+      const Realm::IndexSpace<1,coord_t> rect_space(
+          Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
+            Realm::Point<1,coord_t>(future_result_size - 1)));
+      Realm::InstanceLayoutGeneric *ilg =
+        Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+            rect_space, constraints, dim_order);
+      PhysicalInstance source_instance;
+      const ApEvent src_ready(
+          PhysicalInstance::create_external_instance(
+            source_instance, runtime->runtime_system_memory, ilg, 
+            Realm::ExternalMemoryResource(
+             reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
+             future_result_size, true/*read only*/),
+            Realm::ProfilingRequestSet()));
+      FutureInstance source(serdez_redop_buffer, future_result_size, 
+          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
+          false/*own alloc*/, source_instance);
+      std::vector<ApEvent> done_events;
+      for (std::vector<FutureInstance*>::const_iterator it =
+            targets.begin(); it != targets.end(); it++)
+      {
+        ApEvent done = (*it)->copy_from(&source, this);
+        if (done.exists())
+          done_events.push_back(done);
+      }
+      if (!done_events.empty())
+      {
+        const ApEvent done = Runtime::merge_events(NULL, done_events);
+        protect = Runtime::protect_event(done);
+        source_instance.destroy(protect);
+        return done;
+      }
+      else
+      {
+        source_instance.destroy();
+        return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void AllReduceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      populate_sources();
-      std::set<RtEvent> ready_events;
+      // Invoke the mapper to do figure out where to put the data
+      std::vector<Memory> target_memories;
+      invoke_mapper(target_memories);
       // Make sure we subscribe to all these futures before we are mapped
       // in case they need to make any instances
-      if (serdez_redop_fns != NULL)
+      if (serdez_redop_fns == NULL)
+        future_result_size = redop->sizeof_rhs;
+      else if (serdez_upper_bound < SIZE_MAX)
+        future_result_size = serdez_upper_bound;
+      else
       {
-        // We need to request internal buffers here since we actually
-        // need to read the data
+        // Need to do our subscriptions now
+        std::vector<RtEvent> ready_events;
         for (std::map<DomainPoint,Future>::const_iterator it = 
-              sources.begin(); it != sources.end(); it++)
+            sources.begin(); it != sources.end(); it++)
         {
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
-          const RtEvent ready = it->second.impl->subscribe();
+          FutureImpl *impl = it->second.impl;
+          const RtEvent ready = impl->subscribe();
           if (ready.exists())
-            ready_events.insert(ready);
-        }
-        // Wait for all the local buffers to be ready before reading
-        if (!ready_events.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(ready_events);
-          ready_events.clear();
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+            ready_events.push_back(ready);
         }
         // Serdez redop functions are nasty, we need to actually do the 
         // computation inline here to figure out how big the output buffer
@@ -24500,23 +24551,15 @@ namespace Legion {
         future_result_size = 0;
         (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
                                        future_result_size);
+        // Wait for the subscriptions to be ready
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && ! wait_on.has_triggered())
+            wait_on.wait();
+        }
         all_reduce_serdez();
       }
-      else
-      {
-        future_result_size = redop->sizeof_rhs;
-        // We only need to subscribe to the futures here 
-        for (std::map<DomainPoint,Future>::const_iterator it = 
-              sources.begin(); it != sources.end(); it++)
-        {
-          const RtEvent subscribed = it->second.impl->subscribe();
-          if (subscribed.exists())
-            ready_events.insert(subscribed);
-        }
-      }
-      // Invoke the mapper to do figure out where to put the data
-      std::vector<Memory> target_memories;
-      invoke_mapper(target_memories);
 #ifdef DEBUG_LEGION
       assert(targets.empty());
       assert(!target_memories.empty());
@@ -24525,55 +24568,65 @@ namespace Legion {
       create_future_instances(target_memories); 
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
-      if (serdez_redop_fns != NULL)
+      std::vector<RtEvent> ready_events;
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            sources.begin(); it != sources.end(); it++)
       {
-        // Now that we've got the output instances we copy the result to
-        // each of the targets, we're done when the copies are done
-        // create an external instance for the current allocation
-        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, 1);
-        const int dim_order[1] = { 0 };
-        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-        const Realm::IndexSpace<1,coord_t> rect_space(
-            Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-              Realm::Point<1,coord_t>(future_result_size - 1)));
-        Realm::InstanceLayoutGeneric *ilg =
-          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
-              rect_space, constraints, dim_order);
-        PhysicalInstance source_instance;
-        const ApEvent src_ready(
-            PhysicalInstance::create_external_instance(
-              source_instance, runtime->runtime_system_memory, ilg, 
-              Realm::ExternalMemoryResource(
-               reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
-               future_result_size, true/*read only*/),
-              Realm::ProfilingRequestSet()));
-        FutureInstance source(serdez_redop_buffer, future_result_size, 
-            ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
-            false/*own alloc*/, source_instance);
-        std::set<ApEvent> done_events;
-        for (std::vector<FutureInstance*>::const_iterator it =
-              targets.begin(); it != targets.end(); it++)
-        {
-          ApEvent done = (*it)->copy_from(&source, this);
-          if (done.exists())
-            done_events.insert(done);
-        }
-        if (!done_events.empty())
-        {
-          const ApEvent done = Runtime::merge_events(NULL, done_events);
-          if (done.exists())
-            record_completion_effect(done);
-          source_instance.destroy(done);
-        }
-        else
-          source_instance.destroy();
-        complete_execution();
+        const RtEvent ready = it->second.impl->subscribe();
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.push_back(ready);
       }
-      else if (!ready_events.empty())
-        complete_execution(Runtime::merge_events(ready_events));
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+          return;
+        }
+      }
+      trigger_execution(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent executed;
+      if (serdez_redop_fns == NULL)
+        executed = all_reduce_redop();
+      else if (serdez_upper_bound < SIZE_MAX)
+      {
+        future_result_size = 0;
+        (*(serdez_redop_fns->init_fn))(redop, serdez_redop_buffer, 
+                                       future_result_size);
+        all_reduce_serdez();
+        // Check that the result is smaller than the bound
+        if (serdez_upper_bound < future_result_size)
+        {
+          Processor exec_proc = parent_ctx->get_executing_processor();
+          MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output. Mapper %s specified an upper bound of "
+              "%zd bytes for future map all reduce in task %s (UID %lld) with "
+              "serdez redop %d. However, the actual size of the reduced value "
+              "is %zd bytes which exceeds the specified upper bound.",
+              mapper->get_mapper_name(), serdez_upper_bound, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              redop_id, future_result_size)
+        }
+        ApEvent done = finalize_serdez_targets(executed);
+        if (done.exists())
+          record_completion_effect(done);
+      }
       else
-        complete_execution();
+      {
+        ApEvent done = finalize_serdez_targets(executed);
+        if (done.exists())
+          record_completion_effect(done);
+      }
+      result.impl->set_results(targets);
+      complete_execution(executed);
     }
 
     //--------------------------------------------------------------------------
@@ -24583,9 +24636,11 @@ namespace Legion {
       Mapper::FutureMapReductionInput input;
       Mapper::FutureMapReductionOutput output;
       input.tag = tag;
+      output.serdez_upper_bound = SIZE_MAX;
       Processor exec_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(exec_proc, mapper_id);
       mapper->invoke_map_future_map_reduction(this, &input, &output);
+      serdez_upper_bound = output.serdez_upper_bound;
       if (!output.destination_memories.empty())
       {
         if (output.destination_memories.size() > 1)
@@ -24705,17 +24760,6 @@ namespace Legion {
       if (!postconditions.empty())
         record_completion_effects(postconditions);
       return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent precondition;
-      if (serdez_redop_fns == NULL)
-        precondition = all_reduce_redop();
-      result.impl->set_results(targets);
-      complete_operation(precondition);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -25358,14 +25402,42 @@ namespace Legion {
       prepare_for_mapping(sources, input.source_instances,
                           input.collective_views); 
       prepare_for_mapping(target, input.target);
-      input.is_src = (index < src_requirements.size());
-      if (input.is_src)
-        input.region_req_index = index;
+      input.is_src = false;
+      input.is_dst = false;
+      input.is_src_indirect = false;
+      input.is_dst_indirect = false;
+      unsigned mod_index = index;
+      if (mod_index < src_requirements.size())
+      {
+        input.region_req_index = mod_index;
+        input.is_src = true;
+      }
       else
-        input.region_req_index = index - src_requirements.size();
+      {
+        mod_index -= src_requirements.size();
+        if (mod_index < dst_requirements.size())
+        {
+          input.region_req_index = mod_index;
+          input.is_dst = true;
+        }
+        else
+        {
+          mod_index -= dst_requirements.size();
+          if (mod_index < src_indirect_requirements.size())
+          {
+            input.region_req_index = mod_index;
+            input.is_src_indirect = true;
+          }
+          else
+          {
+            mod_index -= src_indirect_requirements.size();
 #ifdef DEBUG_LEGION
-      assert(input.region_req_index < dst_requirements.size());
+            assert(mod_index < dst_indirect_requirements.size());
 #endif
+            input.is_dst_indirect = true;
+          }
+        }
+      }
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);

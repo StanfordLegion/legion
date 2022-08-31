@@ -462,6 +462,19 @@ namespace Legion {
       public:
         FutureInstance *const instance;
       };
+      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
+      public:
+        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
+            void (*func)(const Realm::ExternalInstanceResource&),
+            PhysicalInstance inst, ApEvent precondition);
+      public:
+        const Realm::ExternalInstanceResource *const resource;
+        void (*const freefunc)(const Realm::ExternalInstanceResource&);
+        const PhysicalInstance instance;
+        const ApEvent precondition;
+      };
     public:
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
@@ -491,9 +504,14 @@ namespace Legion {
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
+      const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
       ApEvent get_ready(bool check_ready_event = true);
-      PhysicalInstance get_instance(void);
+      // This method will return an instance that represents the
+      // data for this future instance of a given size, if the needed size
+      // does not match the base size then a fresh instance will be returned
+      // which will be the responsibility of the caller to destroy
+      PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
       bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
@@ -506,11 +524,16 @@ namespace Legion {
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
+      static void free_external_allocation(Runtime *runtime, Processor proc,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&),
+                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
+                       const Realm::ExternalInstanceResource *resource);
+      static void handle_free_external(const void *args);
       static void handle_deferred_delete(const void *args);
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
       Runtime *const runtime;
-      const void *const data;
+    public:
       const size_t size;
       const Memory memory;
       const ApEvent ready_event;
@@ -522,6 +545,9 @@ namespace Legion {
       const bool is_meta_visible;
     protected:
       bool own_allocation;
+      std::atomic<const void*> data;
+      // This instance always has a domain of [0,0] and a field
+      // size == `size` for the future instance
       std::atomic<PhysicalInstance> instance;
       std::atomic<RtEvent> use_event;
       std::atomic<bool> own_instance;
@@ -754,7 +780,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
       // Whether the future map owns the sharding function
       bool own_sharding_function;
-      bool collective_performed;
+      std::atomic<bool> collective_performed;
       // For replicated future maps we track whether there have been any
       // non-triival calls to this shard of the future map. If there are
       // then we know there could be non-trivial calls in other shards.
@@ -956,17 +982,14 @@ namespace Legion {
     public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       uintptr_t ptr,
-                       size_t alignment,
-                       bool eager_pool = false);
-      void return_data(const DomainPoint &extents,
-                       std::map<FieldID,void*> ptrs,
-                       std::map<FieldID,size_t> *alignments);
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       uintptr_t ptr,
+                       size_t alignment);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -992,8 +1015,7 @@ namespace Legion {
       Runtime *const runtime;
       TaskContext *const context;
     private:
-      struct ExternalInstanceInfo {
-        bool eager_pool;
+      struct ReturnedInstanceInfo {
         uintptr_t ptr;
         size_t alignment;
       };
@@ -1001,7 +1023,7 @@ namespace Legion {
       OutputRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
-      std::map<FieldID,ExternalInstanceInfo> returned_instances;
+      std::map<FieldID,ReturnedInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;
@@ -1301,8 +1323,6 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op, LgPriority priority,
-                                    RtEvent wait_on);
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
@@ -1601,6 +1621,10 @@ namespace Legion {
     public:
       RtEvent create_eager_instance(PhysicalInstance &instance,
                                     Realm::InstanceLayoutGeneric *layout);
+      // Create an external instance that is a view to the eager pool instance
+      RtEvent create_sub_eager_instance(PhysicalInstance &instance,
+                                        uintptr_t ptr, size_t size,
+                                        Realm::InstanceLayoutGeneric *layout);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
     public:
@@ -2572,18 +2596,6 @@ namespace Legion {
       public:
         TopLevelContext *const ctx;
       };
-      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
-      public:
-        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
-            void (*func)(const Realm::ExternalInstanceResource&))
-          : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
-            resource(r), freefunc(func) { }
-      public:
-        const Realm::ExternalInstanceResource *const resource;
-        void (*const freefunc)(const Realm::ExternalInstanceResource&);
-      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -3039,9 +3051,6 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
-      void free_external_allocation(Processor proc,
-          const Realm::ExternalInstanceResource *resource, 
-          void (*freefunc)(const Realm::ExternalInstanceResource&));
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
       void free_deferred_instance(Memory memory, uintptr_t ptr);
@@ -3847,10 +3856,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_ready_queue(Processor p, TaskOp *task_op, 
-          RtEvent wait_on = RtEvent::NO_RT_EVENT, bool select_options = false);
-      void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void add_to_ready_queue(Processor p, TaskOp *task_op);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -4262,12 +4268,12 @@ namespace Legion {
       std::atomic<unsigned> unique_field_space_id;
       std::atomic<unsigned> unique_index_tree_id;
       std::atomic<unsigned> unique_region_tree_id;
-      std::atomic<unsigned> unique_operation_id;
       std::atomic<unsigned> unique_field_id; 
-      std::atomic<unsigned> unique_code_descriptor_id;
-      std::atomic<unsigned> unique_constraint_id;
-      std::atomic<unsigned> unique_is_expr_id;
       std::atomic<unsigned> unique_control_replication_id;
+      std::atomic<unsigned long long> unique_operation_id;
+      std::atomic<unsigned long long> unique_code_descriptor_id;
+      std::atomic<unsigned long long> unique_constraint_id;
+      std::atomic<unsigned long long> unique_is_expr_id;
 #ifdef LEGION_SPY
       std::atomic<unsigned> unique_indirections_id;
 #endif

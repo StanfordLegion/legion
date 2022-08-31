@@ -1626,6 +1626,12 @@ namespace Legion {
        * virtual function because we allow the output to be empty for
        * backwards compatibility. If the destination memories are empty
        * then the runtime will map one copy in the local system memory.
+       *
+       * In the case that the all-reduce is being performed using a reduction
+       * operator with serdez functions, then the mapper can also specify an
+       * upper bound on the amount of memory required for the findl output 
+       * instance of the fully reduced future which will improve performance.
+       * Not specifying an upper bound will not impact correctness.
        * ----------------------------------------------------------------------
        */
       struct FutureMapReductionInput {
@@ -1633,6 +1639,7 @@ namespace Legion {
       };
       struct FutureMapReductionOutput {
         std::vector<Memory>                     destination_memories;
+        size_t                                  serdez_upper_bound; // =SIZE_MAX
       };
       //------------------------------------------------------------------------
       virtual void map_future_map_reduction(const MapperContext      ctx,

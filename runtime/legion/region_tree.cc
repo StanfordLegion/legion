@@ -59,9 +59,7 @@ namespace Legion {
       for (unsigned fidx = 0; fidx < field_indexes.size(); fidx++)
       {
 #ifdef DEBUG_LEGION
-#ifndef NDEBUG
         bool found = false;
-#endif
 #endif
         for (unsigned idx = 0; idx < insts.size(); idx++)
         {

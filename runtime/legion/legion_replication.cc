@@ -2427,6 +2427,9 @@ namespace Legion {
           continue;
         IndexSpaceNode *parent = forest->get_node(
             output_regions[idx].parent.get_index_space());
+#ifdef DEBUG_LEGION
+        validate_output_sizes(idx, output_regions[idx], all_output_sizes[idx]);
+#endif
         if (options.global_indexing())
         {
           // For globally indexed output regions, we need to check
@@ -4970,30 +4973,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::request_future_buffers(
-              std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
+    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm)
     //--------------------------------------------------------------------------
     {
+      future_map = fm;
 #ifdef DEBUG_LEGION
+      assert(sources.empty());
       assert(future_map.impl != NULL);
 #endif
-      std::map<DomainPoint,Future> sources;
-      future_map.impl->get_shard_local_futures(sources);
-      for (std::map<DomainPoint,Future>::const_iterator it =
-            sources.begin(); it != sources.end(); it++)
-      {
-        const RtEvent mapped =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.insert(mapped);
-        const RtEvent ready = it->second.impl->subscribe();
-        if (ready.exists())
-          ready_events.insert(ready);
-      } 
+      if (thunk->need_all_futures())
+        future_map.impl->get_all_futures(sources);
+      else
+        future_map.impl->get_shard_local_futures(sources);
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::trigger_complete(void)
+    void ReplPendingPartitionOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
       // We know we are in a replicate context
@@ -5006,12 +5001,9 @@ namespace Legion {
       // Perform the partitioning operation
       const ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
         repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation(Runtime::protect_event(ready_event));
+      if (ready_event.exists())
+        record_completion_effect(ready_event);
+      complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6528,21 +6520,16 @@ namespace Legion {
         RtEvent result_ready = 
           timing_collective->perform_collective_wait(false/*block*/);
         if (result_ready.exists() && !result_ready.has_triggered())
-        {
-          // Defer completion until the value is ready
-          DeferredExecuteArgs deferred_execute_args(this);
-          runtime->issue_runtime_meta_task(deferred_execute_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY, result_ready);
-        }
+          parent_ctx->add_to_trigger_execution_queue(this, result_ready);
         else
-          deferred_execute();
+          trigger_execution();
       }
       else // Shard 0 does the normal timing operation
         TimingOp::trigger_mapping();
     } 
 
     //--------------------------------------------------------------------------
-    void ReplTimingOp::deferred_execute(void)
+    void ReplTimingOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
