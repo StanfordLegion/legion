@@ -10052,7 +10052,22 @@ namespace Legion {
                  sit != it->second.end(); ++sit)
             {
 #ifdef DEBUG_LEGION
-              assert(output_sizes.find(sit->first) == output_sizes.end());
+              if (output_sizes.find(sit->first) != output_sizes.end()) {
+                const DomainPoint& color = sit->first;
+                const OutputRequirement& req = output_regions[it->first];
+                std::stringstream ss;
+                ss << "(" << color[0];
+                for (int dim = 1; dim < color.dim; ++dim)
+                  ss << "," << color[dim];
+                ss << ")";
+                REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
+                  "A projection functor for every output requirement must be "
+                  "bijective, but projection functor %u for output requirement "
+                  "%u in task %s (UID: %lld) mapped more than one point "
+                  "in the launch domain to the same subregion of color %s.",
+                  req.projection,it->first, get_task_name(), get_unique_op_id(),
+                  ss.str().c_str());
+              }
 #endif
               output_sizes[sit->first] = sit->second;
             }
