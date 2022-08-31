@@ -1072,12 +1072,12 @@ namespace Legion {
     private:
       struct OutputRegionTagCreator {
       public:
-        OutputRegionTagCreator(TypeTag *_type_tag, int _launch_ndim)
-          : type_tag(_type_tag), launch_ndim(_launch_ndim) { }
+        OutputRegionTagCreator(TypeTag *_type_tag, int _color_ndim)
+          : type_tag(_type_tag), color_ndim(_color_ndim) { }
         template<typename DIM, typename COLOR_T>
         static inline void demux(OutputRegionTagCreator *creator)
         {
-          switch (DIM::N + creator->launch_ndim)
+          switch (DIM::N + creator->color_ndim)
           {
 #define DIMFUNC(DIM)                                             \
             case DIM:                                            \
@@ -1094,7 +1094,7 @@ namespace Legion {
         }
       private:
         TypeTag *type_tag;
-        int launch_ndim;
+        int color_ndim;
       };
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
@@ -1137,6 +1137,9 @@ namespace Legion {
                                           IndexPartNode *part,
                                           const SizeMap& output_sizes,
                                           const SizeMap& local_sizes);
+      void validate_output_sizes(unsigned index,
+                                 const OutputRequirement& output_requirement,
+                                 const SizeMap& output_sizes) const;
       virtual void finalize_output_regions(void);
     public:
       virtual bool has_prepipeline_stage(void) const

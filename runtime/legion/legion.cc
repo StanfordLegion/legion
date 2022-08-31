@@ -1324,7 +1324,8 @@ namespace Legion {
     OutputRequirement::OutputRequirement(bool valid)
       : RegionRequirement(), type_tag(TYPE_TAG_1D),
         field_space(FieldSpace::NO_SPACE),
-        global_indexing(false), valid_requirement(valid)
+        global_indexing(false), valid_requirement(valid),
+        color_space(IndexSpace::NO_SPACE)
     //--------------------------------------------------------------------------
     {
     }
@@ -1332,7 +1333,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const RegionRequirement &req)
       : RegionRequirement(req), type_tag(req.parent.get_type_tag()),
-        global_indexing(false), valid_requirement(true)
+        global_indexing(false), valid_requirement(true),
+        color_space(IndexSpace::NO_SPACE)
     //--------------------------------------------------------------------------
     {
     }
@@ -1343,7 +1345,8 @@ namespace Legion {
                                         int dim /*=1*/,
                                         bool _global_indexing /*=false*/)
       : RegionRequirement(), field_space(_field_space),
-        global_indexing(_global_indexing), valid_requirement(false)
+        global_indexing(_global_indexing), valid_requirement(false),
+        color_space(IndexSpace::NO_SPACE)
     //--------------------------------------------------------------------------
     {
       switch (dim)
@@ -1369,7 +1372,8 @@ namespace Legion {
       : RegionRequirement(static_cast<const RegionRequirement&>(other)),
         type_tag(other.type_tag), field_space(other.field_space),
         global_indexing(other.global_indexing),
-        valid_requirement(other.valid_requirement)
+        valid_requirement(other.valid_requirement),
+        color_space(other.color_space)
     //--------------------------------------------------------------------------
     {
     }
@@ -1391,6 +1395,7 @@ namespace Legion {
       global_indexing = rhs.global_indexing;
       valid_requirement = rhs.valid_requirement;
       type_tag = rhs.type_tag;
+      color_space = rhs.color_space;
       return *this;
     }
 
@@ -1405,6 +1410,7 @@ namespace Legion {
       global_indexing = false;
       valid_requirement = true;
       type_tag = rhs.region.get_type_tag();
+      color_space = IndexSpace::NO_SPACE;
       return *this;
     }
 
@@ -1414,7 +1420,8 @@ namespace Legion {
     {
       if ((field_space != rhs.field_space) ||
           (global_indexing != rhs.global_indexing) ||
-          (valid_requirement != rhs.valid_requirement))
+          (valid_requirement != rhs.valid_requirement) ||
+          (color_space != rhs.color_space))
         return false;
       return static_cast<const RegionRequirement&>(*this) ==
              static_cast<const RegionRequirement&>(rhs);
@@ -1436,8 +1443,20 @@ namespace Legion {
         return true;
       if (valid_requirement > rhs.valid_requirement)
         return false;
+      if (color_space < rhs.color_space)
+        return true;
+      if (color_space > rhs.color_space)
+        return false;
       return static_cast<const RegionRequirement&>(*this) <
              static_cast<const RegionRequirement&>(rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRequirement::set_projection(ProjectionID proj, IndexSpace cspace)
+    //--------------------------------------------------------------------------
+    {
+      projection = proj;
+      color_space = cspace;
     }
 
     /////////////////////////////////////////////////////////////

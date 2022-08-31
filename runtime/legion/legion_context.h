@@ -2704,6 +2704,8 @@ namespace Legion {
           const std::vector<IndexSpaceRequirement> &index_requirements);
       static void hash_region_requirements(Murmur3Hasher &hasher,
           const std::vector<RegionRequirement> &region_requirements);
+      static void hash_output_requirements(Murmur3Hasher &hasher,
+          const std::vector<OutputRequirement> &output_requirements);
       static void hash_grants(Murmur3Hasher &hasher, 
           const std::vector<Grant> &grants);
       static void hash_phase_barriers(Murmur3Hasher &hasher,

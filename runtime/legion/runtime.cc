@@ -5693,10 +5693,17 @@ namespace Legion {
       assert(cons->ordering_constraint.ordering.size() > 1);
       assert(cons->ordering_constraint.ordering.back() == LEGION_DIM_F);
 #endif
-      int32_t ndim = cons->ordering_constraint.ordering.size() - 1;
+      int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
+      DimensionKind max_dim =
+        static_cast<DimensionKind>(static_cast<int32_t>(LEGION_DIM_X) + ndim);
       ordering.resize(ndim);
-      for (int32_t idx = 0; idx < ndim; ++idx)
-        ordering[idx] = cons->ordering_constraint.ordering[idx];
+      uint32_t idx = 0;
+      for (std::vector<DimensionKind>::const_iterator it =
+           cons->ordering_constraint.ordering.begin(); it !=
+           cons->ordering_constraint.ordering.end(); ++it)
+      {
+        if (*it < max_dim) ordering[idx++] = *it;
+      }
 
       for (std::vector<AlignmentConstraint>::const_iterator it =
            cons->alignment_constraints.begin(); it !=
@@ -5895,19 +5902,20 @@ namespace Legion {
         {
           if (!global_indexing)
           {
-            DomainPoint index_point = context->owner_task->index_point;
-            domain.dim = index_point.dim + extents.dim;
+            DomainPoint color_point =
+              node->row_source->get_domain_point_color();
+            domain.dim = color_point.dim + extents.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
 #endif
-            for (int idx = 0; idx < index_point.dim; ++idx)
+            for (int idx = 0; idx < color_point.dim; ++idx)
             {
-              domain.rect_data[idx] = index_point[idx];
-              domain.rect_data[idx + domain.dim] = index_point[idx];
+              domain.rect_data[idx] = color_point[idx];
+              domain.rect_data[idx + domain.dim] = color_point[idx];
             }
             for (int idx = 0; idx < extents.dim; ++idx)
             {
-              int off = index_point.dim + idx;
+              int off = color_point.dim + idx;
               domain.rect_data[off] = 0;
               domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }

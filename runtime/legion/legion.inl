@@ -18490,6 +18490,9 @@ namespace Legion {
       size_t alignment;
       get_layout(field_id, ordering, alignment);
       std::array<DimensionKind, DIM> ord;
+#ifdef DEBUG_LEGION
+      assert(ordering.size() == DIM);
+#endif
       std::copy(ordering.begin(), ordering.end(), ord.begin());
 
       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> buffer(
