@@ -2666,7 +2666,7 @@ namespace Legion {
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
       assert(instance.load().exists() || external_allocation);
       assert((data.load() != NULL) || instance.load().exists());
-      assert(resource != NULL);
+      assert((resource != NULL) || inst.exists());
 #endif
     }
 
@@ -2679,28 +2679,33 @@ namespace Legion {
       {
         if (external_allocation)
         {
-          // Destroy the external instance if it exists
-          const PhysicalInstance inst = instance.load();
-          if (inst.exists())
-            inst.destroy(ready_event);
           void *tofree = const_cast<void*>(data.load());
           // Check to see if we have a freefunc or not
-          if (freefunc != NULL)
-            runtime->free_external_allocation(freeproc, resource, freefunc);
-          else if (memory.address_space() != runtime->address_space)
+          if (freefunc == NULL)
           {
-            // Send this to the target node with a NO_PROC which will
-            // be the sign it can delete it immediately
-            Serializer rez;
+            if (memory.address_space() != runtime->address_space)
             {
-              RezCheck z(rez);
-              rez.serialize(Processor::NO_PROC);
-              rez.serialize(tofree);
+              // Send this to the target node with a NO_PROC which will
+              // be the sign it can delete it immediately
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(Processor::NO_PROC);
+                rez.serialize(tofree);
+              }
+              runtime->send_free_external_allocation(memory.address_space(), 
+                                                     rez);
             }
-            runtime->send_free_external_allocation(memory.address_space(), rez);
+            else // this has to be a local allocation so we can free it
+              free(tofree);
+            // Destroy the external instance if it exists
+            const PhysicalInstance inst = instance.load();
+            if (inst.exists())
+              inst.destroy(ready_event);
           }
-          else // this has to be a local allocation so we can free it
-            free(tofree);
+          else
+            free_external_allocation(runtime, freeproc, freefunc, instance,
+                                     use_event, ready_event, resource);
         }
         else
         {
@@ -2718,8 +2723,7 @@ namespace Legion {
 #endif
         inst.destroy(ready_event);
       }
-      if ((resource != NULL) && 
-          (!own_allocation || !external_allocation || (freefunc == NULL)))
+      if (resource != NULL)
         delete resource;
     }
 
@@ -2993,6 +2997,10 @@ namespace Legion {
         if (alt_resource == NULL)
         {
           const PhysicalInstance inst = get_instance(size, own_inst); 
+          const RtEvent wait_on = use_event.load();
+          // Need to make sure the instance is valid before we use it
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
           alt_resource =
             inst.generate_resource_info(rect_space,0/*fid*/,false/*read only*/);
 #ifdef DEBUG_LEGION
@@ -3161,7 +3169,6 @@ namespace Legion {
         if (external_allocation)
         {
           rez.serialize<bool>(true); // external allocation
-          rez.serialize(resource);
           rez.serialize(freefunc);
           rez.serialize(freeproc);
         }
@@ -3207,14 +3214,12 @@ namespace Legion {
       derez.deserialize<bool>(external_allocation);
       if (external_allocation)
       {
-        const Realm::ExternalInstanceResource *resource;
-        derez.deserialize(resource);
         void (*freefunc)(const Realm::ExternalInstanceResource&);
         derez.deserialize(freefunc);
         Processor proc;
         derez.deserialize(proc);
         return new FutureInstance(data, size, ready, runtime, own_allocation,
-                              resource, freefunc, proc, instance, use_event);
+                      NULL/*resource*/, freefunc, proc, instance, use_event);
       }
       else
       {
@@ -3271,6 +3276,72 @@ namespace Legion {
       }
       return new FutureInstance(value, size, ApEvent::NO_AP_EVENT,
                                 runtime, false/*eager*/, true/*external*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::free_external_allocation(
+                       Runtime *runtime, Processor proc,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&),
+                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
+                       const Realm::ExternalInstanceResource *resource)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(freefunc != NULL);
+#endif
+      // Check see if this is local, if not, send a message
+      const AddressSpaceID target_space = proc.address_space();
+      if (target_space != runtime->address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(proc);
+          rez.serialize(freefunc);
+          rez.serialize(inst);
+          rez.serialize(precondition);
+        }
+        runtime->send_free_external_allocation(target_space, rez);
+      }
+      else
+      {
+        // Dispatch this on the target processor
+        FreeExternalArgs args(resource, freefunc, inst, precondition);
+        runtime->issue_application_processor_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, proc, use); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance::FreeExternalArgs::FreeExternalArgs(
+                          const Realm::ExternalInstanceResource *r,
+                          void (*func)(const Realm::ExternalInstanceResource&),
+                          PhysicalInstance inst, ApEvent pre)
+      : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
+        resource((r == NULL) ? r : r->clone()), freefunc(func),
+        instance(inst), precondition(pre)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::handle_free_external(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
+      const Realm::ExternalInstanceResource *resource = fargs->resource;
+      if (resource == NULL)
+      {
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        resource = fargs->instance.generate_resource_info(rect_space,
+                                          0/*fid*/, true/*read only*/);
+      }
+      (*(fargs->freefunc))(*resource);
+      fargs->instance.destroy(fargs->precondition);
+      if (fargs->resource == NULL)
+        delete resource;
     }
 
     //--------------------------------------------------------------------------
@@ -13416,11 +13487,15 @@ namespace Legion {
       // which means we can just free this here now
       if (proc.exists())
       {
-        const Realm::ExternalInstanceResource *resource;
-        derez.deserialize(resource);
         void (*freefunc)(const Realm::ExternalInstanceResource&);
         derez.deserialize(freefunc);
-        free_external_allocation(proc, resource, freefunc);
+        PhysicalInstance instance;
+        derez.deserialize(instance);
+        ApEvent precondition;
+        derez.deserialize(precondition);
+        const RtEvent use_event(instance.fetch_metadata(proc));
+        FutureInstance::free_external_allocation(this, proc, freefunc,
+            instance, use_event, precondition, NULL/*resource*/);
       }
       else
       {
@@ -21160,39 +21235,7 @@ namespace Legion {
       // Just use the standard translation for now
       AddressSpaceID result = handle.address_space();
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_external_allocation(Processor proc,
-                       const Realm::ExternalInstanceResource *resource,
-                       void (*freefunc)(const Realm::ExternalInstanceResource&))
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(resource != NULL);
-      assert(freefunc != NULL);
-#endif
-      // Check see if this is local, if not, send a message
-      const AddressSpaceID target_space = proc.address_space();
-      if (target_space != address_space)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(proc);
-          rez.serialize(resource);
-          rez.serialize(freefunc);
-        }
-        send_free_external_allocation(target_space, rez);
-      }
-      else
-      {
-        // Dispatch this on the target processor
-        FreeExternalArgs args(resource, freefunc);
-        issue_application_processor_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, proc); 
-      }
-    }
+    } 
 
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
@@ -32189,9 +32232,7 @@ namespace Legion {
           }
         case LG_FREE_EXTERNAL_TASK_ID:
           {
-            const FreeExternalArgs *fargs = (const FreeExternalArgs*)args;
-            (*(fargs->freefunc))(*fargs->resource);
-            delete fargs->resource;
+            FutureInstance::handle_free_external(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

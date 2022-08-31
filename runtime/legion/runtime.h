@@ -462,6 +462,19 @@ namespace Legion {
       public:
         FutureInstance *const instance;
       };
+      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
+      public:
+        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
+            void (*func)(const Realm::ExternalInstanceResource&),
+            PhysicalInstance inst, ApEvent precondition);
+      public:
+        const Realm::ExternalInstanceResource *const resource;
+        void (*const freefunc)(const Realm::ExternalInstanceResource&);
+        const PhysicalInstance instance;
+        const ApEvent precondition;
+      };
     public:
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool eager, 
@@ -511,6 +524,11 @@ namespace Legion {
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
+      static void free_external_allocation(Runtime *runtime, Processor proc,
+                       void (*freefunc)(const Realm::ExternalInstanceResource&),
+                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
+                       const Realm::ExternalInstanceResource *resource);
+      static void handle_free_external(const void *args);
       static void handle_deferred_delete(const void *args);
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
@@ -2574,18 +2592,6 @@ namespace Legion {
       public:
         TopLevelContext *const ctx;
       };
-      struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
-      public:
-        FreeExternalArgs(const Realm::ExternalInstanceResource *r,
-            void (*func)(const Realm::ExternalInstanceResource&))
-          : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
-            resource(r), freefunc(func) { }
-      public:
-        const Realm::ExternalInstanceResource *const resource;
-        void (*const freefunc)(const Realm::ExternalInstanceResource&);
-      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -3041,9 +3047,6 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
-      void free_external_allocation(Processor proc,
-          const Realm::ExternalInstanceResource *resource, 
-          void (*freefunc)(const Realm::ExternalInstanceResource&));
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
       void free_deferred_instance(Memory memory, uintptr_t ptr);
