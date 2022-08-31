@@ -9065,7 +9065,7 @@ namespace Legion {
                 "either the color space or the output region.",
                 idx, get_task_name(), get_unique_op_id());
 
-            OutputRegionTagCreator creator(&type_tag, launch_space.get_dim());
+            OutputRegionTagCreator creator(&type_tag, color_dim);
             Internal::NT_TemplateHelper::demux<OutputRegionTagCreator>(
                 req.type_tag, &creator);
           }
