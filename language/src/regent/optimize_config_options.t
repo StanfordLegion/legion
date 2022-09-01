@@ -509,7 +509,16 @@ local node_is_replicable = {
             node}
   end,
 
-  [ast.typed.expr.MethodCall] = always_false,
+  [ast.typed.expr.MethodCall] = function(node)
+    local value_type = std.as_read(node.value.expr_type)
+    local methods = rawget(value_type, "methods")
+    if methods then
+      local method = rawget(methods, node.method_name)
+      return {method and type(method) == "table" and rawget(method, "replicable"), node}
+    end
+    return {false, node}
+  end,
+
   [ast.typed.expr.Adjust]     = always_false,
   [ast.typed.expr.Arrive]     = always_false,
   [ast.typed.expr.Await]      = always_false,

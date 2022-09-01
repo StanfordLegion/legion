@@ -161,7 +161,9 @@ terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
     hi = hi:to_point(),
   }
 end
+to_rect.replicable = true
 
+__demand(__inline)
 task make_private_partition(points : region(ispace(int2d), point),
                             tiles : ispace(int1d),
                             n : int2d, nt : int2d, radius : int64)
@@ -182,6 +184,7 @@ task make_private_partition(points : region(ispace(int2d), point),
   return p
 end
 
+__demand(__inline)
 task make_interior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -202,6 +205,7 @@ task make_interior_partition(points : region(ispace(int2d), point),
   return p
 end
 
+__demand(__inline)
 task make_exterior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -234,10 +238,11 @@ end
 terra clamp(val : int64, lo : int64, hi : int64)
   return min(max(val, lo), hi)
 end
-
+clamp.replicable = true
 
 function make_ghost_x_partition(is_complete)
-  local task ghost_x_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_x_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
@@ -268,7 +273,8 @@ function make_ghost_x_partition(is_complete)
 end
 
 function make_ghost_y_partition(is_complete)
-  local task ghost_y_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_y_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
