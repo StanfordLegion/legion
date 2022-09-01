@@ -127,14 +127,17 @@ namespace Legion {
       operation_instances.push_back(OperationInstance());
       OperationInstance &inst = operation_instances.back();
       inst.op_id = op->get_unique_op_id();
-      inst.parent_id = op->get_context()->get_unique_id();
+      InnerContext *parent_ctx = op->get_context();
+      // Legion prof uses ULLONG_MAX to represent the unique IDs of the root
+      inst.parent_id = 
+       (parent_ctx->get_depth() < 0) ? ULLONG_MAX : parent_ctx->get_unique_id();
       inst.kind = op->get_operation_kind();
       Provenance *prov = op->get_provenance();
       if (prov != NULL)
       {
-      inst.provenance = strdup(prov->provenance.c_str());
-      owner->update_footprint(
-          sizeof(OperationInstance) + strlen(inst.provenance), this);
+        inst.provenance = strdup(prov->provenance.c_str());
+        owner->update_footprint(
+            sizeof(OperationInstance) + strlen(inst.provenance), this);
       }
       else
       {

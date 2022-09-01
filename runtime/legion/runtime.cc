@@ -12492,14 +12492,14 @@ namespace Legion {
                                         MapperID map_id)
     //--------------------------------------------------------------------------
     {
-      // Get an individual task to be the top-level task
-      IndividualTask *mapper_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *map_context = 
         new TopLevelContext(this, get_unique_operation_id());
       map_context->add_reference();
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
+      // Get an individual task to be the top-level task
+      IndividualTask *mapper_task = get_available_individual_task();
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                               false/*track parent*/);
       mapper_task->set_current_proc(proc);
@@ -22537,8 +22537,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(target.exists());
 #endif
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -22546,6 +22544,8 @@ namespace Legion {
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
       // Mark that this task is the top-level task
       Future result = top_task->initialize_task(top_context, launcher, 
                                 false/*track parent*/,true/*top level task*/);
@@ -22599,8 +22599,6 @@ namespace Legion {
         attach_semantic_information(top_task_id, 
             LEGION_NAME_SEMANTIC_TAG, task_name, 
             strlen(task_name) + 1, true/*mutable*/);
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -22635,6 +22633,8 @@ namespace Legion {
       top_context->set_executing_processor(proxy);
       TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
       // Mark that this task is the top-level task
       top_task->initialize_task(top_context, launcher, false/*track parent*/,
                     true/*top level task*/, true/*implicit top level task*/);
