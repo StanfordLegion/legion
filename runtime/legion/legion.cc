@@ -5836,7 +5836,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InlineLauncher launcher(req, id, tag);
-      launcher.provenance = provenance;
+      if (provenance != NULL)
+        launcher.provenance = provenance;
       return runtime->map_region(ctx, launcher);
     }
 
