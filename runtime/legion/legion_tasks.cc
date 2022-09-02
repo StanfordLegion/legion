@@ -8546,9 +8546,9 @@ namespace Legion {
       // Initialize the vector of extents with -1
       std::vector<std::vector<coord_t>> all_extents(ndim);
       for (int32_t dim = 0; dim < ndim; ++dim)
-        all_extents[dim].resize(color_extents[dim] + 1, -1);
+        all_extents[dim].resize(color_extents[dim] + 1, 0);
 
-      // Check the alignment while populating the extent vector
+      // Populate the extent vectors
       for (SizeMap::const_iterator it = output_sizes.begin();
            it != output_sizes.end(); ++it)
       {
@@ -8557,9 +8557,10 @@ namespace Legion {
         for (int32_t dim = 0; dim < ndim; ++dim)
         {
           coord_t c = color[dim];
-          if (all_extents[dim][c] == -1)
-            all_extents[dim][c] = extent[dim];
-          else if (extent[dim] <= 0) continue;
+          coord_t ext = extent[dim];
+          coord_t &to_update = all_extents[dim][c];
+          // Ignore all zero extents when populating the extent vector
+          if (to_update == 0 && ext > 0) to_update = ext;
         }
       }
 
