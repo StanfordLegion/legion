@@ -919,7 +919,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
-      assert(completion_event.exists());
 #endif
       parent_ctx = ctx;
       track_parent = track;

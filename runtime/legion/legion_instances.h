@@ -195,7 +195,7 @@ namespace Legion {
       inline VirtualManager* as_virtual_manager(void) const;
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
-                        bool external, bool reduction, bool collective);
+                                          bool external, bool reduction);
       static inline bool is_physical_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
@@ -1459,7 +1459,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline DistributedID InstanceManager::encode_instance_did(
-              DistributedID did, bool external, bool reduction, bool collective)
+                               DistributedID did, bool external, bool reduction)
     //--------------------------------------------------------------------------
     {
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHYSICAL_MANAGER_DC | 

@@ -958,7 +958,8 @@ namespace Legion {
                         const ReductionOp *op /*= NULL*/,
                         CollectiveMapping *mapping /*=NULL*/,
                         ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
-      : InstanceManager(ctx, owner_space, did, layout, node,
+      : InstanceManager(ctx, owner_space, encode_instance_did(did, 
+          (k == EXTERNAL_ATTACHED_INSTANCE_KIND), (redop_id > 0)), layout, node,
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
           // On remote nodes we'll already have it from the owner

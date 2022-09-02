@@ -4653,7 +4653,7 @@ namespace Legion {
       // STEP 2: Set up the task's context
       {
         const bool is_leaf_variant = variant->is_leaf();
-        if (!is_leaf_variant)
+        if (is_leaf_variant)
         {
           execution_context = new LeafContext(runtime, this, inline_task);
           // Add a reference to our execution context
@@ -10148,12 +10148,12 @@ namespace Legion {
       bool need_trigger = false;
       bool trigger_children_completed = false;
       bool trigger_children_commit = false;
+      record_completion_effect(slice_complete);
       {
         AutoLock o_lock(op_lock);
         mapped_points += points;
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
-        record_completion_effect(slice_complete);
         // Already know that mapped points is the same as total points
         if (mapped_points == total_points)
         {

@@ -6189,7 +6189,7 @@ namespace Legion {
               trace_info, local_space, symbolic);
         }
       }
-      if (!trace_info.recording)
+      if (trace_info.recording)
       {
         InnerContext *context = op->find_physical_context(index);
         std::vector<IndividualView*> individual_views;
@@ -7234,7 +7234,6 @@ namespace Legion {
       assert(usage == this->usage);
       // Should always be local
       assert(original_source == runtime->address_space);
-      assert(user_registered.exists());
 #endif
       if (precondition.exists() && ! precondition.has_triggered())
         return defer_registration(precondition, usage, applied_events,
@@ -7244,7 +7243,8 @@ namespace Legion {
         CollectiveCopyFillAnalysis::perform_registration(precondition,
                               usage, applied_events, init_precondition,
                               termination, instances_ready, symbolic);
-      Runtime::trigger_event(user_registered, registered);
+      if (user_registered.exists())
+        Runtime::trigger_event(user_registered, registered);
       return registered;
     }
 
