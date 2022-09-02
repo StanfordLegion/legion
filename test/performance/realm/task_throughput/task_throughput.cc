@@ -218,7 +218,7 @@ void task_launcher(const void *args, size_t arglen,
       assert(tta->instance.exists());
 
       Processor::TaskFuncID task_id = DUMMY_TASK;
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
       if((*it).kind() == Processor::TOC_PROC)
 	task_id = DUMMY_GPU_TASK;
 #endif
@@ -280,7 +280,7 @@ void top_level_task(const void *args, size_t arglen,
       Memory m = Machine::MemoryQuery(Machine::get_machine())
 	.has_affinity_to(p)
 	.first();
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
       // instance is used by host-side code, so pick a sysmem for GPUs
       if(p.kind() == Processor::TOC_PROC)
 	m = Machine::MemoryQuery(Machine::get_machine())
@@ -387,7 +387,7 @@ int main(int argc, char **argv)
   r.register_task(TASK_LAUNCHER, task_launcher);
   r.register_task(DUMMY_TASK, dummy_cpu_task);
   r.register_task(PROFILER_TASK, profiler_task);
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   Processor::register_task_by_kind(Processor::TOC_PROC,
 				   false /*!global*/,
 				   DUMMY_GPU_TASK,
