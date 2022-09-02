@@ -39,10 +39,16 @@ namespace Legion {
     class Provenance : public Collectable {
     public:
       Provenance(const char *prov) : provenance(prov) { }
+      Provenance(const void *buffer, size_t size)
+        : provenance((const char*)buffer, size) { }
       Provenance(const Provenance &rhs) = delete;
       ~Provenance(void) { }
     public:
       Provenance& operator=(const Provenance &rhs) = delete;
+    public:
+      void serialize(Serializer &rez) const;
+      static void serialize_null(Serializer &rez);
+      static Provenance* deserialize(Deserializer &derez);
     public:
       const std::string provenance;
     };

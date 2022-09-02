@@ -30,6 +30,43 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Provenance
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void Provenance::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t strlen = provenance.length();
+      rez.serialize(strlen);
+      if (strlen > 0)
+        rez.serialize(provenance.c_str(), strlen);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Provenance::serialize_null(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Provenance* Provenance::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t length;
+      derez.deserialize(length);
+      if (length > 0)
+      {
+        Provenance *result = new Provenance(derez.get_current_pointer(),length);
+        derez.advance_pointer(length);
+        return result;
+      }
+      else
+        return NULL;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Operation 
     /////////////////////////////////////////////////////////////
 

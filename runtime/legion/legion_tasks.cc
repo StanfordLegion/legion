@@ -751,7 +751,7 @@ namespace Legion {
       {
         rez.serialize(it->first);
         it->second.pack_references(rez);
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -805,6 +805,9 @@ namespace Legion {
         early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       // Already had our options selected
       options_selected = true;
     }
@@ -5981,6 +5984,10 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6052,6 +6059,9 @@ namespace Legion {
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
       }
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       // Figure out what our parent context is
       RtEvent ctx_ready;
       parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
@@ -6655,6 +6665,9 @@ namespace Legion {
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
+      provenance = slice_owner->get_provenance();
+      if (provenance != NULL)
+        provenance->add_reference();
       // We should always just apply these things now since we were mapped 
       // on the owner node
 #ifdef DEBUG_LEGION
@@ -9224,10 +9237,12 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
         points[idx]->pack_task(rez, target);
-      }
       // If we don't have any points, we have to pack up the argument map
       // and any trace info that we need for doing remote tracing
       if (points.empty())
@@ -9336,6 +9351,11 @@ namespace Legion {
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
       }
+      // Unpack the provenance before unpacking any point tasks so
+      // that they can pick it up as well
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = runtime->get_available_point_task(); 
