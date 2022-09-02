@@ -285,11 +285,24 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    UniqueInst::UniqueInst(void)
+      : inst_did(0), view_did(0), analysis_space(0)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      tid = 0;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     UniqueInst::UniqueInst(IndividualView *view)
       : inst_did(view->get_manager()->did), view_did(view->did),
         analysis_space(view->get_analysis_space(view->get_manager()))
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      tid = view->get_manager()->tree_id;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -303,6 +316,9 @@ namespace Legion {
       rez.serialize(view_did);
       rez.serialize(inst_did);
       rez.serialize(analysis_space);
+#ifdef LEGION_SPY
+      rez.serialize(tid);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -312,6 +328,9 @@ namespace Legion {
       derez.deserialize(view_did);
       derez.deserialize(inst_did);
       derez.deserialize(analysis_space);
+#ifdef LEGION_SPY
+      derez.deserialize(tid);
+#endif
     }
 
     //--------------------------------------------------------------------------

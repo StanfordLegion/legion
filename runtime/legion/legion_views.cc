@@ -2283,15 +2283,15 @@ namespace Legion {
       else
         manager->compute_copy_offsets(fill_mask, dst_fields); 
       const ApEvent result = fill_expression->issue_fill(op, trace_info,
-                                                 dst_fields,
-                                                 fill_view->value->value,
-                                                 fill_view->value->value_size,
+                                             dst_fields,
+                                             fill_view->value->value,
+                                             fill_view->value->value_size,
 #ifdef LEGION_SPY
-                                                 fill_view->fill_op_uid,
-                                                 field_space_node->handle,
-                                                 tree_id,
+                                             fill_view->fill_op_uid,
+                                             manager->field_space_node->handle,
+                                             manager->tree_id,
 #endif
-                                                 precondition, predicate_guard);
+                                             precondition, predicate_guard);
       // Save the result
       if (manage_dst_events && result.exists())
       {
@@ -4798,7 +4798,7 @@ namespace Legion {
                        AddressSpaceID owner_proc,
                        FillViewValue *val, bool register_now,
 #ifdef LEGION_SPY
-                       UniqueID op_uid
+                       UniqueID op_uid,
 #endif
                        CollectiveMapping *map)
       : DeferredView(ctx, encode_fill_did(did), owner_proc, register_now, map), 
@@ -8373,16 +8373,15 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         local_manager->compute_copy_offsets(fill_mask, dst_fields);
         const ApEvent result = fill_expression->issue_fill(op,
-                                                 inst_info, dst_fields,
-                                                 fill_view->value->value,
-                                                 fill_view->value->value_size,
+                                 inst_info, dst_fields,
+                                 fill_view->value->value,
+                                 fill_view->value->value_size,
 #ifdef LEGION_SPY
-                                                 fill_view->fill_op_uid,
-                                                 field_space_node->handle,
-                                                 tree_id,
+                                 fill_view->fill_op_uid,
+                                 local_view->manager->field_space_node->handle,
+                                 local_view->manager->tree_id,
 #endif
-                                                 dst_precondition,
-                                                 predicate_guard);
+                                 dst_precondition, predicate_guard);
         if (result.exists())
         {
           ready_events.push_back(result);
@@ -8588,7 +8587,7 @@ namespace Legion {
       const ApEvent copy_post = copy_expression->issue_copy(op,
             trace_info, dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
-            tree_id, tree_id,
+            local_manager->tree_id, dst_inst.tid,
 #endif
             precondition, predicate_guard);
       // Record the user
@@ -8759,7 +8758,7 @@ namespace Legion {
       const ApEvent copy_post = copy_expression->issue_copy(
           op, local_info, local_fields, src_fields, no_reservations,
 #ifdef LEGION_SPY
-          tree_id, tree_id,
+          src_inst.tid, local_manager->tree_id,
 #endif
           local_pre, predicate_guard);
       if (local_info.recording)
@@ -8879,7 +8878,7 @@ namespace Legion {
         const ApEvent local_copy = copy_expression->issue_copy(
             op, inst_info, dst_fields, local_fields, no_reservations,
 #ifdef LEGION_SPY
-            tree_id, tree_id,
+            local_manager->tree_id, dst_manager->tree_id,
 #endif
             dst_pre, predicate_guard);
         if (local_copy.exists())
@@ -9165,7 +9164,7 @@ namespace Legion {
         const ApEvent reduce_done = copy_expression->issue_copy(
             op, inst_info, local_fields, src_fields, local_reservations,
 #ifdef LEGION_SPY
-            tree_id, tree_id,
+            src_inst.tid, dst_manager->tree_id,
 #endif
             reduce_pre, predicate_guard);
         if (reduce_done.exists())
@@ -9554,7 +9553,7 @@ namespace Legion {
           const ApEvent copy_post = copy_expression->issue_copy(
               op, trace_info, dst_fields, local_fields, no_reservations,
 #ifdef LEGION_SPY
-              tree_id, tree_id,
+              local_manager->tree_id, dst_manager->tree_id,
 #endif
               copy_pre, predicate_guard);
           if (copy_post.exists())
@@ -10050,6 +10049,10 @@ namespace Legion {
                        register_now, mapping)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Replicated View %lld %d %lld", 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10155,6 +10158,10 @@ namespace Legion {
       // We reserve the 0 all-reduce tag to mean no-tag
       if (unique_allreduce_tag.load() == 0)
         unique_allreduce_tag.fetch_add(collective_mapping->size());
+#ifdef LEGION_GC
+      log_garbage.info("GC Allreduce View %lld %d %lld", 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10384,7 +10391,7 @@ namespace Legion {
           const ApEvent local_reduce = copy_expression->issue_copy(
               op, trace_info, local_fields, src_fields, local_reservations,
 #ifdef LEGION_SPY
-              tree_id, tree_id,
+              local_manager->tree_id, src_manager->tree_id,
 #endif
               local_pre, predicate_guard); 
           if (local_reduce.exists())
@@ -10434,7 +10441,7 @@ namespace Legion {
       const ApEvent reduce_post = copy_expression->issue_copy(
           op, trace_info, dst_fields, local_fields, reservations,
 #ifdef LEGION_SPY
-          tree_id, tree_id,
+          local_manager->tree_id, dst_inst.tid,
 #endif
           precondition, predicate_guard);
       // Trigger the output
@@ -10654,7 +10661,7 @@ namespace Legion {
         const ApEvent copy_post = copy_expression->issue_copy(
             op, trace_info, dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
-            tree_id, tree_id,
+            local_manager->tree_id, dst_inst.tid,
 #endif
             src_pre, predicate_guard);
         if (copy_post.exists())
@@ -11037,7 +11044,9 @@ namespace Legion {
                 op, trace_info, local_fields[0], reduction_op->identity,
                 reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
-                fill_view->fill_op_uid, field_space_node->handle, tree_id,
+                fill_view->fill_op_uid, 
+                local_views[0]->manager->field_space_node->handle,
+                local_views[0]->manager->tree_id,
 #endif
                 instance_events[0], predicate_guard);
             if (trace_info.recording)
@@ -11284,7 +11293,9 @@ namespace Legion {
                 local_fields[dst_inst_index],
                 reduction_op->identity, reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
-                fill_view->fill_op_uid, field_space_node->handle, tree_id,
+                fill_view->fill_op_uid,
+                local_views[dst_inst_index]->manager->field_space_node->handle,
+                local_views[dst_inst_index]->manager->tree_id,
 #endif
                 instance_events[dst_inst_index], predicate_guard);
           if (dst_info.recording)
@@ -11302,7 +11313,8 @@ namespace Legion {
               local_fields[dst_inst_index], local_fields[src_inst_index],
               reservations[dst_inst_index],
 #ifdef LEGION_SPY
-              tree_id, tree_id,
+              local_views[src_inst_index]->manager->tree_id,
+              local_views[dst_inst_index]->manager->tree_id,
 #endif
               local_precondition, predicate_guard);
           std::vector<ApEvent> dst_events;
@@ -11475,7 +11487,7 @@ namespace Legion {
           const ApEvent reduced = copy_expression->issue_copy(op, inst_info,
               local_fields.front(), local_fields[idx], reservations.front(),
 #ifdef LEGION_SPY
-              tree_id, tree_id,
+              src_view->manager->tree_id, local_view->manager->tree_id,
 #endif
               copy_pre, predicate_guard);
           // No need to record the output with the view
@@ -11619,7 +11631,7 @@ namespace Legion {
           const ApEvent copy_post = copy_expression->issue_copy(op, inst_info,
               local_fields.front(), local_fields[idx], no_reservations,
 #ifdef LEGION_SPY
-              tree_id, tree_id,
+              local_view->manager->tree_id, dst_view->manager->tree_id,
 #endif
               copy_pre, predicate_guard);
           // No need to record the output with the view
@@ -11843,7 +11855,7 @@ namespace Legion {
         const ApEvent post = copy_expression->issue_copy(
             op, trace_info, dst_fields, it->src_fields, reservations,
 #ifdef LEGION_SPY
-            tree_id, tree_id,
+            it->src_inst.tid, dst_inst.tid,
 #endif
             pre, predicate_guard);
         if (trace_info.recording)
@@ -11914,7 +11926,7 @@ namespace Legion {
           finder->second.op, *(finder->second.trace_info),
           finder->second.dst_fields, src_fields, finder->second.reservations,
 #ifdef LEGION_SPY
-          tree_id, tree_id,
+          src_inst.tid, finder->second.dst_inst.tid,
 #endif
           precondition, finder->second.predicate_guard);
       std::set<RtEvent> applied_events;

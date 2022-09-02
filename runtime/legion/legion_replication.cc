@@ -7732,7 +7732,7 @@ namespace Legion {
                                           *it, ready_event);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        completion_event);
+                                        get_completion_event());
 #endif
       }
 #ifdef DEBUG_LEGION

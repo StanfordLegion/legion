@@ -167,7 +167,7 @@ namespace Legion {
      */
     struct UniqueInst {
     public:
-      UniqueInst(void) : inst_did(0), view_did(0), analysis_space(0) { }
+      UniqueInst(void);
       UniqueInst(IndividualView *v);
     public:
       inline bool operator<(const UniqueInst &rhs) const
@@ -191,6 +191,9 @@ namespace Legion {
       DistributedID view_did;
       // Logical owner space for the view
       AddressSpaceID analysis_space;
+#ifdef LEGION_SPY
+      RegionTreeID tid;
+#endif
     };
 
     /**

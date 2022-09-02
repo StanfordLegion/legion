@@ -1487,7 +1487,7 @@ namespace Legion {
       // Tasks are strange and will do their own calls to log_operation_events
       if (get_operation_kind() != TASK_OP_KIND)
       {
-        ApEvent effect_done;
+        ApEvent effects_done;
         if (!completion_effects.empty())
           effects_done = Runtime::merge_events(NULL, completion_effects);
         if (completion_event.exists())

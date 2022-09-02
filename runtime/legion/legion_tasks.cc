@@ -9772,7 +9772,7 @@ namespace Legion {
         Runtime::trigger_event(future_map_ready);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
+                                      get_completion_event());
 #endif
       if (must_epoch != NULL)
       {

@@ -50,14 +50,14 @@ remove_base_ref_pat = re.compile(prefix + r'GC Remove Base Ref (?P<kind>[0-9]+) 
 remove_nested_ref_pat = re.compile(prefix + r'GC Remove Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 # Instances
 inst_manager_pat = re.compile(prefix + r'GC Instance Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
-collective_manager_pat = re.compile(prefix + r'GC Collective Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
 virtual_manager_pat = re.compile(prefix + r'GC Virtual Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Views
 materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 phi_pat = re.compile(prefix + r'GC Phi View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
-sharded_pat = re.compile(prefix + r'GC Sharded View (?P<did>[0-9]+) (?P<node>[0-9]+)')
+replicated_pat = re.compile(prefix + r'GC Replicated View (?P<did>[0-9]+) (?P<node>[0-9]+)')
+allreduce_pat = re.compile(prefix + r'GC Allreduce View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Equivalence Set 
 equivalence_set_pat = re.compile(prefix + r'GC Equivalence Set (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
@@ -741,11 +741,6 @@ class State(object):
                                           long_type(m.group('iid'),16),
                                           long_type(m.group('mem'),16))
                     continue
-                m = collective_manager_pat.match(line)
-                if m is not None:
-                    self.log_collective_manager(long_type(m.group('did')),
-                                                long_type(m.group('node')))
-                    continue
                 m = virtual_manager_pat.match(line)
                 if m is not None:
                     self.log_virtual_manager(long_type(m.group('did')),
@@ -772,10 +767,15 @@ class State(object):
                                             long_type(m.group('node')),
                                             long_type(m.group('inst')))
                     continue
-                m = sharded_pat.match(line)
+                m = replicated_pat.match(line)
                 if m is not None:
-                    self.log_sharded_view(long_type(m.group('did')),
-                                          long_type(m.group('node')))
+                    self.log_replicated_view(long_type(m.group('did')),
+                                             long_type(m.group('node')))
+                    continue
+                m = allreduce_pat.match(line)
+                if m is not None:
+                    self.log_allreduce_view(long_type(m.group('did')),
+                                            long_type(m.group('node')))
                     continue
                 m = equivalence_set_pat.match(line)
                 if m is not None:
@@ -914,11 +914,6 @@ class State(object):
         manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_collective_manager(self, did, node):
-        inst = Instance(0, 0, 'Collective')
-        manager = self.get_manager(did, node)
-        manager.add_inst(inst)
-
     def log_virtual_manager(self, did, node):
         inst = Instance(0, 0, 'Virtual')
         manager = self.get_manager(did, node)
@@ -940,8 +935,11 @@ class State(object):
         view = self.get_view(did, node, 'Reduction')
         view.add_manager(manager)
 
-    def log_sharded_view(self, did, node):
-        self.get_view(did, node, 'Sharded')
+    def log_replicated_view(self, did, node):
+        self.get_view(did, node, 'Replicated')
+
+    def log_allreduce_view(self, did, node):
+        self.get_view(did, node, 'Allreduce')
 
     def log_equivalence_set(self, did, node):
         self.get_equivalence_set(did, node);
