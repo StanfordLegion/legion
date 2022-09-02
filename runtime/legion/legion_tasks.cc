@@ -8557,8 +8557,9 @@ namespace Legion {
         for (int32_t dim = 0; dim < ndim; ++dim)
         {
           coord_t c = color[dim];
-          if (extent[dim] <= 0) continue;
-          all_extents[dim][c] = extent[dim];
+          if (all_extents[dim][c] == -1)
+            all_extents[dim][c] = extent[dim];
+          else if (extent[dim] <= 0) continue;
         }
       }
 
@@ -8569,6 +8570,9 @@ namespace Legion {
         for (size_t idx = 0; idx < extents.size() - 1; ++idx)
         {
           coord_t ext = extents[idx];
+#ifdef DEBUG_LEGION
+          assert(ext >= 0);
+#endif
           extents[idx] = sum;
           sum += ext;
         }
