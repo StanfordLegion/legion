@@ -7599,7 +7599,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveView::register_collective_analysis(PhysicalManager *target,
-                 CollectiveAnalysis *analysis, size_t local_collective_arrivals)
+                                              CollectiveAnalysis *analysis,
+                                              size_t local_collective_arrivals,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7609,15 +7611,18 @@ namespace Legion {
       const AddressSpaceID analysis_space = get_analysis_space(target);
       if (analysis_space != local_space)
       {
+        const RtEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(target->did);
-          analysis->pack_collective_analysis(rez);
+          analysis->pack_collective_analysis(rez,analysis_space,applied_events);
           rez.serialize(local_collective_arrivals);
+          rez.serialize(applied);
         }
         runtime->send_collective_remote_registration(analysis_space, rez);
+        applied_events.insert(applied);
         return;
       }
       const unsigned local_index = find_local_index(target);
@@ -7659,6 +7664,50 @@ namespace Legion {
       if ((--finder->second.remaining_analyses == 0) &&
           finder->second.analyses_ready.exists())
         Runtime::trigger_event(finder->second.analyses_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_remote_analysis_registration(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent view_ready, manager_ready;
+      CollectiveView *collective_view = static_cast<CollectiveView*>(
+          runtime->find_or_request_logical_view(did, view_ready));
+      derez.deserialize(did);
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(did, manager_ready);
+      std::set<RtEvent> applied_events;
+      RemoteCollectiveAnalysis *analysis = 
+        RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
+      analysis->add_reference();
+      size_t local_collective_arrivals;
+      derez.deserialize(local_collective_arrivals);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      if (view_ready.exists() && !view_ready.has_triggered())
+        applied_events.insert(view_ready);
+      if (manager_ready.exists() && !manager_ready.has_triggered())
+        applied_events.insert(manager_ready);
+      if (!applied_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(applied_events);
+        applied_events.clear();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      collective_view->register_collective_analysis(manager, analysis,
+                            local_collective_arrivals, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
     }
 
     //--------------------------------------------------------------------------

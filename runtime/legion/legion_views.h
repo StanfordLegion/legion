@@ -590,7 +590,8 @@ namespace Legion {
                                        unsigned region_index);
       void register_collective_analysis(PhysicalManager *target,
                                         CollectiveAnalysis *analysis,
-                                        size_t local_collective_arrivals);
+                                        size_t local_collective_arrivals,
+                                        std::set<RtEvent> &applied_events);
       RtEvent find_collective_analyses(size_t context_index, unsigned index,
                           const std::vector<CollectiveAnalysis*> *&analyses);
     public:
@@ -648,6 +649,8 @@ namespace Legion {
       static void handle_nearest_instances_request(Runtime *runtime,
                                                    Deserializer &derez);
       static void handle_nearest_instances_response(Deserializer &derez);
+      static void handle_remote_analysis_registration(Deserializer &derez,
+                                                      Runtime *runtime);
       static void handle_collective_view_deletion(Deserializer &derez,
                                                   Runtime *runtime);
       static void unpack_fields(std::vector<CopySrcDstField> &fields,

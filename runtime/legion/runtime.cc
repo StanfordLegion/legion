@@ -24839,14 +24839,12 @@ namespace Legion {
       CollectiveView::handle_nearest_instances_response(derez);
     }
 
-#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_remote_registration(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_remote_registration(this, derez);
+      CollectiveView::handle_remote_analysis_registration(derez, this);
     }
-#endif // NO_EXPLICIT_COLLECTIVES
     
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_finalize_mapping(Deserializer &derez)

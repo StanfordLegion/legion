@@ -6207,6 +6207,61 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // RemoteCollectiveAnalysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void CollectiveAnalysis::pack_collective_analysis(
+       Serializer &rez, AddressSpaceID target, std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(get_context_index());
+      rez.serialize(get_requirement_index());
+      Operation *op = get_operation();
+      op->pack_remote_operation(rez, target, applied);
+      const PhysicalTraceInfo &trace_info = get_trace_info();
+      trace_info.pack_trace_info(rez, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCollectiveAnalysis::RemoteCollectiveAnalysis(size_t ctx_index,
+        unsigned req_index, RemoteOp *op, Deserializer &derez, Runtime *runtime)
+      : context_index(ctx_index), requirement_index(req_index), operation(op),
+        trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCollectiveAnalysis::~RemoteCollectiveAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+      delete operation;
+    }
+
+    //--------------------------------------------------------------------------
+    Operation* RemoteCollectiveAnalysis::get_operation(void) const
+    //--------------------------------------------------------------------------
+    {
+      return operation;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RemoteCollectiveAnalysis* RemoteCollectiveAnalysis::unpack(
+         Deserializer &derez, Runtime *runtime, std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      size_t context_index;
+      derez.deserialize(context_index);
+      unsigned requirement_index;
+      derez.deserialize(requirement_index);
+      RemoteOp *op =
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      return new RemoteCollectiveAnalysis(context_index, requirement_index,
+                                          op, derez, runtime);
+    }
+
+    /////////////////////////////////////////////////////////////
     // CollectiveCopyFillAnalysis
     /////////////////////////////////////////////////////////////
 
@@ -6242,16 +6297,7 @@ namespace Legion {
       assert(target_instances.size() == target_views.size());
 #endif
       // Remote case so no registration to perform
-    } 
-
-    //--------------------------------------------------------------------------
-    void CollectiveCopyFillAnalysis::pack_collective_analysis(
-                                                          Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(get_context_index());
-      rez.serialize(get_requirement_index());
-    }
+    }  
 
     //--------------------------------------------------------------------------
     RtEvent CollectiveCopyFillAnalysis::perform_traversal(
@@ -6278,7 +6324,7 @@ namespace Legion {
           assert(finder != collective_arrivals.end());
 #endif
           collective->register_collective_analysis(manager, this,
-                                                   finder->second);
+                                  finder->second, applied_events);
         }
       }
       return RegistrationAnalysis::perform_traversal(precondition,
