@@ -2640,8 +2640,14 @@ namespace Legion {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
       const Processor exec_proc = Processor::get_executing_processor();
-      finder.has_affinity_to(exec_proc);
+      finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(exec_proc);
+        finder.only_kind(memkind);
+      }
       if (finder.count() == 0)
       {
         const char *mem_names[] = {
