@@ -805,9 +805,6 @@ namespace Legion {
         early_mapped_regions[index].unpack_references(runtime, derez, 
                                                       ready_events);
       }
-      provenance = Provenance::deserialize(derez);
-      if (provenance != NULL)
-        provenance->add_reference();
       // Already had our options selected
       options_selected = true;
     }
