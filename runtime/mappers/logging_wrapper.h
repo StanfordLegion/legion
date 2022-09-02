@@ -53,7 +53,7 @@ namespace Mapping {
 // - Provide some control over the level of detail.
 class LoggingWrapper : public ForwardingMapper {
  public:
-  LoggingWrapper(Mapper* mapper);
+  LoggingWrapper(Mapper* mapper, Logger* logger = NULL);
   virtual ~LoggingWrapper();
 #ifndef NO_LEGION_CONTROL_REPLICATION
  private:
@@ -107,6 +107,8 @@ class LoggingWrapper : public ForwardingMapper {
                                    const Copy& copy,
                                    const SelectCopySrcInput& input,
                                    SelectCopySrcOutput& output);
+ private:
+  Logger* logger;
 };
 
 }; // namespace Mapping

@@ -11,7 +11,7 @@ variables:
   CXXFLAGS: "-std=c++11"
   CXX_STANDARD: "11"
 
-  SCHEDULER_PARAMETERS: "-A CSC335_crusher -t 2:00:00 -N 1 -p batch"
+  SCHEDULER_PARAMETERS: "-A CSC335_crusher -t 3:00:00 -N 1 -p batch"
   EXTERNAL_WORKDIR: /gpfs/alpine/csc335/proj-shared/ci/${CI_PIPELINE_ID}
   GIT_SUBMODULE_STRATEGY: recursive
 
