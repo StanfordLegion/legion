@@ -8511,6 +8511,38 @@ namespace Legion {
       int32_t ndim = color_space.dim;
       DomainPoint color_extents = color_space.hi() - color_space.lo() + 1;
 
+#ifdef DEBUG_LEGION
+      // Check alignments between tiles
+      for (SizeMap::const_iterator it = output_sizes.begin();
+           it != output_sizes.end(); ++it)
+      {
+        const DomainPoint &color = it->first;
+        const DomainPoint &extent = it->second;
+
+        for (int32_t dim = 0; dim < ndim; ++dim)
+        {
+          if (color[dim] == 0) continue;
+          DomainPoint neighbor = color;
+          --neighbor[dim];
+          auto finder = output_sizes.find(neighbor);
+          assert(finder != output_sizes.end());
+
+          const DomainPoint &neighbor_extent = it->second;
+          if (extent[dim] != neighbor_extent[dim])
+          {
+              std::stringstream ss;
+              ss << "Point task " << color << " returned an output of extent "
+                 << extent[dim] << " for dimension " << dim
+                 << ", but an adjacent point task returned an output of extent "
+                 << neighbor_extent[dim] << ". "
+                 << "Please make sure the outputs from point tasks are aligned.";
+              REPORT_LEGION_ERROR(
+                  ERROR_UNALIGNED_OUTPUT_REGION, "%s", ss.str().c_str());
+          }
+        }
+      }
+#endif
+
       // Initialize the vector of extents with -1
       std::vector<std::vector<coord_t>> all_extents(ndim);
       for (int32_t dim = 0; dim < ndim; ++dim)
@@ -8525,20 +8557,8 @@ namespace Legion {
         for (int32_t dim = 0; dim < ndim; ++dim)
         {
           coord_t c = color[dim];
-          if (all_extents[dim][c] == -1)
-            all_extents[dim][c] = extent[dim];
-          else if (extent[dim] <= 0) continue;
-          else if (all_extents[dim][c] != extent[dim])
-          {
-            std::stringstream ss;
-            ss << "Point task " << color << " returned an output of extent "
-               << extent[dim] << " for dimension " << dim
-               << ", but an adjacent point task returned an output of extent "
-               << all_extents[dim][c] << ". "
-               << "Please make sure the outputs from point tasks are aligned.";
-            REPORT_LEGION_ERROR(
-                ERROR_UNALIGNED_OUTPUT_REGION, "%s", ss.str().c_str());
-          }
+          if (extent[dim] <= 0) continue;
+          all_extents[dim][c] = extent[dim];
         }
       }
 
