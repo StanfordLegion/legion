@@ -8543,7 +8543,7 @@ namespace Legion {
       }
 #endif
 
-      // Initialize the vector of extents with -1
+      // Initialize the vectors of extents with 0
       std::vector<std::vector<coord_t>> all_extents(ndim);
       for (int32_t dim = 0; dim < ndim; ++dim)
         all_extents[dim].resize(color_extents[dim] + 1, 0);
@@ -8571,9 +8571,6 @@ namespace Legion {
         for (size_t idx = 0; idx < extents.size() - 1; ++idx)
         {
           coord_t ext = extents[idx];
-#ifdef DEBUG_LEGION
-          assert(ext >= 0);
-#endif
           extents[idx] = sum;
           sum += ext;
         }
