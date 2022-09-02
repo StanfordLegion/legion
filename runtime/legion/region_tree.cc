@@ -2483,8 +2483,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            const UniqueInst unique_inst(source_views[idx],
-                                         ref.get_physical_manager());
+            const UniqueInst unique_inst(source_views[idx]);
             tracing_srcs[unique_inst] = ref.get_valid_fields();
           }
           for (unsigned idx = 0; idx < target_views.size(); idx++)
@@ -2498,7 +2497,7 @@ namespace Legion {
             assert(it->first->is_individual_view());
 #endif
             IndividualView *view = it->first->as_individual_view();
-            const UniqueInst unique_inst(view, view->get_manager());
+            const UniqueInst unique_inst(view);
             tracing_dsts[unique_inst] = it->second;
           }
           trace_info.record_across_insts(result, src_index, dst_index,
@@ -2677,8 +2676,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
@@ -2686,8 +2684,7 @@ namespace Legion {
           InnerContext *idx_context = op->find_physical_context(idx_index); 
           std::vector<IndividualView*> indirect_views;
           idx_context->convert_individual_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(),
-                                       idx_target.get_physical_manager());
+          const UniqueInst unique_inst(indirect_views.back());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
@@ -2697,8 +2694,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
@@ -2826,8 +2822,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
@@ -2835,8 +2830,7 @@ namespace Legion {
           std::vector<IndividualView*> indirect_views;
           InnerContext *idx_context = op->find_physical_context(idx_index);
           idx_context->convert_individual_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(),
-                                       idx_target.get_physical_manager());
+          const UniqueInst unique_inst(indirect_views.back());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
@@ -2846,8 +2840,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         trace_info.record_across_insts(copy_post, src_index, idx_index,
@@ -3002,8 +2995,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the src_idx_insts
@@ -3013,8 +3005,7 @@ namespace Legion {
           std::vector<IndividualView*> src_indirect_views;
           src_idx_context->convert_individual_views(src_idx_targets,
                                                 src_indirect_views);
-          const UniqueInst unique_inst(src_indirect_views.back(), 
-                                       src_idx_target.get_physical_manager());
+          const UniqueInst unique_inst(src_indirect_views.back());
           src_idx_insts[unique_inst] = src_idx_target.get_valid_fields();
         }
         // Get the dst_insts
@@ -3024,8 +3015,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx],
-                                       ref.get_physical_manager());
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the dst_idx_insts
@@ -3035,8 +3025,7 @@ namespace Legion {
           std::vector<IndividualView*> dst_indirect_views;
           dst_idx_context->convert_individual_views(dst_idx_targets,
                                                 dst_indirect_views);
-          const UniqueInst unique_inst(dst_indirect_views.back(),
-                                       dst_idx_target.get_physical_manager());
+          const UniqueInst unique_inst(dst_indirect_views.back());
           dst_idx_insts[unique_inst] = dst_idx_target.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());

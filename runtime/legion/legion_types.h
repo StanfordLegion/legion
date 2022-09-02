@@ -800,6 +800,8 @@ namespace Legion {
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
+      SEND_REPLICATED_VIEW,
+      SEND_ALLREDUCE_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_DISTRIBUTE_FILL,
@@ -814,14 +816,11 @@ namespace Legion {
       SEND_COLLECTIVE_USER_REQUEST,
       SEND_COLLECTIVE_USER_RESPONSE,
       SEND_COLLECTIVE_REGISTER_USER,
-      SEND_COLLECTIVE_POINT_REQUEST,
-      SEND_COLLECTIVE_POINT_RESPONSE,
       SEND_COLLECTIVE_REMOTE_INSTANCES_REQUEST,
       SEND_COLLECTIVE_REMOTE_INSTANCES_RESPONSE,
       SEND_COLLECTIVE_NEAREST_INSTANCES_REQUEST,
       SEND_COLLECTIVE_NEAREST_INSTANCES_RESPONSE,
       SEND_COLLECTIVE_REMOTE_REGISTRATION,
-      SEND_COLLECTIVE_DELETION,
       SEND_COLLECTIVE_FINALIZE_MAPPING,
       SEND_COLLECTIVE_VIEW_CREATION,
       SEND_COLLECTIVE_VIEW_DELETION,
@@ -861,7 +860,6 @@ namespace Legion {
       SEND_REPL_TRACE_UPDATE,
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
-      SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -1047,6 +1045,8 @@ namespace Legion {
         "Send Fill View",                                             \
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
+        "Send Replicated View",                                       \
+        "Send Allreduce View",                                        \
         "Send Instance Manager",                                      \
         "Send Manager Update",                                        \
         "Send Collective Distribute Fill",                            \
@@ -1061,14 +1061,11 @@ namespace Legion {
         "Send Collective User Request",                               \
         "Send Collective User Response",                              \
         "Send Collective Individual Register User",                   \
-        "Send Collective Point Info Request",                         \
-        "Send Collective Point Info Response",                        \
         "Send Collective Remote Instances Request",                   \
         "Send Collective Remote Instances Response",                  \
         "Send Collective Nearest Instances Request",                  \
         "Send Collective Nearest Instances Response",                 \
         "Send Collective Remote Registration",                        \
-        "Send Collective Deletion",                                   \
         "Send Collective Finalize Mapping",                           \
         "Send Collective View Creation",                              \
         "Send Collective View Deletion",                              \
@@ -1108,7 +1105,6 @@ namespace Legion {
         "Send Replicate Trace Update",                                \
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
-        "Send Replicate Collective Instance Message",                 \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

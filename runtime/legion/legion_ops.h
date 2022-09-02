@@ -1813,7 +1813,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
-      virtual void trigger_complete(void);
     protected:
       CreationKind kind; 
       IndexSpaceNode *index_space_node;

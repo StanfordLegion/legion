@@ -11100,6 +11100,7 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     void ShardManager::send_collective_instance_message(ShardID target,
                                                         Serializer &rez)
@@ -11142,6 +11143,7 @@ namespace Legion {
       // Should never get here
       assert(false);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ShardManager::broadcast_resource_update(ShardTask *source, 
@@ -11814,6 +11816,7 @@ namespace Legion {
       manager->handle_trace_update(derez, source);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_collective_instance_message(
                                           Deserializer &derez, Runtime *runtime)
@@ -11824,6 +11827,7 @@ namespace Legion {
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_collective_instance_message(derez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_disjoint_complete_request(

@@ -1100,7 +1100,7 @@ namespace Legion {
                     std::vector<std::vector<CopySrcDstField> > &local_fields,
               const std::vector<std::vector<Reservation> > &reservations,
                                 std::vector<ApEvent> &local_init_events,
-                                std::vector<ApEvent> &local_final_events);
+                                std::vector<ApEvent> &local_final_events); 
       void send_allreduce_stage(const uint64_t allreduce_tag, const int stage,
                                 const int local_rank, ApEvent src_precondition,
                                 PredEvent predicate_guard,
@@ -1123,6 +1123,7 @@ namespace Legion {
                                 const std::vector<Reservation> &reservations,
                                 const int *expected_ranks, size_t total_ranks,
                                 std::vector<ApEvent> &dst_events);
+      
       void process_distribute_allreduce(const uint64_t allreduce_tag,
                                 const int src_rank, const int stage,
                                 std::vector<CopySrcDstField> &src_fields,

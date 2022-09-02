@@ -2863,9 +2863,11 @@ namespace Legion {
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
+#ifdef NO_EXPLICIT_COLLECTIVES
     public:
       void send_collective_instance_message(ShardID target, Serializer &rez);
       void handle_collective_instance_message(Deserializer &derez);
+#endif
     public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
@@ -2920,8 +2922,10 @@ namespace Legion {
       static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
+#ifdef NO_EXPLICIT_COLLECTIVES
       static void handle_collective_instance_message(Deserializer &derez,
                                                      Runtime *runtime);
+#endif
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

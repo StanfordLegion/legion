@@ -12287,6 +12287,16 @@ namespace Legion {
               runtime->handle_send_reduction_view(derez, remote_address_space);
               break;
             }
+          case SEND_REPLICATED_VIEW:
+            {
+              runtime->handle_send_replicated_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_ALLREDUCE_VIEW:
+            {
+              runtime->handle_send_allreduce_view(derez, remote_address_space);
+              break;
+            }
           case SEND_INSTANCE_MANAGER:
             {
               runtime->handle_send_instance_manager(derez, 
@@ -12368,16 +12378,6 @@ namespace Legion {
               runtime->handle_collective_user_registration(derez);
               break;
             }
-          case SEND_COLLECTIVE_POINT_REQUEST:
-            {
-              runtime->handle_collective_point_request(derez);
-              break;
-            }
-          case SEND_COLLECTIVE_POINT_RESPONSE:
-            {
-              runtime->handle_collective_point_response(derez);
-              break;
-            }
           case SEND_COLLECTIVE_REMOTE_INSTANCES_REQUEST:
             {
               runtime->handle_collective_remote_instances_request(derez,
@@ -12403,11 +12403,6 @@ namespace Legion {
           case SEND_COLLECTIVE_REMOTE_REGISTRATION:
             {
               runtime->handle_collective_remote_registration(derez);
-              break;
-            }
-          case SEND_COLLECTIVE_DELETION:
-            {
-              runtime->handle_collective_deletion(derez);
               break;
             }
           case SEND_COLLECTIVE_FINALIZE_MAPPING:
@@ -12616,12 +12611,6 @@ namespace Legion {
           case SEND_REPL_IMPLICIT_RESPONSE:
             {
               runtime->handle_control_replicate_implicit_response(derez);
-              break;
-            }
-          case SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE:
-            {
-              runtime->handle_control_replicate_collective_instance_message(
-                                                                      derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -13038,11 +13027,6 @@ namespace Legion {
           case SEND_REPLICATE_TRIGGER_COMMIT:
             {
               runtime->handle_replicate_trigger_commit(derez);
-              break;
-            }
-          case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
-            {
-              runtime->handle_control_replicate_collective_message(derez);
               break;
             }
           case SEND_LIBRARY_MAPPER_REQUEST:
@@ -22446,6 +22430,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_replicated_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPLICATED_VIEW>(
+                           rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_allreduce_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_ALLREDUCE_VIEW>(
+                           rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_manager(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -22570,24 +22570,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_collective_point_request(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_COLLECTIVE_POINT_REQUEST>(
-                                                        rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_collective_point_response(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_COLLECTIVE_POINT_RESPONSE>(
-                                      rez, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_collective_remote_instances_request(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22632,15 +22614,6 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_COLLECTIVE_REMOTE_REGISTRATION>(
                                                             rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_collective_deletion(AddressSpaceID target,
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_COLLECTIVE_DELETION>(
-                                                  rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -22986,16 +22959,6 @@ namespace Legion {
       // See Runtime::send_replicate_launch
       find_messenger(target)->send_message<SEND_REPL_IMPLICIT_RESPONSE>(
                                                       rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_collective_instance_message(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<
-          SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE>(
-                              rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24703,6 +24666,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_send_replicated_view(Deserializer &derez,
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ReplicatedView::handle_send_replicated_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_allreduce_view(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AllreduceView::handle_send_allreduce_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_send_instance_manager(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24733,6 +24712,7 @@ namespace Legion {
     {
       CollectiveManager::handle_instance_creation(this, derez);
     }
+#endif // NO_EXPLICIT_COLLECTIVES
 
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_distribute_fill(Deserializer &derez,
@@ -24755,7 +24735,7 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_pointwise(this, source, derez);
+      CollectiveView::handle_distribute_pointwise(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24795,7 +24775,7 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_distribute_allreduce(this, source, derez);
+      AllreduceView::handle_distribute_allreduce(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24810,35 +24790,21 @@ namespace Legion {
     void Runtime::handle_collective_user_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_register_user_request(this, derez);
+      CollectiveView::handle_register_user_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_user_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CollectiveManager::handle_register_user_response(this, derez);
+      CollectiveView::handle_register_user_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_user_registration(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndividualManager::handle_collective_user_registration(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_collective_point_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_point_request(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_collective_point_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_point_response(this, derez);
+      IndividualView::handle_collective_user_registration(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24873,18 +24839,12 @@ namespace Legion {
       CollectiveView::handle_nearest_instances_response(derez);
     }
 
+#ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_remote_registration(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_remote_registration(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_collective_deletion(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_deletion(this, derez);
     }
 #endif // NO_EXPLICIT_COLLECTIVES
     
@@ -25147,14 +25107,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ImplicitShardManager::handle_remote_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_collective_instance_message(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_collective_instance_message(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -32675,11 +32627,13 @@ namespace Legion {
                                                                       args);
             break;
           }
+#ifdef NO_EXPLICIT_COLLECTIVES
         case LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID:
           {
             ReplicateContext::handle_defer_collective_message(args);
             break;
           }
+#endif
         case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:
           {
             PendingEquivalenceSet::handle_defer_finalize(args);

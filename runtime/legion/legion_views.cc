@@ -2302,7 +2302,7 @@ namespace Legion {
       }
       if (trace_info.recording)
       {
-        const UniqueInst dst_inst(this, manager);
+        const UniqueInst dst_inst(this);
         trace_info.record_fill_inst(result, fill_expression, dst_inst,
                         fill_mask, applied_events, (get_redop() > 0));
       }
@@ -2417,8 +2417,8 @@ namespace Legion {
         }
         if (trace_info.recording)
         {
-          const UniqueInst src_inst(source_view, source_manager);
-          const UniqueInst dst_inst(this, manager);
+          const UniqueInst src_inst(source_view);
+          const UniqueInst dst_inst(this);
           trace_info.record_copy_insts(result, copy_expression, src_inst,
               dst_inst, *src_mask, copy_mask, reduction_op_id, applied_events);
         }
@@ -2471,7 +2471,7 @@ namespace Legion {
           // instances. Therefore for now we will hammer all the source
           // instances into the destination instance without any
           // intermediate reductions.
-          const UniqueInst dst_inst(this, manager);
+          const UniqueInst dst_inst(this);
           if (manage_dst_events)
           {
             // Reduction-tree case
@@ -2615,7 +2615,7 @@ namespace Legion {
           const AddressSpaceID origin = (src_point != NULL) ?
               src_point->owner_space :
               collective->select_source_space(owner_space);
-          const UniqueInst dst_inst(this, manager);
+          const UniqueInst dst_inst(this);
           if (origin != local_space)
           {
             const RtUserEvent recorded = Runtime::create_rt_user_event();
@@ -6519,7 +6519,7 @@ namespace Legion {
 #endif
           }
         }
-        const UniqueInst src_inst(source_view, source_manager);
+        const UniqueInst src_inst(source_view);
         if (origin != local_space)
         {
           const RtUserEvent recorded = Runtime::create_rt_user_event();
@@ -8344,7 +8344,7 @@ namespace Legion {
         }
         if (inst_info.recording)
         {
-          const UniqueInst dst_inst(local_view, local_manager);
+          const UniqueInst dst_inst(local_view);
           inst_info.record_fill_inst(result, fill_expression, dst_inst, 
                          fill_mask, applied_events, (get_redop() > 0));
         }
@@ -8552,7 +8552,7 @@ namespace Legion {
       }
       if (trace_info.recording)
       {
-        const UniqueInst src_inst(local_view, local_manager);
+        const UniqueInst src_inst(local_view);
         trace_info.record_copy_insts(copy_post, copy_expression,
           src_inst, dst_inst, copy_mask, dst_mask, get_redop(), applied_events);
       }
@@ -8715,7 +8715,7 @@ namespace Legion {
           local_pre, predicate_guard);
       if (local_info.recording)
       {
-        const UniqueInst dst_inst(local_view, local_manager);
+        const UniqueInst dst_inst(local_view);
         local_info.record_copy_insts(copy_post, copy_expression,
           src_inst, dst_inst, copy_mask, copy_mask, 0/*redop*/, applied_events);
       }
@@ -8741,7 +8741,7 @@ namespace Legion {
       ApBarrier broadcast_bar;
       ShardID broadcast_shard = 0;
       std::vector<ApEvent> read_events, done_events;
-      const UniqueInst local_inst(local_view, local_manager);
+      const UniqueInst local_inst(local_view);
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
@@ -8843,7 +8843,7 @@ namespace Legion {
         }
         if (inst_info.recording)
         {
-          const UniqueInst dst_inst(dst_view, dst_manager);
+          const UniqueInst dst_inst(dst_view);
           inst_info.record_copy_insts(local_copy, copy_expression, local_inst,
               dst_inst, copy_mask, copy_mask, 0/*redop*/, applied_events);
         }
@@ -9129,7 +9129,7 @@ namespace Legion {
         }
         if (inst_info.recording)
         {
-          const UniqueInst dst_inst(dst_view, dst_manager);
+          const UniqueInst dst_inst(dst_view);
           inst_info.record_copy_insts(reduce_done, copy_expression, src_inst,
               dst_inst, copy_mask, copy_mask, src_redop, applied_events);
         }
@@ -9243,7 +9243,6 @@ namespace Legion {
         delete op;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void CollectiveView::perform_collective_hourglass(
                                           AllreduceView *source,
@@ -9265,7 +9264,6 @@ namespace Legion {
       assert(op != NULL);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
-      assert(source->is_reduction_manager());
 #endif
       if (target != local_space)
       {
@@ -9299,25 +9297,25 @@ namespace Legion {
       assert(!instances.empty());
 #endif
       const UniqueID op_id = op->get_unique_op_id();
-      InstanceView *dst_view = local_views.front();
+      IndividualView *local_view = local_views.front();
       // Perform the collective reduction first on the source
-      const ApEvent reduce_pre = dst_view->find_copy_preconditions(
+      ApEvent reduce_pre = local_view->find_copy_preconditions(
           false/*reding*/, source->redop, copy_mask, copy_expression,
           op_id, index, applied_events, trace_info);
-      if (reduce_pre.exists())
+      if (precondition.exists())
       {
-        if (precondition.exists())
-          precondition =
+        if (reduce_pre.exists())
+          reduce_pre =
             Runtime::merge_events(&trace_info, precondition, reduce_pre);
         else
-          precondition = reduce_pre;
+          reduce_pre = precondition;
       }
-      PhysicalManager *dst_manager = dst_view->get_manager();
+      PhysicalManager *local_manager = local_view->get_manager();
       // We'll just use the first instance for the target
       std::vector<CopySrcDstField> local_fields;
-      dst_manager->compute_copy_offsets(copy_mask, local_fields);
+      local_manager->compute_copy_offsets(copy_mask, local_fields);
       std::vector<Reservation> reservations;
-      dst_view->find_field_reservations(copy_mask, reservations);
+      local_view->find_field_reservations(copy_mask, reservations);
       for (unsigned idx = 0; idx < local_fields.size(); idx++)
         local_fields[idx].set_redop(source->redop, false/*fold*/,
                                     true/*exclusive*/);
@@ -9326,7 +9324,14 @@ namespace Legion {
         runtime->determine_owner(src_inst_did) :
         source->select_source_space(local_space);
       ApEvent reduced;
-      const UniqueInst local_inst(dst_view, dst_manager);
+      const UniqueInst local_inst(local_view);
+      // Note that there is something subtle going on here!
+      // If the copy aggregator needs to issue multiple reduction copies
+      // to this collective instance, they might all need to do an
+      // hourglass or a reducecast case, to keep things correct with
+      // the broadcast, we rely on the ordering of collective messages
+      // going out from the same source node to all the other nodes to
+      // ensure that copies are done in the right order
       if (origin != local_space)
       {
         const RtUserEvent recorded = Runtime::create_rt_user_event();
@@ -9339,14 +9344,14 @@ namespace Legion {
           rez.serialize<size_t>(reservations.size());
           for (unsigned idx = 0; idx < reservations.size(); idx++)
             rez.serialize(reservations[idx]);
-          rez.serialize(precondition);
+          rez.serialize(reduce_pre);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, origin);
           op->pack_remote_operation(rez, origin, applied_events); 
           rez.serialize(index);
           rez.serialize(copy_mask);
           rez.serialize(copy_mask);
-          rez.serialize(src_point);
+          rez.serialize(src_inst_did);
           local_inst.serialize(rez);
           trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
@@ -9377,137 +9382,161 @@ namespace Legion {
         const ApUserEvent to_trigger = 
           Runtime::create_ap_user_event(&trace_info);
         source->perform_collective_reduction(local_fields,
-            reservations, precondition, predicate_guard, copy_expression,
+            reservations, reduce_pre, predicate_guard, copy_expression,
             op, index, copy_mask, copy_mask, src_inst_did, local_inst, 
             trace_info, recorded_events, applied_events, to_trigger, origin);
         reduced = to_trigger;
       }
       // Record the write 
-
-      // Do the broadcast out, start with any children
-      std::vector<AddressSpaceID> children;
-      collective_mapping->get_children(local_space, local_space, children);
-      ApBarrier broadcast_bar, all_bar;
-      ShardID broadcast_shard = 0, owner_shard = 0;
-      std::vector<ApEvent> broadcast_events;
-      std::vector<ApEvent> all_done_events;
-      if (all_done.exists() && trace_info.recording)
-      {
-        const size_t arrivals = collective_mapping->size();
-        all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
-        owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
-      }
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-        const RtUserEvent recorded = Runtime::create_rt_user_event();
-        const RtUserEvent applied = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(this->did);
-          rez.serialize(dst_view->did);
-          pack_fields(rez, local_fields);
-          local_inst.serialize(rez);
-          rez.serialize(reduced);
-          rez.serialize(predicate_guard);
-          copy_expression->pack_expression(rez, *it);
-          rez.serialize<bool>(copy_restricted);
-          if (copy_restricted)
-            op->pack_remote_operation(rez, origin, applied_events); 
-          rez.serialize(index);
-          rez.serialize(op->get_ctx_index());
-          rez.serialize(copy_mask);
-          trace_info.pack_trace_info(rez, applied_events);
-          rez.serialize(recorded);
-          rez.serialize(applied);
-          if (trace_info.recording)
-          {
-            if (!broadcast_bar.exists())
-            {
-              broadcast_bar =
-                ApBarrier(Realm::Barrier::create_barrier(children.size()));
-              broadcast_shard = trace_info.record_managed_barrier(broadcast_bar,
-                                                               children.size());
-              broadcast_events.push_back(broadcast_bar);
-            }
-            rez.serialize(broadcast_bar);
-            rez.serialize(broadcast_shard);
-            rez.serialize(all_bar);
-            if (all_bar.exists())
-              rez.serialize(owner_shard);
-          }
-          else
-          {
-            const ApUserEvent done = Runtime::create_ap_user_event(&trace_info);
-            rez.serialize(done);
-            broadcast_events.push_back(done);
-            ApUserEvent all;
-            if (all_done.exists())
-            {
-              all = Runtime::create_ap_user_event(&trace_info);
-              all_done_events.push_back(all);
-            }
-            rez.serialize(all);
-          }
-          rez.serialize(origin);
-        }
-        runtime->send_collective_distribute_broadcast(origin, rez);
-        recorded_events.insert(recorded);
-        applied_events.insert(applied);
-      }
-      // Then do our local broadcast
-      // TODO: if the number of local instances is large then we could
-      // turn this into a tree broadcast, but for now we're just going
-      // to copy everything out of the first instance
-      for (unsigned idx = 1; idx < instances.size(); idx++)
-      {
-        std::vector<CopySrcDstField> dst_fields;
-        layout->compute_copy_offsets(copy_mask, instances[idx],
-#ifdef LEGION_SPY
-                                     instance_events[idx],
-#endif
-                                     local_fields);
-        const std::vector<Reservation> no_reservations;
-        const ApEvent local_copy = copy_expression->issue_copy(
-            op, trace_info, dst_fields, local_fields, no_reservations,
-#ifdef LEGION_SPY
-            tree_id, tree_id,
-#endif
-            reduced, predicate_guard);
-        if (local_copy.exists())
-          broadcast_events.push_back(local_copy);
-        if (trace_info.recording)
-        {
-          const UniqueInst dst_inst(dst_view, instance_points[idx]);
-          trace_info.record_copy_insts(local_copy, copy_expression, local_inst,
-                 local_inst, copy_mask, copy_mask, 0/*redop*/, applied_events);
-        }
-      }
-      if (!broadcast_events.empty())
-      {
-        // Broadcast events will dominated the reduced event so there
-        // is no need to include it specifically
-        const ApEvent broadcast_done =
-          Runtime::merge_events(&trace_info, broadcast_events);
-        if (broadcast_done.exists())
-        {
-          dst_view->add_copy_user(false/*reading*/, 0/*redop*/, broadcast_done,
-              trace_info.get_collect_event(), copy_mask, copy_expression,
-              op_id, index, recorded_events, trace_info.recording,
-              runtime->address_space);
-          if (all_done.exists())
-            all_done_events.push_back(broadcast_done);
-        }
-      }
-      else 
-      {
-        dst_view->add_copy_user(false/*reading*/, 0/*redop*/, reduced,
+      if (reduced.exists())
+        local_view->add_copy_user(false/*reading*/, source->redop, reduced,
             trace_info.get_collect_event(), copy_mask, copy_expression,
             op_id, index, recorded_events, trace_info.recording,
             runtime->address_space);
-        if (all_done.exists())
-          all_done_events.push_back(reduced);
+      // Do the broadcast out, start with any children
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(local_space, local_space, children);
+      ApBarrier all_bar;
+      ShardID owner_shard = 0;
+      std::vector<ApEvent> all_done_events;
+      if (!children.empty() || (local_views.size() > 1))
+      {
+        ApEvent broadcast_pre = local_view->find_copy_preconditions(
+            true/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+            op_id, index, applied_events, trace_info);
+        if (precondition.exists())
+        {
+          if (broadcast_pre.exists())
+            broadcast_pre =
+              Runtime::merge_events(&trace_info, precondition, broadcast_pre);
+          else
+            broadcast_pre = precondition;
+        }
+        ApBarrier broadcast_bar;
+        ShardID broadcast_shard = 0;
+        std::vector<ApEvent> broadcast_events;
+        if (all_done.exists() && trace_info.recording)
+        {
+          const size_t arrivals = collective_mapping->size();
+          all_bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+          owner_shard = trace_info.record_managed_barrier(all_bar, arrivals);
+        }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          const RtUserEvent recorded = Runtime::create_rt_user_event();
+          const RtUserEvent applied = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(this->did);
+            rez.serialize(local_view->did);
+            pack_fields(rez, local_fields);
+            local_inst.serialize(rez);
+            rez.serialize(broadcast_pre);
+            rez.serialize(predicate_guard);
+            copy_expression->pack_expression(rez, *it);
+            rez.serialize<bool>(copy_restricted);
+            if (copy_restricted)
+              op->pack_remote_operation(rez, origin, applied_events); 
+            rez.serialize(index);
+            rez.serialize(op->get_ctx_index());
+            rez.serialize(copy_mask);
+            trace_info.pack_trace_info(rez, applied_events);
+            rez.serialize(recorded);
+            rez.serialize(applied);
+            if (trace_info.recording)
+            {
+              if (!broadcast_bar.exists())
+              {
+                broadcast_bar =
+                  ApBarrier(Realm::Barrier::create_barrier(children.size()));
+                broadcast_shard = trace_info.record_managed_barrier(
+                                      broadcast_bar, children.size());
+                broadcast_events.push_back(broadcast_bar);
+              }
+              rez.serialize(broadcast_bar);
+              rez.serialize(broadcast_shard);
+              rez.serialize(all_bar);
+              if (all_bar.exists())
+                rez.serialize(owner_shard);
+            }
+            else
+            {
+              const ApUserEvent done =
+                Runtime::create_ap_user_event(&trace_info);
+              rez.serialize(done);
+              broadcast_events.push_back(done);
+              ApUserEvent all;
+              if (all_done.exists())
+              {
+                all = Runtime::create_ap_user_event(&trace_info);
+                all_done_events.push_back(all);
+              }
+              rez.serialize(all);
+            }
+            rez.serialize(origin);
+          }
+          runtime->send_collective_distribute_broadcast(origin, rez);
+          recorded_events.insert(recorded);
+          applied_events.insert(applied);
+        }
+        // Then do our local broadcast
+        // TODO: if the number of local instances is large then we could
+        // turn this into a tree broadcast, but for now we're just going
+        // to copy everything out of the first instance
+        for (unsigned idx = 1; idx < local_views.size(); idx++)
+        {
+          ApEvent copy_pre = local_views[idx]->find_copy_preconditions(
+              false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+              op_id, index, applied_events, trace_info);
+          if (broadcast_pre.exists())
+          {
+            if (copy_pre.exists())
+              copy_pre = Runtime::merge_events(&trace_info, 
+                                  copy_pre, broadcast_pre);
+            else
+              copy_pre = broadcast_pre;
+          }
+          PhysicalManager *dst_manager = local_views[idx]->get_manager();
+          std::vector<CopySrcDstField> dst_fields;
+          dst_manager->compute_copy_offsets(copy_mask, local_fields);
+          const std::vector<Reservation> no_reservations;
+          const ApEvent copy_post = copy_expression->issue_copy(
+              op, trace_info, dst_fields, local_fields, no_reservations,
+#ifdef LEGION_SPY
+              tree_id, tree_id,
+#endif
+              copy_pre, predicate_guard);
+          if (copy_post.exists())
+          {
+            broadcast_events.push_back(copy_post);
+            local_views[idx]->add_copy_user(false/*reading*/, 0/*redop*/,
+                copy_post, trace_info.get_collect_event(), copy_mask, 
+                copy_expression, op_id, index, recorded_events,
+                trace_info.recording, runtime->address_space);
+          }
+          if (trace_info.recording)
+          {
+            const UniqueInst dst_inst(local_views[idx]);
+            trace_info.record_copy_insts(copy_post, copy_expression, local_inst,
+                   local_inst, copy_mask, copy_mask, 0/*redop*/, applied_events);
+          }
+        }
+        if (!broadcast_events.empty())
+        {
+          const ApEvent broadcast_done =
+            Runtime::merge_events(&trace_info, broadcast_events);
+          if (broadcast_done.exists())
+          {
+            local_view->add_copy_user(true/*reading*/, 0/*redop*/, 
+                broadcast_done, trace_info.get_collect_event(), copy_mask, 
+                copy_expression, op_id, index, recorded_events,
+                trace_info.recording, runtime->address_space);
+            if (all_done.exists())
+              all_done_events.push_back(broadcast_done);
+          }
+        }
       }
       if (all_done.exists())
       {
@@ -9540,18 +9569,12 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent dst_man_ready, src_man_ready, dst_view_ready, src_view_ready;
-      CollectiveManager *target = static_cast<CollectiveManager*>(
-          runtime->find_or_request_instance_manager(did, dst_man_ready));
-      derez.deserialize(did);
-      CollectiveManager *manager = static_cast<CollectiveManager*>(
-          runtime->find_or_request_instance_manager(did, src_man_ready));
-      derez.deserialize(did);
-      InstanceView *src_view = static_cast<InstanceView*>(
-          runtime->find_or_request_logical_view(did, src_view_ready));
-      derez.deserialize(did);
-      InstanceView *dst_view = static_cast<InstanceView*>(
+      RtEvent dst_view_ready, src_view_ready;
+      CollectiveView *target = static_cast<CollectiveView*>(
           runtime->find_or_request_logical_view(did, dst_view_ready));
+      derez.deserialize(did);
+      AllreduceView *src_view = static_cast<AllreduceView*>(
+          runtime->find_or_request_logical_view(did, src_view_ready));
       ApEvent precondition;
       derez.deserialize(precondition);
       PredEvent predicate_guard;
@@ -9565,8 +9588,8 @@ namespace Legion {
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      DomainPoint src_point;
-      derez.deserialize(src_point);
+      DistributedID src_inst_did;
+      derez.deserialize(src_inst_did);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);
@@ -9578,10 +9601,6 @@ namespace Legion {
       bool copy_restricted;
       derez.deserialize<bool>(copy_restricted);
 
-      if (dst_man_ready.exists() && !dst_man_ready.has_triggered())
-        ready_events.insert(dst_man_ready);
-      if (src_man_ready.exists() && !src_man_ready.has_triggered())
-        ready_events.insert(src_man_ready);
       if (src_view_ready.exists() && !src_view_ready.has_triggered())
         ready_events.insert(src_view_ready);
       if (dst_view_ready.exists() && !dst_view_ready.has_triggered())
@@ -9593,9 +9612,9 @@ namespace Legion {
           wait_on.wait();
       }
 
-      target->perform_collective_hourglass(manager, src_view, dst_view,
+      target->perform_collective_hourglass(src_view,
           precondition, predicate_guard, copy_expression, op, index,
-          copy_mask, src_point, trace_info, recorded_events, applied_events,
+          copy_mask, src_inst_did, trace_info, recorded_events, applied_events,
           all_done, runtime->address_space, copy_restricted);
 
       if (!recorded_events.empty())
@@ -9608,7 +9627,6 @@ namespace Legion {
         Runtime::trigger_event(applied);
       delete op;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void CollectiveView::perform_collective_pointwise(
@@ -9804,7 +9822,7 @@ namespace Legion {
         const AddressSpaceID src = (local_src_inst_did > 0) ?
           runtime->determine_owner(local_src_inst_did) :
           source->select_source_space(local_space);
-        const UniqueInst dst_inst(local_view, local_manager);
+        const UniqueInst dst_inst(local_view);
         ApEvent local_done;
         if (src != local_space)
         {
@@ -9991,6 +10009,74 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void ReplicatedView::send_view(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      // Check to see if this is a replicated view, if the target
+      // is in the replicated set, then there's nothing we need to do
+      // We can just ignore this and the registration will be done later
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(owner_context);
+        rez.serialize<size_t>(instances.size());
+        rez.serialize(&instances.front(), 
+            instances.size() * sizeof(DistributedID));
+        if (collective_mapping != NULL)
+          collective_mapping->pack(rez);
+        else
+          rez.serialize<size_t>(0);
+      }
+      runtime->send_replicated_view(target, rez);
+      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicatedView::handle_send_replicated_view(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      UniqueID owner_context;
+      derez.deserialize(owner_context);
+      size_t num_insts;
+      derez.deserialize(num_insts);
+      std::vector<DistributedID> instances(num_insts);
+      derez.deserialize(&instances.front(), num_insts * sizeof(DistributedID));
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (num_spaces > 0)
+      {
+        mapping = new CollectiveMapping(derez, num_spaces);
+        mapping->add_reference();
+      }
+      void *location;
+      ReplicatedView *view = NULL;
+      std::vector<IndividualView*> no_views;
+      if (runtime->find_pending_collectable_location(did, location))
+        view = new(location) ReplicatedView(runtime->forest, did, source,
+                                            owner_context, no_views, instances,
+                                            false/*register now*/, mapping);
+      else
+        view = new ReplicatedView(runtime->forest, did, source,
+                                  owner_context, no_views, instances,
+                                  false/*register now*/, mapping);
+      // Register only after construction
+      view->register_with_runtime();
+      if ((mapping != NULL) && mapping->remove_reference())
+        delete mapping;
+    }
+
     /////////////////////////////////////////////////////////////
     // AllreduceView
     /////////////////////////////////////////////////////////////
@@ -10005,14 +10091,18 @@ namespace Legion {
                                  ReductionOpID redop_id)
       : CollectiveView(ctx, id, owner_proc, owner_context, views, insts,
                        register_now, mapping), redop(redop_id),
+        reduction_op(runtime->get_reduction_op(redop)),
+        fill_view(runtime->find_or_create_reduction_fill_view(redop)),
         unique_allreduce_tag(mapping->contains(local_space) ? 
-            mapping->find_index(local_space) : 0)
+            mapping->find_index(local_space) : 0), multi_instance(false),
+        evaluated_multi_instance(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < local_views.size(); idx++)
         assert(local_views[idx]->get_redop() == redop);
 #endif
+      fill_view->add_nested_resource_ref(did);
       // We reserve the 0 all-reduce tag to mean no-tag
       if (unique_allreduce_tag.load() == 0)
         unique_allreduce_tag.fetch_add(collective_mapping->size());
@@ -10022,6 +10112,80 @@ namespace Legion {
     AllreduceView::~AllreduceView(void)
     //--------------------------------------------------------------------------
     {
+      if (fill_view->remove_nested_resource_ref(did))
+        delete fill_view;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::send_view(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      // Check to see if this is a replicated view, if the target
+      // is in the replicated set, then there's nothing we need to do
+      // We can just ignore this and the registration will be done later
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+        return;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(owner_context);
+        rez.serialize<size_t>(instances.size());
+        rez.serialize(&instances.front(), 
+            instances.size() * sizeof(DistributedID));
+        if (collective_mapping != NULL)
+          collective_mapping->pack(rez);
+        else
+          rez.serialize<size_t>(0);
+        rez.serialize(redop);
+      }
+      runtime->send_allreduce_view(target, rez);
+      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void AllreduceView::handle_send_allreduce_view(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      UniqueID owner_context;
+      derez.deserialize(owner_context);
+      size_t num_insts;
+      derez.deserialize(num_insts);
+      std::vector<DistributedID> instances(num_insts);
+      derez.deserialize(&instances.front(), num_insts * sizeof(DistributedID));
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (num_spaces > 0)
+      {
+        mapping = new CollectiveMapping(derez, num_spaces);
+        mapping->add_reference();
+      }
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      void *location;
+      AllreduceView *view = NULL;
+      std::vector<IndividualView*> no_views;
+      if (runtime->find_pending_collectable_location(did, location))
+        view = new(location) AllreduceView(runtime->forest, did, source,
+                                           owner_context, no_views, instances,
+                                           false/*register now*/, 
+                                           mapping, redop);
+      else
+        view = new AllreduceView(runtime->forest, did, source,
+                                 owner_context, no_views, instances,
+                                 false/*register now*/, mapping, redop);
+      // Register only after construction
+      view->register_with_runtime();
+      if ((mapping != NULL) && mapping->remove_reference())
+        delete mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -10094,7 +10258,7 @@ namespace Legion {
       // If we have any children, send them messages to reduce to our instance
       ApBarrier trace_barrier;
       ShardID trace_shard = 0;
-      const UniqueInst local_inst(local_view, local_manager);
+      const UniqueInst local_inst(local_view);
       for (std::vector<AddressSpaceID>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
@@ -10184,7 +10348,7 @@ namespace Legion {
           }
           if (trace_info.recording)
           {
-            const UniqueInst src_inst(src_view, src_manager);
+            const UniqueInst src_inst(src_view);
             trace_info.record_copy_insts(local_reduce, copy_expression,
              src_inst, local_inst, copy_mask, copy_mask, redop, applied_events);
           }
@@ -10454,7 +10618,7 @@ namespace Legion {
         }
         if (trace_info.recording)
         {
-          const UniqueInst src_inst(local_view, local_manager);
+          const UniqueInst src_inst(local_view);
           trace_info.record_copy_insts(copy_post, copy_expression, src_inst,
                       dst_inst, copy_mask, dst_mask, redop, applied_events);
         }
@@ -10547,6 +10711,1287 @@ namespace Legion {
       else
         Runtime::trigger_event(applied);
       delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::perform_collective_allreduce(ApEvent precondition,
+                                          PredEvent predicate_guard,
+                                          IndexSpaceExpression *copy_expression,
+                                          Operation *op, const unsigned index,
+                                          const FieldMask &copy_mask,
+                                          const PhysicalTraceInfo &trace_info,
+                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                                          std::set<RtEvent> &recorded_events,
+                                          std::set<RtEvent> &applied_events,
+                                          const uint64_t allreduce_tag)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(redop > 0);
+      assert(op != NULL);
+      assert(collective_mapping != NULL);
+      assert(collective_mapping->contains(local_space));
+#endif
+      // We're guaranteed to get one call to this function for each space
+      // in the collective mapping from perform_collective_pointwise, so
+      // we've already distributed control
+      // Our job in this function is to build a butterfly all-reduce network
+      // for exchanging the reduction data so each reduction instance in this
+      // collective instance contains all the same data
+      // There is a major complicating factor here because we can't do a 
+      // natural in-place all-reduce across our instances since the finish
+      // event for Realm copies only says when the whole copy is done and not
+      // when the copy has finished reading out from the source instance.
+      // Furthermore, we can't control when the reductions into the destination
+      // instances start happening as they precondition just governs the start
+      // of the whole copy. Therefore, we need to fake an in-place all-reduce.
+      // We fake things in one of two ways:
+      // Case 1: If we know that each node has at least two instances, then 
+      //         we can use one instance as the source for outgoing reduction
+      //         copies and the other as the destination for incoming
+      //         reduction copies and ping pong between them.
+      // Case 2: If we don't have at least two instances on each node then
+      //         we will pair up nodes and have them do the same trick as in
+      //         case 1 but using the two instances on adjacent nodes as the
+      //         sources and destinations.
+      // We handle unusual numbers of nodes that are not a power of the 
+      // collective radix in the normal way by picking a number of participants
+      // that is the largest power of the radix still less than or equal to
+      // the number of nodes and using an extra stage to fold-in the 
+      // non-participants values before doing the butterfly.
+
+      // See if we've got to do the multi-node all-reduce
+      if (collective_mapping->size() > 1)
+      {
+        if (is_multi_instance())
+          // Case 1: each node has multiple instances
+          perform_multi_allreduce(allreduce_tag, op, index, precondition, 
+              predicate_guard, copy_expression, copy_mask, trace_info, 
+              local_analyses, recorded_events, applied_events);
+        else
+          // Case 2: there are some nodes that only have one instance
+          // Pair up nodes to have them cooperate to have two buffers
+          // that we can ping-pong between to do the all-reduce "inplace"
+          perform_single_allreduce(allreduce_tag, op, index, precondition,
+              predicate_guard, copy_expression, copy_mask, trace_info, 
+              local_analyses, recorded_events, applied_events);
+      }
+      else
+      {
+        // Everything is local so this is easy
+        std::vector<std::vector<CopySrcDstField> > 
+          local_fields(local_views.size());
+        std::vector<std::vector<Reservation> > reservations(local_views.size());
+        std::vector<ApEvent> instance_events(local_views.size());
+        initialize_allreduce_with_reductions(precondition, predicate_guard,
+            op, index, copy_expression, copy_mask, trace_info, local_analyses,
+            applied_events, instance_events, local_fields, reservations);
+        complete_initialize_allreduce_with_reductions(op, index,
+            copy_expression, copy_mask, trace_info, recorded_events,
+            applied_events, instance_events, local_fields);
+        finalize_allreduce_with_broadcasts(predicate_guard, op, index,
+            copy_expression, copy_mask, trace_info, local_analyses,
+            recorded_events, applied_events, instance_events, local_fields);
+        complete_finalize_allreduce_with_broadcasts(op, index, copy_expression,
+            copy_mask, trace_info, recorded_events, instance_events);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool AllreduceView::is_multi_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      if (evaluated_multi_instance.load())
+        return multi_instance.load();
+      bool result = false;
+      // Must have at least twice as many collective instances as nodes
+      // in order for this to qualify as multi instance
+      if (instances.size() >= (2*collective_mapping->size()))
+      {
+        // Check that there is at least two instances on every node
+        std::vector<unsigned> counts(collective_mapping->size(), 0);
+        for (std::vector<DistributedID>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+        {
+          const AddressSpaceID owner = runtime->determine_owner(*it);
+#ifdef DEBUG_LEGION
+          assert(collective_mapping->contains(owner));
+#endif
+          const unsigned index = collective_mapping->find_index(owner);
+          counts[index]++;
+        }
+        result = true;
+        for (unsigned idx = 0; idx < counts.size(); idx++)
+        {
+          if (counts[idx] > 1)
+            continue;
+          result = false;
+          break;
+        }
+      }
+      multi_instance.store(result);
+      evaluated_multi_instance.store(true);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::perform_single_allreduce(
+                         const uint64_t allreduce_tag,
+                         Operation *op, unsigned index,
+                         ApEvent precondition, PredEvent predicate_guard,
+                         IndexSpaceExpression *copy_expression,
+                         const FieldMask &copy_mask,
+                         const PhysicalTraceInfo &trace_info,
+                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                         std::set<RtEvent> &recorded_events,
+                         std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!multi_instance);
+#endif
+      // Case 2: there are some nodes that only have one instance
+      // Pair up nodes to have them cooperate to have two buffers
+      // that we can ping-pong between to do the all-reduce "inplace"
+      const int participants = collective_mapping->size() / 2; // truncate
+      const int local_index = collective_mapping->find_index(local_space);
+      const int local_rank = local_index / 2;
+      const int local_offset = local_index % 2;
+      int collective_radix = runtime->legion_collective_radix;
+      int collective_log_radix, collective_stages;
+      int participating_ranks, collective_last_radix;
+      const bool participating = configure_collective_settings(
+          participants, local_rank, collective_radix, collective_log_radix,
+          collective_stages, participating_ranks, collective_last_radix);
+      std::vector<std::vector<CopySrcDstField> > 
+        local_fields(local_views.size());
+      std::vector<std::vector<Reservation> > reservations(local_views.size());
+      std::vector<ApEvent> instance_events(local_views.size());
+      if (participating)
+      {
+        // Check to see if we need to handle stage -1 from non-participants
+        // As well as from offset=1 down to offset=0
+        if (local_offset == 0)
+        {
+          const ApEvent reduce_pre = initialize_allreduce_with_reductions(
+              precondition, predicate_guard, op, index, copy_expression,
+              copy_mask, trace_info, local_analyses, applied_events,
+              instance_events, local_fields, reservations);
+          // We definitely will be expecting our partner
+          std::vector<int> expected_ranks(1, local_rank);
+          // We could be expecting up to two non-participants
+          // User their index instead of rank to avoid key collision
+          const int nonpart_index = local_index + 2*participating_ranks;
+          for (int offset = 0; offset < 2; offset++)
+          {
+            const int rank = nonpart_index + offset;
+            if (rank >= int(collective_mapping->size()))
+              break;
+            expected_ranks.push_back(rank);
+          }
+          std::vector<ApEvent> reduce_events;
+          const UniqueInst dst_inst(local_views.front());
+          receive_allreduce_stage(dst_inst, allreduce_tag, -1/*stage*/, op,
+            reduce_pre, predicate_guard, copy_expression,
+            copy_mask, trace_info, applied_events, local_fields[0], 
+            reservations[0], &expected_ranks.front(),
+            expected_ranks.size(), reduce_events);
+          complete_initialize_allreduce_with_reductions(op, index, 
+              copy_expression, copy_mask, trace_info, recorded_events,
+              applied_events, instance_events, local_fields, &reduce_events);
+        }
+        else
+        {
+          // local_offset == 1
+          initialize_allreduce_without_reductions(precondition, 
+              predicate_guard, op, index, copy_expression, copy_mask, 
+              trace_info, local_analyses, recorded_events, applied_events,
+              instance_events, local_fields, reservations);
+          // Just need to send the reduction down to our partner
+          const AddressSpaceID target = (*collective_mapping)[local_index-1];
+          std::vector<ApEvent> read_events;
+          send_allreduce_stage(allreduce_tag, -1/*stage*/, local_rank,
+              instance_events[0], predicate_guard, copy_expression,
+              trace_info, local_fields[0], 0/*src index*/,
+              &target, 1/*target count*/, read_events);
+          if (!read_events.empty())
+          {
+#ifdef DEBUG_LEGION
+            assert(read_events.size() == 1);
+#endif
+            instance_events[0] = read_events[0];
+          }
+        }
+        // Do the stages
+        for (int stage = 0; stage < collective_stages; stage++)
+        {
+          // Figure out the participating ranks
+          std::vector<int> stage_ranks;
+          if (stage < (collective_stages-1))
+          {
+            // Normal radix
+            stage_ranks.reserve(collective_radix);
+            for (int r = 1; r < collective_radix; r++)
+            {
+              int target = local_rank ^
+                (r << (stage * collective_log_radix));
+              stage_ranks.push_back(target);
+            }
+          }
+          else
+          {
+            // Last stage so special radix
+            stage_ranks.reserve(collective_last_radix);
+            for (int r = 1; r < collective_last_radix; r++)
+            {
+              int target = local_rank ^
+                (r << (stage * collective_log_radix));
+              stage_ranks.push_back(target);
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(!stage_ranks.empty());
+#endif
+          // Always include ourselves in the ranks as well
+          stage_ranks.push_back(local_rank);
+          // Check to see if we're sending or receiving this stage
+          if ((stage % 2) == local_offset)
+          {
+            // We're doing a sending stage
+            std::vector<AddressSpaceID> targets(stage_ranks.size());
+            for (unsigned idx = 0; idx < stage_ranks.size(); idx++)
+            {
+              // If we're even, send to the odd
+              // If we're odd, send to the even
+              const unsigned index =
+                2 * stage_ranks[idx] + ((local_offset == 0) ? 1 : 0);
+#ifdef DEBUG_LEGION
+              assert(index < collective_mapping->size());
+#endif
+              targets[idx] = (*collective_mapping)[index];
+            }
+            std::vector<ApEvent> read_events;
+            send_allreduce_stage(allreduce_tag, stage, local_rank,
+                instance_events[0], predicate_guard, copy_expression,
+                trace_info, local_fields[0], 0/*src index*/,
+                &targets.front(), targets.size(), read_events);
+            if (!read_events.empty())
+              instance_events[0] =
+                Runtime::merge_events(&trace_info, read_events);
+          }
+          else
+          {
+            // We're doing a receiving stage
+            // First issue a fill to initialize the instance
+            // Realm should ignore the redop data on these fields
+            instance_events[0] = copy_expression->issue_fill(
+                op, trace_info, local_fields[0], reduction_op->identity,
+                reduction_op->sizeof_rhs,
+#ifdef LEGION_SPY
+                fill_view->fill_op_uid, field_space_node->handle, tree_id,
+#endif
+                instance_events[0], predicate_guard);
+            if (trace_info.recording)
+            {
+              const UniqueInst dst_inst(local_views[0]);
+              trace_info.record_fill_inst(instance_events[0],
+                  copy_expression, dst_inst, copy_mask,
+                  applied_events, (redop > 0));
+            }
+            // Then check to see if we've received any reductions
+            std::vector<ApEvent> reduce_events;
+            set_redop(local_fields[0]);
+            const UniqueInst dst_inst(local_views.front());
+            receive_allreduce_stage(dst_inst, allreduce_tag, stage, op,
+                instance_events[0], predicate_guard, copy_expression,
+                copy_mask, trace_info, applied_events, local_fields[0],
+                reservations[0], &stage_ranks.front(),
+                stage_ranks.size(), reduce_events);
+            clear_redop(local_fields[0]);
+            if (!reduce_events.empty())
+              instance_events[0] =
+                Runtime::merge_events(&trace_info, reduce_events);
+          }
+        }
+        // If we have to do stage -1 then we can do that now
+        // Check to see if we have the valid data or not
+        if ((collective_stages % 2) == local_offset)
+        {
+          const ApEvent broadcast_pre = finalize_allreduce_with_broadcasts(
+              predicate_guard, op, index, copy_expression,
+              copy_mask, trace_info, local_analyses, recorded_events, 
+              applied_events, instance_events, local_fields);
+          // We have the valid data, send it to up to two 
+          // non-participants as well as our partner
+          // If we're odd then make us even and vice-versa
+          int partner_index = local_index + ((local_offset == 0) ? 1 : -1);
+          const AddressSpaceID partner = (*collective_mapping)[partner_index];
+          std::vector<AddressSpaceID> targets(1, partner);
+          // Check for the two non-participants
+          const unsigned offset = 2*participating_ranks;
+          const unsigned one = offset + local_index;
+          if (one < collective_mapping->size())
+            targets.push_back((*collective_mapping)[one]);
+          const unsigned two = offset + partner_index;
+          if (two < collective_mapping->size())
+            targets.push_back((*collective_mapping)[two]);
+          std::vector<ApEvent> read_events;
+          send_allreduce_stage(allreduce_tag, -2/*stage*/, local_rank,
+              broadcast_pre, predicate_guard, copy_expression,
+              trace_info, local_fields[0], 0/*src index*/,
+              &targets.front(), targets.size(), read_events);
+          complete_finalize_allreduce_with_broadcasts(op, index,
+              copy_expression, copy_mask, trace_info, recorded_events, 
+              instance_events, &read_events);
+        }
+        else
+        {
+          // Not reducing here, just standard copy
+          // See if we received the copy from our partner
+          std::vector<ApEvent> reduce_events;
+          // No reservations since this is a straight copy
+          const std::vector<Reservation> no_reservations;
+          const UniqueInst dst_inst(local_views.front());
+          receive_allreduce_stage(dst_inst, allreduce_tag, -2/*stage*/, op,
+              instance_events[0], predicate_guard, copy_expression,
+              copy_mask, trace_info, applied_events, local_fields[0],
+              no_reservations, &local_rank, 1/*total ranks*/, reduce_events);
+          if (!reduce_events.empty())
+          {
+#ifdef DEBUG_LEGION
+            assert(reduce_events.size() == 1);
+#endif
+            instance_events[0] = reduce_events[0];
+          }
+          finalize_allreduce_without_broadcasts(predicate_guard, op, index,
+              copy_expression, copy_mask, trace_info, local_analyses,
+              recorded_events, applied_events, instance_events, local_fields);
+        }
+      }
+      else
+      {
+        // Not a participant in the stages, so just need to do
+        // the stage -1 send and receive
+        initialize_allreduce_without_reductions(precondition, 
+            predicate_guard, op, index, copy_expression, copy_mask, 
+            trace_info, local_analyses, recorded_events, applied_events,
+            instance_events, local_fields, reservations);
+        // Truncate down
+        const int target_rank = (local_index - 2*participating_ranks) / 2;
+#ifdef DEBUG_LEGION
+        assert(target_rank >= 0);
+#endif
+        // Then convert back to the appropriate index
+        const int target_index = 2 * target_rank;
+#ifdef DEBUG_LEGION
+        assert(target_index < int(collective_mapping->size()));
+#endif
+        const AddressSpaceID target = (*collective_mapping)[target_index];
+        std::vector<ApEvent> read_events;
+        // Intentionally use the local_index here to avoid key collisions
+        send_allreduce_stage(allreduce_tag, -1/*stage*/, local_index,
+            instance_events[0], predicate_guard, copy_expression,
+            trace_info, local_fields[0], 0/*src index*/,
+            &target, 1/*total targets*/, read_events);
+        if (!read_events.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(read_events.size() == 1);
+#endif
+          instance_events[0] = read_events[0];
+        }
+        // Check to see if we received the copy back yet
+        // Keep the redop data zeroed out since we're doing normal copies
+        // No reservations since this is a straight copy
+        const std::vector<Reservation> no_reservations;
+        std::vector<ApEvent> reduce_events;
+        const UniqueInst dst_inst(local_views.front());
+        receive_allreduce_stage(dst_inst, allreduce_tag, -2/*stage*/, op,
+            instance_events[0], predicate_guard, copy_expression,
+            copy_mask, trace_info, applied_events, local_fields[0],
+            no_reservations, &target_rank, 1/*total ranks*/, reduce_events);
+        if (!reduce_events.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(reduce_events.size() == 1);
+#endif
+          instance_events[0] = reduce_events[0];
+        }
+        finalize_allreduce_without_broadcasts(predicate_guard, op, index,
+            copy_expression, copy_mask, trace_info, local_analyses,
+            recorded_events, applied_events, instance_events, local_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::perform_multi_allreduce(
+                         const uint64_t allreduce_tag,
+                         Operation *op, unsigned index,
+                         ApEvent precondition,
+                         PredEvent predicate_guard,
+                         IndexSpaceExpression *copy_expression,
+                         const FieldMask &copy_mask,
+                         const PhysicalTraceInfo &trace_info,
+                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                         std::set<RtEvent> &recorded_events,
+                         std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Case 1: each node has multiple instances
+      assert(redop > 0);
+      assert(multi_instance);
+      assert(instances.size() > 1);
+#endif
+      const int participants = collective_mapping->size();
+      const int local_rank = collective_mapping->find_index(local_space);
+      int collective_radix = runtime->legion_collective_radix;
+      int collective_log_radix, collective_stages;
+      int participating_ranks, collective_last_radix;
+      const bool participating = configure_collective_settings(
+          participants, local_rank, collective_radix, collective_log_radix,
+          collective_stages, participating_ranks, collective_last_radix);
+      std::vector<std::vector<CopySrcDstField> > 
+        local_fields(local_views.size());
+      std::vector<std::vector<Reservation> > reservations(local_views.size());
+      std::vector<ApEvent> instance_events(local_views.size());
+      if (participating)
+      {
+        // Check to see if we need to wait for a remainder copy
+        // for any non-participating ranks
+        int remainder_rank = local_rank + participating_ranks;
+        if (collective_mapping->size() <= size_t(remainder_rank))
+          remainder_rank = -1;
+        if (remainder_rank >= 0)
+        {
+          const ApEvent reduce_pre = initialize_allreduce_with_reductions(
+              precondition, predicate_guard, op, index, copy_expression,
+              copy_mask, trace_info, local_analyses, applied_events,
+              instance_events, local_fields, reservations);
+          const UniqueInst dst_inst(local_views.front());
+          std::vector<ApEvent> reduce_events;
+          receive_allreduce_stage(dst_inst, allreduce_tag, -1/*stage*/, op,
+              reduce_pre, predicate_guard, copy_expression, copy_mask,
+              trace_info, applied_events, local_fields[0], reservations[0], 
+              &remainder_rank, 1/*total ranks*/, reduce_events);
+          complete_initialize_allreduce_with_reductions(op, index,
+              copy_expression, copy_mask, trace_info, recorded_events,
+              applied_events, instance_events, local_fields, &reduce_events);
+        }
+        else 
+          initialize_allreduce_without_reductions(precondition,
+              predicate_guard, op, index, copy_expression, copy_mask,
+              trace_info, local_analyses, recorded_events, applied_events,
+              instance_events, local_fields, reservations);
+        unsigned src_inst_index = 0;
+        unsigned dst_inst_index = 1;
+        // Issue the stages
+        for (int stage = 0; stage < collective_stages; stage++)
+        { 
+          // Figure out where to send out messages first
+          std::vector<int> stage_ranks;
+          if (stage < (collective_stages-1))
+          {
+            // Normal radix
+            stage_ranks.reserve(collective_radix-1);
+            for (int r = 1; r < collective_radix; r++)
+            {
+              int target = local_rank ^
+                (r << (stage * collective_log_radix));
+              stage_ranks.push_back(target);
+            }
+          }
+          else
+          {
+            // Last stage so special radix
+            stage_ranks.reserve(collective_last_radix-1);
+            for (int r = 1; r < collective_last_radix; r++)
+            {
+              int target = local_rank ^
+                (r << (stage * collective_log_radix));
+              stage_ranks.push_back(target);
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(!stage_ranks.empty());
+#endif
+          // Send out the messages to the dst ranks to perform copies
+          std::vector<AddressSpaceID> targets(stage_ranks.size());
+          for (unsigned idx = 0; idx < stage_ranks.size(); idx++)
+            targets[idx] = (*collective_mapping)[stage_ranks[idx]];
+          std::vector<ApEvent> src_events;
+          const PhysicalTraceInfo &src_info = (local_analyses == NULL) ?
+            trace_info : local_analyses->at(src_inst_index)->get_trace_info();
+          send_allreduce_stage(allreduce_tag, stage, local_rank,
+              instance_events[src_inst_index], predicate_guard,
+              copy_expression, src_info, local_fields[src_inst_index],
+              src_inst_index, &targets.front(), targets.size(), src_events);
+          // Issuse the fill for the destination instance
+          // Realm should ignore the redop data on these fields
+          const PhysicalTraceInfo &dst_info = (local_analyses == NULL) ?
+            trace_info : local_analyses->at(dst_inst_index)->get_trace_info();
+          instance_events[dst_inst_index] =
+            copy_expression->issue_fill(op, dst_info,
+                local_fields[dst_inst_index],
+                reduction_op->identity, reduction_op->sizeof_rhs,
+#ifdef LEGION_SPY
+                fill_view->fill_op_uid, field_space_node->handle, tree_id,
+#endif
+                instance_events[dst_inst_index], predicate_guard);
+          if (dst_info.recording)
+          {
+            const UniqueInst dst_inst(local_views[dst_inst_index]);
+            dst_info.record_fill_inst(instance_events[dst_inst_index],
+                copy_expression, dst_inst, copy_mask, 
+                applied_events, true/*reduction*/);
+          }
+          set_redop(local_fields[dst_inst_index]);
+          // Issue the reduction from the source to the destination
+          ApEvent local_precondition = Runtime::merge_events(&dst_info,
+              instance_events[src_inst_index], instance_events[dst_inst_index]);
+          const ApEvent local_post = copy_expression->issue_copy(op, dst_info,
+              local_fields[dst_inst_index], local_fields[src_inst_index],
+              reservations[dst_inst_index],
+#ifdef LEGION_SPY
+              tree_id, tree_id,
+#endif
+              local_precondition, predicate_guard);
+          std::vector<ApEvent> dst_events;
+          if (local_post.exists())
+          {
+            src_events.push_back(local_post);
+            dst_events.push_back(local_post);
+          }
+          if (dst_info.recording)
+          {
+            const UniqueInst src_inst(local_views[src_inst_index]);
+            const UniqueInst dst_inst(local_views[dst_inst_index]);
+            dst_info.record_copy_insts(local_post, copy_expression,
+               src_inst, dst_inst, copy_mask, copy_mask, redop, applied_events);
+          }
+          // Update the source instance precondition
+          // to reflect all the reduction copies read from it
+          if (!src_events.empty())
+            instance_events[src_inst_index] =
+              Runtime::merge_events(&src_info, src_events);
+          // Now check to see if we're received any messages
+          // for this stage, and if not make place holders for them
+          const UniqueInst dst_inst(local_views[dst_inst_index]);
+          receive_allreduce_stage(dst_inst, allreduce_tag, stage, op,
+              instance_events[dst_inst_index], predicate_guard,
+              copy_expression, copy_mask, dst_info, applied_events, 
+              local_fields[dst_inst_index], reservations[dst_inst_index],
+              &stage_ranks.front(), stage_ranks.size(), dst_events);
+          clear_redop(local_fields[dst_inst_index]);
+          if (!dst_events.empty())
+            instance_events[dst_inst_index] =
+              Runtime::merge_events(&dst_info, dst_events);
+          // Update the src and dst instances for the next stage
+          if (++src_inst_index == instances.size())
+            src_inst_index = 0;
+          if (++dst_inst_index == instances.size())
+            dst_inst_index = 0;
+        }
+        // Send out the result to any non-participating ranks
+        if (remainder_rank >= 0)
+        {
+          const ApEvent broadcast_pre = finalize_allreduce_with_broadcasts(
+              predicate_guard, op, index, copy_expression, copy_mask,
+              trace_info, local_analyses, recorded_events, applied_events,
+              instance_events, local_fields, src_inst_index);
+          std::vector<ApEvent> broadcast_events;
+          const AddressSpaceID target = (*collective_mapping)[remainder_rank];
+          send_allreduce_stage(allreduce_tag, -1/*stage*/, local_rank,
+              broadcast_pre, predicate_guard, copy_expression, trace_info,
+              local_fields[src_inst_index], src_inst_index,
+              &target, 1/*total targets*/, broadcast_events);
+          complete_finalize_allreduce_with_broadcasts(op, index, 
+              copy_expression, copy_mask, trace_info, recorded_events,
+              instance_events, &broadcast_events, src_inst_index);
+        }
+        else
+          finalize_allreduce_without_broadcasts(predicate_guard, op, index,
+              copy_expression, copy_mask, trace_info, local_analyses,
+              recorded_events, applied_events, instance_events,
+              local_fields, src_inst_index);
+      }
+      else
+      {
+        // Not a participant in the stages so just need to 
+        // do the stage -1 send and receive
+#ifdef DEBUG_LEGION
+        assert(local_rank >= participating_ranks);
+#endif
+        initialize_allreduce_without_reductions(precondition, 
+            predicate_guard, op, index, copy_expression, copy_mask,
+            trace_info, local_analyses, recorded_events, applied_events,
+            instance_events, local_fields, reservations);
+        const int mirror_rank = local_rank - participating_ranks;
+        const AddressSpaceID target = (*collective_mapping)[mirror_rank];
+        std::vector<ApEvent> read_events;
+        send_allreduce_stage(allreduce_tag, -1/*stage*/, local_rank,
+            instance_events[0], predicate_guard, copy_expression,
+            trace_info, local_fields[0], 0/*src index*/,
+            &target, 1/*total targets*/, read_events);
+        if (!read_events.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(read_events.size() == 1);
+#endif
+          instance_events[0] = read_events[0];
+        }
+        // We can put this back in the first buffer without any
+        // anti-dependences because we know the computation of the
+        // result coming back had to already depend on the copy we
+        // sent out to the target
+        // Keep the local fields redop cleared since we're going to 
+        // doing direct copies here into these instance and not reductions
+        std::vector<ApEvent> reduce_events;
+        const std::vector<Reservation> no_reservations;
+        const UniqueInst dst_inst(local_views.front());
+        receive_allreduce_stage(dst_inst, allreduce_tag, -1/*stage*/, op,
+            instance_events[0], predicate_guard, copy_expression,
+            copy_mask, trace_info, applied_events, local_fields[0],
+            no_reservations, &mirror_rank, 1/*total ranks*/, reduce_events);
+        if (!reduce_events.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(reduce_events.size() == 1);
+#endif
+          instance_events[0] = reduce_events[0];
+        }
+        finalize_allreduce_without_broadcasts(predicate_guard, op, index,
+            copy_expression, copy_mask, trace_info, local_analyses,
+            recorded_events, applied_events, instance_events, local_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AllreduceView::initialize_allreduce_with_reductions(
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+                    std::vector<std::vector<Reservation> > &reservations)
+    //--------------------------------------------------------------------------
+    {
+      const UniqueID op_id = op->get_unique_op_id(); 
+      IndividualView *local_view = local_views.front();
+      // Compute the reduction precondition for the first instance
+      ApEvent reduce_pre = local_view->find_copy_preconditions(
+          false/*reading*/, redop, copy_mask, copy_expression,
+          op_id, index, applied_events, trace_info);
+      if (precondition.exists())
+      {
+        if (reduce_pre.exists())
+          reduce_pre =
+            Runtime::merge_events(&trace_info, reduce_pre, precondition);
+        else
+          reduce_pre = precondition;
+      }
+      local_view->find_field_reservations(copy_mask, reservations.front());
+      PhysicalManager *local_manager = local_view->get_manager();
+      local_manager->compute_copy_offsets(copy_mask, local_fields.front());
+      // Perform any local reductions and record their events
+      set_redop(local_fields[0]);
+      if (local_views.size() > 1)
+      {
+        const UniqueInst dst_inst(local_view);
+        for (unsigned idx = 1; idx < local_views.size(); idx++)
+        {
+          const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
+            trace_info : local_analyses->at(idx)->get_trace_info();
+          // Find the reservations for the other instances for later
+          IndividualView *src_view = local_views[idx];
+          // Technically we're reading here, but we're going to be "writing" the
+          // allreduce result so we pretend like we're writing
+          ApEvent copy_pre = src_view->find_copy_preconditions(
+              false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+              op_id, index, applied_events, inst_info);
+          if (reduce_pre.exists())
+          {
+            if (copy_pre.exists())
+              copy_pre = Runtime::merge_events(&inst_info, copy_pre,reduce_pre);
+            else
+              copy_pre = reduce_pre;
+          }
+          src_view->find_field_reservations(copy_mask, reservations[idx]);
+          PhysicalManager *src_manager = local_views[idx]->get_manager();
+          src_manager->compute_copy_offsets(copy_mask, local_fields[idx]);
+          const ApEvent reduced = copy_expression->issue_copy(op, inst_info,
+              local_fields.front(), local_fields[idx], reservations.front(),
+#ifdef LEGION_SPY
+              tree_id, tree_id,
+#endif
+              copy_pre, predicate_guard);
+          // No need to record the output with the view
+          // We'll do that at the end of the full all-reduce
+          if (reduced.exists())
+            instance_events[idx] = reduced;
+          if (inst_info.recording)
+          {
+            const UniqueInst src_inst(src_view);
+            inst_info.record_copy_insts(reduced, copy_expression,
+               src_inst, dst_inst, copy_mask, copy_mask, redop, applied_events);
+          }
+        }
+      }
+      return reduce_pre;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::complete_initialize_allreduce_with_reductions(
+                                   Operation *op, unsigned index,
+                                   IndexSpaceExpression *copy_expression,
+                                   const FieldMask &copy_mask,
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &recorded_events,
+                                   std::set<RtEvent> &applied_events,
+                                   std::vector<ApEvent> &instance_events,
+                       std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                   std::vector<ApEvent> *reduced)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent reduce_post;
+      if (reduced != NULL)
+      {
+        for (unsigned idx = 1; idx < instance_events.size(); idx++)
+          if (instance_events[idx].exists())
+            reduced->push_back(instance_events[idx]);
+        reduce_post = Runtime::merge_events(&trace_info, *reduced);
+      }
+      else
+        reduce_post = Runtime::merge_events(&trace_info, instance_events);
+      const UniqueID op_id = op->get_unique_op_id();
+      if (reduce_post.exists())
+        local_views[0]->add_copy_user(false/*reading*/, redop, reduce_post,
+            trace_info.get_collect_event(), copy_mask, copy_expression,
+            op_id, index, recorded_events, trace_info.recording,
+            runtime->address_space);
+      instance_events[0] = local_views[0]->find_copy_preconditions(
+          false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+          op_id, index, applied_events, trace_info);
+      clear_redop(local_fields[0]);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::initialize_allreduce_without_reductions(
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+                    std::vector<std::vector<Reservation> > &reservations)
+    //--------------------------------------------------------------------------
+    {
+      if (local_views.size() == 1)
+      {
+        const UniqueID op_id = op->get_unique_op_id(); 
+        IndividualView *local_view = local_views.front();
+        instance_events[0] = local_view->find_copy_preconditions(
+          false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+          op_id, index, applied_events, trace_info);
+        local_view->find_field_reservations(copy_mask, reservations.front());
+        PhysicalManager *local_manager = local_view->get_manager();
+        local_manager->compute_copy_offsets(copy_mask, local_fields.front());
+      }
+      else
+      {
+        initialize_allreduce_with_reductions(precondition, predicate_guard, 
+            op, index, copy_expression, copy_mask, trace_info, local_analyses,
+            applied_events, instance_events, local_fields, reservations);
+        complete_initialize_allreduce_with_reductions(op, index,
+            copy_expression, copy_mask, trace_info, recorded_events, 
+            applied_events, instance_events, local_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AllreduceView::finalize_allreduce_with_broadcasts(
+                                PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+              const std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                const unsigned final_index)
+    //--------------------------------------------------------------------------
+    {
+      const UniqueID op_id = op->get_unique_op_id(); 
+      IndividualView *local_view = local_views[final_index];
+      if (instance_events[final_index].exists())
+      {
+        local_view->add_copy_user(false/*reading*/, 0/*redop*/,
+            instance_events[final_index], trace_info.get_collect_event(),
+            copy_mask, copy_expression, op_id, index, recorded_events,
+            trace_info.recording, runtime->address_space);
+        instance_events[final_index] = ApEvent::NO_AP_EVENT;
+      }
+      const ApEvent broadcast_pre = local_view->find_copy_preconditions(
+          true/*reading*/, 0/*redop*/, copy_mask, copy_expression,
+          op_id, index, applied_events, trace_info);
+      if (local_views.size() > 1)
+      {
+        const UniqueInst src_inst(local_view);
+        const std::vector<Reservation> no_reservations;
+        for (unsigned idx = 0; idx < local_views.size(); idx++)
+        {
+          if (idx == final_index)
+            continue;
+          const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
+            trace_info : local_analyses->at(idx)->get_trace_info();
+          // Find the reservations for the other instances for later
+          IndividualView *dst_view = local_views[idx];
+          // Technically we're reading here, but we're going to be "writing" the
+          // allreduce result so we pretend like we're writing
+          ApEvent copy_pre = instance_events[idx]; 
+          if (broadcast_pre.exists())
+          {
+            if (broadcast_pre.exists())
+              copy_pre = 
+                Runtime::merge_events(&inst_info, copy_pre, broadcast_pre);
+            else
+              copy_pre = broadcast_pre;
+          }
+          const ApEvent copy_post = copy_expression->issue_copy(op, inst_info,
+              local_fields.front(), local_fields[idx], no_reservations,
+#ifdef LEGION_SPY
+              tree_id, tree_id,
+#endif
+              copy_pre, predicate_guard);
+          // No need to record the output with the view
+          // We'll do that at the end of the full all-reduce
+          if (copy_post.exists())
+          {
+            dst_view->add_copy_user(false/*reading*/, 0/*redop*/, copy_post,
+                inst_info.get_collect_event(), copy_mask, copy_expression,
+                op_id, index, recorded_events, inst_info.recording,
+                runtime->address_space);
+            instance_events[idx] = copy_post;
+          }
+          if (inst_info.recording)
+          {
+            const UniqueInst dst_inst(dst_view);
+            inst_info.record_copy_insts(copy_post, copy_expression,
+               src_inst, dst_inst, copy_mask, copy_mask, redop, applied_events);
+          }
+        }
+      }
+      return broadcast_pre;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::complete_finalize_allreduce_with_broadcasts(
+                                    Operation *op, unsigned index,
+                                    IndexSpaceExpression *copy_expression,
+                                    const FieldMask &copy_mask,
+                                    const PhysicalTraceInfo &trace_info,
+                                    std::set<RtEvent> &recorded_events,
+                                    const std::vector<ApEvent> &instance_events,
+                                    std::vector<ApEvent> *broadcast,
+                                    const unsigned final_index)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent broadcast_post;
+      if (broadcast != NULL)
+      {
+        for (unsigned idx = 0; idx < instance_events.size(); idx++)
+          if ((idx != final_index) && instance_events[idx].exists())
+            broadcast->push_back(instance_events[idx]);
+        broadcast_post = Runtime::merge_events(&trace_info, *broadcast);
+      }
+      else
+        broadcast_post = Runtime::merge_events(&trace_info, instance_events);
+      const UniqueID op_id = op->get_unique_op_id();
+      if (broadcast_post.exists())
+        local_views[final_index]->add_copy_user(false/*reading*/, 0/*redop*/, 
+            broadcast_post, trace_info.get_collect_event(), copy_mask,
+            copy_expression, op_id, index, recorded_events,
+            trace_info.recording, runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::finalize_allreduce_without_broadcasts(
+                                PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+              const std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                const unsigned final_index)
+    //--------------------------------------------------------------------------
+    {
+      if (local_views.size() == 1)
+      {
+        if (instance_events[final_index].exists())
+        {
+          const UniqueID op_id = op->get_unique_op_id(); 
+          IndividualView *local_view = local_views[final_index];
+          local_view->add_copy_user(false/*reading*/, 0/*redop*/,
+              instance_events[final_index], trace_info.get_collect_event(),
+              copy_mask, copy_expression, op_id, index, recorded_events,
+              trace_info.recording, runtime->address_space);
+        }
+      }
+      else
+      {
+        finalize_allreduce_with_broadcasts(predicate_guard, op, index,
+            copy_expression, copy_mask, trace_info, local_analyses, 
+            recorded_events, applied_events, instance_events, 
+            local_fields, final_index);
+        complete_finalize_allreduce_with_broadcasts(op, index,
+            copy_expression, copy_mask, trace_info, recorded_events,
+            instance_events, NULL/*broadcast events*/, final_index);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::send_allreduce_stage(const uint64_t allreduce_tag,
+                                 const int stage, const int local_rank,
+                                 ApEvent precondition,PredEvent predicate_guard,
+                                 IndexSpaceExpression *copy_expression, 
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 const unsigned src_index,
+                                 const AddressSpaceID *targets, size_t total,
+                                 std::vector<ApEvent> &src_events)
+    //--------------------------------------------------------------------------
+    {
+      ApBarrier src_bar;
+      ShardID src_bar_shard = 0;
+      const UniqueInst src_inst(local_views[src_index]);
+      for (unsigned t = 0; t < total; t++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(allreduce_tag);
+          rez.serialize(local_rank);
+          rez.serialize(stage);
+          pack_fields(rez, src_fields);
+          src_inst.serialize(rez);
+          rez.serialize(precondition);
+          rez.serialize<bool>(trace_info.recording);
+          if (trace_info.recording)
+          {
+            if (!src_bar.exists())
+            {
+              src_bar = 
+                ApBarrier(Realm::Barrier::create_barrier(total));
+              src_bar_shard =
+                trace_info.record_managed_barrier(src_bar, total);
+              src_events.push_back(src_bar);
+            }
+            rez.serialize(src_bar);
+            rez.serialize(src_bar_shard);
+          }
+          else
+          {
+            const ApUserEvent src_done =
+              Runtime::create_ap_user_event(&trace_info);
+            rez.serialize(src_done);
+            src_events.push_back(src_done);
+          }
+        }
+        runtime->send_collective_distribute_allreduce(targets[t], rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::receive_allreduce_stage(const UniqueInst dst_inst,
+                            const uint64_t allreduce_tag, 
+                            const int stage, Operation *op,
+                            ApEvent dst_precondition, PredEvent predicate_guard,
+                            IndexSpaceExpression *copy_expression,
+                            const FieldMask &copy_mask,
+                            const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
+                            const std::vector<CopySrcDstField> &dst_fields,
+                            const std::vector<Reservation> &reservations,
+                            const int *expected_ranks, size_t total_ranks,
+                            std::vector<ApEvent> &dst_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((stage != -2) || (total_ranks == 1));
+#endif
+      std::vector<AllReduceCopy> to_perform;
+      {
+        unsigned remaining = 0;
+        AutoLock v_lock(view_lock);
+        for (unsigned r = 0; r < total_ranks; r++)
+        {
+          const CopyKey key(allreduce_tag, expected_ranks[r], stage);
+          std::map<CopyKey,AllReduceCopy>::iterator finder =
+            all_reduce_copies.find(key);
+          if (finder != all_reduce_copies.end())
+          {
+            to_perform.emplace_back(std::move(finder->second));
+            all_reduce_copies.erase(finder);
+          }
+          else
+            remaining++;
+        }
+        if (remaining > 0)
+        {
+          // If we still have outstanding copies, save a data
+          // structure for them for when they arrive
+          const std::pair<uint64_t,int> key(allreduce_tag, stage);
+#ifdef DEBUG_LEGION
+          assert(remaining_stages.find(key) == remaining_stages.end());
+#endif
+          AllReduceStage &pending = remaining_stages[key];
+          pending.dst_inst = dst_inst;
+          pending.op = op;
+          pending.copy_expression = copy_expression;
+          copy_expression->add_nested_expression_reference(
+              this->did, applied_events);
+          pending.copy_mask = copy_mask;
+          pending.dst_fields = dst_fields;
+          pending.reservations = reservations;
+          pending.trace_info = new PhysicalTraceInfo(trace_info);
+          pending.dst_precondition = dst_precondition;
+          pending.predicate_guard = predicate_guard;
+          pending.remaining_postconditions.reserve(remaining);
+          for (unsigned idx = 0; idx < remaining; idx++)
+          {
+            const ApUserEvent post = Runtime::create_ap_user_event(&trace_info);
+            pending.remaining_postconditions.push_back(post);
+            dst_events.push_back(post);
+          }
+          if (trace_info.recording)
+          {
+            pending.applied_event = Runtime::create_rt_user_event();
+            applied_events.insert(pending.applied_event);
+          }
+        }
+      }
+      // Now we can perform any copies that we received
+      for (std::vector<AllReduceCopy>::const_iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
+      {
+        const ApEvent pre = Runtime::merge_events(&trace_info,
+          it->src_precondition, dst_precondition);
+        const ApEvent post = copy_expression->issue_copy(
+            op, trace_info, dst_fields, it->src_fields, reservations,
+#ifdef LEGION_SPY
+            tree_id, tree_id,
+#endif
+            pre, predicate_guard);
+        if (trace_info.recording)
+          trace_info.record_copy_insts(post, copy_expression, it->src_inst,
+              dst_inst, copy_mask, copy_mask, redop, applied_events);
+        if (it->barrier_postcondition.exists())
+        {
+          Runtime::phase_barrier_arrive(
+              it->barrier_postcondition, 1/*count*/, post);
+          if (trace_info.recording)
+            trace_info.record_barrier_arrival(it->barrier_postcondition,
+                post, 1/*count*/, applied_events, it->barrier_shard);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(it->src_postcondition.exists());
+#endif
+          Runtime::trigger_event(&trace_info, it->src_postcondition, post);
+        }
+        if (post.exists())
+          dst_events.push_back(post);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AllreduceView::process_distribute_allreduce(
+              const uint64_t allreduce_tag, const int src_rank, const int stage,
+              std::vector<CopySrcDstField> &src_fields,
+              const ApEvent src_precondition, ApUserEvent src_postcondition,
+              ApBarrier src_barrier, ShardID barrier_shard, 
+              const UniqueInst &src_inst)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<std::pair<uint64_t,int>,AllReduceStage>::iterator finder;
+      {
+        AutoLock v_lock(view_lock);
+        const std::pair<uint64_t,int> stage_key(allreduce_tag, stage);
+        finder = remaining_stages.find(stage_key);
+        if (finder == remaining_stages.end())
+        {
+          const CopyKey key(allreduce_tag, src_rank, stage);
+#ifdef DEBUG_LEGION
+          assert(all_reduce_copies.find(key) == all_reduce_copies.end());
+#endif
+          AllReduceCopy &copy = all_reduce_copies[key];
+          copy.src_fields.swap(src_fields);
+          copy.src_precondition = src_precondition;
+          copy.src_postcondition = src_postcondition;
+          copy.barrier_postcondition = src_barrier;
+          copy.barrier_shard = barrier_shard;
+          copy.src_inst = src_inst;
+          return;
+        }
+#ifdef DEBUG_LEGION
+        assert(!finder->second.remaining_postconditions.empty());
+#endif
+        // We can release the lock because we know map iterators are 
+        // not invalidated by insertion/deletion and any other copies
+        // for this same stage are also just going to be reading except
+        // for when we need to grab our event at the end to trigger
+        // which we can re-take the lock to do
+      }
+      const ApEvent precondition = Runtime::merge_events(
+          finder->second.trace_info, src_precondition,
+          finder->second.dst_precondition);
+      const ApEvent copy_post = finder->second.copy_expression->issue_copy(
+          finder->second.op, *(finder->second.trace_info),
+          finder->second.dst_fields, src_fields, finder->second.reservations,
+#ifdef LEGION_SPY
+          tree_id, tree_id,
+#endif
+          precondition, finder->second.predicate_guard);
+      std::set<RtEvent> applied_events;
+      if (finder->second.trace_info->recording)
+        finder->second.trace_info->record_copy_insts(copy_post, 
+            finder->second.copy_expression, src_inst, finder->second.dst_inst,
+            finder->second.copy_mask, finder->second.copy_mask,
+            redop, applied_events);
+      if (src_barrier.exists())
+      {
+        Runtime::phase_barrier_arrive(src_barrier, 1/*count*/, copy_post);
+        finder->second.trace_info->record_barrier_arrival(src_barrier,
+            copy_post, 1/*count*/, applied_events, barrier_shard);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(src_postcondition.exists());
+#endif
+        Runtime::trigger_event(finder->second.trace_info, 
+                               src_postcondition, copy_post);
+      }
+      RtUserEvent applied;
+      ApUserEvent to_trigger;
+      PhysicalTraceInfo *trace_info = NULL;
+      IndexSpaceExpression *copy_expression = NULL;
+      {
+        // Retake the lock and see if we're the last arrival
+        AutoLock v_lock(view_lock);
+        // Save any applied events that we have
+        if (!applied_events.empty())
+        {
+          finder->second.applied_events.insert(
+              applied_events.begin(), applied_events.end());
+#ifdef DEBUG_LEGION
+          applied_events.clear();
+#endif
+        }
+#ifdef DEBUG_LEGION
+        assert(!finder->second.remaining_postconditions.empty());
+#endif
+        to_trigger = finder->second.remaining_postconditions.back();
+        finder->second.remaining_postconditions.pop_back();
+        if (finder->second.remaining_postconditions.empty())
+        {
+          // Last pass through, grab data and remove from the stages
+          trace_info = finder->second.trace_info;
+          copy_expression = finder->second.copy_expression;
+          applied = finder->second.applied_event;
+          applied_events.swap(finder->second.applied_events);
+          remaining_stages.erase(finder);
+        }
+        else // Need a copy of this
+          trace_info = new PhysicalTraceInfo(*(finder->second.trace_info));
+      }
+      Runtime::trigger_event(trace_info, to_trigger, copy_post); 
+      if (applied.exists())
+      {
+        if (!applied_events.empty())
+          Runtime::trigger_event(applied,Runtime::merge_events(applied_events));
+        else
+          Runtime::trigger_event(applied);
+#ifdef DEBUG_LEGION
+        applied_events.clear();
+#endif
+      }
+#ifdef DEBUG_LEGION
+      assert(applied_events.empty());
+#endif
+      delete trace_info;
+      if ((copy_expression != NULL) &&
+          copy_expression->remove_nested_expression_reference(this->did))
+        delete copy_expression;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void AllreduceView::handle_distribute_allreduce(
+                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      AllreduceView *view= static_cast<AllreduceView*>(
+          runtime->find_or_request_logical_view(did, ready));
+      uint64_t allreduce_tag;
+      derez.deserialize(allreduce_tag);
+      int src_rank;
+      derez.deserialize(src_rank);
+      int stage;
+      derez.deserialize(stage);
+      size_t num_src_fields;
+      derez.deserialize(num_src_fields);
+      std::vector<CopySrcDstField> src_fields(num_src_fields);
+      std::set<RtEvent> ready_events;
+      unpack_fields(src_fields, derez, ready_events, view, ready, runtime);
+      UniqueInst src_inst;
+      src_inst.deserialize(derez);
+      ApEvent src_precondition;
+      derez.deserialize(src_precondition);
+      bool recording;
+      derez.deserialize<bool>(recording);
+      ApBarrier src_barrier;
+      ShardID barrier_shard = 0;
+      ApUserEvent src_postcondition;
+      if (recording)
+      {
+        derez.deserialize(src_barrier);
+        derez.deserialize(barrier_shard);
+      }
+      else
+        derez.deserialize(src_postcondition);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready_events.insert(ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+
+      view->process_distribute_allreduce(allreduce_tag, src_rank, stage,
+                            src_fields, src_precondition, src_postcondition,
+                            src_barrier, barrier_shard, src_inst);
     }
 
   }; // namespace Internal 

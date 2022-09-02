@@ -168,7 +168,7 @@ namespace Legion {
     struct UniqueInst {
     public:
       UniqueInst(void) : inst_did(0), view_did(0), analysis_space(0) { }
-      UniqueInst(IndividualView *v, PhysicalManager *m);
+      UniqueInst(IndividualView *v);
     public:
       inline bool operator<(const UniqueInst &rhs) const
       {

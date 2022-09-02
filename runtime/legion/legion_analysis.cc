@@ -285,9 +285,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    UniqueInst::UniqueInst(IndividualView *view, PhysicalManager *manager)
-      : inst_did(manager->did), view_did(view->did),
-        analysis_space(view->get_analysis_space(manager))
+    UniqueInst::UniqueInst(IndividualView *view)
+      : inst_did(view->get_manager()->did), view_did(view->did),
+        analysis_space(view->get_analysis_space(view->get_manager()))
     //--------------------------------------------------------------------------
     {
     }
@@ -6196,8 +6196,7 @@ namespace Legion {
         context->convert_individual_views(target_instances, individual_views);
         for (unsigned idx = 0; idx < individual_views.size(); idx++)
         {
-          const UniqueInst unique_inst(individual_views[idx],
-                                       target_instances[idx]);
+          const UniqueInst unique_inst(individual_views[idx]);
           trace_info.record_op_inst(usage, target_views[idx].get_valid_mask(),
                                     unique_inst, region, applied_events);
         }

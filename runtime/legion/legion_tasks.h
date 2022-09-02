@@ -1063,7 +1063,6 @@ namespace Legion {
       void handle_future_map_request(Deserializer &derez);
       void handle_disjoint_complete_request(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
-      void handle_collective_instance_message(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_created_region_contexts(Deserializer &derez,

@@ -3189,6 +3189,8 @@ namespace Legion {
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
+      void send_replicated_view(AddressSpaceID target, Serializer &rez);
+      void send_allreduce_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_manager_update(AddressSpaceID target, Serializer &rez);
       void send_collective_distribute_fill(AddressSpaceID target,
@@ -3549,6 +3551,10 @@ namespace Legion {
       void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
+      void handle_send_replicated_view(Deserializer &derez,
+                                       AddressSpaceID source);
+      void handle_send_allreduce_view(Deserializer &derez,
+                                      AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_manager_update(Deserializer &derez,
@@ -3574,8 +3580,6 @@ namespace Legion {
       void handle_collective_user_request(Deserializer &derez);
       void handle_collective_user_response(Deserializer &derez);
       void handle_collective_user_registration(Deserializer &derez);
-      void handle_collective_point_request(Deserializer &derez);
-      void handle_collective_point_response(Deserializer &derez);
       void handle_collective_remote_instances_request(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_collective_remote_instances_response(Deserializer &derez,
@@ -3583,7 +3587,6 @@ namespace Legion {
       void handle_collective_nearest_instances_request(Deserializer &derez);
       void handle_collective_nearest_instances_response(Deserializer &derez);
       void handle_collective_remote_registration(Deserializer &derez);
-      void handle_collective_deletion(Deserializer &derez);
       void handle_collective_finalize_mapping(Deserializer &derez);
       void handle_collective_view_creation(Deserializer &derez);
       void handle_collective_view_deletion(Deserializer &derez);
@@ -3758,8 +3761,6 @@ namespace Legion {
       void handle_control_replicate_implicit_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
-      void handle_control_replicate_collective_instance_message(
-                                                      Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -5666,6 +5667,10 @@ namespace Legion {
           break;
         case SEND_REDUCTION_VIEW:
           break;
+        case SEND_REPLICATED_VIEW:
+          break;
+        case SEND_ALLREDUCE_VIEW:
+          break;
         case SEND_INSTANCE_MANAGER:
           break;
         case SEND_MANAGER_UPDATE:
@@ -5699,10 +5704,6 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_REGISTER_USER:
           break;
-        case SEND_COLLECTIVE_POINT_REQUEST:
-          break;
-        case SEND_COLLECTIVE_POINT_RESPONSE:
-          break;
         case SEND_COLLECTIVE_REMOTE_INSTANCES_REQUEST:
           break;
         case SEND_COLLECTIVE_REMOTE_INSTANCES_RESPONSE:
@@ -5715,8 +5716,6 @@ namespace Legion {
           // register_user messages so they go on the same VC
         case SEND_COLLECTIVE_REMOTE_REGISTRATION:
           return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_COLLECTIVE_DELETION:
-          return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_FINALIZE_MAPPING:
           break;
         case SEND_COLLECTIVE_VIEW_CREATION:
@@ -5795,8 +5794,6 @@ namespace Legion {
           break;
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
-        case SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE:
-          break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
         case SEND_MAPPER_BROADCAST:
