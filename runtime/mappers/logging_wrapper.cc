@@ -20,21 +20,23 @@
 
 using namespace Legion::Mapping::Utilities;
 
-Realm::Logger log_maplog("mapper");
+Legion::Logger log_maplog("mapper");
 
 namespace Legion {
 namespace Mapping {
 
 class MessageBuffer {
  public:
-  MessageBuffer(MapperRuntime* _runtime, const MapperContext _ctx)
-      : runtime(_runtime), ctx(_ctx) {
+  MessageBuffer(MapperRuntime* _runtime,
+                const MapperContext _ctx,
+                Legion::Logger* _logger)
+      : runtime(_runtime), ctx(_ctx), logger(_logger) {
     // Do nothing;
   }
   ~MessageBuffer() {
     for (std::vector<std::stringstream*>::iterator it = lines.begin();
          it != lines.end(); ++it) {
-      log_maplog.info() << (*it)->str();
+      logger->info() << (*it)->str();
       delete(*it);
     }
   }
@@ -86,13 +88,15 @@ class MessageBuffer {
  private:
   MapperRuntime* const runtime;
   const MapperContext ctx;
+  Logger* logger;
   std::vector<std::stringstream*> lines;
 };
 
-LoggingWrapper::LoggingWrapper(Mapper* mapper)
-    : ForwardingMapper(mapper) {
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, NULL);
+LoggingWrapper::LoggingWrapper(Mapper* mapper, Logger* _logger)
+    : ForwardingMapper(mapper),
+      logger(_logger != NULL ? _logger : &log_maplog) {
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, NULL, logger);
   Machine machine = Machine::get_machine();
   AddressSpace rank = Processor::get_executing_processor().address_space();
   buf.line() << "Memories on rank " << rank << ":";
@@ -132,8 +136,8 @@ void LoggingWrapper::select_sharding_functor_impl(
                               const SelectShardingFunctorInput& input,
                               SelectShardingFunctorOutput& output) {
   mapper->select_sharding_functor(ctx, op, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "SELECT_SHARDING_FUNCTOR for "
              << to_string(runtime, ctx, op, false /*include_index_point*/);
   ShardingFunctor* functor =
@@ -167,8 +171,8 @@ void LoggingWrapper::map_replicate_task(const MapperContext ctx,
                                         const MapTaskOutput& default_output,
                                         MapReplicateTaskOutput& output) {
   mapper->map_replicate_task(ctx, task, input, default_output, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_REPLICATE_TASK for "
              << to_string(runtime, ctx, task, false /*include_index_point*/);
   buf.line() << "  INPUT:";
@@ -206,8 +210,8 @@ void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output) {
   mapper->slice_task(ctx, task, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "SLICE_TASK for "
              << to_string(runtime, ctx, task, false /*include_index_point*/);
   buf.line() << "  INPUT: " << to_string(runtime, ctx, input.domain);
@@ -224,8 +228,8 @@ void LoggingWrapper::map_task(const MapperContext ctx,
                               const MapTaskInput& input,
                               MapTaskOutput& output) {
   mapper->map_task(ctx, task, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_TASK for " << to_string(runtime, ctx, task);
   buf.line() << "  INPUT:";
   buf.report(task.regions, input.valid_instances);
@@ -237,8 +241,8 @@ void LoggingWrapper::select_task_sources(const MapperContext ctx,
                                          const SelectTaskSrcInput& input,
                                          SelectTaskSrcOutput& output) {
   mapper->select_task_sources(ctx, task, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "SELECT_TASK_SOURCES for " << to_string(runtime, ctx, task);
   buf.line() << "  INPUT:";
   buf.report(task.regions[input.region_req_index],
@@ -259,8 +263,8 @@ void LoggingWrapper::map_inline(const MapperContext ctx,
                                 const MapInlineInput& input,
                                 MapInlineOutput& output) {
   mapper->map_inline(ctx, inline_op, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_INLINE for "
              << to_string(runtime, ctx, inline_op)
              << " in "
@@ -276,8 +280,8 @@ void LoggingWrapper::select_inline_sources(const MapperContext ctx,
                                            const SelectInlineSrcInput& input,
                                            SelectInlineSrcOutput& output) {
   mapper->select_inline_sources(ctx, inline_op, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "SELECT_INLINE_SOURCES in "
              << to_string(runtime, ctx, inline_op)
              << " in "
@@ -299,8 +303,8 @@ void LoggingWrapper::map_copy(const MapperContext ctx,
                               const MapCopyInput& input,
                               MapCopyOutput& output) {
   mapper->map_copy(ctx, copy, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "MAP_COPY for " << to_string(runtime, ctx, copy);
   buf.line() << "  INPUT SRC:";
   buf.report(copy.src_requirements, input.src_instances);
@@ -325,8 +329,8 @@ void LoggingWrapper::select_copy_sources(const MapperContext ctx,
                                          const SelectCopySrcInput& input,
                                          SelectCopySrcOutput& output) {
   mapper->select_copy_sources(ctx, copy, input, output);
-  if (!log_maplog.want_info()) return;
-  MessageBuffer buf(runtime, ctx);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
   buf.line() << "SELECT_COPY_SOURCES for " << to_string(runtime, ctx, copy)
              << " "
              << (input.is_src ? "SRC" : input.is_dst ? "DST" :
