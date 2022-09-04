@@ -457,6 +457,8 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      // Allow the parent context to sample any outstanding effects 
+      void find_completion_effects(std::set<ApEvent> &effects);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -1380,6 +1382,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
@@ -1721,6 +1724,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
@@ -2326,6 +2330,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -2443,6 +2448,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -3779,6 +3785,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
+      virtual void complete_replay(ApEvent fill_complete_event);
     public:
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;

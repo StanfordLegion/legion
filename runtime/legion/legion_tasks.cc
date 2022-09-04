@@ -3665,10 +3665,7 @@ namespace Legion {
             map_applied_conditions.insert(future_mapped);
         }
       }
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+      // Don't complete the mapping until we get the effects event recorded
     }
 
     //--------------------------------------------------------------------------
@@ -3707,6 +3704,11 @@ namespace Legion {
     {
       if (postcondition != single_task_termination)
         task_completion_effects.insert(postcondition);
+      // Now we can complete the mapping for this task
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -4217,6 +4219,7 @@ namespace Legion {
 #endif
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL); 
+      record_completion_effect(single_task_termination);
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
       const TraceInfo trace_info = is_remote() ?
@@ -4368,7 +4371,10 @@ namespace Legion {
 
         }
         trace_info.record_complete_replay(ready_event);
-        trace_info.record_set_effects(get_completion_event(),
+        // TODO: delete this line when we fix the tracing code to
+        // properly handle recording completion effects which can't
+        // be known until after the operation is done executing
+        trace_info.record_set_effects(single_task_termination,
                                       map_applied_conditions);
       }
       if (remote_trace_recorder != NULL)
@@ -6476,13 +6482,30 @@ namespace Legion {
       }
       else
       {
+        // If we're on the owner node then record the completion effects
         if (!task_completion_effects.empty())
         {
-          task_completion_effects.insert(single_task_termination);
           Operation::record_completion_effects(task_completion_effects);
+          if (is_recording())
+          {
+#ifdef DEBUG_LEGION
+            assert(!is_remote());
+#endif
+            // XXX: Tracing code is broken right now and can't handle recording
+            // completion effects after the mapping stage of the pipeilne
+            // When we do fix this be sure to delete the call to record
+            // the set effects in map_all_regions
+#if 0
+            const TraceInfo trace_info(this, false/*init*/);
+            const ApEvent effects_done =
+              Runtime::merge_events(&trace_info, task_completion_effects);
+            trace_info.record_set_effects(effects_done, 
+                              completion_preconditions);
+#else
+            assert(task_completion_effects.size() == 1);
+#endif
+          }
         }
-        else if (single_task_termination.exists())
-          record_completion_effect(single_task_termination);
         if (!completion_preconditions.empty())
           complete_operation(Runtime::merge_events(completion_preconditions));
         else
@@ -6812,15 +6835,17 @@ namespace Legion {
         rez.serialize<bool>(false);
       if (!is_origin_mapped())
       {
-        if (!task_completion_effects.empty())
-        {
-          task_completion_effects.insert(single_task_termination);
-          ApEvent task_effects = 
-            Runtime::merge_events(NULL, task_completion_effects);
-          rez.serialize(task_effects);
-        }
-        else
-          rez.serialize(single_task_termination);
+#ifdef DEBUG_LEGION
+        // Should always include the single task termination
+        assert(!task_completion_effects.empty());
+#endif
+        rez.serialize<size_t>(task_completion_effects.size());
+        for (std::set<ApEvent>::const_iterator it =
+              task_completion_effects.begin(); it != 
+              task_completion_effects.end(); it++)
+          rez.serialize(*it);
+        // Clear it so we don't try to record it in trigger_task_complete
+        task_completion_effects.clear();
       }
     }
     
@@ -6851,9 +6876,25 @@ namespace Legion {
       }
       if (!is_origin_mapped())
       {
-        ApEvent task_effects;
-        derez.deserialize(task_effects);
-        record_completion_effect(task_effects);
+        size_t num_effects;
+        derez.deserialize(num_effects);
+        if (num_effects > 1)
+        {
+          std::set<ApEvent> effects;
+          for (unsigned idx = 0; idx < num_effects; idx++)
+          {
+            ApEvent effect;
+            derez.deserialize(effect);
+            effects.insert(effect);
+          }
+          record_completion_effects(effects);
+        }
+        else
+        {
+          ApEvent task_effects;
+          derez.deserialize(task_effects);
+          record_completion_effect(task_effects);
+        }
       }
       // Mark that we have both finished executing and that our
       // children are complete
@@ -7352,6 +7393,43 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
       // Pass back our created and deleted operations 
       std::set<RtEvent> preconditions;
+      // if we have any completion effecs here it's because we are tracing
+      // and we need to record the specific completion effects for this
+      // particular point task
+      if (!task_completion_effects.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(is_recording());
+#endif 
+        // XXX: Tracing code is broken right now and can't handle recording
+        // completion effects after the mapping stage of the pipeilne
+        // When we do fix this be sure to delete the call to record
+        // the set effects in map_all_regions
+#if 0
+        if (is_remote())
+        {
+          const RtUserEvent remote_applied = Runtime::create_rt_user_event();
+          RemoteTraceRecorder *recorder = new RemoteTraceRecorder(
+              runtime, orig_proc.address_space(), runtime->address_space,
+              get_trace_local_id(), tpl, remote_applied, remote_collect_event);
+          preconditions.insert(remote_applied);
+          // This takes ownership of the recorder and will delete it
+          const TraceInfo trace_info(this, recorder, false/*initialize*/);
+          const ApEvent effects_done =
+            Runtime::merge_events(&trace_info, task_completion_effects);
+          trace_info.record_set_effects(effects_done, preconditions);
+        }
+        else
+        {
+          const TraceInfo trace_info(this, false/*initialize*/);
+          const ApEvent effects_done =
+            Runtime::merge_events(&trace_info, task_completion_effects);
+          trace_info.record_set_effects(effects_done, preconditions);
+        }
+#else
+        assert(task_completion_effects.size() == 1);
+#endif
+      }
       if (execution_context != NULL)
       {
         slice_owner->return_privileges(execution_context, preconditions);
@@ -8461,6 +8539,14 @@ namespace Legion {
     void PointTask::record_completion_effect(ApEvent effect)
     //--------------------------------------------------------------------------
     {
+      if (!effect.exists())
+        return;
+      // If we're recording then we also need to capture this for later
+      if (is_recording())
+      {
+        AutoLock o_lock(op_lock);
+        task_completion_effects.insert(effect);
+      }
       slice_owner->record_completion_effect(effect);
     }
 
@@ -8469,6 +8555,14 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
+      if (!effect.exists())
+        return;
+      // If we're recording then we also need to capture this for later
+      if (is_recording())
+      {
+        AutoLock o_lock(op_lock);
+        task_completion_effects.insert(effect);
+      }
       slice_owner->record_completion_effect(effect, map_applied_events);
     }
 
@@ -8476,6 +8570,17 @@ namespace Legion {
     void PointTask::record_completion_effects(const std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
+      if (effects.empty())
+        return;
+      // If we're recording then we also need to capture this for later
+      if (is_recording())
+      {
+        AutoLock o_lock(op_lock);
+        for (std::set<ApEvent>::const_iterator it =
+              effects.begin(); it != effects.end(); it++)
+          if (it->exists())
+            task_completion_effects.insert(*it);
+      }
       slice_owner->record_completion_effects(effects);
     }
 

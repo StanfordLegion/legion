@@ -2360,7 +2360,7 @@ namespace Legion {
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
       // Issue any release copies/fills that need to be done
-      const RtEvent updates_done = 
+      RtEvent updates_done = 
         analysis->perform_updates(traversal_done, map_applied_events);
       // There are two cases here: one where we have the target intances
       // already from the operation and we know where to put the users
@@ -2374,6 +2374,7 @@ namespace Legion {
           remote_ready.wait();
         FieldMaskSet<LogicalView> instances;
         analysis->report_instances(instances);
+        analysis->target_instances.resize(instances.size());
         analysis->target_views.resize(instances.size());
         restricted_instances.resize(instances.size());
         unsigned inst_index = 0;
@@ -2391,9 +2392,20 @@ namespace Legion {
           assert(it->first->is_individual_view());
 #endif         
           IndividualView *inst_view = it->first->as_individual_view();
-          restricted_instances[inst_index] = 
-            InstanceRef(inst_view->get_manager(), it->second);
+          PhysicalManager *manager = inst_view->get_manager();
+          restricted_instances[inst_index] = InstanceRef(manager, it->second);
+          analysis->target_instances[inst_index] = manager;
           analysis->target_views[inst_index].insert(inst_view, it->second);
+        }
+      }
+      else
+      {
+        if (remote_ready.exists())
+        {
+          if (updates_done.exists())
+            updates_done = Runtime::merge_events(updates_done, remote_ready);
+          else
+            updates_done = remote_ready;
         }
       }
       ApEvent instances_ready;

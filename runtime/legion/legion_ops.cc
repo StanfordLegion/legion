@@ -1484,16 +1484,18 @@ namespace Legion {
         }
       }
 #ifdef LEGION_SPY
-      // Tasks are strange and will do their own calls to log_operation_events
-      if (get_operation_kind() != TASK_OP_KIND)
+      // Operations with regions and tasks do their own logging
+      const OpKind op_kind = get_operation_kind();
+      if ((op_kind != TASK_OP_KIND) && (op_kind != MAP_OP_KIND) &&
+          (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND))
       {
         ApEvent effects_done;
         if (!completion_effects.empty())
           effects_done = Runtime::merge_events(NULL, completion_effects);
         if (completion_event.exists())
           Runtime::trigger_event(NULL, completion_event, effects_done);
-        LegionSpy::log_operation_events(unique_op_id, effects_done,
-                                        completion_event);
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        effects_done);
       }
       else
 #endif
@@ -1582,6 +1584,15 @@ namespace Legion {
             effects.begin(); it != effects.end(); it++)
         if (it->exists())
           completion_effects.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::find_completion_effects(std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!completion_effects.empty())
+        effects.insert(completion_effects.begin(), completion_effects.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4837,9 +4848,15 @@ namespace Legion {
       } 
 #endif
       if (runtime->legion_spy_enabled)
+      {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
                                               mapped_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
+                                        termination_event);
+#endif
+      }
       record_completion_effect(termination_event);
       if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
@@ -7106,8 +7123,6 @@ namespace Legion {
                                         get_completion_event());    
         }
       }
-      if (is_recording())
-        trace_info.record_complete_replay(get_completion_event());
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -7117,6 +7132,21 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(mapping_applied);
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_recording())
+      {
+        const TraceInfo trace_info(this, false/*initialize*/);
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
+        trace_info.record_complete_replay(effects_done);
+      }
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7881,10 +7911,9 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());    
+                                        copy_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
       record_completion_effect(copy_complete_event);
       complete_execution();
@@ -10152,8 +10181,6 @@ namespace Legion {
             const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
             // We can always trigger the completion event when these are done
             record_completion_effects(execution_preconditions);
-            if (is_recording())
-              trace_info.record_complete_replay(get_completion_event());
             // Mark that we finished our mapping now
             if (!map_applied_conditions.empty())
               complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -10165,6 +10192,21 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_recording())
+      {
+        const TraceInfo trace_info(this, false/*initialize*/);
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
+        trace_info.record_complete_replay(effects_done);
+      }
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -13562,9 +13604,15 @@ namespace Legion {
       dump_physical_state(&requirement, 0);
 #endif
       if (runtime->legion_spy_enabled)
+      {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
                                               restricted_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, acquire_complete,
+                                        acquire_post);
+#endif
+      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -13582,8 +13630,6 @@ namespace Legion {
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(get_completion_event());
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -13593,6 +13639,21 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(finalize_complete_mapping(mapping_applied));
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_recording())
+      {
+        const TraceInfo trace_info(this, false/*initialize*/);
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
+        trace_info.record_complete_replay(effects_done);
+      }
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -13781,10 +13842,9 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
+                                        acquire_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
       record_completion_effect(acquire_complete_event);
       complete_execution();
@@ -14479,9 +14539,15 @@ namespace Legion {
       dump_physical_state(&requirement, 0);
 #endif
       if (runtime->legion_spy_enabled)
+      {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
                                               restricted_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, release_complete,
+                                        release_post);
+#endif
+      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -14499,8 +14565,6 @@ namespace Legion {
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(get_completion_event());
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -14510,6 +14574,21 @@ namespace Legion {
                                                           acquired_instances);
       complete_mapping(finalize_complete_mapping(mapping_applied));
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_recording())
+      {
+        const TraceInfo trace_info(this, false/*initialize*/);
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
+        trace_info.record_complete_replay(effects_done);
+      }
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -14722,10 +14801,9 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        get_completion_event());
+                                        release_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
       record_completion_effect(release_complete_event);
       complete_execution();
@@ -20361,6 +20439,14 @@ namespace Legion {
     void FillOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+      if (is_recording())
+      {
+        const TraceInfo trace_info(this, false/*initialize*/);
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
+        trace_info.record_complete_replay(effects_done);
+      }
       // See if we have a fill view on which we can remove a reference
       if (fill_view != NULL)
       {
@@ -20591,8 +20677,29 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      complete_execution();
       resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::complete_replay(ApEvent fill_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        fill_complete_event);
+        }
+      }
+      record_completion_effect(fill_complete_event);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------

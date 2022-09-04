@@ -8603,7 +8603,7 @@ namespace Legion {
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
-            child_completion_events.insert(it->first->get_completion_event());
+            it->first->find_completion_effects(child_completion_events);
         }
       }
       if (needs_trigger)
@@ -9253,7 +9253,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            it->first->find_completion_effects(previous_events);
         }
       }
       else
@@ -9300,7 +9300,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            it->first->find_completion_effects(previous_events);
         }
       }
 
@@ -11807,7 +11807,7 @@ namespace Legion {
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
-              child_completion_events.insert(it->first->get_completion_event());
+              it->first->find_completion_effects(child_completion_events);
           }
           if (complete_children.empty() && 
               !children_commit_invoked)

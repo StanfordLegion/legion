@@ -7070,8 +7070,6 @@ namespace Legion {
                   Runtime::merge_events(&trace_info, execution_preconditions);
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
-            if (is_recording())
-              trace_info.record_complete_replay(execution_fence_precondition);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             if (!map_applied_conditions.empty())
