@@ -9029,9 +9029,9 @@ namespace Legion {
       derez.deserialize(depth);
       bool add_root_reference;
       derez.deserialize(add_root_reference);
+      Provenance *provenance = Provenance::deserialize(derez);
       size_t index_space_size;
       derez.deserialize(index_space_size);
-      Provenance *provenance = Provenance::deserialize(derez);
       const void *index_space_ptr = 
         (index_space_size > 0) ? derez.get_current_pointer() : NULL;
 
