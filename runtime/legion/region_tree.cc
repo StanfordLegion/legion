@@ -8919,14 +8919,14 @@ namespace Legion {
           rez.serialize(initialized);
           rez.serialize(depth);
           rez.serialize<bool>(record.add_root_reference);
-          if (record.pack_space)
-            pack_index_space(rez, true/*include size*/);
-          else
-            rez.serialize<size_t>(0);
           if (provenance != NULL)
             provenance->serialize(rez);
           else
             Provenance::serialize_null(rez);
+          if (record.pack_space)
+            pack_index_space(rez, true/*include size*/);
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -9031,9 +9031,9 @@ namespace Legion {
       derez.deserialize(add_root_reference);
       size_t index_space_size;
       derez.deserialize(index_space_size);
+      Provenance *provenance = Provenance::deserialize(derez);
       const void *index_space_ptr = 
         (index_space_size > 0) ? derez.get_current_pointer() : NULL;
-      Provenance *provenance = Provenance::deserialize(derez);
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
@@ -14118,6 +14118,10 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(did);
           rez.serialize(initialized);
+          if (provenance != NULL)
+            provenance->serialize(rez);
+          else
+            Provenance::serialize_null(rez);
           // Pack the field infos
           if (allocation_state == FIELD_ALLOC_READ_ONLY)
           {
@@ -14133,10 +14137,6 @@ namespace Legion {
           }
           else
             rez.serialize<size_t>(0);
-          if (provenance != NULL)
-            provenance->serialize(rez);
-          else
-            Provenance::serialize_null(rez);
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
