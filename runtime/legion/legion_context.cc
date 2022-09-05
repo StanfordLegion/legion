@@ -223,16 +223,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(const Domain &bounds, 
-                                               TypeTag type_tag)
+                                       TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(bounds, type_tag); 
+      return create_index_space_internal(bounds, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(
-                                         const std::vector<DomainPoint> &points)
+                 const std::vector<DomainPoint> &points, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -249,7 +249,7 @@ namespace Legion {
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
             return create_index_space_internal(bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -260,7 +260,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects)
+    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects,
+                                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -276,7 +277,7 @@ namespace Legion {
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
             return create_index_space_internal(bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -288,7 +289,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space_internal(const Domain &bounds,
-                                                        TypeTag type_tag)
+                                             TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle(runtime->get_unique_index_space_id(),
@@ -300,7 +301,11 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      runtime->forest->create_index_space(handle, &bounds, did); 
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
+      // Will take ownership of provenance if not NULL
+      runtime->forest->create_index_space(handle, &bounds, did, provenance); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -332,7 +337,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::union_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (spaces.empty())
@@ -355,7 +360,7 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_union_space(handle, did, spaces);
+      runtime->forest->create_union_space(handle, did, provenance, spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id());
@@ -364,7 +369,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::intersect_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (spaces.empty())
@@ -387,7 +392,7 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_intersection_space(handle, did, spaces);
+      runtime->forest->create_intersection_space(handle,did,provenance,spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id());
@@ -396,7 +401,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::subtract_index_spaces(
-                                              IndexSpace left, IndexSpace right)
+                      IndexSpace left, IndexSpace right, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -410,7 +415,8 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), left.get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_difference_space(handle, did, left, right);
+      runtime->forest->create_difference_space(handle, did, provenance,
+                                               left, right); 
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id());
@@ -435,7 +441,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(void)
+    FieldSpace TaskContext::create_field_space(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -448,7 +454,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      runtime->forest->create_field_space(space, did);
+      runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
       return space;
     }
@@ -457,7 +463,8 @@ namespace Legion {
     FieldSpace TaskContext::create_field_space(
                                          const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -470,7 +477,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      FieldSpaceNode *node = runtime->forest->create_field_space(space, did);
+      FieldSpaceNode *node =
+        runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
@@ -2251,7 +2259,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::find_index_launch_space(const Domain &domain)
+    IndexSpace TaskContext::find_index_launch_space(const Domain &domain,
+                                                    const std::string &prov)
     //--------------------------------------------------------------------------
     {
       std::map<Domain,IndexSpace>::const_iterator finder =
@@ -2265,7 +2274,8 @@ namespace Legion {
         case DIM: \
           { \
             result = TaskContext::create_index_space(domain, \
-              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+              (prov.length() > 0) ? prov.c_str() : NULL); \
             break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -3554,7 +3564,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(const Future &future, 
-                                                TypeTag type_tag)
+                                       TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3570,9 +3580,9 @@ namespace Legion {
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
-      IndexSpaceNode *node = 
-        runtime->forest->create_index_space(handle, NULL, did, ready);
-      creator_op->initialize_index_space(this, node, future);
+      IndexSpaceNode *node = runtime->forest->create_index_space(handle, 
+          NULL, did, creator_op->get_provenance(), ready);
+      creator_op->initialize_index_space(this, node, future, provenance);
       register_index_space_creation(handle);
       add_to_dependence_queue(creator_op);
       return handle;
@@ -3766,7 +3776,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
                     color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                    did, term_event);
+                    did, part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3804,7 +3814,7 @@ namespace Legion {
       RegionTreeForest *forest = runtime->forest;
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
                   color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                  did, term_event);
+                  did, part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3885,7 +3895,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+            parent, color_space, partition_color, kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3967,7 +3978,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+            parent, color_space, partition_color, kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4030,7 +4042,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
-        part_node->color_space->handle, partition_color, kind, did, term_event);
+                     part_node->color_space->handle, partition_color, kind, did,
+                     part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4102,7 +4115,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+                         parent, color_space, partition_color, kind, did,
+                         part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4146,7 +4160,8 @@ namespace Legion {
       // Tell the region tree forest about this partition
       std::set<RtEvent> safe_events;
       runtime->forest->create_pending_cross_product(this, handle1, handle2, 
-                  handles, kind, partition_color, term_event, safe_events);
+                                  handles, kind, part_op->get_provenance(),
+                                  partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,
                                         partition_color, provenance);
       // Now we can add the operation to the queue
@@ -4276,7 +4291,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4319,7 +4335,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did, 
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4365,7 +4382,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
@@ -4434,7 +4452,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            handle, color_space, part_color, part_kind, did, term_event);
+            handle, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image(this, pid, projection, parent,
@@ -4503,7 +4522,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            handle, color_space, part_color, part_kind, did, term_event);
+            handle, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, projection, parent, 
@@ -4590,7 +4610,8 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, did, term_event);
+                                       part_color, part_kind, did,
+                                       part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
@@ -4660,7 +4681,8 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, did, term_event);
+                                       part_color, part_kind, did,
+                                       part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
@@ -4699,7 +4721,7 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4716,10 +4738,18 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+      {
+        provenance = new Provenance(prov);
+        provenance->add_reference();
+      }
       const ApUserEvent partition_ready = Runtime::create_ap_user_event(NULL);
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-                                parent, color_space, part_color, part_kind, 
-                                did, partition_ready, partition_ready);
+                            parent, color_space, part_color, part_kind, 
+                            did, provenance, partition_ready, partition_ready);
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -5104,10 +5134,11 @@ namespace Legion {
     FieldSpace InnerContext::create_field_space(
                                          const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      const FieldSpace space = TaskContext::create_field_space();
+      const FieldSpace space = TaskContext::create_field_space(provenance);
       AutoRuntimeCall call(this);
       FieldSpaceNode *node = runtime->forest->get_node(space);
       if (resulting_fields.size() < sizes.size())
@@ -5135,7 +5166,8 @@ namespace Legion {
       CreationOp *creator_op = runtime->get_available_creation_op();  
       const ApEvent ready = creator_op->get_completion_event();
       node->initialize_fields(ready, resulting_fields, serdez_id);
-      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+      creator_op->initialize_fields(this, node, resulting_fields,
+                                    sizes, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
       add_to_dependence_queue(creator_op);
       return space;
@@ -5325,7 +5357,8 @@ namespace Legion {
     void InnerContext::allocate_fields(FieldSpace space,
                                        const std::vector<Future> &sizes,
                                        std::vector<FieldID> &resulting_fields,
-                                       bool local, CustomSerdezID serdez_id)
+                                       bool local, CustomSerdezID serdez_id,
+                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5360,7 +5393,8 @@ namespace Legion {
       // which will indicate that we'll fill in the size later
       FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready, 
                                               resulting_fields, serdez_id);
-      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+      creator_op->initialize_fields(this, node, resulting_fields, 
+                                    sizes, provenance);
       register_all_field_creations(space, local, resulting_fields);
       add_to_dependence_queue(creator_op);
     }
@@ -5733,7 +5767,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexTask *task = runtime->get_available_index_task();
       FutureMap result = task->initialize_task(this, launcher, launch_space);
 #ifdef DEBUG_LEGION
@@ -5782,7 +5817,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
                                             redop, deterministic);
@@ -6098,7 +6134,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexFillOp *fill_op = runtime->get_available_index_fill_op();
       fill_op->initialize(this, launcher, launch_space); 
 #ifdef DEBUG_LEGION
@@ -6183,7 +6220,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexCopyOp *copy_op = runtime->get_available_index_copy_op();
       copy_op->initialize(this, launcher, launch_space); 
 #ifdef DEBUG_LEGION
@@ -6346,7 +6384,8 @@ namespace Legion {
       // Compute the upper bound partition node from this launcher
       RegionTreeNode *node = compute_index_attach_upper_bound(launcher,indexes);
       IndexSpaceNode *launch_space = runtime->forest->get_node(
-       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1))));
+       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1)),
+                               launcher.provenance));
       IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
       ExternalResources result = 
         attach_op->initialize(this, node, launch_space, launcher, indexes);
@@ -11603,7 +11642,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag)
+    IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag,
+                                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
@@ -12002,7 +12042,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_PENDING_PARTITION,
@@ -12083,7 +12123,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12258,7 +12299,8 @@ namespace Legion {
     void LeafContext::allocate_fields(FieldSpace space,
                                       const std::vector<Future> &sizes,
                                       std::vector<FieldID> &resuling_fields,
-                                      bool local, CustomSerdezID serdez_id)
+                                      bool local, CustomSerdezID serdez_id,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12412,7 +12454,8 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain);
+          launch_space = find_index_launch_space(launcher.launch_domain,
+                                                 launcher.provenance);
         FutureMap result = task->initialize_task(parent, launcher, 
                                                  launch_space, false/*track*/);
         inline_child_task(task);
@@ -12440,7 +12483,8 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain);
+          launch_space = find_index_launch_space(launcher.launch_domain,
+                                                 launcher.provenance);
         Future result = task->initialize_task(parent, launcher, launch_space, 
                                         redop, deterministic, false/*track*/);
         inline_child_task(task);

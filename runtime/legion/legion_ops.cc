@@ -8319,14 +8319,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreationOp::initialize_index_space(
-                          InnerContext *ctx, IndexSpaceNode *n, const Future &f)
+        InnerContext *ctx, IndexSpaceNode *n, const Future &f, const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(index_space_node == NULL);
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, prov);
       kind = INDEX_SPACE_CREATION;
       index_space_node = n;
       futures.push_back(f);
@@ -8358,7 +8358,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CreationOp::initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                                        const std::vector<FieldID> &fids,
-                                       const std::vector<Future> &field_sizes)
+                                       const std::vector<Future> &field_sizes,
+                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8367,7 +8368,7 @@ namespace Legion {
       assert(futures.empty());
       assert(fids.size() == field_sizes.size());
 #endif
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;     
       fields = fids;
@@ -12715,7 +12716,7 @@ namespace Legion {
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
           launch_space = ctx->find_index_launch_space(
-                          launcher.index_tasks[idx].launch_domain);
+              launcher.index_tasks[idx].launch_domain, launcher.provenance);
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           launch_space, false/*track*/);

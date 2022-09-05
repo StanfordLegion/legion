@@ -421,14 +421,15 @@ namespace Legion {
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<Future> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id, bool local)
+                                        CustomSerdezID serdez_id, bool local,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields, 
-                               local, serdez_id);
+                               local, serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -19769,7 +19770,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
-                                                         TypeTag type_tag)
+                                       TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19786,7 +19787,7 @@ namespace Legion {
       const IndexSpace result(get_unique_index_space_id(),
                               get_unique_index_tree_id(), type_tag);
       const DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, &domain, did);
+      forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 

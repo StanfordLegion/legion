@@ -161,7 +161,8 @@ namespace Legion {
                            CustomSerdezID serdez_id, bool local);
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id, bool local);
+                           CustomSerdezID serdez_id, bool local,
+                           const char *provenance);
       void free_fields(const std::set<FieldID> &to_free, const bool unordered);
     public:
       FieldSpace field_space;
@@ -2801,7 +2802,7 @@ namespace Legion {
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                 TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
-                                                  TypeTag type_tag);
+                                    TypeTag type_tag, Provenance *provenance);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);

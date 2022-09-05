@@ -561,6 +561,8 @@ namespace Legion {
        * @param field_sizes size in bytes of the fields to be allocated
        * @param resulting_fields optional field names for allocated fields
        * @param local_fields whether these should be local fields or not
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return resulting_fields vector with length equivalent to
        *    the length of field_sizes with field IDs specified
        */
@@ -571,7 +573,8 @@ namespace Legion {
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
-                           bool local_fields = false);
+                           bool local_fields = false,
+                           const char *provenance = NULL);
       ///@}
       /**
        * Free a collection of field IDs
@@ -4395,17 +4398,22 @@ namespace Legion {
        * @param ctx the enclosing task context
        * @param bounds the bounds for the new index space
        * @param type_tag optional type tag to use for the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, const Domain &bounds,
-                                    TypeTag type_tag = 0);
+                                    TypeTag type_tag = 0,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                      const Rect<DIM,COORD_T> &bounds);
+                                      const Rect<DIM,COORD_T> &bounds,
+                                      const char *provenance = NULL);
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                    const DomainT<DIM,COORD_T> &bounds);
+                                    const DomainT<DIM,COORD_T> &bounds,
+                                    const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4417,40 +4425,52 @@ namespace Legion {
        * @param future the future value containing the bounds
        * @param type_tag optional type tag to use for the index space
        *                 defaults to 'coord_t'
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, size_t dimensions, 
-                                    const Future &f, TypeTag type_tag = 0);
+                                    const Future &f, TypeTag type_tag = 0,
+                                    const char *provenance = NULL);
       template<int DIM, typename COORD_T>
-      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f);
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f,
+                                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space from a vector of points
        * @param ctx the enclosing task context
        * @param points a vector of points to have in the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, 
-                                    const std::vector<DomainPoint> &points);
+                                    const std::vector<DomainPoint> &points,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                      const std::vector<Point<DIM,COORD_T> > &points);
+                      const std::vector<Point<DIM,COORD_T> > &points,
+                      const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space from a vector of rectangles
        * @param ctx the enclosing task context
        * @param rects a vector of rectangles to have in the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx,
-                                    const std::vector<Domain> &rects);
+                                    const std::vector<Domain> &rects,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                      const std::vector<Rect<DIM,COORD_T> > &rects);
+                      const std::vector<Rect<DIM,COORD_T> > &rects,
+                      const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4458,14 +4478,18 @@ namespace Legion {
        * several existing index spaces
        * @param ctx the enclosing task context
        * @param spaces the index spaces to union together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace union_index_spaces(Context ctx, 
-                                    const std::vector<IndexSpace> &spaces);
+                                    const std::vector<IndexSpace> &spaces,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> union_index_spaces(Context ctx,
-                     const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+                     const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces,
+                     const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4473,26 +4497,34 @@ namespace Legion {
        * several existing index spaces
        * @param ctx the enclosing task context
        * @param spaces the index spaces to intersect
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace intersect_index_spaces(Context ctx,
-                                        const std::vector<IndexSpace> &spaces);
+                                        const std::vector<IndexSpace> &spaces,
+                                        const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> intersect_index_spaces(Context ctx,
-                         const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+                         const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces,
+                         const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space by taking the
        * set difference of two different index spaces
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       IndexSpace subtract_index_spaces(Context ctx, 
-                                       IndexSpace left, IndexSpace right);
+                                       IndexSpace left, IndexSpace right,
+                                       const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> subtract_index_spaces(Context ctx,
-           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right);
+           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right,
+           const char *provenance = NULL);
       ///@}
       /**
        * @deprecated
@@ -5531,20 +5563,24 @@ namespace Legion {
        * @param color_space the color space for the new partition
        * @param part_kind optionally specify the partition kind
        * @param color optionally assign a color to the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index partition
        */
       IndexPartition create_pending_partition(Context ctx,
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_pending_partition(Context ctx,
                               IndexSpaceT<DIM,COORD_T> parent,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                              Color color = LEGION_AUTO_GENERATE_ID);
+                              Color color = LEGION_AUTO_GENERATE_ID,
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -6072,9 +6108,11 @@ namespace Legion {
       /**
        * Create a new field space.
        * @param ctx enclosing task context
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
-      FieldSpace create_field_space(Context ctx);
+      FieldSpace create_field_space(Context ctx, const char *provenance = NULL);
       /**
        * Create a new field space with an existing set of fields
        * @param ctx enclosing task context
@@ -6082,12 +6120,15 @@ namespace Legion {
        * @param resulting_fields optional field snames for fields
        * @param serdez_id optional parameter for specifying a custom
        *        serdez object for serializing and deserializing fields
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
       FieldSpace create_field_space(Context ctx,
                                     const std::vector<size_t> &field_sizes,
                                     std::vector<FieldID> &resulting_fields,
-                                    CustomSerdezID serdez_id = 0);
+                                    CustomSerdezID serdez_id = 0,
+                                    const char *provenance = NULL);
       /**
        * Create a new field space with an existing set of fields
        * @param ctx enclosing task context
@@ -6095,12 +6136,15 @@ namespace Legion {
        * @param resulting_fields optional field snames for fields
        * @param serdez_id optional parameter for specifying a custom
        *        serdez object for serializing and deserializing fields
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
       FieldSpace create_field_space(Context ctx,
                                     const std::vector<Future> &field_sizes,
                                     std::vector<FieldID> &resulting_fields,
-                                    CustomSerdezID serdez_id = 0);
+                                    CustomSerdezID serdez_id = 0,
+                                    const char *provenance = NULL);
       /**
        * Create a new shared ownership of a field space to prevent it 
        * from being destroyed by other potential owners. Every call to this

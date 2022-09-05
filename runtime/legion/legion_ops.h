@@ -1577,13 +1577,14 @@ namespace Legion {
     public:
       CreationOp& operator=(const CreationOp &rhs);
     public:
-      void initialize_index_space(
-                 InnerContext *ctx, IndexSpaceNode *node, const Future &future);
+      void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node,
+                                  const Future &future, const char *provenance);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
                             FieldID fid, const Future &field_size);
       void initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                              const std::vector<FieldID> &fids,
-                             const std::vector<Future> &field_sizes);
+                             const std::vector<Future> &field_sizes,
+                             const char *provenance);
       void initialize_map(InnerContext *ctx,
                           const std::map<DomainPoint,Future> &futures);
     public:

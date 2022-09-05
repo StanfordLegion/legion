@@ -3199,13 +3199,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      impl->allocate_fields(field_sizes, resulting_fields,
+                            serdez_id, local, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3683,12 +3685,12 @@ namespace Legion {
       const Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
                                    (Point<1,coord_t>(max_num_elmts-1)));
       const Domain domain(bounds);
-      return create_index_space(ctx, domain, TYPE_TAG_1D);
+      return create_index_space(ctx, domain, TYPE_TAG_1D, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
-                                           TypeTag type_tag)
+                                       TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (domain.get_dim())
@@ -3698,7 +3700,7 @@ namespace Legion {
           {                             \
             if (type_tag == 0) \
               type_tag = TYPE_TAG_##DIM##D; \
-            return ctx->create_index_space(domain, type_tag); \
+            return ctx->create_index_space(domain, type_tag, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3710,7 +3712,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, size_t dimensions,
-                                         const Future &future, TypeTag type_tag)
+                 const Future &future, TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (type_tag == 0)
@@ -3729,7 +3731,7 @@ namespace Legion {
           assert(false);
         }
       }
-      return ctx->create_index_space(future, type_tag); 
+      return ctx->create_index_space(future, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3738,47 +3740,47 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<Domain> rects(domains.begin(), domains.end());
-      return create_index_space(ctx, rects); 
+      return create_index_space(ctx, rects, NULL/*provenance*/); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                         const std::vector<DomainPoint> &points)
+                 const std::vector<DomainPoint> &points, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(points); 
+      return ctx->create_index_space(points, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                           const std::vector<Domain> &rects)
+                        const std::vector<Domain> &rects, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(rects); 
+      return ctx->create_index_space(rects, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::union_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->union_index_spaces(spaces);
+      return ctx->union_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::intersect_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->intersect_index_spaces(spaces);
+      return ctx->intersect_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::subtract_index_spaces(Context ctx,
-                                              IndexSpace left, IndexSpace right)
+                      IndexSpace left, IndexSpace right, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->subtract_index_spaces(left, right);
+      return ctx->subtract_index_spaces(left, right, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4449,10 +4451,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, IndexSpace color_space, 
-                             PartitionKind part_kind, Color color)
+                             PartitionKind part_kind, Color color,
+                             const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_pending_partition(parent, color_space,part_kind,color);
+      return ctx->create_pending_partition(parent, color_space,
+                                           part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5176,30 +5180,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace Runtime::create_field_space(Context ctx)
+    FieldSpace Runtime::create_field_space(Context ctx, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space();
+      return ctx->create_field_space(provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id, 
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------

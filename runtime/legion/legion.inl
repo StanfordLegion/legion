@@ -20496,39 +20496,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   const Rect<DIM,T> &bounds)
+                              const Rect<DIM,T> &bounds, const char *provenance)
     //--------------------------------------------------------------------------
     {
       const Domain domain(bounds);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   const DomainT<DIM,T> &bounds)
+                           const DomainT<DIM,T> &bounds, const char *provenance)
     //--------------------------------------------------------------------------
     {
       const Domain domain(bounds);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   const Future &future)
+                                   const Future &future, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(create_index_space(ctx, DIM, future,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
-                                       const std::vector<Point<DIM,T> > &points)
+               const std::vector<Point<DIM,T> > &points, const char *provenance)
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
@@ -20538,13 +20538,13 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
-                                         const std::vector<Rect<DIM,T> > &rects)
+                 const std::vector<Rect<DIM,T> > &rects, const char *provenance)
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
@@ -20554,41 +20554,41 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::union_index_spaces(Context ctx,
-                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+         const std::vector<IndexSpaceT<DIM,T> > &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> handles(spaces.size());
       for (unsigned idx = 0; idx < spaces.size(); idx++)
         handles[idx] = spaces[idx];
-      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, handles));
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, handles, provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::intersect_index_spaces(Context ctx,
-                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+         const std::vector<IndexSpaceT<DIM,T> > &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> handles(spaces.size());
       for (unsigned idx = 0; idx < spaces.size(); idx++)
         handles[idx] = spaces[idx];
-      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, handles));
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx,handles,provenance));
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::subtract_index_spaces(Context ctx,
-                              IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right)
+      IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
-                                        IndexSpace(left), IndexSpace(right)));
+                              IndexSpace(left), IndexSpace(right), provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21033,13 +21033,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_pending_partition(Context ctx,
-                              IndexSpaceT<DIM,T> parent,
-                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                         IndexSpaceT<DIM,T> parent,
+                         IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                         PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_pending_partition(ctx,
-            IndexSpace(parent), IndexSpace(color_space), part_kind, color));
+          IndexSpace(parent), IndexSpace(color_space), part_kind, color, prov));
     }
 
     //--------------------------------------------------------------------------
