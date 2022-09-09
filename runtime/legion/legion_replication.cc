@@ -4076,7 +4076,7 @@ namespace Legion {
         // Arrive on our indirection barriers if we have them
         if (!pre_indirection_barriers.empty())
         {
-          const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
+          const PhysicalTraceInfo trace_info(this, 0/*index*/);
           for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
           {
             Runtime::phase_barrier_arrive(pre_indirection_barriers[idx], 1);
@@ -7061,7 +7061,7 @@ namespace Legion {
             // If we're recording find all the prior event dependences
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
-            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+            const PhysicalTraceInfo trace_info(this, 0/*index*/);
             // We arrive on our barrier when all our previous operations
             // have finished executing
             ApEvent execution_fence_precondition;
@@ -7074,9 +7074,11 @@ namespace Legion {
             // everyone is mapped
             if (!map_applied_conditions.empty())
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
-                  Runtime::merge_events(map_applied_conditions));
+                  record_complete_replay(trace_info, 
+                    Runtime::merge_events(map_applied_conditions)));
             else
-              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+                  record_complete_replay(trace_info));
             complete_mapping(mapping_fence_barrier);
             // We can always trigger the completion event when these are done
             record_completion_effect(execution_fence_barrier);
@@ -7108,12 +7110,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFenceOp::complete_replay(ApEvent complete_event)
+    void ReplFenceOp::complete_replay(ApEvent pre, ApEvent complete_event)
     //--------------------------------------------------------------------------
     {
       Runtime::phase_barrier_arrive(execution_fence_barrier, 
                                     1/*count*/, complete_event);
-      FenceOp::complete_replay(execution_fence_barrier);
+      FenceOp::complete_replay(pre, execution_fence_barrier);
     }
 
     /////////////////////////////////////////////////////////////

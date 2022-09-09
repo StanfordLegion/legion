@@ -401,7 +401,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_get_term_event(ApEvent lhs,
+    void RemoteTraceRecorder::record_completion_event(ApEvent lhs,
                                      unsigned op_kind, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
@@ -412,7 +412,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_RECORD_GET_TERM);
+          rez.serialize(REMOTE_TRACE_RECORD_COMPLETION_EVENT);
           rez.serialize(applied);
           rez.serialize(lhs);
           rez.serialize(op_kind);
@@ -423,7 +423,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_get_term_event(lhs, op_kind, tlid);
+        remote_tpl->record_completion_event(lhs, op_kind, tlid);
     }
 
     //--------------------------------------------------------------------------
@@ -1042,33 +1042,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_set_effects(const TraceLocalID &tlid, 
-                                        ApEvent rhs, std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      if (local_space != origin_space)
-      {
-        RtUserEvent applied = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_SET_EFFECTS);
-          rez.serialize(applied);
-          tlid.serialize(rez);
-          rez.serialize(rhs);
-        }
-        runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
-        applied_events.insert(applied);
-      }
-      else
-        remote_tpl->record_set_effects(tlid, rhs, applied);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_complete_replay(const TraceLocalID &tlid, 
-                                                     ApEvent rhs)
+                    ApEvent pre, ApEvent post, std::set<RtEvent> &local_applied)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -1081,14 +1056,15 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_COMPLETE_REPLAY);
           rez.serialize(applied);
           tlid.serialize(rez);
-          rez.serialize(rhs);
+          rez.serialize(pre);
+          rez.serialize(post);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
-        applied_events.insert(applied);
+        // Don't use the applied_events!
+        local_applied.insert(applied);
       }
       else
-        remote_tpl->record_complete_replay(tlid, rhs);
+        remote_tpl->record_complete_replay(tlid, pre, post, local_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1152,7 +1128,7 @@ namespace Legion {
       derez.deserialize(kind);
       switch (kind)
       {
-        case REMOTE_TRACE_RECORD_GET_TERM:
+        case REMOTE_TRACE_RECORD_COMPLETION_EVENT:
           {
             RtUserEvent applied;
             derez.deserialize(applied);
@@ -1162,7 +1138,7 @@ namespace Legion {
             derez.deserialize(op_kind);
             TraceLocalID tlid;
             tlid.deserialize(derez);
-            tpl->record_get_term_event(lhs, op_kind, tlid);
+            tpl->record_completion_event(lhs, op_kind, tlid);
             Runtime::trigger_event(applied);
             break;
           }
@@ -1575,33 +1551,22 @@ namespace Legion {
               Runtime::trigger_event(applied);
             break;
           }
-        case REMOTE_TRACE_SET_EFFECTS:
-          {
-            RtUserEvent applied;
-            derez.deserialize(applied);
-            TraceLocalID tlid;
-            tlid.deserialize(derez);
-            ApEvent postcondition;
-            derez.deserialize(postcondition);
-            std::set<RtEvent> applied_events;
-            tpl->record_set_effects(tlid, postcondition, applied_events);
-            if (!applied_events.empty())
-              Runtime::trigger_event(applied,
-                  Runtime::merge_events(applied_events));
-            else
-              Runtime::trigger_event(applied);
-            break;
-          }
         case REMOTE_TRACE_COMPLETE_REPLAY:
           {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
             tlid.deserialize(derez);
-            ApEvent ready_event;
-            derez.deserialize(ready_event);
-            tpl->record_complete_replay(tlid, ready_event);
-            Runtime::trigger_event(applied);
+            ApEvent pre, post;
+            derez.deserialize(pre);
+            derez.deserialize(post);
+            std::set<RtEvent> applied_events;
+            tpl->record_complete_replay(tlid, pre, post, applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied,
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_ACQUIRE_RELEASE:
@@ -1772,13 +1737,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(Operation *op, bool init)
+    TraceInfo::TraceInfo(Operation *op)
       : rec(init_recorder(op)), tlid(init_tlid(op)),
         recording((rec == NULL) ? false : rec->is_recording())
     //--------------------------------------------------------------------------
     {
-      if (recording && init)
-        record_get_term_event(op->get_memoizable());
       if (rec != NULL)
         rec->add_recorder_reference();
     }
@@ -1808,28 +1771,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(SingleTask *task, RemoteTraceRecorder *r, bool init)
+    TraceInfo::TraceInfo(SingleTask *task, RemoteTraceRecorder *r)
       : rec(r), tlid(task->get_trace_local_id()), recording(rec != NULL)
     //--------------------------------------------------------------------------
     {
       if (recording)
-      {
         rec->add_recorder_reference();
-        if (init)
-          record_get_term_event(task);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceInfo::record_get_term_event(Memoizable *memo)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(recording);
-      assert(memo != NULL);
-#endif
-      ApEvent completion = memo->get_memo_completion();
-      rec->record_get_term_event(completion, memo->get_memoizable_kind(), tlid);
     }
 
     //--------------------------------------------------------------------------
@@ -1863,8 +1810,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
-      : TraceInfo(o, init), index(idx), dst_index(idx), update_validity(true)
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx)
+      : TraceInfo(o), index(idx), dst_index(idx), update_validity(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -1945,7 +1892,7 @@ namespace Legion {
                                  update_validity, recorder);
       }
       else
-        return PhysicalTraceInfo(NULL, -1U, false);
+        return PhysicalTraceInfo(NULL, -1U);
     }
 
     /////////////////////////////////////////////////////////////

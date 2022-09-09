@@ -214,7 +214,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
     public:
-      virtual void record_get_term_event(ApEvent lhs,
+      virtual void record_completion_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
@@ -314,11 +314,9 @@ namespace Legion {
                          const std::vector<size_t> &future_size_bounds,
                          const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
-      virtual void record_set_effects(const TraceLocalID &tlid, 
-                                      ApEvent rhs,
-                                      std::set<RtEvent> &applied) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
-                                          ApEvent rhs) = 0;
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied) = 0;
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events) = 0;
@@ -333,7 +331,7 @@ namespace Legion {
                                 public Collectable {
     public:
       enum RemoteTraceKind {
-        REMOTE_TRACE_RECORD_GET_TERM,
+        REMOTE_TRACE_RECORD_COMPLETION_EVENT,
         REMOTE_TRACE_REQUEST_TERM_EVENT,
         REMOTE_TRACE_CREATE_USER_EVENT,
         REMOTE_TRACE_TRIGGER_EVENT,
@@ -344,7 +342,6 @@ namespace Legion {
         REMOTE_TRACE_FILL_INST,
         REMOTE_TRACE_RECORD_OP_INST,
         REMOTE_TRACE_SET_OP_SYNC,
-        REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
         REMOTE_TRACE_ACQUIRE_RELEASE,
@@ -367,8 +364,8 @@ namespace Legion {
                                  std::set<RtEvent> &applied);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
-      virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
-                                         const TraceLocalID &tlid);
+      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
+                                           const TraceLocalID &tlid);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &hs, 
                                                const TraceLocalID &tlid);
@@ -462,9 +459,9 @@ namespace Legion {
                           const std::vector<size_t> &future_size_bounds,
                           const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent rhs,
-                                      std::set<RtEvent> &applied);
-      virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
+      virtual void record_complete_replay(const TraceLocalID &tlid,
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events);
@@ -494,9 +491,8 @@ namespace Legion {
      */
     struct TraceInfo {
     public:
-      explicit TraceInfo(Operation *op, bool initialize = false);
-      TraceInfo(SingleTask *task, RemoteTraceRecorder *rec, 
-                bool initialize = false); 
+      explicit TraceInfo(Operation *op);
+      TraceInfo(SingleTask *task, RemoteTraceRecorder *rec); 
       TraceInfo(const TraceInfo &info);
       ~TraceInfo(void);
     protected:
@@ -576,16 +572,11 @@ namespace Legion {
           rec->record_mapper_output(tlid, output, physical_instances,
                             future_size_bounds, coordinates, applied);
         }
-      inline void record_set_effects(ApEvent rhs,
-                                     std::set<RtEvent> &applied) const
+      inline void record_complete_replay(ApEvent pre, ApEvent post,
+                                         std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_set_effects(tlid, rhs, applied);
-        }
-      inline void record_complete_replay(ApEvent ready_event) const
-        {
-          base_sanity_check();
-          rec->record_complete_replay(tlid, ready_event);
+          rec->record_complete_replay(tlid, pre, post, applied);
         }
       inline void record_reservations(const TraceLocalID &tlid,
                       const std::map<Reservation,bool> &reservations,
@@ -611,7 +602,6 @@ namespace Legion {
           assert(rec->is_recording());
 #endif
         }
-      void record_get_term_event(Memoizable *memo);
       static PhysicalTraceRecorder* init_recorder(Operation *op);
       static TraceLocalID init_tlid(Operation *op);
     protected:
@@ -628,7 +618,7 @@ namespace Legion {
      */
     struct PhysicalTraceInfo : public TraceInfo {
     public:
-      PhysicalTraceInfo(Operation *op, unsigned index, bool init);
+      PhysicalTraceInfo(Operation *op, unsigned index);
       PhysicalTraceInfo(const TraceInfo &info, unsigned index,
                         bool update_validity = true);
       // Weird argument order to help the compiler avoid ambiguity

@@ -458,7 +458,7 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       // Allow the parent context to sample any outstanding effects 
-      void find_completion_effects(std::set<ApEvent> &effects);
+      virtual void find_completion_effects(std::set<ApEvent> &effects);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -1067,6 +1067,20 @@ namespace Legion {
      */
     class Memoizable {
     public:
+      struct DeferRecordCompleteReplay : 
+        public LgTaskArgs<DeferRecordCompleteReplay> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID;
+      public:
+        DeferRecordCompleteReplay(Memoizable *memo, ApEvent precondition,
+            const TraceInfo &trace_info, UniqueID provenance);
+      public:
+        Memoizable *const memo;
+        const ApEvent precondition;
+        TraceInfo *const trace_info;
+        const RtUserEvent done;
+      };
+    public:
       virtual ~Memoizable(void) { }
       virtual bool is_recording(void) const = 0;
       virtual bool is_memoizing(void) const = 0;
@@ -1078,13 +1092,16 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
       virtual TraceLocalID get_trace_local_id(void) const = 0;
-      virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
-      virtual void set_effects_postcondition(ApEvent postcondition) = 0;
-      virtual void complete_replay(ApEvent complete_event) = 0;
+      virtual ApEvent compute_sync_precondition(void) const = 0;
+      virtual void complete_replay(ApEvent precondition,
+                                   ApEvent postcondition) = 0;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
+      virtual RtEvent record_complete_replay(const TraceInfo &trace_info,
+                    RtEvent ready = RtEvent::NO_RT_EVENT,
+                    ApEvent precondition = ApEvent::NO_AP_EVENT) = 0;
     public:
-      //virtual Memoizable* clone(Operation *op) { return this; }
+      static void handle_record_complete_replay(const void *args);
     };
 
     /**
@@ -1119,11 +1136,9 @@ namespace Legion {
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
       virtual PhysicalTemplate* get_template(void) const;
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
+      virtual ApEvent compute_sync_precondition(void) const
         { assert(false); return ApEvent::NO_AP_EVENT; }
-      virtual void set_effects_postcondition(ApEvent postcondition)
-        { assert(false); }
-      virtual void complete_replay(ApEvent complete_event)
+      virtual void complete_replay(ApEvent precondition, ApEvent postcondition)
         { assert(false); }
       virtual ApEvent get_memo_completion(void)
         { return this->get_completion_event(); }
@@ -1133,6 +1148,9 @@ namespace Legion {
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
+      virtual RtEvent record_complete_replay(const TraceInfo &trace_info,
+                    RtEvent ready = RtEvent::NO_RT_EVENT,
+                    ApEvent precondition = ApEvent::NO_AP_EVENT);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
       virtual bool is_recording(void) const { return memo_state == MEMO_RECORD;}
@@ -1382,7 +1400,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
@@ -1444,8 +1461,8 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
-      virtual void complete_replay(ApEvent copy_complete_event);
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent pre, ApEvent copy_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
@@ -1724,9 +1741,8 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent complete_event);
+      virtual void complete_replay(ApEvent pre, ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     protected:
       void activate_fence(void);
@@ -2330,7 +2346,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -2354,8 +2369,8 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
-      virtual void complete_replay(ApEvent acquire_complete_event);
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent pre, ApEvent acquire_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
     public:
@@ -2448,7 +2463,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -2476,8 +2490,8 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
-      virtual void complete_replay(ApEvent release_complete_event);
+      virtual ApEvent compute_sync_precondition(void) const;
+      virtual void complete_replay(ApEvent pre, ApEvent release_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
     public:
@@ -3769,12 +3783,11 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
-      ApEvent compute_sync_precondition(const TraceInfo *info) const;
+      ApEvent compute_sync_precondition(void) const;
       void log_fill_requirement(void) const;
     public:
       // From Memoizable
@@ -3785,7 +3798,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent fill_complete_event);
+      virtual void complete_replay(ApEvent pre, ApEvent fill_complete_event);
     public:
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;

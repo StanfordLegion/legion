@@ -2300,6 +2300,32 @@ namespace Legion {
       return true;
     }
 
+    ///////////////////////////////////////////////////////////// 
+    // Memoizable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Memoizable::DeferRecordCompleteReplay::DeferRecordCompleteReplay(
+        Memoizable *m, ApEvent pre, const TraceInfo &info, UniqueID provenance)
+        : LgTaskArgs<DeferRecordCompleteReplay>(provenance),
+          memo(m), precondition(pre), trace_info(new TraceInfo(info)),
+          done(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Memoizable::handle_record_complete_replay(const void *args) 
+    //--------------------------------------------------------------------------
+    {
+      const DeferRecordCompleteReplay *dargs = 
+        (const DeferRecordCompleteReplay*)args;
+      Runtime::trigger_event(dargs->done,
+          dargs->memo->record_complete_replay(*(dargs->trace_info),
+            RtEvent::NO_RT_EVENT, dargs->precondition));
+      delete dargs->trace_info;
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     ///////////////////////////////////////////////////////////// 
     // CollectiveInstanceCreator
@@ -4790,7 +4816,7 @@ namespace Legion {
     void MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // If we have any wait preconditions from phase barriers or 
       // grants then we use them to compute a precondition for doing
       // any copies or anything else for this operation
@@ -6685,7 +6711,7 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const TraceInfo trace_info(this, true/*initialize*/);
+      const TraceInfo trace_info(this);
       Mapper::MapCopyInput input;
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
@@ -7130,23 +7156,8 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(record_complete_replay(trace_info, mapping_applied));
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_recording())
-      {
-        const TraceInfo trace_info(this, false/*initialize*/);
-        std::set<ApEvent> effects;
-        find_completion_effects(effects);
-        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
-        trace_info.record_complete_replay(effects_done);
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7861,7 +7872,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::compute_sync_precondition(const TraceInfo *info) const
+    ApEvent CopyOp::compute_sync_precondition(void) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -7888,16 +7899,13 @@ namespace Legion {
             sync_preconditions.insert(e);
           }
         }
-        // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
       }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::complete_replay(ApEvent copy_complete_event)
+    void CopyOp::complete_replay(ApEvent pre, ApEvent copy_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -10178,35 +10186,22 @@ namespace Legion {
             // If we're recording find all the prior event dependences
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
-            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+            const PhysicalTraceInfo trace_info(this, 0/*index*/);
             // We can always trigger the completion event when these are done
             record_completion_effects(execution_preconditions);
             // Mark that we finished our mapping now
             if (!map_applied_conditions.empty())
-              complete_mapping(Runtime::merge_events(map_applied_conditions));
+              complete_mapping(
+                  record_complete_replay(trace_info,
+                    Runtime::merge_events(map_applied_conditions)));
             else
-              complete_mapping();
+              complete_mapping(record_complete_replay(trace_info));
             complete_execution();
             break;
           }
         default:
           assert(false); // should never get here
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_recording())
-      {
-        const TraceInfo trace_info(this, false/*initialize*/);
-        std::set<ApEvent> effects;
-        find_completion_effects(effects);
-        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
-        trace_info.record_complete_replay(effects_done);
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -10276,7 +10271,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::complete_replay(ApEvent fence_complete_event)
+    void FenceOp::complete_replay(ApEvent pre, ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
       // Handle the case for marking when the copy completes
@@ -11946,7 +11941,7 @@ namespace Legion {
     void PostCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       ApUserEvent close_event = Runtime::create_ap_user_event(&trace_info);
       std::vector<PhysicalManager*> dummy_sources;
       ApEvent instances_ready =
@@ -13580,7 +13575,7 @@ namespace Legion {
     void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
@@ -13637,23 +13632,9 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(finalize_complete_mapping(mapping_applied));
+      complete_mapping(finalize_complete_mapping(
+            record_complete_replay(trace_info, mapping_applied)));
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_recording())
-      {
-        const TraceInfo trace_info(this, false/*initialize*/);
-        std::set<ApEvent> effects;
-        find_completion_effects(effects);
-        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
-        trace_info.record_complete_replay(effects_done);
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -13792,7 +13773,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent AcquireOp::compute_sync_precondition(const TraceInfo *info) const
+    ApEvent AcquireOp::compute_sync_precondition(void) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -13819,16 +13800,13 @@ namespace Legion {
             sync_preconditions.insert(e);
           }
         }
-        // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
       }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::complete_replay(ApEvent acquire_complete_event)
+    void AcquireOp::complete_replay(ApEvent pre, ApEvent acquire_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -14513,7 +14491,7 @@ namespace Legion {
     void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Invoke the mapper before doing anything else 
       std::vector<PhysicalManager*> source_instances;
       invoke_mapper(source_instances);
@@ -14572,23 +14550,9 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(finalize_complete_mapping(mapping_applied));
+      complete_mapping(finalize_complete_mapping(
+            record_complete_replay(trace_info, mapping_applied)));
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_recording())
-      {
-        const TraceInfo trace_info(this, false/*initialize*/);
-        std::set<ApEvent> effects;
-        find_completion_effects(effects);
-        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
-        trace_info.record_complete_replay(effects_done);
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -14751,7 +14715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReleaseOp::compute_sync_precondition(const TraceInfo *info) const
+    ApEvent ReleaseOp::compute_sync_precondition(void) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -14778,16 +14742,13 @@ namespace Legion {
             sync_preconditions.insert(e);
           }
         }
-        // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
       }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::complete_replay(ApEvent release_complete_event)
+    void ReleaseOp::complete_replay(ApEvent pre, ApEvent release_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -18347,7 +18308,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
@@ -20295,7 +20256,7 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -20335,9 +20296,11 @@ namespace Legion {
         
         if (!map_applied_conditions.empty())
           complete_mapping(finalize_complete_mapping(
-                Runtime::merge_events(map_applied_conditions)));
+                record_complete_replay(trace_info,
+                  Runtime::merge_events(map_applied_conditions))));
         else
-          complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+          complete_mapping(finalize_complete_mapping(
+                record_complete_replay(trace_info)));
         // See if we have any arrivals to trigger
         if (!arrive_barriers.empty())
         {
@@ -20373,7 +20336,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(fill_view == NULL);
 #endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Make a copy of the future value since the region tree
       // will want to take ownership of the buffer
       size_t result_size = 0;
@@ -20406,9 +20369,11 @@ namespace Legion {
 #endif
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
-              Runtime::merge_events(map_applied_conditions)));
+              record_complete_replay(trace_info,
+                Runtime::merge_events(map_applied_conditions))));
       else
-        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+        complete_mapping(finalize_complete_mapping(
+              record_complete_replay(trace_info)));
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {
@@ -20433,28 +20398,6 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_recording())
-      {
-        const TraceInfo trace_info(this, false/*initialize*/);
-        std::set<ApEvent> effects;
-        find_completion_effects(effects);
-        const ApEvent effects_done = Runtime::merge_events(&trace_info,effects);
-        trace_info.record_complete_replay(effects_done);
-      }
-      // See if we have a fill view on which we can remove a reference
-      if (fill_view != NULL)
-      {
-        if (fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-          delete fill_view;
-        fill_view = NULL;
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -20631,7 +20574,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FillOp::compute_sync_precondition(const TraceInfo *info) const
+    ApEvent FillOp::compute_sync_precondition(void) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -20658,11 +20601,8 @@ namespace Legion {
             sync_preconditions.insert(e);
           }
         }
-        // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
       }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
       return result;
     }
 
@@ -20681,7 +20621,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::complete_replay(ApEvent fill_complete_event)
+    void FillOp::complete_replay(ApEvent pre, ApEvent fill_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -21935,7 +21875,7 @@ namespace Legion {
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
       // Check to see if we're going to be the ones performing the attach
       // If someone else has already done the attach for us then the 
       // attached event will be non-trivial
@@ -23400,7 +23340,7 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
 #endif
       manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're
       // not going to invalidate the existing data. Don't register ourselves

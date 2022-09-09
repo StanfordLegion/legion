@@ -104,6 +104,9 @@ namespace Legion {
       }
       need_prepipeline_stage = true;
       OP::execute_dependence_analysis();
+      if (memo_state == MEMO_RECORD)
+        tpl->record_completion_event(get_memo_completion(),
+              get_memoizable_kind(), get_trace_local_id());
     };
 
     //--------------------------------------------------------------------------
@@ -128,7 +131,9 @@ namespace Legion {
                                                     const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      ApEvent sync_precondition = compute_sync_precondition();
+      if (trace_info.recording)
+        trace_info.record_op_sync_event(sync_precondition);
       if (sync_precondition.exists())
       {
         if (this->execution_fence_event.exists())
@@ -164,6 +169,35 @@ namespace Legion {
       mapper->invoke_memoize_operation(mappable, &input, &output);
       if (output.memoize)
         memo_state = MEMO_REQ;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent MemoizableOp<OP>::record_complete_replay(
+               const TraceInfo &trace_info, RtEvent ready, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_recording())
+        return ready;
+      // Defer this until the precondition is ready
+      if (ready.exists() && !ready.has_triggered())
+      {
+        DeferRecordCompleteReplay args(this, precondition, trace_info, 
+            this->get_unique_op_id());
+        this->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_WORK_PRIORITY, ready);
+        return args.done;
+      }
+      std::set<ApEvent> effects;
+      this->find_completion_effects(effects);
+      ApEvent postcondition;
+      if (!effects.empty())
+        postcondition = Runtime::merge_events(&trace_info, effects);
+      std::set<RtEvent> applied;
+      trace_info.record_complete_replay(precondition, postcondition, applied);
+      if (!applied.empty())
+        return Runtime::merge_events(applied);
+      return RtEvent::NO_RT_EVENT; 
     }
 
   }; // namespace Internal

@@ -964,8 +964,8 @@ namespace Legion {
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
     public:
-      virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
-                                         const TraceLocalID &tlid);
+      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
+                                           const TraceLocalID &tlid);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
@@ -1065,9 +1065,9 @@ namespace Legion {
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs,
                                             const TraceLocalID &tlid);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent rhs,
-                                      std::set<RtEvent> &applied_events);
-      virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
+      virtual void record_complete_replay(const TraceLocalID &tlid,
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied_events);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events); 
@@ -1230,7 +1230,6 @@ namespace Legion {
       friend class IssueFill;
       friend class IssueAcross;
       friend class SetOpSyncEvent;
-      friend class SetEffects;
       friend class CompleteReplay;
       friend class AcquireReplay;
       friend class ReleaseReplay;
@@ -1804,29 +1803,6 @@ namespace Legion {
     };
 
     /**
-     * \class SetEffects
-     * This instruction has the following semantics:
-     *   operations[lhs].set_effects_postcondition(events[rhs])
-     */
-    class SetEffects : public Instruction {
-    public:
-      SetEffects(PhysicalTemplate& tpl, const TraceLocalID& lhs, unsigned rhs);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
-                           const bool recurrent_replay);
-      virtual std::string to_string(const MemoEntries &memo_entires);
-
-      virtual InstructionKind get_kind(void)
-        { return SET_EFFECTS; }
-      virtual SetEffects* as_set_effects(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      unsigned rhs;
-    };
-
-    /**
      * \class CompleteReplay
      * This instruction has the following semantics:
      *   operations[lhs]->complete_replay(events[rhs])
@@ -1834,7 +1810,7 @@ namespace Legion {
     class CompleteReplay : public Instruction {
     public:
       CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
-                     unsigned rhs);
+                     unsigned pre, unsigned post);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
                            std::map<TraceLocalID,Memoizable*> &operations,
@@ -1847,7 +1823,7 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      unsigned rhs;
+      unsigned pre, post;
     };
 
     /**

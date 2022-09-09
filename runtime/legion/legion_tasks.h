@@ -195,7 +195,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(void) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                             get_acquired_instances_ref(void);
     public:
@@ -501,9 +501,8 @@ namespace Legion {
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
-      virtual ApEvent get_memo_completion(void);
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
-      virtual void set_effects_postcondition(ApEvent postcondition);
+      virtual void find_completion_effects(std::set<ApEvent> &effects);
     public:
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
@@ -811,7 +810,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent completion_event);
+      virtual void complete_replay(ApEvent pre, ApEvent completion_event);
     public:
       static void process_unpack_remote_future_size(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
@@ -919,7 +918,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // From MemoizableOp
-      virtual void complete_replay(ApEvent completion_event);
+      virtual void complete_replay(ApEvent pre, ApEvent completion_event);
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
@@ -1441,7 +1440,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent instance_ready_event);
+      virtual void complete_replay(ApEvent pre, ApEvent instance_ready_event);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);

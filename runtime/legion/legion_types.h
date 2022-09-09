@@ -421,6 +421,7 @@ namespace Legion {
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
+      LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -545,6 +546,7 @@ namespace Legion {
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
+        "Defer Record Complete Replay",                           \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \

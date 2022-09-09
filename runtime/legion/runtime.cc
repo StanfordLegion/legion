@@ -32685,6 +32685,11 @@ namespace Legion {
             ShardCollective::handle_deferred_collective(args);
             break;
           }
+        case LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID:
+          {
+            Memoizable::handle_record_complete_replay(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:

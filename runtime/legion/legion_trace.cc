@@ -3757,7 +3757,7 @@ namespace Legion {
       }
       // Perform an overwrite analysis for each of the postconditions
       unsigned index = 0;
-      const TraceInfo trace_info(op, false/*init*/);
+      const TraceInfo trace_info(op);
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++, index++)
@@ -4501,11 +4501,12 @@ namespace Legion {
             }
           case COMPLETE_REPLAY:
             {
-              unsigned completion_event_idx =
-                (*it)->as_complete_replay()->rhs;
+              CompleteReplay *complete = (*it)->as_complete_replay();
               InstructionKind generator_kind =
-                instructions[completion_event_idx]->get_kind();
-              num_merges += generator_kind != MERGE_EVENT;
+                instructions[complete->pre]->get_kind();
+              num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
+              generator_kind = instructions[complete->post]->get_kind(); 
+              num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
               break;
             }
           default:
@@ -4540,7 +4541,9 @@ namespace Legion {
               if (finder == op_insts.end()) break;
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
-              rewrite_preconditions(replay->rhs, users, instructions, 
+              rewrite_preconditions(replay->pre, users, instructions, 
+                  new_instructions, gen, merge_starts);
+              rewrite_preconditions(replay->post, users, instructions, 
                   new_instructions, gen, merge_starts);
               break;
             }
@@ -4737,16 +4740,11 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-              used[gen[effects->rhs]] = true;
-              break;
-            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
-              used[gen[complete->rhs]] = true;
+              used[gen[complete->pre]] = true;
+              used[gen[complete->post]] = true;
               break;
             }
           case GET_TERM_EVENT:
@@ -5045,16 +5043,12 @@ namespace Legion {
                       crossing_counts, crossing_instructions);
                 break;
               }
-            case SET_EFFECTS:
-              {
-                parallelize_replay_event(inst->as_set_effects()->rhs,
-                    slice_index, gen, slice_indices_by_inst,
-                    crossing_counts, crossing_instructions);
-                break;
-              }
             case COMPLETE_REPLAY:
               {
-                parallelize_replay_event(inst->as_complete_replay()->rhs,
+                parallelize_replay_event(inst->as_complete_replay()->pre,
+                    slice_index, gen, slice_indices_by_inst,
+                    crossing_counts, crossing_instructions);
+                parallelize_replay_event(inst->as_complete_replay()->post,
                     slice_index, gen, slice_indices_by_inst,
                     crossing_counts, crossing_instructions);
                 break;
@@ -5252,10 +5246,6 @@ namespace Legion {
               topo_order.push_back(advance->lhs);
               break;
             }
-          case SET_EFFECTS :
-            {
-              break;
-            }
           case ASSIGN_FENCE_COMPLETION :
             {
               inv_topo_order[fence_completion_id] = topo_order.size();
@@ -5273,8 +5263,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(lhs != -1U);
 #endif
-              incoming[lhs].push_back(replay->rhs);
-              outgoing[replay->rhs].push_back(lhs);
+              if (replay->post > 0)
+              {
+                if (replay->pre > 0)
+                {
+                  incoming[replay->post].push_back(replay->pre);
+                  outgoing[replay->pre].push_back(replay->post);
+                }
+                incoming[lhs].push_back(replay->post);
+                outgoing[replay->post].push_back(lhs);
+              }
               break;
             }
           default:
@@ -5622,13 +5620,6 @@ namespace Legion {
               lhs = across->lhs;
               break;
             }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-              int subst = substs[effects->rhs];
-              if (subst >= 0) effects->rhs = (unsigned)subst;
-              break;
-            }
           case SET_OP_SYNC_EVENT:
             {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
@@ -5649,8 +5640,10 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              int subst = substs[replay->rhs];
-              if (subst >= 0) replay->rhs = (unsigned)subst;
+              int subst = substs[replay->pre];
+              if (subst >= 0) replay->pre = (unsigned)subst;
+              subst = substs[replay->post];
+              if (subst >= 0) replay->post = (unsigned)subst;
               break;
             }
           default:
@@ -5781,22 +5774,15 @@ namespace Legion {
               }
               break;
             }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-#ifdef DEBUG_LEGION
-              assert(gen[effects->rhs] != -1U);
-#endif
-              used[gen[effects->rhs]] = true;
-              break;
-            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
 #ifdef DEBUG_LEGION
-              assert(gen[complete->rhs] != -1U);
+              assert(gen[complete->pre] != -1U);
+              assert(gen[complete->post] != -1U);
 #endif
-              used[gen[complete->rhs]] = true;
+              used[gen[complete->pre]] = true;
+              used[gen[complete->post]] = true;
               break;
             }
           case BARRIER_ARRIVAL:
@@ -6082,7 +6068,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_term_event(ApEvent lhs,
+    void PhysicalTemplate::record_completion_event(ApEvent lhs,
                                      unsigned op_kind, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
@@ -6637,22 +6623,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_effects(const TraceLocalID &tlid, 
-                                 ApEvent rhs, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      const unsigned rhs_ = find_event(rhs, tpl_lock);
-      events.push_back(ApEvent());
-      insert_instruction(new SetEffects(*this, tlid, rhs_));
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_complete_replay(const TraceLocalID &tlid,
-                                                  ApEvent rhs)
+                   ApEvent pre, ApEvent post, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -6660,9 +6632,10 @@ namespace Legion {
       assert(is_recording());
 #endif
       // Do this first in case it gets preempted
-      const unsigned rhs_ = find_event(rhs, tpl_lock);
+      const unsigned pre_ = pre.exists() ? find_event(pre, tpl_lock) : 0;
+      const unsigned post_ = post.exists() ? find_event(post, tpl_lock) : 0;
       events.push_back(ApEvent());
-      insert_instruction(new CompleteReplay(*this, tlid, rhs_));
+      insert_instruction(new CompleteReplay(*this, tlid, pre_, post_));
     }
 
     //--------------------------------------------------------------------------
@@ -9181,7 +9154,7 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       Operation *op = memo->get_operation();
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = expr->issue_copy(op, trace_info, dst_fields, 
                                      src_fields, reservations,
 #ifdef LEGION_SPY
@@ -9267,7 +9240,7 @@ namespace Legion {
       ApEvent copy_pre = events[copy_precondition];
       ApEvent src_indirect_pre = events[src_indirect_precondition];
       ApEvent dst_indirect_pre = events[dst_indirect_precondition];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = executor->execute(op, PredEvent::NO_PRED_EVENT,
                                       copy_pre, src_indirect_pre,
                                       dst_indirect_pre, trace_info,
@@ -9343,7 +9316,7 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       Operation *op = memo->get_operation();
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = expr->issue_fill(op, trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
@@ -9403,7 +9376,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      ApEvent sync_condition = memoizable->compute_sync_precondition(NULL);
+      ApEvent sync_condition = memoizable->compute_sync_precondition();
       events[lhs] = sync_condition;
     }
 
@@ -9424,66 +9397,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // SetEffects
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    SetEffects::SetEffects(PhysicalTemplate& tpl, const TraceLocalID& l,
-                           unsigned r)
-      : Instruction(tpl, l), rhs(r)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void SetEffects::execute(std::vector<ApEvent> &events,
-                             std::map<unsigned,ApUserEvent> &user_events,
-                             std::map<TraceLocalID,Memoizable*> &operations,
-                             const bool recurrent_replay)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
-#endif
-      Memoizable *memoizable = operations[owner];
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      memoizable->set_effects_postcondition(events[rhs]);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string SetEffects::to_string(const MemoEntries &memo_entries)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      MemoEntries::const_iterator finder = memo_entries.find(owner);
-#ifdef DEBUG_LEGION
-      assert(finder != memo_entries.end());
-#endif
-      ss << "operations[" << owner << "].set_effects_postcondition(events["
-         << rhs << "])    (op kind: "
-         << Operation::op_names[finder->second.second]
-         << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
     // CompleteReplay
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl,
-                                              const TraceLocalID& l, unsigned r)
-      : Instruction(tpl, l), rhs(r)
+    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& l,
+                                   unsigned pr, unsigned po)
+      : Instruction(tpl, l), pre(pr), post(po)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs < tpl.events.size());
+      assert(pre < tpl.events.size());
+      assert(post < tpl.events.size());
 #endif
     }
 
@@ -9502,7 +9427,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      memoizable->complete_replay(events[rhs]);
+      memoizable->complete_replay(events[pre], events[post]);
     }
 
     //--------------------------------------------------------------------------
@@ -9515,7 +9440,8 @@ namespace Legion {
       assert(finder != memo_entries.end());
 #endif
       ss << "operations[" << owner
-         << "].complete_replay(events[" << rhs << "])    (op kind: "
+         << "].complete_replay(events[" << pre
+         << "], events[ " << post << "])    (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();
