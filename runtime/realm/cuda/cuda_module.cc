@@ -3827,45 +3827,39 @@ namespace Realm {
       }
 #if CUDA_VERSION >= 11030
       // cuda 11.3+ provides cuGetProcAddress to handle versioning nicely
-      PFN_cuGetProcAddress driver_getproc = 0;
+      PFN_cuGetProcAddress_v11030 cuGetProcAddress_fnptr =
+          reinterpret_cast<PFN_cuGetProcAddress_v11030>(
+              dlsym(libcuda, "cuGetProcAddress"));
+      if (cuGetProcAddress_fnptr) {
+#define DRIVER_GET_FNPTR(name)                                                 \
+  CHECK_CU((cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr,             \
+                                    CUDA_VERSION,                              \
+                                    CU_GET_PROC_ADDRESS_DEFAULT));
+        CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+      } else  // if cuGetProcAddress is not found, fallback to dlsym path
+#endif
       {
-        void *sym = dlsym(libcuda, "cuGetProcAddress");
-        if(sym) {
-          driver_getproc = reinterpret_cast<PFN_cuGetProcAddress>(sym);
-        } else {
-          if(required) {
-            log_gpu.fatal() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
-            abort();
-          } else {
-            log_gpu.info() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
-          }
-        }
-      }
-#else
-      // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
-      //  compile-time translation to versioned function names
+    // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
+    //  compile-time translation to versioned function names
 #define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name) \
-      do { \
-        void *sym = dlsym(libcuda, STRINGIFY(name)); \
-        if(!sym) { \
-          log_gpu.fatal() << "symbol '" STRINGIFY(name) " missing from libcuda.so!"; \
-          abort(); \
-        } \
-        name ## _fnptr = reinterpret_cast<decltype(&name)>(sym); \
-      } while(0)
-      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#define DRIVER_GET_FNPTR(name)                                                 \
+  do {                                                                         \
+    void *sym = dlsym(libcuda, STRINGIFY(name));                               \
+    if (!sym) {                                                                \
+      log_gpu.fatal() << "symbol '" STRINGIFY(                                 \
+          name) " missing from libcuda.so!";                                   \
+      abort();                                                                 \
+    }                                                                          \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
+  } while (0)
+
+    CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+
 #undef DRIVER_GET_FNPTR
 #undef STRINGIFY
-#endif
-#endif
-#if CUDA_VERSION >= 11030
-#define DRIVER_GET_FNPTR(name)                                        \
-      CHECK_CU( (driver_getproc)(#name, (void **)&name ## _fnptr,       \
-                                 CUDA_VERSION, CU_GET_PROC_ADDRESS_DEFAULT) );
-      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
-#undef DRIVER_GET_FNPTR
-#endif
+      }
+#endif  // REALM_USE_DLFCN
 
       // see if we've been statically linked against libcudart_static.a
       if(cudaGetDevice) {
