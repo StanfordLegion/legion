@@ -328,17 +328,19 @@ namespace Legion {
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, CustomSerdezID serdez_id);
+                          FieldID fid, CustomSerdezID serdez_id,
+                          const char *provenance);
       FieldSpaceNode* allocate_field(FieldSpace handle, ApEvent ready,
-                                     FieldID fid, CustomSerdezID serdez_id);
+                                     FieldID fid, CustomSerdezID serdez_id,
+                                     const char *provenance);
       void free_field(FieldSpace handle, FieldID fid,
                       std::set<RtEvent> &preconditions);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id, const char *provenance);
       FieldSpaceNode* allocate_fields(FieldSpace handle, ApEvent ready, 
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id, const char *provenance);
       void free_fields(FieldSpace handle, 
                        const std::vector<FieldID> &to_free,
                        std::set<RtEvent> &preconditions);
@@ -350,7 +352,8 @@ namespace Legion {
                                  const std::vector<size_t> &sizes,
                                  CustomSerdezID serdez_id,
                                  const std::set<unsigned> &allocated_indexes,
-                                 std::vector<unsigned> &new_indexes);
+                                 std::vector<unsigned> &new_indexes,
+                                 const char *provenance);
       void free_local_fields(FieldSpace handle,
                              const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes);
@@ -371,6 +374,7 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle, DistributedID did,
+                                 const char *provenance,
                                  std::set<RtEvent> *applied = NULL);
       void destroy_logical_region(LogicalRegion handle, 
                                   std::set<RtEvent> &preconditions);
@@ -709,6 +713,7 @@ namespace Legion {
                                   Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par, 
                                   RtEvent initialized, DistributedID did,
+                                  Provenance *provenance = NULL,
                                   std::set<RtEvent> *applied = NULL);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
                                   std::set<RtEvent> *applied = NULL);
@@ -3283,20 +3288,26 @@ namespace Legion {
     public:
       void initialize_fields(const std::vector<size_t> &sizes,
                              const std::vector<FieldID> &resulting_fields,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       void initialize_fields(ApEvent sizes_ready,
                              const std::vector<FieldID> &resulting_fields,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             Provenance *provenance);
       RtEvent allocate_field(FieldID fid, size_t size,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       RtEvent allocate_field(FieldID fid, ApEvent size_ready,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              const char *provenance);
       RtEvent allocate_fields(ApEvent sizes_ready,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              const char *provenance);
       void update_field_size(FieldID fid, size_t field_size, 
           std::set<RtEvent> &update_events, AddressSpaceID source);
       void free_field(FieldID fid, AddressSpaceID source,
@@ -3310,7 +3321,8 @@ namespace Legion {
                                  const std::vector<size_t> &sizes,
                                  CustomSerdezID serdez_id,
                                  const std::set<unsigned> &indexes,
-                                 std::vector<unsigned> &new_indexes);
+                                 std::vector<unsigned> &new_indexes,
+                                 const char *provenance);
       void free_local_fields(const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes);
       void update_local_fields(const std::vector<FieldID> &fields,
@@ -3495,7 +3507,7 @@ namespace Legion {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
                      RtEvent initialized, RtEvent tree_init, 
-                     DistributedID did = 0);
+                     Provenance *provenance = NULL, DistributedID did = 0);
       virtual ~RegionTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -3706,6 +3718,7 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
+      Provenance *const provenance;
       RtEvent initialized;
       const RtEvent tree_initialized; // top level tree initialization
     public:
@@ -3755,7 +3768,8 @@ namespace Legion {
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
-             DistributedID did, RtEvent initialized, RtEvent tree_initialized);
+             DistributedID did, RtEvent initialized, 
+             RtEvent tree_initialized, Provenance *provenance);
       RegionNode(const RegionNode &rhs);
       virtual ~RegionNode(void);
     public:

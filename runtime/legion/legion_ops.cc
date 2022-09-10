@@ -8337,7 +8337,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreationOp::initialize_field(InnerContext *ctx, FieldSpaceNode *node,
-                                      FieldID fid, const Future &field_size)
+                                      FieldID fid, const Future &field_size,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8345,7 +8346,7 @@ namespace Legion {
       assert(fields.empty());
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       kind = FIELD_ALLOCATION;
       field_space_node = node;
       fields.push_back(fid);
@@ -8379,14 +8380,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::initialize_map(
-           InnerContext *ctx, const std::map<DomainPoint,Future> &future_points)
+    void CreationOp::initialize_map(InnerContext *ctx, const char *provenance,
+                              const std::map<DomainPoint,Future> &future_points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       kind = FUTURE_MAP_CREATION;
       futures.resize(future_points.size());
       unsigned index = 0;
@@ -13927,10 +13928,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_union(InnerContext *ctx,
                                                           IndexSpace target,
-                                         const std::vector<IndexSpace> &handles)
+                                         const std::vector<IndexSpace> &handles,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13941,11 +13943,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_union(InnerContext *ctx,
-                                                          IndexSpace target,
-                                                          IndexPartition handle)
+                                                         IndexSpace target,
+                                                         IndexPartition handle,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13956,10 +13959,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-     InnerContext *ctx,IndexSpace target,const std::vector<IndexSpace> &handles)
+                                         InnerContext *ctx,IndexSpace target,
+                                         const std::vector<IndexSpace> &handles,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13970,10 +13975,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-                    InnerContext *ctx, IndexSpace target, IndexPartition handle)
+                                  InnerContext *ctx, IndexSpace target,
+                                  IndexPartition handle, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -13986,10 +13992,11 @@ namespace Legion {
     void PendingPartitionOp::initialize_index_space_difference(
                                          InnerContext *ctx,
                                          IndexSpace target, IndexSpace initial, 
-                                         const std::vector<IndexSpace> &handles)
+                                         const std::vector<IndexSpace> &handles,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif

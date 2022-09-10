@@ -287,28 +287,33 @@ namespace Legion {
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles) = 0;
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance) = 0;
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle) = 0;
+                                            IndexPartition handle,
+                                            const char *provenance) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles) = 0;
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle) = 0;
+                                            IndexPartition handle,
+                                            const char *provenance) = 0;
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles) = 0;
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance) = 0;
       virtual FieldSpace create_field_space(const char *provenance);
       virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
@@ -323,20 +328,24 @@ namespace Legion {
                                        const bool unordered) = 0;
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     const char *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id) = 0;
+                                     CustomSerdezID serdez_id,
+                                     const char *provenance) = 0;
       virtual void allocate_local_field(
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events) = 0;
+                                     std::set<RtEvent> &done_events,
+                                     const char *provenance) = 0;
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
                               FieldID fid, const bool unordered) = 0;
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   const char *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -346,14 +355,16 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events) = 0;
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance) = 0;
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space, 
                                const std::set<FieldID> &to_free,
                                const bool unordered) = 0; 
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+      virtual LogicalRegion create_logical_region(
                                             IndexSpace index_space,
                                             FieldSpace field_space,
-                                            bool task_local);
+                                            bool task_local,
+                                            const char *provenance);
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
@@ -392,13 +403,15 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false) = 0;
+                                             bool implicit = false,
+                                             const char *provenance = NULL) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false) = 0;
+                                             bool implicit = false,
+                                             const char *provenance = NULL) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(const PhysicalRegion &region,
                                    const char *provenance) = 0;
@@ -1239,28 +1252,33 @@ namespace Legion {
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual void verify_partition(IndexPartition pid, PartitionKind kind,
                                     const char *function_name);
       static void handle_partition_verification(const void *args);
@@ -1271,10 +1289,12 @@ namespace Legion {
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     const char *provenance);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events);
+                                     std::set<RtEvent> &done_events,
+                                     const char *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -1284,7 +1304,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events);
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance);
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
                               FieldID fid, const bool unordered);
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
@@ -1324,13 +1345,15 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             const char *provenance = NULL);
       virtual FutureMap construct_future_map(const Domain &domain,
                                    const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             const char *provenance = NULL);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
                                    const char *provenance);
@@ -2142,28 +2165,33 @@ namespace Legion {
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            const char *provenance);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            const char *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         CustomSerdezID serdez_id,
@@ -2171,10 +2199,12 @@ namespace Legion {
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     const char *provenance);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events);
+                                     std::set<RtEvent> &done_events,
+                                     const char *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -2184,7 +2214,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events);
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance);
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
                               FieldID fid, const bool unordered);
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
@@ -2224,13 +2255,15 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             const char *provenance = NULL);
       virtual FutureMap construct_future_map(const Domain &domain,
                                    const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             const char *provenance = NULL);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(const PhysicalRegion &region,
                                    const char *provenance);

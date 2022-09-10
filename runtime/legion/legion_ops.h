@@ -1580,12 +1580,13 @@ namespace Legion {
       void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node,
                                   const Future &future, const char *provenance);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
-                            FieldID fid, const Future &field_size);
+                            FieldID fid, const Future &field_size,
+                            const char *provenance);
       void initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                              const std::vector<FieldID> &fids,
                              const std::vector<Future> &field_sizes,
                              const char *provenance);
-      void initialize_map(InnerContext *ctx,
+      void initialize_map(InnerContext *ctx, const char *provenance,
                           const std::map<DomainPoint,Future> &futures);
     public:
       virtual void activate(void);
@@ -2836,19 +2837,24 @@ namespace Legion {
                                     IndexPartition source, LegionColor color,
                                     const char *provenance);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenance);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
-                                        IndexPartition handle);
+                                        IndexPartition handle,
+                                        const char *provenance);
       void initialize_index_space_intersection(InnerContext *ctx, 
                                                IndexSpace target,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                               const char *provenance);
       void initialize_index_space_intersection(InnerContext *ctx,
                                               IndexSpace target,
-                                              IndexPartition handle);
+                                              IndexPartition handle,
+                                              const char *provenance);
       void initialize_index_space_difference(InnerContext *ctx, 
                                              IndexSpace target, 
                                              IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenance);
       void perform_logging();
     public:
       virtual void trigger_dependence_analysis(void);

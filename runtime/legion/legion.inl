@@ -21048,7 +21048,8 @@ namespace Legion {
                                 IndexPartitionT<DIM,T> parent,
                                 Point<COLOR_DIM,COLOR_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,T> > &handles)
+                                  IndexSpaceT<DIM,T> > &handles,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> untyped_handles(handles.size());
@@ -21057,7 +21058,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx, 
             IndexPartition(parent), &color, 
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-            untyped_handles));
+            untyped_handles, provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21065,13 +21066,14 @@ namespace Legion {
     IndexSpaceT<DIM,T> Runtime::create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
                                 Point<COLOR_DIM,COLOR_T> color,
-                                IndexPartitionT<DIM,T> handle)
+                                IndexPartitionT<DIM,T> handle,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx,
           IndexPartition(parent), &color, 
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-          IndexPartition(handle)));
+          IndexPartition(handle), provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21080,7 +21082,8 @@ namespace Legion {
                                 IndexPartitionT<DIM,T> parent,
                                 Point<COLOR_DIM,COLOR_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,T> > &handles)
+                                  IndexSpaceT<DIM,T> > &handles,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> untyped_handles(handles.size());
@@ -21089,7 +21092,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
             IndexPartition(parent), &color,
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
-            untyped_handles));
+            untyped_handles, provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21097,13 +21100,14 @@ namespace Legion {
     IndexSpaceT<DIM,T> Runtime::create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
                                 Point<COLOR_DIM,COLOR_T> color,
-                                IndexPartitionT<DIM,T> handle)
+                                IndexPartitionT<DIM,T> handle,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
           IndexPartition(parent), &color, 
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-          IndexPartition(handle)));
+          IndexPartition(handle), provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21113,7 +21117,8 @@ namespace Legion {
                                 Point<COLOR_DIM,COLOR_T> color,
                                 IndexSpaceT<DIM,T> initial,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,T> > &handles)
+                                  IndexSpaceT<DIM,T> > &handles,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> untyped_handles(handles.size());
@@ -21122,7 +21127,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_difference_internal(ctx,
             IndexPartition(parent), &color,
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
-            IndexSpace(initial), untyped_handles));
+            IndexSpace(initial), untyped_handles, provenance));
     }
 
     //--------------------------------------------------------------------------
@@ -21249,11 +21254,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalRegionT<DIM,T> Runtime::create_logical_region(Context ctx,
-                   IndexSpaceT<DIM,T> index, FieldSpace fields, bool task_local)
+                                   IndexSpaceT<DIM,T> index, FieldSpace fields,
+                                   bool task_local, const char *provenance)
     //--------------------------------------------------------------------------
     {
       return LogicalRegionT<DIM,T>(create_logical_region(ctx, 
-                                  IndexSpace(index), fields, task_local));
+                            IndexSpace(index), fields, task_local, provenance));
     }
 
     //--------------------------------------------------------------------------

@@ -150,15 +150,18 @@ namespace Legion {
     public:
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid,
-                             CustomSerdezID serdez_id, bool local);
+                             CustomSerdezID serdez_id, bool local,
+                             const char *provenance);
       FieldID allocate_field(const Future &field_size, 
                              FieldID desired_fieldid,
-                             CustomSerdezID serdez_id, bool local);
+                             CustomSerdezID serdez_id, bool local,
+                             const char *provenance);
       void free_field(FieldID fid, const bool unordered);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id, bool local);
+                           CustomSerdezID serdez_id, bool local,
+                           const char *provenance);
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id, bool local,
@@ -1932,9 +1935,6 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
-    public:
-      LogicalRegion create_logical_region(Context ctx, IndexSpace index,
-                                          FieldSpace fields, bool task_local);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);

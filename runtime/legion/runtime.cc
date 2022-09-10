@@ -370,28 +370,28 @@ namespace Legion {
     FieldID FieldAllocatorImpl::allocate_field(size_t field_size,
                                                FieldID desired_fieldid,
                                                CustomSerdezID serdez_id, 
-                                               bool local)
+                                               bool local, const char *prov)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid,
-                                     local, serdez_id);
+                                     local, serdez_id, prov);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocatorImpl::allocate_field(const Future &field_size,
                                                FieldID desired_fieldid,
                                                CustomSerdezID serdez_id, 
-                                               bool local)
+                                               bool local, const char *prov)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid, 
-                                     local, serdez_id);
+                                     local, serdez_id, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -407,14 +407,15 @@ namespace Legion {
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id, bool local)
+                                        CustomSerdezID serdez_id, bool local,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields,
-                               local, serdez_id);
+                               local, serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -13124,18 +13125,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       forest->get_field_space_fields(handle, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion Runtime::create_logical_region(Context ctx, 
-                IndexSpace index_space, FieldSpace field_space, bool task_local)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create logical region!");
-      return ctx->create_logical_region(forest, index_space, field_space,
-                                        task_local); 
     }
 
     //--------------------------------------------------------------------------

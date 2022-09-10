@@ -498,7 +498,7 @@ namespace Legion {
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
       }
-      node->initialize_fields(sizes, resulting_fields, serdez_id);
+      node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
       return space;
     }
@@ -568,7 +568,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID TaskContext::allocate_field(FieldSpace space, size_t field_size,
                                         FieldID fid, bool local,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -587,9 +588,10 @@ namespace Legion {
       std::set<RtEvent> done_events;
       if (local)
         allocate_local_field(space, field_size, fid, 
-                             serdez_id, done_events);
+                             serdez_id, done_events, provenance);
       else
-        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
+        runtime->forest->allocate_field(space, field_size, fid,
+                                        serdez_id, provenance);
       register_field_creation(space, fid, local);
       if (!done_events.empty())
       {
@@ -603,7 +605,8 @@ namespace Legion {
     void TaskContext::allocate_fields(FieldSpace space,
                                       const std::vector<size_t> &sizes,
                                       std::vector<FieldID> &resulting_fields,
-                                      bool local, CustomSerdezID serdez_id)
+                                      bool local, CustomSerdezID serdez_id,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -628,10 +631,10 @@ namespace Legion {
       std::set<RtEvent> done_events;
       if (local)
         allocate_local_fields(space, sizes, resulting_fields,
-                              serdez_id, done_events);
+                              serdez_id, done_events, provenance);
       else
-        runtime->forest->allocate_fields(space, sizes, 
-                                         resulting_fields, serdez_id);
+        runtime->forest->allocate_fields(space, sizes, resulting_fields,
+                                         serdez_id, provenance);
       register_all_field_creations(space, local, resulting_fields);
       if (!done_events.empty())
       {
@@ -641,10 +644,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion TaskContext::create_logical_region(RegionTreeForest *forest,
-                                                     IndexSpace index_space,
+    LogicalRegion TaskContext::create_logical_region(IndexSpace index_space,
                                                      FieldSpace field_space,
-                                                     bool task_local)
+                                                     bool task_local,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -660,7 +663,7 @@ namespace Legion {
         LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 
       const DistributedID did = runtime->get_available_distributed_id(); 
-      forest->create_logical_region(region, did);
+      runtime->forest->create_logical_region(region, did, provenance);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;
@@ -4769,7 +4772,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4782,7 +4786,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_union(this, result, handles);
+      part_op->initialize_index_space_union(this, result, handles, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4793,7 +4797,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                                      IndexPartition handle)
+                                                      IndexPartition handle,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4806,7 +4811,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_union(this, result, handle);
+      part_op->initialize_index_space_union(this, result, handle, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4818,7 +4823,8 @@ namespace Legion {
                                                       IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4831,7 +4837,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_intersection(this, result, handles);
+      part_op->initialize_index_space_intersection(this, result, handles, prov);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4843,7 +4849,8 @@ namespace Legion {
                                                       IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                                      IndexPartition handle)
+                                                      IndexPartition handle,
+                                                      const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4856,7 +4863,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_intersection(this, result, handle);
+      part_op->initialize_index_space_intersection(this, result, handle, prov);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4869,7 +4876,8 @@ namespace Legion {
                                                     const void *realm_color,
                                                     TypeTag type_tag,
                                                     IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4882,7 +4890,8 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_difference(this, result, initial,handles);
+      part_op->initialize_index_space_difference(this, result, initial,
+                                                 handles, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5165,7 +5174,8 @@ namespace Legion {
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();  
       const ApEvent ready = creator_op->get_completion_event();
-      node->initialize_fields(ready, resulting_fields, serdez_id);
+      node->initialize_fields(ready, resulting_fields, serdez_id,
+                              creator_op->get_provenance());
       creator_op->initialize_fields(this, node, resulting_fields,
                                     sizes, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
@@ -5259,7 +5269,8 @@ namespace Legion {
     FieldID InnerContext::allocate_field(FieldSpace space, 
                                          const Future &field_size,
                                          FieldID fid, bool local,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5285,8 +5296,8 @@ namespace Legion {
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
       FieldSpaceNode *node = 
-        runtime->forest->allocate_field(space, ready, fid, serdez_id);
-      creator_op->initialize_field(this, node, fid, field_size); 
+        runtime->forest->allocate_field(space, ready, fid,serdez_id,provenance);
+      creator_op->initialize_field(this, node, fid, field_size, provenance); 
       register_field_creation(space, fid, local);
       add_to_dependence_queue(creator_op);
       return fid;
@@ -5295,7 +5306,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::allocate_local_field(FieldSpace space, size_t field_size,
                                           FieldID fid, CustomSerdezID serdez_id,
-                                          std::set<RtEvent> &done_events)
+                                          std::set<RtEvent> &done_events,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       // See if we've exceeded our local field allocations 
@@ -5317,7 +5329,7 @@ namespace Legion {
       std::vector<size_t> sizes(1, field_size);
       std::vector<unsigned> new_indexes;
       if (!runtime->forest->allocate_local_fields(space, fields, sizes, 
-                              serdez_id, current_indexes, new_indexes))
+                  serdez_id, current_indexes, new_indexes, provenance))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -5391,8 +5403,8 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
-      FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready, 
-                                              resulting_fields, serdez_id);
+      FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
+                                  resulting_fields, serdez_id, provenance);
       creator_op->initialize_fields(this, node, resulting_fields, 
                                     sizes, provenance);
       register_all_field_creations(space, local, resulting_fields);
@@ -5404,7 +5416,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resulting_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance)
     //--------------------------------------------------------------------------
     {
       // See if we've exceeded our local field allocations 
@@ -5424,7 +5437,7 @@ namespace Legion {
         current_indexes.insert(it->index);
       std::vector<unsigned> new_indexes;
       if (!runtime->forest->allocate_local_fields(space, resulting_fields, 
-                          sizes, serdez_id, current_indexes, new_indexes))
+              sizes, serdez_id, current_indexes, new_indexes, provenance))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -5906,19 +5919,22 @@ namespace Legion {
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective, 
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       Domain domain;
       runtime->forest->find_launch_space_domain(space, domain);
-      return construct_future_map(domain, futures, internal, collective, sid);
+      return construct_future_map(domain, futures, internal, collective, sid,
+                                  provenance);
     }
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -5931,10 +5947,10 @@ namespace Legion {
             "in task %s (UID %lld)", futures.size(), domain.get_volume(),
             get_task_name(), get_unique_id())
         return construct_future_map(domain, futures, true/*internal*/,
-                                    collective, sid);
+                                    collective, sid, provenance);
       }
       CreationOp *creation_op = runtime->get_available_creation_op();
-      creation_op->initialize_map(this, futures);
+      creation_op->initialize_map(this, provenance, futures);
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
           RtEvent::NO_RT_EVENT, runtime, did, runtime->address_space);
@@ -12055,7 +12071,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles) 
+                                        const std::vector<IndexSpace> &handles,
+                                                     const char *provenance) 
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION,
@@ -12068,7 +12085,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                                     IndexPartition handle)
+                                                     IndexPartition handle,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION,
@@ -12082,7 +12100,8 @@ namespace Legion {
                                                      IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles) 
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *provenance) 
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION,
@@ -12096,7 +12115,8 @@ namespace Legion {
                                                      IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                                     IndexPartition handle)
+                                                     IndexPartition handle,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION,
@@ -12111,7 +12131,8 @@ namespace Legion {
                                                   const void *realm_color,
                                                   TypeTag type_tag,
                                                   IndexSpace initial,
-                                          const std::vector<IndexSpace> &handles)
+                                          const std::vector<IndexSpace> &handles,
+                                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_DIFFERENCE,
@@ -12275,7 +12296,8 @@ namespace Legion {
     FieldID LeafContext::allocate_field(FieldSpace space, 
                                         const Future &field_size,
                                         FieldID fid, bool local,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
@@ -12287,7 +12309,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events)
+                                     std::set<RtEvent> &done_events,
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
@@ -12313,7 +12336,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12538,7 +12562,8 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12551,7 +12576,8 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(const Domain &domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,

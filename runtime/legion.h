@@ -519,16 +519,20 @@ namespace Legion {
        *   custom serdez object for serializing and deserializing
        *   a field when it is moved.
        * @param local_field whether this is a local field or not
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return field ID for the allocated field
        */
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
-                             bool local_field = false);
+                             bool local_field = false,
+                             const char *provenance = NULL);
       FieldID allocate_field(const Future &field_size,
                              FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
-                             bool local_field = false);
+                             bool local_field = false,
+                             const char *provenance = NULL);
       ///@}
       /**
        * Deallocate the specified field from the field space.
@@ -547,7 +551,7 @@ namespace Legion {
        */
       FieldID allocate_local_field(size_t field_size,
           FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
-          CustomSerdezID serdez_id = 0);
+          CustomSerdezID serdez_id = 0, const char *provenance = NULL);
       ///@{
       /**
        * Allocate a collection of fields with the specified sizes.
@@ -569,7 +573,8 @@ namespace Legion {
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
-                           bool local_fields = false);
+                           bool local_fields = false,
+                           const char *provenance = NULL);
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
@@ -593,7 +598,8 @@ namespace Legion {
        */
       void allocate_local_fields(const std::vector<size_t> &field_sizes,
                                  std::vector<FieldID> &resulting_fields,
-                                 CustomSerdezID serdez_id = 0);
+                                 CustomSerdezID serdez_id = 0,
+                                 const char *provenance = NULL);
       /**
        * @return field space associated with this allocator
        */
@@ -5595,18 +5601,22 @@ namespace Legion {
        * @param parent the parent index partition 
        * @param color the color to assign the index space to in the parent
        * @param handles a vector index space handles to union
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent, 
                                         const DomainPoint &color,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5618,17 +5628,21 @@ namespace Legion {
        * @param parent the parent index partition 
        * @param color the color to assign the index space to in the parent
        * @param handle an index partition to union together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
                                           const DomainPoint &color,
-                                          IndexPartition handle);
+                                          IndexPartition handle,
+                                          const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-                                IndexPartitionT<DIM,COORD_T> handle);
+                                IndexPartitionT<DIM,COORD_T> handle,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5643,19 +5657,23 @@ namespace Legion {
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
        * @param handles a vector index space handles to intersect 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
-                                       const std::vector<IndexSpace> &handles);
+                                       const std::vector<IndexSpace> &handles,
+                                       const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5667,18 +5685,22 @@ namespace Legion {
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
        * @param handle an index partition to intersect together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
-                                                 IndexPartition handle);
+                                                 IndexPartition handle,
+                                                 const char *provenannce=NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-                                IndexPartitionT<DIM,COORD_T> handle);
+                                IndexPartitionT<DIM,COORD_T> handle,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5698,13 +5720,16 @@ namespace Legion {
        * @param color the color to assign the index space to in the parent
        * @param initial the starting index space
        * @param handles a vector index space handles to subtract 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_difference(Context ctx, 
                                                IndexPartition parent,
                                                const DomainPoint &color,
                                                IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenancne = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_difference(Context ctx,
@@ -5712,7 +5737,8 @@ namespace Legion {
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 IndexSpaceT<DIM,COORD_T> initial,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
     public:
       //------------------------------------------------------------------------
@@ -6219,17 +6245,21 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param index handle for the index space of the logical region
        * @param fields handle for the field space of the logical region
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the logical region created
        */
       LogicalRegion create_logical_region(Context ctx, IndexSpace index, 
                                           FieldSpace fields,
-                                          bool task_local = false);
+                                          bool task_local = false,
+                                          const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       LogicalRegionT<DIM,COORD_T> create_logical_region(Context ctx,
                                       IndexSpaceT<DIM,COORD_T> index,
                                       FieldSpace fields,
-                                      bool task_local = false);
+                                      bool task_local = false,
+                                      const char *provenance = NULL);
       /**
        * Create a new shared ownership of a top-level logical region to prevent 
        * it  from being destroyed by other potential owners. Every call to this
@@ -6705,12 +6735,15 @@ namespace Legion {
        * @param implicit_sharding if collective=true this says whether the
        *                   sharding should be implicitly handled by the
        *                   runtime and the sharding function ID ignored
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain,
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0,
-                           bool implicit_sharding = false);
+                           bool implicit_sharding = false,
+                           const char *provenance = NULL);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
@@ -9457,24 +9490,29 @@ namespace Legion {
       IndexSpace create_index_space_union_internal(Context ctx,
                                       IndexPartition parent,
                                       const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace create_index_space_union_internal(Context ctx, 
                                       IndexPartition parent, 
                                       const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      IndexPartition handle,
+                                      const char *provenance);
       IndexSpace create_index_space_intersection_internal(Context ctx,
                                       IndexPartition parent,
                                       const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace create_index_space_intersection_internal(Context ctx, 
                                       IndexPartition parent, 
                                       const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      IndexPartition handle,
+                                      const char *provenance);
       IndexSpace create_index_space_difference_internal(Context ctx,
                                       IndexPartition paretn,
                                       const void *realm_color, TypeTag type_tag,
                                       IndexSpace initial,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace get_index_subspace_internal(IndexPartition handle, 
                                       const void *realm_color,TypeTag type_tag);
       bool has_index_subspace_internal(IndexPartition handle,

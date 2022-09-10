@@ -3140,25 +3140,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(size_t field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(const Future &field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3174,26 +3178,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_local_field(size_t field_size,
                                                  FieldID desired_fieldid,
-                                                 CustomSerdezID serdez_id)
+                                                 CustomSerdezID serdez_id,
+                                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->allocate_field(field_size, desired_fieldid, 
-                                  serdez_id, true/*local*/);
+                                  serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id,
+                            local, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3225,14 +3232,15 @@ namespace Legion {
     void FieldAllocator::allocate_local_fields(
                                         const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->allocate_fields(field_sizes, resulting_fields, 
-                            serdez_id, true/*local*/); 
+                            serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4462,7 +4470,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles, const char *prov) 
     //--------------------------------------------------------------------------
     {
       switch (color.get_dim())
@@ -4472,7 +4480,7 @@ namespace Legion {
           { \
             Point<DIM,coord_t> point = color; \
             return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handles); \
+                                     TYPE_TAG_##DIM##D, handles, prov); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4485,16 +4493,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                     IndexPartition parent, const void *color, TypeTag type_tag,
-                    const std::vector<IndexSpace> &handles)
+                    const std::vector<IndexSpace> &handles, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, color, type_tag, handles);
+      return ctx->create_index_space_union(parent,color,type_tag,handles,prov);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                      IndexPartition handle, const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (color.get_dim())
@@ -4504,7 +4512,7 @@ namespace Legion {
           { \
             Point<DIM,coord_t> point = color; \
             return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handle); \
+                         TYPE_TAG_##DIM##D, handle, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4517,16 +4525,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                         IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                        TypeTag type_tag, IndexPartition handle,
+                        const char *provenance)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, realm_color,type_tag,handle);
+      return ctx->create_index_space_union(parent, realm_color, type_tag,
+                                           handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles,
+                      const char *provenance) 
     //--------------------------------------------------------------------------
     {
       switch (color.get_dim())
@@ -4536,7 +4547,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                          TYPE_TAG_##DIM##D, handles); \
+                              TYPE_TAG_##DIM##D, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4549,17 +4560,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
                     IndexPartition parent, const void *color, TypeTag type_tag,
-                    const std::vector<IndexSpace> &handles)
+                    const std::vector<IndexSpace> &handles, const char *prov)
     //--------------------------------------------------------------------------
     {
       return ctx->create_index_space_intersection(parent, color, 
-                                                  type_tag, handles);
+                                                  type_tag, handles, prov);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                      IndexPartition handle, const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (color.get_dim())
@@ -4569,7 +4580,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                           TYPE_TAG_##DIM##D, handle); \
+                               TYPE_TAG_##DIM##D, handle, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4582,17 +4593,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
                         IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                        TypeTag type_tag, IndexPartition handle,
+                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       return ctx->create_index_space_intersection(parent, realm_color,
-                                                  type_tag, handle);
+                                                  type_tag, handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference(Context ctx,
           IndexPartition parent, const DomainPoint &color, IndexSpace initial, 
-          const std::vector<IndexSpace> &handles)
+          const std::vector<IndexSpace> &handles, const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (color.get_dim())
@@ -4602,7 +4614,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_difference(parent, &point, \
-                              TYPE_TAG_##DIM##D, initial, handles); \
+                  TYPE_TAG_##DIM##D, initial, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4615,11 +4627,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference_internal(Context ctx,
         IndexPartition parent, const void *realm_color, TypeTag type_tag,
-        IndexSpace initial, const std::vector<IndexSpace> &handles)
+        IndexSpace initial, const std::vector<IndexSpace> &handles,
+        const char *provenance)
     //--------------------------------------------------------------------------
     {
       return ctx->create_index_space_difference(parent, realm_color, type_tag, 
-                                                initial, handles);
+                                                initial, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5278,10 +5291,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                           IndexSpace index, FieldSpace fields, bool task_local)
+                           IndexSpace index, FieldSpace fields,
+                           bool task_local, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_logical_region(ctx, index, fields, task_local);
+      return ctx->create_logical_region(index, fields, task_local, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -5747,11 +5761,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                  const std::map<DomainPoint,Future> &futures,
-                                 bool collective, ShardingID sid, bool implicit)
+                                 bool collective, ShardingID sid, bool implicit,
+                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
       return ctx->construct_future_map(domain, futures, false,
-                                       collective, sid, implicit);
+                                       collective, sid, implicit, provenance);
     }
 
     //--------------------------------------------------------------------------
