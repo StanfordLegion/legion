@@ -2144,6 +2144,9 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         assert self.level is not None
         assert self.start is not None
         assert self.stop is not None
+        assert self.ready is not None
+        assert self.create is not None
+        assert self.ready == self.start
         inst_name = repr(self)
 
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
@@ -2151,6 +2154,24 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
+        # deferred allocation
+        threshold = 0.0
+        if self.ready - self.create > threshold:
+            tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                    level_ready = None,
+                                    ready = None,
+                                    start = self.create,
+                                    end = self.ready,
+                                    color = self.get_color(),
+                                    opacity = "0.45",
+                                    title = inst_name + " (deferred)",
+                                    initiation = self.initiation,
+                                    _in = _in,
+                                    out = out,
+                                    children = children,
+                                    parents = parents,
+                                    prof_uid = self.prof_uid)
+            tsv_file.write(tsv_line)
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
                                 ready = None,
@@ -2165,7 +2186,6 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                 children = children,
                                 parents = parents,
                                 prof_uid = self.prof_uid)
-
         tsv_file.write(tsv_line)
 
     @typecheck
@@ -2635,14 +2655,22 @@ class Memory(object):
 
     def sort_time_range(self) -> None:
         self.max_live_instances = 0
+        # we use ready to stop here for correct utilization calculation. 
+        # but we need to use start to stop for calculating levels
+        time_points_level = list()
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.start, inst, True, 0))
+            self.time_points.append(TimePoint(inst.ready, inst, True, 0))
             self.time_points.append(TimePoint(inst.stop, inst, False, 0))
+
+            time_points_level.append(TimePoint(inst.create, inst, True, 0))
+            time_points_level.append(TimePoint(inst.stop, inst, False, 0))
+
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
+        time_points_level.sort(key=lambda p: p.time_key)
         free_levels: Set[int] = set()
         # Iterate over all the points in sorted order
-        for point in self.time_points:
+        for point in time_points_level:
             if point.first:
                 # Find a level to assign this to
                 if len(free_levels) > 0:
@@ -3345,11 +3373,13 @@ class State(object):
     # InstTimelineInfo
     @typecheck
     def log_inst_timeline(self, op_id: int, inst_id: int, 
-                          create: float, destroy: float
+                          create: float, ready: float, destroy: float
     ) -> None:
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
-        inst.start = create
+        inst.create = create
+        inst.ready = ready
+        inst.start = ready
         inst.stop = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
