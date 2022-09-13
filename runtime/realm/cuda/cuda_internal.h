@@ -20,9 +20,8 @@
 
 #include <cuda.h>
 
-// We don't actually use the cuda runtime, but
-// we need all its declarations so we have all the right types
-#include <cuda_runtime.h>
+// For CUDA runtime's dim3 definition
+#include <vector_types.h>
 
 #if defined(REALM_CUDA_DYNAMIC_LOAD) && (CUDA_VERSION >= 11030)
 #include <cudaTypedefs.h>
@@ -38,14 +37,20 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/ib_memory.h"
 
-#define CHECK_CUDART(cmd) do { \
-  cudaError_t ret = (cmd); \
-  if(ret != cudaSuccess) { \
-    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, CUDA_RUNTIME_FNPTR(cudaGetErrorString)(ret)); \
-    assert(0); \
-    exit(1); \
-  } \
-} while(0)
+#if CUDART_VERSION < 11000
+#define CHECK_CUDART(cmd)                                                      \
+  do {                                                                         \
+    int ret = (int)(cmd);                                                      \
+    if (ret != 0) {                                                            \
+      fprintf(stderr, "CUDART: %s = %d\n", #cmd, ret);                         \
+      assert(0);                                                               \
+      exit(1);                                                                 \
+    }                                                                          \
+  } while (0)
+#else
+// Since CUDA TK11.0, runtime and driver error codes are 1:1 correlated
+#define CHECK_CUDART(cmd) CHECK_CU((CUresult)(cmd))
+#endif
 
 // Need CUDA 6.5 or later for good error reporting
 #if CUDA_VERSION >= 6050
@@ -69,23 +74,112 @@
   if(ret != CUDA_SUCCESS) REPORT_CU_ERROR(#cmd, ret); \
 } while(0)
 
+#ifdef REALM_USE_CUDART_HIJACK
+#define CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  __op__(major, COMPUTE_CAPABILITY_MAJOR)                \
+  __op__(minor, COMPUTE_CAPABILITY_MINOR)                \
+  __op__(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK) \
+  __op__(regsPerBlock,      MAX_REGISTERS_PER_BLOCK)     \
+  __op__(warpSize,          WARP_SIZE)                   \
+  __op__(memPitch, MAX_PITCH)                            \
+  __op__(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK)      \
+  __op__(maxThreadsDimX, MAX_BLOCK_DIM_X)                \
+  __op__(maxThreadsDimY, MAX_BLOCK_DIM_Y)                \
+  __op__(maxThreadsDimZ, MAX_BLOCK_DIM_Z)                \
+  __op__(maxGridSizeX, MAX_GRID_DIM_X)                   \
+  __op__(maxGridSizeY, MAX_GRID_DIM_Y)                   \
+  __op__(maxGridSizeZ, MAX_GRID_DIM_Z)                   \
+  __op__(clockRate, CLOCK_RATE)                          \
+  __op__(totalConstMem, TOTAL_CONSTANT_MEMORY)           \
+  __op__(deviceOverlap, GPU_OVERLAP)                     \
+  __op__(multiProcessorCount, MULTIPROCESSOR_COUNT)      \
+  __op__(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT)  \
+  __op__(integrated, INTEGRATED)                         \
+  __op__(canMapHostMemory, CAN_MAP_HOST_MEMORY)          \
+  __op__(computeMode, COMPUTE_MODE)                      \
+  __op__(concurrentKernels, CONCURRENT_KERNELS)          \
+  __op__(ECCEnabled, ECC_ENABLED)                        \
+  __op__(pciBusID, PCI_BUS_ID)                           \
+  __op__(pciDeviceID, PCI_DEVICE_ID)                     \
+  __op__(pciDomainID, PCI_DOMAIN_ID)                     \
+  __op__(tccDriver, TCC_DRIVER)                          \
+  __op__(asyncEngineCount, ASYNC_ENGINE_COUNT)           \
+  __op__(unifiedAddressing, UNIFIED_ADDRESSING)          \
+  __op__(memoryClockRate, MEMORY_CLOCK_RATE)             \
+  __op__(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH)        \
+  __op__(l2CacheSize, L2_CACHE_SIZE)                     \
+  __op__(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR) \
+  __op__(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED)      \
+  __op__(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED)           \
+  __op__(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED)             \
+  __op__(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)  \
+  __op__(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR)           \
+  __op__(managedMemory, MANAGED_MEMORY)                                     \
+  __op__(isMultiGpuBoard, MULTI_GPU_BOARD)                                  \
+  __op__(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID)
+
+#if CUDA_VERSION >= 8000
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)                                        \
+  __op__(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO) \
+  __op__(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS)                            \
+  __op__(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9000
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)                                            \
+  __op__(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED)                    \
+  __op__(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM)  \
+  __op__(cooperativeLaunch, COOPERATIVE_LAUNCH)                                       \
+  __op__(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH)               \
+  __op__(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9200
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)                                                      \
+  __op__(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES)  \
+  __op__(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)
+#endif
+#if CUDA_VERSION >= 11000
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)                         \
+  __op__(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR) \
+  __op__(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+#endif
+
+#define CUDA_DEVICE_ATTRIBUTES(__op__)   \
+  CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  CUDA_DEVICE_ATTRIBUTES_8_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_2 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+#else
+#define CUDA_DEVICE_ATTRIBUTES(__op__)      \
+  __op__(major, COMPUTE_CAPABILITY_MAJOR)   \
+  __op__(minor, COMPUTE_CAPABILITY_MINOR)
+#endif
+
 namespace Realm {
 
   namespace Cuda {
 
     struct GPUInfo 
-#ifdef REALM_USE_CUDART_HIJACK
-      : public cudaDeviceProp
-#endif
-        {
+    {
       int index;  // index used by CUDA runtime
       CUdevice device;
+      #define DEFINE_CUDA_ATTRIBUTES(name, attr) int name;
+      CUDA_DEVICE_ATTRIBUTES(DEFINE_CUDA_ATTRIBUTES)
 
 #ifndef REALM_USE_CUDART_HIAJCK
       static const size_t MAX_NAME_LEN = 64;
       char name[MAX_NAME_LEN];
 
-      int major, minor;
       size_t totalGlobalMem;
 #endif
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
@@ -689,49 +783,49 @@ namespace Realm {
                                   size_t *shared_size, void *stream);
 #endif
 
-      void stream_wait_on_event(cudaStream_t stream, cudaEvent_t event);
-      void stream_synchronize(cudaStream_t stream);
+      void stream_wait_on_event(CUstream stream, CUevent event);
+      void stream_synchronize(CUstream stream);
       void device_synchronize(void);
 
 #ifdef REALM_USE_CUDART_HIJACK
-      void event_create(cudaEvent_t *event, int flags);
-      void event_destroy(cudaEvent_t event);
-      void event_record(cudaEvent_t event, cudaStream_t stream);
-      void event_synchronize(cudaEvent_t event);
-      void event_elapsed_time(float *ms, cudaEvent_t start, cudaEvent_t end);
+      void event_create(CUevent *event, int flags);
+      void event_destroy(CUevent event);
+      void event_record(CUevent event, CUstream stream);
+      void event_synchronize(CUevent event);
+      void event_elapsed_time(float *ms, CUevent start, CUevent end);
       
       void configure_call(dim3 grid_dim, dim3 block_dim,
-			  size_t shared_memory, cudaStream_t stream);
+			  size_t shared_memory, CUstream stream);
       void setup_argument(const void *arg, size_t size, size_t offset);
       void launch(const void *func);
       void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, 
                          void **args, size_t shared_memory, 
-                         cudaStream_t stream, bool cooperative = false);
+                         CUstream stream, bool cooperative = false);
 #endif
 
-      void gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
+      void gpu_memcpy(void *dst, const void *src, size_t size);
       void gpu_memcpy_async(void *dst, const void *src, size_t size,
-			    cudaMemcpyKind kind, cudaStream_t stream);
+                            CUstream stream);
 #ifdef REALM_USE_CUDART_HIJACK
       void gpu_memcpy2d(void *dst, size_t dpitch, const void *src, size_t spitch,
-                        size_t width, size_t height, cudaMemcpyKind kind);
+                        size_t width, size_t height);
       void gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
                               size_t spitch, size_t width, size_t height, 
-                              cudaMemcpyKind kind, cudaStream_t stream);
+                              CUstream stream);
       void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
-				size_t offset, cudaMemcpyKind kind);
+				size_t offset);
       void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,
-				      size_t offset, cudaMemcpyKind kind,
-				      cudaStream_t stream);
+				      size_t offset,
+				      CUstream stream);
       void gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-				  size_t offset, cudaMemcpyKind kind);
+				  size_t offset);
       void gpu_memcpy_from_symbol_async(void *dst, const void *src, size_t size,
-					size_t offset, cudaMemcpyKind kind,
-					cudaStream_t stream);
+					size_t offset,
+					CUstream stream);
 #endif
 
       void gpu_memset(void *dst, int value, size_t count);
-      void gpu_memset_async(void *dst, int value, size_t count, cudaStream_t stream);
+      void gpu_memset_async(void *dst, int value, size_t count, CUstream stream);
     public:
       GPU *gpu;
 
@@ -743,8 +837,8 @@ namespace Realm {
 	LaunchConfig(dim3 _grid, dim3 _block, size_t _shared);
       };
       struct CallConfig : public LaunchConfig {
-        cudaStream_t stream; 
-        CallConfig(dim3 _grid, dim3 _block, size_t _shared, cudaStream_t _stream);
+        CUstream stream; 
+        CallConfig(dim3 _grid, dim3 _block, size_t _shared, CUstream _stream);
       };
       std::vector<CallConfig> launch_configs;
       std::vector<char> kernel_args;
@@ -1052,11 +1146,8 @@ namespace Realm {
     protected:
       XferDesRedopInfo redop_info;
       const ReductionOpUntyped *redop;
-#if defined(REALM_USE_CUDART_HIJACK) || (CUDA_VERSION >= 11000)
       CUfunction kernel;
-#else
       const void *kernel_host_proxy;
-#endif
       GPUStream *stream;
     };
 
@@ -1167,67 +1258,66 @@ namespace Realm {
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
   // cuda driver and/or runtime entry points
-  #define CUDA_DRIVER_FNPTR(name) (name ## _fnptr)
-  #define CUDA_RUNTIME_FNPTR(name) (name ## _fnptr)
+#define CUDA_DRIVER_FNPTR(name) (name##_fnptr)
 
-  #define CUDA_DRIVER_APIS(__op__) \
-    __op__(cuModuleGetFunction);   \
-    __op__(cuCtxEnablePeerAccess); \
-    __op__(cuCtxGetFlags); \
-    __op__(cuCtxGetStreamPriorityRange); \
-    __op__(cuCtxPopCurrent); \
-    __op__(cuCtxPushCurrent); \
-    __op__(cuCtxSynchronize); \
-    __op__(cuDeviceCanAccessPeer); \
-    __op__(cuDeviceGet); \
-    __op__(cuDeviceGetAttribute); \
-    __op__(cuDeviceGetCount); \
-    __op__(cuDeviceGetName); \
-    __op__(cuDevicePrimaryCtxRelease); \
-    __op__(cuDevicePrimaryCtxRetain); \
-    __op__(cuDevicePrimaryCtxSetFlags); \
-    __op__(cuDeviceTotalMem); \
-    __op__(cuEventCreate); \
-    __op__(cuEventDestroy); \
-    __op__(cuEventQuery); \
-    __op__(cuEventRecord); \
-    __op__(cuGetErrorName); \
-    __op__(cuGetErrorString); \
-    __op__(cuInit); \
-    __op__(cuIpcCloseMemHandle); \
-    __op__(cuIpcGetMemHandle); \
-    __op__(cuIpcOpenMemHandle); \
-    __op__(cuLaunchKernel); \
-    __op__(cuMemAllocManaged); \
-    __op__(cuMemAlloc); \
-    __op__(cuMemcpy2DAsync); \
-    __op__(cuMemcpy3DAsync); \
-    __op__(cuMemcpyAsync); \
-    __op__(cuMemcpyDtoDAsync); \
-    __op__(cuMemcpyDtoH); \
-    __op__(cuMemcpyDtoHAsync); \
-    __op__(cuMemcpyHtoD); \
-    __op__(cuMemcpyHtoDAsync); \
-    __op__(cuMemFreeHost); \
-    __op__(cuMemFree); \
-    __op__(cuMemGetInfo); \
-    __op__(cuMemHostAlloc); \
-    __op__(cuMemHostGetDevicePointer); \
-    __op__(cuMemHostRegister); \
-    __op__(cuMemHostUnregister); \
-    __op__(cuMemsetD16Async); \
-    __op__(cuMemsetD2D16Async); \
-    __op__(cuMemsetD2D32Async); \
-    __op__(cuMemsetD2D8Async); \
-    __op__(cuMemsetD32Async); \
-    __op__(cuMemsetD8Async); \
-    __op__(cuModuleLoadDataEx); \
-    __op__(cuStreamAddCallback); \
-    __op__(cuStreamCreate); \
-    __op__(cuStreamCreateWithPriority); \
-    __op__(cuStreamDestroy); \
-    __op__(cuStreamSynchronize); \
-    __op__(cuStreamWaitEvent)
+#define CUDA_DRIVER_APIS(__op__)                                               \
+  __op__(cuModuleGetFunction);                                                 \
+  __op__(cuCtxEnablePeerAccess);                                               \
+  __op__(cuCtxGetFlags);                                                       \
+  __op__(cuCtxGetStreamPriorityRange);                                         \
+  __op__(cuCtxPopCurrent);                                                     \
+  __op__(cuCtxPushCurrent);                                                    \
+  __op__(cuCtxSynchronize);                                                    \
+  __op__(cuDeviceCanAccessPeer);                                               \
+  __op__(cuDeviceGet);                                                         \
+  __op__(cuDeviceGetAttribute);                                                \
+  __op__(cuDeviceGetCount);                                                    \
+  __op__(cuDeviceGetName);                                                     \
+  __op__(cuDevicePrimaryCtxRelease);                                           \
+  __op__(cuDevicePrimaryCtxRetain);                                            \
+  __op__(cuDevicePrimaryCtxSetFlags);                                          \
+  __op__(cuDeviceTotalMem);                                                    \
+  __op__(cuEventCreate);                                                       \
+  __op__(cuEventDestroy);                                                      \
+  __op__(cuEventQuery);                                                        \
+  __op__(cuEventRecord);                                                       \
+  __op__(cuGetErrorName);                                                      \
+  __op__(cuGetErrorString);                                                    \
+  __op__(cuInit);                                                              \
+  __op__(cuIpcCloseMemHandle);                                                 \
+  __op__(cuIpcGetMemHandle);                                                   \
+  __op__(cuIpcOpenMemHandle);                                                  \
+  __op__(cuLaunchKernel);                                                      \
+  __op__(cuMemAllocManaged);                                                   \
+  __op__(cuMemAlloc);                                                          \
+  __op__(cuMemcpy2DAsync);                                                     \
+  __op__(cuMemcpy3DAsync);                                                     \
+  __op__(cuMemcpyAsync);                                                       \
+  __op__(cuMemcpyDtoDAsync);                                                   \
+  __op__(cuMemcpyDtoH);                                                        \
+  __op__(cuMemcpyDtoHAsync);                                                   \
+  __op__(cuMemcpyHtoD);                                                        \
+  __op__(cuMemcpyHtoDAsync);                                                   \
+  __op__(cuMemFreeHost);                                                       \
+  __op__(cuMemFree);                                                           \
+  __op__(cuMemGetInfo);                                                        \
+  __op__(cuMemHostAlloc);                                                      \
+  __op__(cuMemHostGetDevicePointer);                                           \
+  __op__(cuMemHostRegister);                                                   \
+  __op__(cuMemHostUnregister);                                                 \
+  __op__(cuMemsetD16Async);                                                    \
+  __op__(cuMemsetD2D16Async);                                                  \
+  __op__(cuMemsetD2D32Async);                                                  \
+  __op__(cuMemsetD2D8Async);                                                   \
+  __op__(cuMemsetD32Async);                                                    \
+  __op__(cuMemsetD8Async);                                                     \
+  __op__(cuModuleLoadDataEx);                                                  \
+  __op__(cuStreamAddCallback);                                                 \
+  __op__(cuStreamCreate);                                                      \
+  __op__(cuStreamCreateWithPriority);                                          \
+  __op__(cuStreamDestroy);                                                     \
+  __op__(cuStreamSynchronize);                                                 \
+  __op__(cuStreamWaitEvent)
 
   #if CUDA_VERSION >= 11030
     // cuda 11.3+ gives us handy PFN_... types
@@ -1241,30 +1331,8 @@ namespace Realm {
     CUDA_DRIVER_APIS(DECL_FNPTR_EXTERN);
   #undef DECL_FNPTR_EXTERN
 
-  #define CUDA_RUNTIME_APIS_PRE_11_0(__op__) \
-    __op__(cudaGetDevice, cudaError_t, (int *)); \
-    __op__(cudaGetErrorString, const char *, (cudaError_t)); \
-    __op__(cudaSetDevice, cudaError_t, (int)); \
-    __op__(cudaLaunchKernel, cudaError_t, (const void *, dim3, dim3, void **, size_t, cudaStream_t))
-  #if CUDA_VERSION >= 11000
-    #define CUDA_RUNTIME_APIS_11_0(__op__) \
-      __op__(cudaGetFuncBySymbol, cudaError_t, (cudaFunction_t *, const void *));
-  #else
-    #define CUDA_RUNTIME_APIS_11_0(__op__)
-  #endif
-
-  #define CUDA_RUNTIME_APIS(__op__) \
-    CUDA_RUNTIME_APIS_11_0(__op__) \
-    CUDA_RUNTIME_APIS_PRE_11_0(__op__)
-
-  #define DECL_FNPTR_EXTERN(name, retval, params) \
-    extern retval (*name ## _fnptr) params;
-    CUDA_RUNTIME_APIS(DECL_FNPTR_EXTERN);
-  #undef DECL_FNPTR_EXTERN
-
 #else
   #define CUDA_DRIVER_FNPTR(name) (name)
-  #define CUDA_RUNTIME_FNPTR(name) (name)
 #endif
 
   }; // namespace Cuda
