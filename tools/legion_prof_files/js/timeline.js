@@ -418,17 +418,16 @@ function getMouseOver() {
     }
     if (provenance != "") {
         descTexts.push("Provenance: " + provenance);
-    }
-    if (initiation_provenance != "") {
-        descTexts.push("Initiator Provenance: " + initiation_provenance);
+    } else if (initiation_provenance != "") {
+        descTexts.push("Provenance: " + initiation_provenance);
     }
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
-	descTexts.push("Ready State: " + get_time_str(delay,false));
+      descTexts.push("Ready State: " + get_time_str(delay,false));
     }
     descTexts.push("End:   " + get_time_str(d.end, false));
     descTexts.push("Start: " + get_time_str(d.start, false));
     descTexts.push("Total: " + get_time_str(total, true));
-    if ((d.initiation != undefined) && d.initiation != "") {
+    if ((d.initiation != undefined) && d.initiation != "" && d.initiation != 0) {
       descTexts.push("Initiator: " + state.operations[d.initiation].desc);
     } 
 
