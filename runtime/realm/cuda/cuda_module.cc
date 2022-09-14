@@ -53,18 +53,7 @@
 #include <string.h>
 
 #define IS_DEFAULT_STREAM(stream)   \
-  (((stream) == 0) || ((stream) == cudaStreamLegacy) || ((stream) == cudaStreamPerThread))
-
-#ifdef REALM_CUDA_DYNAMIC_LOAD
-// the cuda runtime might be statically linked, in which case we want to use
-//  those symbols instead of dlopen'ing a fresh libcudart.so
-extern "C" {
-#define WEAK_RUNTIME_DECL(name, retval, params) \
-  retval name params __attribute__((weak));
-  CUDA_RUNTIME_APIS(WEAK_RUNTIME_DECL);
-  #undef WEAK_RUNTIME_DECL
-};
-#endif
+  (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
 
 namespace Realm {
   namespace Cuda {
@@ -89,11 +78,6 @@ namespace Realm {
       decltype(&name) name ## _fnptr = 0;
   #endif
     CUDA_DRIVER_APIS(DEFINE_FNPTR);
-  #undef DEFINE_FNPTR
-
-  #define DEFINE_FNPTR(name, retval, params) \
-    retval (*name ## _fnptr) params = 0;
-    CUDA_RUNTIME_APIS(DEFINE_FNPTR);
   #undef DEFINE_FNPTR
 #endif
 
@@ -2835,7 +2819,7 @@ namespace Realm {
                                                size_t shared_size, void *stream)
     {
       call_configs.push_back(CallConfig(grid_dim, block_dim,
-                                        shared_size, (cudaStream_t)stream));
+                                        shared_size, (CUstream)stream));
     }
 
     void GPUProcessor::pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
@@ -2846,12 +2830,12 @@ namespace Realm {
       *grid_dim = config.grid;
       *block_dim = config.block;
       *shared_size = config.shared;
-      *((cudaStream_t*)stream) = config.stream;
+      *((CUstream*)stream) = config.stream;
       call_configs.pop_back();
     }
 #endif
 
-    void GPUProcessor::stream_wait_on_event(cudaStream_t stream, cudaEvent_t event)
+    void GPUProcessor::stream_wait_on_event(CUstream stream, CUevent event)
     {
       if(IS_DEFAULT_STREAM(stream))
         CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(
@@ -2860,7 +2844,7 @@ namespace Realm {
         CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(stream, event, 0) );
     }
 
-    void GPUProcessor::stream_synchronize(cudaStream_t stream)
+    void GPUProcessor::stream_synchronize(CUstream stream)
     {
       // same as device_synchronize if stream is zero
       if(!IS_DEFAULT_STREAM(stream))
@@ -2946,7 +2930,7 @@ namespace Realm {
     }
     
 #ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::event_create(cudaEvent_t *event, int flags)
+    void GPUProcessor::event_create(CUevent *event, int flags)
     {
       // int cu_flags = CU_EVENT_DEFAULT;
       // if((flags & cudaEventBlockingSync) != 0)
@@ -2959,7 +2943,7 @@ namespace Realm {
       *event = e;
     }
 
-    void GPUProcessor::event_destroy(cudaEvent_t event)
+    void GPUProcessor::event_destroy(CUevent event)
     {
       // assume the event is one of ours and put it back in the pool
       CUevent e = event;
@@ -2967,7 +2951,7 @@ namespace Realm {
 	gpu->event_pool.return_event(e, true/*external*/);
     }
 
-    void GPUProcessor::event_record(cudaEvent_t event, cudaStream_t stream)
+    void GPUProcessor::event_record(CUevent event, CUstream stream)
     {
       CUevent e = event;
       if(IS_DEFAULT_STREAM(stream))
@@ -2975,14 +2959,14 @@ namespace Realm {
       CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
     }
 
-    void GPUProcessor::event_synchronize(cudaEvent_t event)
+    void GPUProcessor::event_synchronize(CUevent event)
     {
       // TODO: consider suspending task rather than busy-waiting here...
       CUevent e = event;
       CHECK_CU( CUDA_DRIVER_FNPTR(cuEventSynchronize)(e) );
     }
       
-    void GPUProcessor::event_elapsed_time(float *ms, cudaEvent_t start, cudaEvent_t end)
+    void GPUProcessor::event_elapsed_time(float *ms, CUevent start, CUevent end)
     {
       // TODO: consider suspending task rather than busy-waiting here...
       CUevent e1 = start;
@@ -2995,14 +2979,14 @@ namespace Realm {
     {}
 
     GPUProcessor::CallConfig::CallConfig(dim3 _grid, dim3 _block, 
-                                         size_t _shared, cudaStream_t _stream)
+                                         size_t _shared, CUstream _stream)
       : LaunchConfig(_grid, _block, _shared), stream(_stream)
     {}
 
     void GPUProcessor::configure_call(dim3 grid_dim,
 				      dim3 block_dim,
 				      size_t shared_mem,
-				      cudaStream_t stream)
+				      CUstream stream)
     {
       launch_configs.push_back(CallConfig(grid_dim, block_dim, shared_mem, stream));
     }
@@ -3058,7 +3042,7 @@ namespace Realm {
                                      dim3 block_dim,
                                      void **args,
                                      size_t shared_memory,
-                                     cudaStream_t stream,
+                                     CUstream stream,
                                      bool cooperative /*=false*/)
     {
       // Find our function
@@ -3091,8 +3075,7 @@ namespace Realm {
     }
 #endif
 
-    void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
-				  cudaMemcpyKind kind)
+    void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size)
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
@@ -3102,8 +3085,7 @@ namespace Realm {
       stream_synchronize(current);
     }
 
-    void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
-					cudaMemcpyKind kind, cudaStream_t stream)
+    void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size, CUstream stream)
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -3114,17 +3096,12 @@ namespace Realm {
 
 #ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::gpu_memcpy2d(void *dst, size_t dpitch, const void *src, 
-                                    size_t spitch, size_t width, size_t height, 
-                                    cudaMemcpyKind kind)
+                                    size_t spitch, size_t width, size_t height)
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUDA_MEMCPY2D copy_info;
-      copy_info.srcMemoryType = (kind == cudaMemcpyHostToDevice) ||
-        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
-        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
-      copy_info.dstMemoryType = (kind == cudaMemcpyDeviceToHost) ||
-        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
-        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+      copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
       copy_info.srcDevice = (CUdeviceptr)src;
       copy_info.srcHost = src;
       copy_info.srcPitch = spitch;
@@ -3146,17 +3123,13 @@ namespace Realm {
 
     void GPUProcessor::gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
                                           size_t spitch, size_t width, size_t height, 
-                                          cudaMemcpyKind kind, cudaStream_t stream)
+                                          CUstream stream)
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUDA_MEMCPY2D copy_info;
-      copy_info.srcMemoryType = (kind == cudaMemcpyHostToDevice) ||
-        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
-        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
-      copy_info.dstMemoryType = (kind == cudaMemcpyDeviceToHost) ||
-        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
-        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+      copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
       copy_info.srcDevice = (CUdeviceptr)src;
       copy_info.srcHost = src;
       copy_info.srcPitch = spitch;
@@ -3175,8 +3148,7 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
-					    size_t size, size_t offset,
-					    cudaMemcpyKind kind)
+					    size_t size, size_t offset)
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
@@ -3187,8 +3159,7 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
-						  size_t size, size_t offset,
-						  cudaMemcpyKind kind, cudaStream_t stream)
+						  size_t size, size_t offset, CUstream stream)
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -3200,8 +3171,7 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src,
-					      size_t size, size_t offset,
-					      cudaMemcpyKind kind)
+					      size_t size, size_t offset)
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
@@ -3214,7 +3184,7 @@ namespace Realm {
 
     void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
 						    size_t size, size_t offset,
-						    cudaMemcpyKind kind, cudaStream_t stream)
+						    CUstream stream)
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -3236,7 +3206,7 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
-                                        size_t count, cudaStream_t stream)
+                                        size_t count, CUstream stream)
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -3827,98 +3797,39 @@ namespace Realm {
       }
 #if CUDA_VERSION >= 11030
       // cuda 11.3+ provides cuGetProcAddress to handle versioning nicely
-      PFN_cuGetProcAddress driver_getproc = 0;
+      PFN_cuGetProcAddress_v11030 cuGetProcAddress_fnptr =
+          reinterpret_cast<PFN_cuGetProcAddress_v11030>(
+              dlsym(libcuda, "cuGetProcAddress"));
+      if (cuGetProcAddress_fnptr) {
+#define DRIVER_GET_FNPTR(name)                                                 \
+  CHECK_CU((cuGetProcAddress_fnptr)(#name, (void **)&name##_fnptr,             \
+                                    CUDA_VERSION,                              \
+                                    CU_GET_PROC_ADDRESS_DEFAULT));
+        CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+      } else  // if cuGetProcAddress is not found, fallback to dlsym path
+#endif
       {
-        void *sym = dlsym(libcuda, "cuGetProcAddress");
-        if(sym) {
-          driver_getproc = reinterpret_cast<PFN_cuGetProcAddress>(sym);
-        } else {
-          if(required) {
-            log_gpu.fatal() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
-            abort();
-          } else {
-            log_gpu.info() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
-          }
-        }
-      }
-#else
-      // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
-      //  compile-time translation to versioned function names
+    // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
+    //  compile-time translation to versioned function names
 #define STRINGIFY(s) #s
-#define DRIVER_GET_FNPTR(name) \
-      do { \
-        void *sym = dlsym(libcuda, STRINGIFY(name)); \
-        if(!sym) { \
-          log_gpu.fatal() << "symbol '" STRINGIFY(name) " missing from libcuda.so!"; \
-          abort(); \
-        } \
-        name ## _fnptr = reinterpret_cast<decltype(&name)>(sym); \
-      } while(0)
-      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#define DRIVER_GET_FNPTR(name)                                                 \
+  do {                                                                         \
+    void *sym = dlsym(libcuda, STRINGIFY(name));                               \
+    if (!sym) {                                                                \
+      log_gpu.fatal() << "symbol '" STRINGIFY(                                 \
+          name) " missing from libcuda.so!";                                   \
+      abort();                                                                 \
+    }                                                                          \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
+  } while (0)
+
+    CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+
 #undef DRIVER_GET_FNPTR
 #undef STRINGIFY
-#endif
-#endif
-#if CUDA_VERSION >= 11030
-#define DRIVER_GET_FNPTR(name)                                        \
-      CHECK_CU( (driver_getproc)(#name, (void **)&name ## _fnptr,       \
-                                 CUDA_VERSION, CU_GET_PROC_ADDRESS_DEFAULT) );
-      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
-#undef DRIVER_GET_FNPTR
-#endif
-
-      // see if we've been statically linked against libcudart_static.a
-      if(cudaGetDevice) {
-        log_gpu.info() << "using statically linked libcudart";
-#define RUNTIME_STATIC_FNPTR(name, retval, params) \
-        if(static_cast<retval (*) params>(name)) { \
-          name ## _fnptr = name; \
-        } else { \
-          log_gpu.fatal() << "static cudart linkage missing symbol '" #name "'!"; \
-          abort(); \
-        }
-        CUDA_RUNTIME_APIS(RUNTIME_STATIC_FNPTR);
-#undef RUNTIME_STATIC_FNPTR
-      } else {
-        log_gpu.info() << "dynamically loading libcudart.so";
-        void *libcudart = dlopen("libcudart.so", RTLD_NOW);
-        if(libcudart) {
-          // sanity-check which version of the runtime we loaded
-          {
-            void *sym = dlsym(libcudart, "cudaRuntimeGetVersion");
-            if(sym) {
-              cudaError_t (*runtime_version_fnptr)(int *);
-              runtime_version_fnptr = reinterpret_cast<cudaError_t (*)(int *)>(sym);
-              int loaded_runtime_version = 0;
-              CHECK_CUDART( runtime_version_fnptr(&loaded_runtime_version) );
-              if(loaded_runtime_version < CUDA_VERSION)
-                log_gpu.error() << "CUDA runtime version mismatch - expected " << CUDA_VERSION << ", got " << loaded_runtime_version << " - consider adjusting LD_LIBRARY_PATH";
-            } else {
-              log_gpu.fatal() << "symbol 'cudaRuntimeGetVersion' missing from libcudart.so!";
-              abort();
-            }
-          }
-#define RUNTIME_GET_FNPTR(name, retval, params) \
-          do { \
-            void *sym = dlsym(libcudart, #name); \
-            if(!sym) { \
-              log_gpu.fatal() << "symbol '" #name "' missing from libcudart.so!"; \
-              abort(); \
-            } \
-            name ## _fnptr = reinterpret_cast<retval (*) params>(sym); \
-          } while(0)
-          CUDA_RUNTIME_APIS(RUNTIME_GET_FNPTR);
-#undef RUNTIME_GET_FNPTR
-        } else {
-          if(required) {
-            log_gpu.fatal() << "could not open libcudart.so: " << strerror(errno);
-            abort();
-          } else {
-            log_gpu.info() << "could not open libcudart.so: " << strerror(errno);
-            return false;
-          }
-        }
       }
+#endif  // REALM_USE_DLFCN
 
       return true;
     }
@@ -4012,87 +3923,14 @@ namespace Realm {
 	    info->index = i;
 	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i) );
 	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name), info->device) );
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
-                      (&info->major,
-                       CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
-                       info->device) );
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
-                      (&info->minor,
-                       CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
-                       info->device) );
 	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceTotalMem)
                       (&info->totalGlobalMem, info->device) );
-#ifdef REALM_USE_CUDART_HIJACK
-            // We only need the rest of these properties for the hijack
-#define GET_DEVICE_PROP(member, name)					\
-            do {								\
-              int tmp;								\
-              CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)                 \
-                        (&tmp, CU_DEVICE_ATTRIBUTE_##name, info->device) );     \
-              info->member = tmp;						\
-            } while(0)
-            // SCREW TEXTURES AND SURFACES FOR NOW!
-            GET_DEVICE_PROP(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK);
-            GET_DEVICE_PROP(regsPerBlock, MAX_REGISTERS_PER_BLOCK);
-            GET_DEVICE_PROP(warpSize, WARP_SIZE);
-            GET_DEVICE_PROP(memPitch, MAX_PITCH);
-            GET_DEVICE_PROP(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK);
-            GET_DEVICE_PROP(maxThreadsDim[0], MAX_BLOCK_DIM_X);
-            GET_DEVICE_PROP(maxThreadsDim[1], MAX_BLOCK_DIM_Y);
-            GET_DEVICE_PROP(maxThreadsDim[2], MAX_BLOCK_DIM_Z);
-            GET_DEVICE_PROP(maxGridSize[0], MAX_GRID_DIM_X);
-            GET_DEVICE_PROP(maxGridSize[1], MAX_GRID_DIM_Y);
-            GET_DEVICE_PROP(maxGridSize[2], MAX_GRID_DIM_Z);
-            GET_DEVICE_PROP(clockRate, CLOCK_RATE);
-            GET_DEVICE_PROP(totalConstMem, TOTAL_CONSTANT_MEMORY);
-            GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
-            GET_DEVICE_PROP(multiProcessorCount, MULTIPROCESSOR_COUNT);
-            GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
-            GET_DEVICE_PROP(integrated, INTEGRATED);
-            GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
-            GET_DEVICE_PROP(computeMode, COMPUTE_MODE);
-            GET_DEVICE_PROP(concurrentKernels, CONCURRENT_KERNELS);
-            GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
-            GET_DEVICE_PROP(pciBusID, PCI_BUS_ID);
-            GET_DEVICE_PROP(pciDeviceID, PCI_DEVICE_ID);
-            GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
-            GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
-            GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
-            GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
-            GET_DEVICE_PROP(memoryClockRate, MEMORY_CLOCK_RATE);
-            GET_DEVICE_PROP(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH);
-            GET_DEVICE_PROP(l2CacheSize, L2_CACHE_SIZE);
-            GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR);
-            GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
-            GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
-            GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
-            GET_DEVICE_PROP(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
-            GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
-            GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
-            GET_DEVICE_PROP(isMultiGpuBoard, MULTI_GPU_BOARD);
-            GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
-#if CUDA_VERSION >= 8000
-            GET_DEVICE_PROP(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO);
-            GET_DEVICE_PROP(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS);
-            GET_DEVICE_PROP(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS);
-#endif
-#if CUDA_VERSION >= 9000
-            GET_DEVICE_PROP(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED);
-            GET_DEVICE_PROP(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM);
-            GET_DEVICE_PROP(cooperativeLaunch, COOPERATIVE_LAUNCH);
-            GET_DEVICE_PROP(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH);
-            GET_DEVICE_PROP(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN); 
-#endif
-#if CUDA_VERSION >= 9200
-            GET_DEVICE_PROP(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
-            GET_DEVICE_PROP(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST);
-#endif
-#if CUDA_VERSION >= 11000
-            GET_DEVICE_PROP(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR);
-            GET_DEVICE_PROP(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE);
-#endif
-#undef GET_DEVICE_PROP
-#endif // REALM_USE_CUDART_HIJACK
+      #define CUDA_GET_DEVICE_PROP(name, attr)                                         \
+            do {								                                       \
+              CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)                        \
+                        (&info->name, CU_DEVICE_ATTRIBUTE_##attr, info->device) );     \
+            } while(0);
+      CUDA_DEVICE_ATTRIBUTES(CUDA_GET_DEVICE_PROP)
 	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
 			   << info->major << '.' << info->minor
 			   << ") " << (info->totalGlobalMem >> 20) << " MB";

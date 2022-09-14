@@ -33,9 +33,9 @@ namespace Realm {
       cudart_hijack_active = true;
 
       GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
-      if(!p) {
-	log_cudart.fatal() << funcname << "() called outside CUDA task";
-	assert(false);
+      if (!p) {
+        log_cudart.fatal() << funcname << "() called outside CUDA task";
+        assert(false);
       }
       return p;
     }
@@ -649,7 +649,7 @@ extern "C" {
 			 size_t size, cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy");
-    p->gpu_memcpy(dst, src, size, kind);
+    p->gpu_memcpy(dst, src, size);
     return cudaSuccess;
   }
 
@@ -659,7 +659,7 @@ extern "C" {
 			      cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyAsync");
-    p->gpu_memcpy_async(dst, src, size, kind, stream);
+    p->gpu_memcpy_async(dst, src, size, stream);
     return cudaSuccess;
   }
 
@@ -668,7 +668,7 @@ extern "C" {
 			   size_t width, size_t height, cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy2D");
-    p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height, kind);
+    p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height);
     return cudaSuccess;
   }
 
@@ -678,7 +678,7 @@ extern "C" {
 				cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpy2DAsync");
-    p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, kind, stream);
+    p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, stream);
     return cudaSuccess;
   }
 
@@ -745,7 +745,7 @@ extern "C" {
 				 cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbol");
-    p->gpu_memcpy_to_symbol(dst, src, size, offset, kind);
+    p->gpu_memcpy_to_symbol(dst, src, size, offset);
     return cudaSuccess;
   }
 
@@ -755,7 +755,7 @@ extern "C" {
 				      cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbolAsync");
-    p->gpu_memcpy_to_symbol_async(dst, src, size, offset, kind, stream);
+    p->gpu_memcpy_to_symbol_async(dst, src, size, offset, stream);
     return cudaSuccess;
   }
 
@@ -765,7 +765,7 @@ extern "C" {
 				   cudaMemcpyKind kind)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbol");
-    p->gpu_memcpy_from_symbol(dst, src, size, offset, kind);
+    p->gpu_memcpy_from_symbol(dst, src, size, offset);
     return cudaSuccess;
   }
       
@@ -775,7 +775,7 @@ extern "C" {
 					cudaMemcpyKind kind, cudaStream_t stream)
   {
     GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbolAsync");
-    p->gpu_memcpy_from_symbol_async(dst, src, size, offset, kind, stream);
+    p->gpu_memcpy_from_symbol_async(dst, src, size, offset, stream);
     return cudaSuccess;
   }
       

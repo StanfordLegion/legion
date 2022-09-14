@@ -225,7 +225,7 @@ namespace Realm {
     }
 
     // Create a new lock, destroy an existing lock
-    /*static*/ Reservation Reservation::create_reservation(size_t _data_size /*= 0*/)
+    /*static*/ Reservation Reservation::create_reservation()
     {
       // see if the freelist has an event we can reuse
       ReservationImpl *impl = get_runtime()->local_reservation_free_list->alloc_entry();
@@ -287,8 +287,7 @@ namespace Realm {
       init(Reservation::NO_RESERVATION, (unsigned)-1);
     }
 
-    void ReservationImpl::init(Reservation _me, unsigned _init_owner,
-			  size_t _data_size /*= 0*/)
+    void ReservationImpl::init(Reservation _me, unsigned _init_owner)
     {
       me = _me;
       owner = _init_owner;
@@ -299,15 +298,6 @@ namespace Realm {
       remote_waiter_mask = NodeSet(); 
       remote_sharer_mask = NodeSet();
       requested = false;
-      if(_data_size) {
-	local_data = malloc(_data_size);
-	local_data_size = _data_size;
-        own_local = true;
-      } else {
-        local_data = 0;
-	local_data_size = 0;
-        own_local = false;
-      }
     }
 
     /*static*/ void LockReleaseMessage::handle_message(NodeID sender, const LockReleaseMessage &msg,
@@ -339,14 +329,10 @@ namespace Realm {
 	const int *pos = (const int *)data;
 
 	size_t waiter_count = *pos++;
-	assert(datalen == (((waiter_count+1) * sizeof(int)) + impl->local_data_size));
+	assert(datalen == ((waiter_count+1) * sizeof(int)));
 	impl->remote_waiter_mask.clear();
 	for(size_t i = 0; i < waiter_count; i++)
 	  impl->remote_waiter_mask.add(*pos++);
-
-	// is there local data to grab?
-	if(impl->local_data_size > 0)
-          memcpy(impl->local_data, pos, impl->local_data_size);
 
 	if(args.mode == 0) // take ownership if given exclusive access
 	  impl->owner = Network::my_node_id;
@@ -673,7 +659,7 @@ namespace Realm {
       {
         // Make a buffer for storing our waiter mask and the the local data
 	size_t waiter_count = copy_waiters.size();
-        size_t payload_size = ((waiter_count+1) * sizeof(int)) + local_data_size;
+        size_t payload_size = ((waiter_count+1) * sizeof(int));
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
@@ -681,10 +667,6 @@ namespace Realm {
 	    it != copy_waiters.end();
 	    ++it)
 	  *pos++ = *it;
-	//for(int i = 0; i < MAX_NUM_NODES; i++)
-	//  if(copy_waiters.contains(i))
-	//    *pos++ = i;
-        memcpy(pos, local_data, local_data_size);
 	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
 	amsg->lock = me;
 	amsg->mode = 0; // TODO: figure out shared cases
@@ -735,12 +717,6 @@ namespace Realm {
 	assert(local_shared.empty());
 	assert(retries.empty());
 	assert(in_use);
-        // Mark that we no longer own our data
-        if (own_local)
-          free(local_data);
-        local_data = NULL;
-        local_data_size = 0;
-        own_local = false;
       	in_use = false;
 	count = ZERO_COUNT;
       }
@@ -1540,7 +1516,7 @@ namespace Realm {
       {
         // Make a buffer for storing our waiter mask and the the local data
 	size_t waiter_count = copy_waiters.size();
-        size_t payload_size = ((waiter_count+1) * sizeof(int)) + impl->local_data_size;
+        size_t payload_size = ((waiter_count+1) * sizeof(int));
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
@@ -1548,10 +1524,6 @@ namespace Realm {
 	    it != copy_waiters.end();
 	    ++it)
 	  *pos++ = *it;
-	//for(int i = 0; i < MAX_NUM_NODES; i++)
-	//  if(copy_waiters.contains(i))
-	//    *pos++ = i;
-        memcpy(pos, impl->local_data, impl->local_data_size);
 	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
 	amsg->lock = args.lock;
 	amsg->mode = 0; // always grant exclusive for now

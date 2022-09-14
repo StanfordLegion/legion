@@ -78,7 +78,13 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   StructuredTransform<N, T, N2, T2>::StructuredTransform(
       const TranslationTransform<N, T2>& _transform)
-      : offset(_transform.offset), type(StructuredTransformType::TRANSLATION) {}
+      : offset(_transform.offset), type(StructuredTransformType::TRANSLATION) {
+    for (int i = 0; i < N; i++) {
+      for (int j = 0; j < N2; j++) {
+        transform_matrix[i][j] = (i == j);
+      }
+    }
+  }
 
   template <int N, typename T, int N2, typename T2>
   inline Point<N, T> StructuredTransform<N, T, N2, T2>::operator[](
@@ -974,7 +980,8 @@ namespace Realm {
    // TODO(apryakhin): For now we just support building a general structured
    // transform from an affince transform. This will be extended later
    // to support more transform types.
-   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>));
+   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>) ||
+          typeid(transform) == typeid(TranslationTransform<N2, T2>));
    return create_subspaces_by_image(DomainTransform<N, T, N2, T2>(transform),
                                     sources, images, reqs, wait_on);
   }
@@ -1069,7 +1076,8 @@ namespace Realm {
    // TODO(apryakhin): For now we just support building a general structured
    // transform from an affince transform. This will be extended later
    // to support more transform types.
-   assert(typeid(transform) == typeid(AffineTransform<N2, N, T>));
+   assert(typeid(transform) == typeid(AffineTransform<N, N2, T2>) ||
+          typeid(transform) == typeid(TranslationTransform<N2, T2>));
    return create_subspaces_by_preimage(DomainTransform<N2, T2, N, T>(transform),
                                        targets, preimages, reqs, wait_on);
   }

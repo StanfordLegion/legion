@@ -10,6 +10,8 @@ OUTPUT_LEVEL ?= LEVEL_PRINT  # Compile time print level
 # GASNet and CUDA off by default for now
 USE_GASNET ?= 0
 USE_CUDA ?= 0
+USE_HIP ?= 0
+HIP_TARGET ?= ROCM
 
 # Put the binary file name here
 OUTFILE		:= task_throughput 
@@ -20,6 +22,7 @@ GEN_GPU_SRC	:= task_throughput_gpu.cu		    # .cu files
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:=
 NVCC_FLAGS	:=
+HIPCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:=
 
