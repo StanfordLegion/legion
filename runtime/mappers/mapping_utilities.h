@@ -300,6 +300,10 @@ namespace Legion {
 
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
+                            LogicalRegion lr);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
                             IndexSpace is);
 
       std::string to_string(MapperRuntime* runtime,

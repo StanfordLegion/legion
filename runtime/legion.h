@@ -3318,6 +3318,7 @@ namespace Legion {
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
       void finalize(Runtime *runtime, Context ctx) const;
+      Realm::RegionInstance get_instance() const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;

@@ -11,7 +11,7 @@ use nom::{
     bytes::complete::{tag, take_till, take_while1},
     character::{is_alphanumeric, is_digit},
     combinator::{map, map_opt, map_res, opt},
-    multi::{many1, many_m_n, separated_nonempty_list},
+    multi::{many1, many_m_n, separated_list1},
     number::complete::{le_i32, le_u32, le_u64, le_u8},
     IResult,
 };
@@ -241,7 +241,7 @@ fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
     let (input, _) = tag(" {id:")(input)?;
     let (input, id) = parse_text_u32(input)?;
     let (input, _) = tag(", ")(input)?;
-    let (input, fields) = separated_nonempty_list(tag(", "), parse_field_format)(input)?;
+    let (input, fields) = separated_list1(tag(", "), parse_field_format)(input)?;
     let (input, _) = tag("}")(input)?;
     let (input, _) = newline(input)?;
     Ok((

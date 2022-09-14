@@ -17705,7 +17705,7 @@ namespace Legion {
     template<typename T>
     UntypedDeferredBuffer<T>::UntypedDeferredBuffer(size_t fs, int d,
                                                     Memory::Kind memkind,
-                                                    const Domain &space,
+                                                    IndexSpace space,
                                                     const void *initial_value,
                                                     size_t alignment,
                                                     bool fortran_order_dims)
@@ -17813,7 +17813,7 @@ namespace Legion {
     template<typename T>
     UntypedDeferredBuffer<T>::UntypedDeferredBuffer(size_t fs, int d,
                                                     Memory::Kind memkind,
-                                                    IndexSpace space,
+                                                    const Domain &space,
                                                     const void *initial_value,
                                                     size_t alignment,
                                                     bool fortran_order_dims)
@@ -17917,7 +17917,7 @@ namespace Legion {
     template<typename T>
     UntypedDeferredBuffer<T>::UntypedDeferredBuffer(size_t fs, int d,
                                                     Memory memory,
-                                                    const Domain &space,
+                                                    IndexSpace space,
                                                     const void *initial_value,
                                                     size_t alignment,
                                                     bool fortran_order_dims)
@@ -17992,7 +17992,7 @@ namespace Legion {
     template<typename T>
     UntypedDeferredBuffer<T>::UntypedDeferredBuffer(size_t fs, int d,
                                                     Memory memory,
-                                                    IndexSpace space,
+                                                    const Domain &space,
                                                     const void *initial_value,
                                                     size_t alignment,
                                                     bool fortran_order_dims)

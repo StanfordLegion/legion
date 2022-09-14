@@ -17,13 +17,6 @@
 #include "realm/cuda/cuda_module.h"
 #include "realm/cuda/cuda_access.h"
 
-#ifndef REALM_USE_CUDART_HIJACK
-// we do nearly everything with the driver API, but if we're not pretending
-//  to be the cuda runtime, we need to be able to talk to the real runtime
-//  for a few things
-#include <cuda_runtime.h>
-#endif
-
 namespace Realm {
 
   extern Logger log_xd;
@@ -33,6 +26,11 @@ namespace Realm {
     extern Logger log_stream;
     extern Logger log_gpudma;
 
+    typedef int (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,
+                                        dim3 blockDim, void **args,
+                                        size_t sharedMem, CUstream stream);
+    typedef int (*PFN_cudaGetFuncBySymbol)(void *functionPtr,
+                                           const void *symbolPtr);
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1531,30 +1529,36 @@ namespace Realm {
     {
       kind = XFER_GPU_IN_FB;
       redop = get_runtime()->reduce_op_table.get(redop_info.id, 0);
+      kernel = 0;
+      kernel_host_proxy = nullptr;
       assert(redop);
 
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
 
       // select reduction kernel now - translate to CUfunction if possible
-      void *host_proxy = (redop_info.is_fold ? 
-          (redop_info.is_exclusive ? redop->cuda_fold_excl_fn : redop->cuda_fold_nonexcl_fn) :
-          (redop_info.is_exclusive ? redop->cuda_apply_excl_fn : redop->cuda_apply_nonexcl_fn));
+      void *host_proxy =
+          (redop_info.is_fold
+               ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
+                                          : redop->cuda_fold_nonexcl_fn)
+               : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
+                                          : redop->cuda_apply_nonexcl_fn));
 #ifdef REALM_USE_CUDART_HIJACK
       // we have the host->device mapping table for functions
       kernel = gpu->lookup_function(host_proxy);
 #else
-  #if CUDA_VERSION >= 11000
-      // we can ask the runtime to perform the mapping for us
-      int orig_device;
-      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
-      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(gpu->info->index) );
-      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetFuncBySymbol)(&kernel, host_proxy) );
-      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
-  #else
-      // no way to ask the runtime to perform the mapping, so we'll have
-      //  to actually launch the kernels with the runtime API
-      kernel_host_proxy = host_proxy;
-  #endif
+      if (redop->cudaGetFuncBySymbol_fn != 0) {
+        // we can ask the runtime to perform the mapping for us
+        gpu->push_context();
+        CHECK_CUDART(reinterpret_cast<PFN_cudaGetFuncBySymbol>(
+            redop->cudaGetFuncBySymbol_fn)((void **)&kernel, host_proxy));
+        gpu->pop_context();
+      } else {
+        // no way to ask the runtime to perform the mapping, so we'll have
+        //  to actually launch the kernels with the runtime API using the launch
+        //  kernel function provided
+        kernel_host_proxy = host_proxy;
+        assert(redop->cudaLaunchKernel_fn != 0);
+      }
 #endif
 
       stream = gpu->get_next_d2d_stream();
@@ -1698,42 +1702,26 @@ namespace Realm {
               {
                 AutoGPUContext agc(channel->gpu);
 
-#if defined(REALM_USE_CUDART_HIJACK) || (CUDA_VERSION >= 11000)
-                void *extra[] = {
-                  CU_LAUNCH_PARAM_BUFFER_POINTER, args,
-                  CU_LAUNCH_PARAM_BUFFER_SIZE,    &args_size,
-                  CU_LAUNCH_PARAM_END
-                };
+                if (kernel != 0) {
+                  void *extra[] = {CU_LAUNCH_PARAM_BUFFER_POINTER, args,
+                                   CU_LAUNCH_PARAM_BUFFER_SIZE, &args_size,
+                                   CU_LAUNCH_PARAM_END};
 
-                CHECK_CU( CUDA_DRIVER_FNPTR(cuLaunchKernel)
-                          (kernel,
-                           blocks_per_grid, 1, 1,
-                           threads_per_block, 1, 1,
-                           0 /*sharedmem*/,
-                           stream->get_stream(),
-                           0 /*params*/,
-                           extra) );
-#else
-                int orig_device;
-                void *params[] = {
-                  &args->dst_base,
-                  &args->dst_stride,
-                  &args->src_base,
-                  &args->src_stride,
-                  &args->count,
-                  args+1
-                };
-                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
-                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(channel->gpu->info->index) );
-                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaLaunchKernel)
-                              (kernel_host_proxy,
-                               dim3(blocks_per_grid, 1, 1),
-                               dim3(threads_per_block, 1, 1),
-                               params,
-                               0 /*sharedMem*/,
-                               (cudaStream_t)(stream->get_stream())) );
-                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
-#endif
+                  CHECK_CU(CUDA_DRIVER_FNPTR(cuLaunchKernel)(
+                      kernel, blocks_per_grid, 1, 1, threads_per_block, 1, 1,
+                      0 /*sharedmem*/, stream->get_stream(), 0 /*params*/,
+                      extra));
+                } else {
+                  void *params[] = {&args->dst_base, &args->dst_stride,
+                                    &args->src_base, &args->src_stride,
+                                    &args->count,    args + 1};
+                  assert(redop->cudaLaunchKernel_fn != 0);
+                  CHECK_CUDART(reinterpret_cast<PFN_cudaLaunchKernel>(
+                      redop->cudaLaunchKernel_fn)(
+                      kernel_host_proxy, dim3(blocks_per_grid, 1, 1),
+                      dim3(threads_per_block, 1, 1), params, 0 /*sharedMem*/,
+                      stream->get_stream()));
+                }
 
                 // insert fence to track completion of reduction kernel
                 add_reference(); // released by transfer completion
