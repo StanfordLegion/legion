@@ -6964,6 +6964,11 @@ namespace Legion {
 #endif
         }
       }
+#ifdef LEGION_SPY
+      else if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, detach_event,
+                                          completion_event);
+#endif
       // Make sure that all the detach operations are done before 
       // we count any of them as being mapped
       if (!map_applied_conditions.empty())
