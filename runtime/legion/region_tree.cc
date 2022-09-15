@@ -12338,7 +12338,7 @@ namespace Legion {
                           field_infos.end(); /*nothing*/)
                     {
                       rez.serialize(it->first);
-                      rez.serialize(it->second);
+                      it->second.serialize(rez);
                       if (!it->second.local)
                       {
                         std::map<FieldID,FieldInfo>::iterator to_delete = it++;
@@ -14592,7 +14592,7 @@ namespace Legion {
       {
         FieldID fid;
         derez.deserialize(fid);
-        derez.deserialize((*target)[fid]);
+        (*target)[fid].deserialize(derez);
       } 
       FieldSpace handle;
       derez.deserialize(handle);
@@ -14914,7 +14914,7 @@ namespace Legion {
                       field_infos.begin(); it != field_infos.end(); it++)
                 {
                   rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  it->second.serialize(rez);
                 }
                 std::set<AddressSpaceID>::const_iterator finder = 
                   remote_field_infos.find(source);
@@ -14959,7 +14959,7 @@ namespace Legion {
                       field_infos.begin(); it != field_infos.end(); it++)
                 {
                   rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  it->second.serialize(rez);
                 }
                 rez.serialize(FieldSpace::NO_SPACE);
                 rez.serialize(to_trigger);
@@ -14999,7 +14999,7 @@ namespace Legion {
                     field_infos.begin(); it != field_infos.end(); it++)
               {
                 rez.serialize(it->first);
-                rez.serialize(it->second);
+                it->second.serialize(rez);
               }
               // We can't give them read-only privileges 
               rez.serialize(FieldSpace::NO_SPACE);
@@ -15070,7 +15070,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
       }
       derez.deserialize(unallocated_indexes);
