@@ -2812,15 +2812,32 @@ class IndexSpace(object):
         printer.println(parent+' -> '+ self.node_name+
                 " [style=solid,color=black,penwidth=2];")
 
+    def get_provenance(self):
+        if self.parent is not None:
+            return self.parent.provenance
+        else:
+            return self.provenance
+
     def print_graph(self, printer):
+        provenance = self.get_provenance()
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = '%s (ID: %s)' % (self.name, self.uid)
+            if provenance is not None:
+                label = '%s [%s] (ID: %s)' % (self.name, provenance, self.uid)
+            else:
+                label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space %s' % self.uid
+                if provenance is not None:
+                    label = 'Index Space %s [%s]' % (self.uid, provenance)
+                else:
+                    label = 'Index Space %s' % self.uid
             else:
-                
-                label = 'subspace %s' % self.uid
+                if provenance is not None:
+                    label = 'Subspace %s [%s]' % (self.uid, provenance)
+                else:
+                    label = 'Subspace %s' % self.uid
         if self.parent is not None:
             color = None
             for c, child in iteritems(self.parent.children):
@@ -3047,10 +3064,19 @@ class IndexPartition(object):
                 ' [style=dotted,color=black,penwidth=2];')
 
     def print_graph(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name + ' (ID: ' + str(self.uid) + ')'
+            if provenance is not None:
+                label = self.name + ' [' + provenance + '] (ID: ' + str(self.uid) + ')'
+            else:
+                label = self.name + ' (ID: ' + str(self.uid) + ')'
         else:
-            label = 'Index Partition '+str(self.uid)
+            if provenance is not None:
+                label = 'Index Partition '+str(self.uid) + ' [' + provenance + ']'
+            else:
+                label = 'Index Partition '+str(self.uid)
         color = None
         for c,child in iteritems(self.parent.children):
             if child == self:
@@ -3127,20 +3153,38 @@ class FieldSpace(object):
     __repr__ = __str__
 
     def print_graph(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name + ' (ID: '+str(self.uid) + ')'
+            if provenance is not None:
+                label = self.name + ' [' + provenance + '] (ID: '+str(self.uid) + ')'
+            else:
+                label = self.name + ' (ID: '+str(self.uid) + ')'
         else:
-            label = str(self)
+            if provenance is not None:
+                lavel = str(self) + ' [' + provenance + ']'
+            else:
+                label = str(self)
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="Helvetica"];')
 
         for fid,field in iteritems(self.fields):
             field_id = "field_node_"+str(self.uid)+"_"+str(fid)
+            provenance = field.provenance
+            if provenance is not None and len(provenance) == 0:
+                provenance = None
             if field.name is not None:
-                field_name = field.name + '(FID: ' + str(fid) + ')'
+                if provenance is not None:
+                    field_name = field.name + ' [' + provenance + '] (FID: ' + str(fid) + ')'
+                else:
+                    field_name = field.name + ' (FID: ' + str(fid) + ')'
             else:
-                field_name = 'FID: ' + str(fid)
+                if provenance is not None:
+                    field_name = 'FID: ' + str(fid) + ' [' + provenance + ']'
+                else:
+                    field_name = 'FID: ' + str(fid)
             printer.println(field_id+' [label="'+field_name+
                     '",shape=plaintext,fontsize=14,'+
                     'fontcolor=black,fontname="Helvetica"]')
@@ -3493,13 +3537,23 @@ class LogicalRegion(object):
                 'tree: '+str(self.tree_id)
 
     def print_node(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name+' ('+self.gen_id()+')'
+            if provenance is not None:
+                label = self.name+' [' + provenance + '] ('+self.gen_id()+')'
+            else:
+                label = self.name+' ('+self.gen_id()+')'
         else:
             if self.parent is None:
-                label = 'region ('+self.gen_id()+')'
+                if provenance is not None:
+                    label = 'Region ('+self.gen_id()+') [' + provenance + ']'
+                else:
+                    label = 'Region ('+self.gen_id()+')'
             else:
-                label = 'subregion ('+self.gen_id()+')'
+                assert provenance is None
+                label = 'Subregion ('+self.gen_id()+')'
         shape = self.get_shape()
         if shape is None or shape.empty():
             label += '\nEmpty Bounds'
