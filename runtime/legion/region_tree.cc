@@ -15109,7 +15109,7 @@ namespace Legion {
               field_infos.begin(); it != field_infos.end(); /*nothing*/)
         {
           rez.serialize(it->first);
-          rez.serialize(it->second);
+          it->second.serialize(rez);
           if (!it->second.local)
           {
             std::map<FieldID,FieldInfo>::iterator to_delete = it++;
