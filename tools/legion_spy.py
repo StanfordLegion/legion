@@ -2596,7 +2596,7 @@ class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
                  'instances', 'name', 'independent_children',
                  'depth', 'shape', 'point_set', 'node_name', 
-                 'intersections', 'dominated', 'expr']
+                 'intersections', 'dominated', 'expr', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2612,6 +2612,7 @@ class IndexSpace(object):
         self.intersections = dict() 
         self.dominated = dict()
         self.expr = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -2862,7 +2863,7 @@ class IndexSpace(object):
 class IndexPartition(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 
                  'disjoint', 'complete', 'name', 'depth', 'shape', 'point_set',
-                 'node_name', 'intersections', 'dominated']
+                 'node_name', 'intersections', 'dominated', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2879,6 +2880,7 @@ class IndexPartition(object):
         self.node_name = 'index_part_node_%s' % uid
         self.intersections = dict()
         self.dominated = dict()
+        self.provenance = None
 
     def set_parent(self, parent, color):
         self.parent = parent
@@ -3073,12 +3075,13 @@ class IndexPartition(object):
             child.print_tree()
 
 class Field(object):
-    __slots__ = ['space', 'fid', 'size', 'name']
+    __slots__ = ['space', 'fid', 'size', 'name', 'provenance']
     def __init__(self, space, fid):
         self.space = space
         self.fid = fid
         self.size = None
         self.name = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -3096,13 +3099,14 @@ class Field(object):
     __repr__ = __str__
 
 class FieldSpace(object):
-    __slots__ = ['state', 'uid', 'name', 'fields', 'node_name']
+    __slots__ = ['state', 'uid', 'name', 'fields', 'node_name', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
         self.name = None
         self.fields = dict()
         self.node_name = 'field_space_node_'+str(uid)
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -3146,7 +3150,7 @@ class FieldSpace(object):
 class LogicalRegion(object):
     __slots__ = ['state', 'index_space', 'field_space', 'tree_id', 'children',
                  'name', 'parent', 'logical_state', 'verification_state', 
-                 'node_name', 'has_named_children']
+                 'node_name', 'has_named_children', 'provenance']
     def __init__(self, state, iid, fid, tid):
         self.state = state
         self.index_space = iid
@@ -3161,6 +3165,7 @@ class LogicalRegion(object):
         self.node_name = 'region_node_'+str(self.index_space.uid)+\
             '_'+str(self.field_space.uid)+'_'+str(self.tree_id)
         self.has_named_children = False
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -5528,7 +5533,7 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued',
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', "replayed", "restricted"]
+                 'intra_space_dependences', 'merged', "replayed", "restricted", "provenance"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5601,6 +5606,8 @@ class Operation(object):
         self.replayed = False
         # For attach ops only - whether we should add a restriction
         self.restricted = False
+        # Provenance string from the application
+        self.provenance = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -5616,11 +5623,23 @@ class Operation(object):
             for point in itervalues(self.points):
                 point.set_name(name)
 
+    def get_provenance(self):
+        if  self.index_owner is not None:
+            return self.index_owner.get_provenance()
+        return self.provenance
+
     def __str__(self):
-        if self.name is None:
-            return OpNames[self.kind] + " " + str(self.uid)
+        provenance = self.get_provenance()
+        if provenance is None:
+            if self.name is None:
+                return OpNames[self.kind] + " " + str(self.uid)
+            else:
+                return self.name
         else:
-            return self.name
+            if self.name is None:
+                return OpNames[self.kind] + " [" + provenance + "] " + str(self.uid)
+            else:
+                return self.name + " [" + provenance + "]"
 
     __repr__ = __str__
 
@@ -5951,6 +5970,10 @@ class Operation(object):
             assert self.context == other.context
         if self.name is None:
             self.name = other.name
+        if self.provenance is None:
+            self.provenance = other.provenance
+        elif other.provenance is not None:
+            assert self.provenance == other.provenance
         self.fully_logged = self.fully_logged or other.fully_logged
         if not self.reqs:
             self.reqs = other.reqs
@@ -10238,26 +10261,26 @@ mem_mem_pat              = re.compile(
            "(?P<lat>[0-9]+)")
 # Patterns for the shape of region trees
 top_index_pat            = re.compile(
-    prefix+"Index Space (?P<uid>[0-9a-f]+)")
+    prefix+"Index Space (?P<uid>[0-9a-f]+) (?P<provenance>.*)")
 index_name_pat           = re.compile(
     prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_part_pat           = re.compile(
     prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-2]) "+
-           "(?P<complete>[0-2]) (?P<color>[0-9]+)")
+           "(?P<complete>[0-2]) (?P<color>[0-9]+) (?P<provenance>.*)")
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_subspace_pat       = re.compile(
     prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
-    prefix+"Field Space (?P<uid>[0-9]+)")
+    prefix+"Field Space (?P<uid>[0-9]+) (?P<provenance>.*)")
 field_space_name_pat     = re.compile(
     prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>.+)")
 field_create_pat         = re.compile(
-    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
+    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+) (?P<provenance>.*)")
 field_name_pat           = re.compile(
     prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>.+)")
 region_pat               = re.compile(
-    prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<provenance>.*)")
 region_name_pat          = re.compile(
     prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
             "(?P<name>.+)")
@@ -10365,6 +10388,8 @@ intra_space_pat          = re.compile(
     prefix+"Intra Space Dependence (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
+op_provenance_pat        = re.compile(
+    prefix+"Operation Provenance (?P<uid>[0-9]+) (?P<provenance>.*)")
 close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 predicate_false_pat      = re.compile(
@@ -11181,6 +11206,11 @@ def parse_legion_spy_line(line, state):
         task.add_operation_index(int(m.group('index')),
                                  int(m.group('child')))
         return True
+    m = op_provenance_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.provenance = m.group('provenance')
+        return True
     m = close_index_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('parent')))
@@ -11195,7 +11225,8 @@ def parse_legion_spy_line(line, state):
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
     if m is not None:
-        state.get_index_space(int(m.group('uid'),16)) 
+        space = state.get_index_space(int(m.group('uid'),16)) 
+        space.provenance = m.group('provenance')
         return True
     m = index_name_pat.match(line)
     if m is not None:
@@ -11215,6 +11246,7 @@ def parse_legion_spy_line(line, state):
         complete = int(m.group('complete'))
         if complete > 0:
             part.set_complete(True if complete == 2 else False)
+        part.provenance = m.group('provenance')
         return True
     m = index_part_name_pat.match(line)
     if m is not None:
@@ -11234,7 +11266,8 @@ def parse_legion_spy_line(line, state):
         return True
     m = field_space_pat.match(line)
     if m is not None:
-        state.get_field_space(int(m.group('uid')))
+        space = state.get_field_space(int(m.group('uid')))
+        space.provenance = m.group('provenance')
         return True
     m = field_space_name_pat.match(line)
     if m is not None:
@@ -11246,6 +11279,7 @@ def parse_legion_spy_line(line, state):
         space = state.get_field_space(int(m.group('uid')))
         field = space.get_field(int(m.group('fid')))
         field.size = int(m.group('size'))
+        field.provenance = m.group('provenance')
         return True
     m = field_name_pat.match(line)
     if m is not None:
@@ -11255,8 +11289,9 @@ def parse_legion_spy_line(line, state):
         return True
     m = region_pat.match(line)
     if m is not None:
-        state.get_region(int(m.group('iid'),16),
+        region = state.get_region(int(m.group('iid'),16),
             int(m.group('fid')),int(m.group('tid')))
+        region.provenance = m.group('provenance')
         return True
     m = region_name_pat.match(line)
     if m is not None:

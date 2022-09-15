@@ -2821,7 +2821,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       runtime->forest->create_union_space(result, did, provenance, sources);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(), provenance);
       resume_mapper_call(ctx);
       return result;
     }
@@ -2852,7 +2852,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       runtime->forest->create_intersection_space(result,did,provenance,sources);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(), provenance);
       resume_mapper_call(ctx);
       return result;
     }
@@ -2875,7 +2875,7 @@ namespace Legion {
       runtime->forest->create_difference_space(result, did, provenance,
                                                left, right);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(), provenance);
       resume_mapper_call(ctx);
       return result;
     }

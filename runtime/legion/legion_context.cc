@@ -300,7 +300,7 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
+        LegionSpy::log_top_index_space(handle.id, prov);
       Provenance *provenance = NULL;
       if (prov != NULL)
         provenance = new Provenance(prov);
@@ -363,7 +363,7 @@ namespace Legion {
       runtime->forest->create_union_space(handle, did, provenance, spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(), provenance);
       return handle;
     }
 
@@ -395,7 +395,7 @@ namespace Legion {
       runtime->forest->create_intersection_space(handle,did,provenance,spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(), provenance);
       return handle;
     }
 
@@ -419,7 +419,7 @@ namespace Legion {
                                                left, right); 
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(), provenance);
       return handle;
     }
 
@@ -452,7 +452,7 @@ namespace Legion {
                       space.id, get_task_name(), get_unique_id());
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id);
+        LegionSpy::log_field_space(space.id, provenance);
 
       runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
@@ -475,7 +475,7 @@ namespace Legion {
                       space.id, get_task_name(), get_unique_id());
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id);
+        LegionSpy::log_field_space(space.id, provenance);
 
       FieldSpaceNode *node =
         runtime->forest->create_field_space(space, did, provenance);
@@ -495,8 +495,8 @@ namespace Legion {
             get_unique_id(), resulting_fields[idx])
 #endif
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, 
-                                        resulting_fields[idx], sizes[idx]);
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+                                        sizes[idx], provenance);
       }
       node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
@@ -583,7 +583,7 @@ namespace Legion {
           "bound set in legion_config.h", get_task_name(), get_unique_id(), fid)
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_creation(space.id, fid, field_size);
+        LegionSpy::log_field_creation(space.id, fid, field_size, provenance);
 
       std::set<RtEvent> done_events;
       if (local)
@@ -625,8 +625,8 @@ namespace Legion {
             get_unique_id(), resulting_fields[idx])
 #endif
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, 
-                                        resulting_fields[idx], sizes[idx]);
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+                                        sizes[idx], provenance);
       }
       std::set<RtEvent> done_events;
       if (local)
@@ -660,7 +660,7 @@ namespace Legion {
                        index_space.id, field_space.id, tid);
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+        LegionSpy::log_top_region(index_space.id,field_space.id,tid,provenance);
 
       const DistributedID did = runtime->get_available_distributed_id(); 
       runtime->forest->create_logical_region(region, did, provenance);
@@ -3596,7 +3596,7 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
+        LegionSpy::log_top_index_space(handle.id, provenance);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();

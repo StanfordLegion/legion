@@ -84,9 +84,11 @@ namespace Legion {
       }
 
       // Logger calls for the shape of region trees
-      static inline void log_top_index_space(IDType unique_id)
+      static inline void log_top_index_space(IDType unique_id,
+                                             const char *provenance)
       {
-        log_spy.print("Index Space " IDFMT "", unique_id);
+        log_spy.print("Index Space " IDFMT " %s", unique_id,
+            (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_index_space_name(IDType unique_id,
@@ -97,11 +99,13 @@ namespace Legion {
       }
 
       static inline void log_index_partition(IDType parent_id, 
-                IDType unique_id, int disjoint, int complete, LegionColor point)
+                IDType unique_id, int disjoint, int complete,
+                LegionColor point, const char *provenance)
       {
         // Convert ints from -1,0,1 to 0,1,2
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld",
-		      parent_id, unique_id, disjoint+1, complete+1, point); 
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %s",
+		      parent_id, unique_id, disjoint+1, complete+1, point,
+                      (provenance == NULL) ? "" : provenance); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -193,9 +197,11 @@ namespace Legion {
 #endif
       }
 
-      static inline void log_field_space(unsigned unique_id)
+      static inline void log_field_space(unsigned unique_id,
+                                         const char *provenance)
       {
-        log_spy.print("Field Space %u", unique_id);
+        log_spy.print("Field Space %u %s", unique_id, 
+            (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_field_space_name(unsigned unique_id,
@@ -206,10 +212,12 @@ namespace Legion {
       }
 
       static inline void log_field_creation(unsigned unique_id, 
-                                unsigned field_id, size_t size)
+                                unsigned field_id, size_t size,
+                                const char *provenance)
       {
-        log_spy.print("Field Creation %u %u %ld", 
-		      unique_id, field_id, long(size));
+        log_spy.print("Field Creation %u %u %ld %s", 
+		      unique_id, field_id, long(size),
+                      (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -221,10 +229,12 @@ namespace Legion {
       }
 
       static inline void log_top_region(IDType index_space, 
-                      unsigned field_space, unsigned tree_id)
+                      unsigned field_space, unsigned tree_id,
+                      const char *provenance)
       {
-        log_spy.print("Region " IDFMT " %u %u", 
-		      index_space, field_space, tree_id);
+        log_spy.print("Region " IDFMT " %u %u %s", 
+		      index_space, field_space, tree_id,
+                      (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_logical_region_name(IDType index_space, 
@@ -520,7 +530,8 @@ namespace Legion {
 
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
                                             UniqueID parent_ctx_uid,
-                                            UniqueID unique_id,const char *name)
+                                            UniqueID unique_id,
+                                            const char *name)
       {
         log_spy.print("Top Task %u %llu %llu %s", 
 		      task_id, parent_ctx_uid, unique_id, name);
@@ -994,6 +1005,12 @@ namespace Legion {
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
+      }
+
+      static inline void log_operation_provenance(UniqueID unique_id,
+                                                  const char *provenance)
+      {
+        log_spy.print("Operation Provenance %llu %s", unique_id, provenance);
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 

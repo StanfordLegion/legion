@@ -430,7 +430,12 @@ namespace Legion {
         unverified_regions.insert(idx);
       provenance = prov;
       if (provenance != NULL)
+      {
         provenance->add_reference();
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_operation_provenance(unique_op_id,
+                                  prov->provenance.c_str());
+      }
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
     }
@@ -8561,7 +8566,8 @@ namespace Legion {
                           complete_preconditions, runtime->address_space);
               if (runtime->legion_spy_enabled)
                 LegionSpy::log_field_creation(field_space_node->handle.id,
-                                              fields[idx], field_size);
+                    fields[idx], field_size, (provenance == NULL) ? NULL :
+                    provenance->provenance.c_str());
             }
             break;
           }

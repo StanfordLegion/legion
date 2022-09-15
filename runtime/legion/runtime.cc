@@ -19779,7 +19779,8 @@ namespace Legion {
       const DistributedID did = get_available_distributed_id();
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.id);
+        LegionSpy::log_top_index_space(result.id,
+            (provenance == NULL) ? NULL : provenance->provenance.c_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
