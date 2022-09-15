@@ -3181,6 +3181,9 @@ namespace Legion {
         FieldInfo& operator=(const FieldInfo &rhs);
         FieldInfo& operator=(FieldInfo &&rhs);
       public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;

@@ -11391,7 +11391,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
       }
       if (provenance != NULL)
@@ -11547,6 +11547,35 @@ namespace Legion {
       local = rhs.local;
       rhs.provenance = NULL;
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::FieldInfo::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(field_size);
+      rez.serialize(size_ready);
+      rez.serialize(idx);
+      rez.serialize<bool>(local);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::FieldInfo::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(field_size);
+      derez.deserialize(size_ready);
+      derez.deserialize(idx);
+      derez.deserialize<bool>(local);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -14322,7 +14351,7 @@ namespace Legion {
                   field_infos.begin(); it != field_infos.end(); it++)
             {
               rez.serialize(it->first);
-              rez.serialize(it->second);
+              it->second.serialize(rez);
             }
             remote_field_infos.insert(target);
           }
