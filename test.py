@@ -69,12 +69,17 @@ legion_cxx_tests = [
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/local_function_tasks/local_function_tasks', []],
+    ['examples/provenance/provenance', []],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+]
+
+legion_cxx_provenance_tests = [
+    ['examples/provenance/provenance', []],
 ]
 
 legion_fortran_tests = [
@@ -338,6 +343,17 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'legion_kernel_nocr', jupyter_test_file]
     cmd(jupyter_test_cmd, env=env)
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
+
+def run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
+    run_cxx(legion_cxx_provenance_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+    provenance_test_dir = os.path.join(root_dir, 'examples', 'provenance')
+    test_cmd = [sys.executable, 'test.py']
+    env = dict(list(env.items()) + [
+        ('LEGION_DIR', root_dir),
+        ('TMP_DIR', tmp_dir),
+    ])
+    cmd(test_cmd, env=env, cwd=provenance_test_dir)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
@@ -1080,6 +1096,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                if use_prof:
+                    run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:

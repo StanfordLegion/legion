@@ -344,7 +344,7 @@ int main(int argc, char **argv)
 
   {
     TaskVariantRegistrar registrar(GPU_TASK_ID, "gpu");
-    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
     Runtime::preregister_task_variant<gpu_task>(registrar, "gpu");
   }
