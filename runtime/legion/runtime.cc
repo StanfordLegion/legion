@@ -395,12 +395,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
+    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Don't need to wait here since deletion operations catch
       // dependences on the allocator themselves
-      context->free_field(this, field_space, fid, unordered);
+      context->free_field(this, field_space, fid, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -435,12 +436,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free,
-                                         const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Don't need to wait here since deletion operations catch
       // dependences on the allocator themselves
-      context->free_fields(this, field_space, to_free, unordered);
+      context->free_fields(this, field_space, to_free, unordered, provenance);
     }
 
     /////////////////////////////////////////////////////////////

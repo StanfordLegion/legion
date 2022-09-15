@@ -361,7 +361,8 @@ namespace Legion {
                                const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
-                               const std::vector<unsigned> &indexes);
+                               const std::vector<unsigned> &indexes,
+                               Provenance *provenance);
       void remove_local_fields(FieldSpace handle,
                                const std::vector<FieldID> &to_remove);
     public:
@@ -3168,17 +3169,23 @@ namespace Legion {
     public:
       struct FieldInfo {
       public:
-        FieldInfo(void) : field_size(0), idx(0), serdez_id(0), local(false) { }
-        FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
-          : field_size(size), idx(id), serdez_id(sid), local(loc) { }
-        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
-          : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
-            local(loc) { }
+        FieldInfo(void);
+        FieldInfo(size_t size, unsigned id, CustomSerdezID sid,
+                  Provenance *prov, bool loc=false);
+        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,
+                  Provenance *prov, bool loc=false);
+        FieldInfo(const FieldInfo &rhs);
+        FieldInfo(FieldInfo &&rhs);
+        ~FieldInfo(void);
+      public:
+        FieldInfo& operator=(const FieldInfo &rhs);
+        FieldInfo& operator=(FieldInfo &&rhs);
       public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
+        Provenance *provenance;
         bool local;
       };
       struct FindTargetsFunctor {
@@ -3328,7 +3335,8 @@ namespace Legion {
       void update_local_fields(const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
-                               const std::vector<unsigned> &indexes);
+                               const std::vector<unsigned> &indexes,
+                               Provenance *provenance);
       void remove_local_fields(const std::vector<FieldID> &to_removes);
     public:
       bool has_field(FieldID fid);

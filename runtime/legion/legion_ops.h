@@ -1636,23 +1636,27 @@ namespace Legion {
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
-                                   const bool unordered);
+                                   const bool unordered,Provenance *provenance);
       void initialize_index_part_deletion(InnerContext *ctx,IndexPartition part,
                                    std::vector<IndexPartition> &sub_partitions,
-                                   const bool unordered);
+                                   const bool unordered,Provenance *provenance);
       void initialize_field_space_deletion(InnerContext *ctx,
                                            FieldSpace handle,
-                                           const bool unordered);
+                                           const bool unordered,
+                                           Provenance *provenance);
       void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
                                      FieldID fid, const bool unordered,
-                                     FieldAllocatorImpl *allocator);
+                                     FieldAllocatorImpl *allocator,
+                                     Provenance *provenance);
       void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
                                       const std::set<FieldID> &to_free,
                                       const bool unordered,
-                                      FieldAllocatorImpl *allocator);
+                                      FieldAllocatorImpl *allocator,
+                                      Provenance *provenance);
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                               LogicalRegion handle,
-                                              const bool unordered);
+                                              const bool unordered,
+                                              Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

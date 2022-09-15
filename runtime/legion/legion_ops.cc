@@ -8610,10 +8610,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_space_deletion(InnerContext *ctx,
                            IndexSpace handle, std::vector<IndexPartition> &subs,
-                           const bool unordered)
+                           const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
       sub_partitions.swap(subs);
@@ -8625,10 +8625,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_part_deletion(InnerContext *ctx,
                        IndexPartition handle, std::vector<IndexPartition> &subs,
-                       const bool unordered)
+                       const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
       sub_partitions.swap(subs);
@@ -8639,10 +8639,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_space_deletion(InnerContext *ctx,
-                                        FieldSpace handle, const bool unordered)
+                FieldSpace handle, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
       if (runtime->legion_spy_enabled)
@@ -8652,15 +8652,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(InnerContext *ctx, 
-                                  FieldSpace handle, FieldID fid, 
-                                  const bool unordered,FieldAllocatorImpl *impl)
+                                               FieldSpace handle, FieldID fid, 
+                                               const bool unordered,
+                                               FieldAllocatorImpl *impl,
+                                               Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
       assert(allocator == NULL);
 #endif
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
@@ -8686,14 +8688,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletions(InnerContext *ctx,
                             FieldSpace handle, const std::set<FieldID> &to_free,
-                            const bool unordered, FieldAllocatorImpl *impl)
+                            const bool unordered, FieldAllocatorImpl *impl,
+                            Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
       assert(allocator == NULL);
 #endif
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
@@ -8718,10 +8721,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_logical_region_deletion(InnerContext *ctx,
-                                     LogicalRegion handle, const bool unordered)
+             LogicalRegion handle, const bool unordered, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, !unordered/*track*/);
+      initialize_operation(ctx, !unordered/*track*/, 0/*regions*/, provenance);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle; 
       if (runtime->legion_spy_enabled)

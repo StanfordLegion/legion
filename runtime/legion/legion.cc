@@ -3179,13 +3179,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocator::free_field(FieldID fid, const bool unordered)
+    void FieldAllocator::free_field(FieldID fid, const bool unordered,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif     
-      impl->free_field(fid, unordered);
+      impl->free_field(fid, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3232,13 +3233,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldAllocator::free_fields(const std::set<FieldID> &to_free,
-                                     const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->free_fields(to_free, unordered);
+      impl->free_fields(to_free, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -3813,10 +3814,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_space(handle, unordered, recurse);
+      ctx->destroy_index_space(handle, unordered, recurse, provenance);
     } 
 
     //--------------------------------------------------------------------------
@@ -4115,10 +4116,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_partition(handle, unordered, recurse);
+      ctx->destroy_index_partition(handle, unordered, recurse, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5245,10 +5246,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
-                                      const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_field_space(handle, unordered);
+      ctx->destroy_field_space(handle, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5320,10 +5321,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
-                                         const bool unordered)
+                                         const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_logical_region(handle, unordered);
+      ctx->destroy_logical_region(handle, unordered, prov);
     }
 
     //--------------------------------------------------------------------------

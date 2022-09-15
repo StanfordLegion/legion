@@ -1182,11 +1182,12 @@ namespace Legion {
                                   const std::vector<FieldID> &fields,
                                   const std::vector<size_t> &sizes,
                                   const std::vector<CustomSerdezID> &serdez_ids,
-                                  const std::vector<unsigned> &indexes)
+                                  const std::vector<unsigned> &indexes,
+                                  Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      node->update_local_fields(fields, sizes, serdez_ids, indexes);
+      node->update_local_fields(fields, sizes, serdez_ids, indexes, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -11459,6 +11460,96 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(void)
+      : field_size(0), idx(0), serdez_id(0), provenance(NULL), local(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(size_t size, unsigned id, 
+                                 CustomSerdezID sid, Provenance *prov, bool loc)
+      : field_size(size), idx(id), serdez_id(sid), provenance(prov), local(loc)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(ApEvent ready, unsigned id,
+                                 CustomSerdezID sid, Provenance *prov, bool loc)
+      : field_size(0), size_ready(ready), idx(id), serdez_id(sid),
+        provenance(prov), local(loc)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(const FieldInfo &rhs)
+      : field_size(rhs.field_size), size_ready(rhs.size_ready), idx(rhs.idx),
+        serdez_id(rhs.serdez_id), provenance(rhs.provenance), local(rhs.local)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(FieldInfo &&rhs)
+      : field_size(rhs.field_size), size_ready(rhs.size_ready), idx(rhs.idx),
+        serdez_id(rhs.serdez_id), provenance(rhs.provenance), local(rhs.local)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::~FieldInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo& FieldSpaceNode::FieldInfo::operator=(
+                                                           const FieldInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      field_size = rhs.field_size;
+      size_ready = rhs.size_ready;
+      idx = rhs.idx;
+      serdez_id = rhs.serdez_id;
+      provenance = rhs.provenance;
+      local = rhs.local;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo& FieldSpaceNode::FieldInfo::operator=(
+                                                                FieldInfo &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      field_size = rhs.field_size;
+      size_ready = rhs.size_ready;
+      idx = rhs.idx;
+      serdez_id = rhs.serdez_id;
+      provenance = rhs.provenance;
+      local = rhs.local;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -12392,6 +12483,12 @@ namespace Legion {
                      const char *provenance)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!fids.empty());
+#endif
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       for (unsigned idx = 0; idx < fids.size(); idx++)
       {
         FieldID fid = fids[idx];
@@ -12412,7 +12509,7 @@ namespace Legion {
         assert(!dummy_event.exists());
 #endif
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id, prov);
       }
     }
 
@@ -12442,7 +12539,7 @@ namespace Legion {
         assert(!dummy_event.exists());
 #endif
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id, provenance);
       }
     }
 
@@ -12496,8 +12593,11 @@ namespace Legion {
                         "field space %x. Change LEGION_MAX_FIELDS from %d and"
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size, index, serdez_id);
+      field_infos[fid] = FieldInfo(size, index, serdez_id, prov);
       return ready_event;
     }
 
@@ -12551,7 +12651,10 @@ namespace Legion {
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size_ready, index, serdez_id);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+      field_infos[fid] = FieldInfo(size_ready, index, serdez_id, prov);
       return ready_event;
     }
 
@@ -12563,6 +12666,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!fids.empty());
       assert(sizes.size() == fids.size());
 #endif
       AutoLock n_lock(node_lock);
@@ -12596,6 +12700,9 @@ namespace Legion {
         context->runtime->send_field_alloc_request(owner_space, rez);
         return allocated_event;
       }
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       // We're the owner so do the field allocation
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
@@ -12617,7 +12724,7 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id, prov);
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -12660,6 +12767,9 @@ namespace Legion {
         context->runtime->send_field_alloc_request(owner_space, rez);
         return allocated_event;
       }
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       // We're the owner so do the field allocation
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
@@ -12681,7 +12791,7 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id, prov);
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -12927,16 +13037,20 @@ namespace Legion {
         allocated_event.wait();
         if (new_indexes.empty())
           return false;
+        Provenance *prov = NULL;
+        if (provenance != NULL)
+          prov = new Provenance(provenance);
         // When we wake up then fill in the field information
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
+        assert(!fids.empty());
         assert(new_indexes.size() == fids.size());
 #endif
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
           field_infos[fid] = 
-            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
+            FieldInfo(sizes[idx],new_indexes[idx],serdez_id,prov,true/*local*/);
         }
       }
       else
@@ -12945,6 +13059,12 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         if (!allocate_local_indexes(serdez_id, sizes, indexes, new_indexes))
           return false;
+        Provenance *prov = NULL;
+        if (provenance != NULL)
+          prov = new Provenance(provenance);
+#ifdef DEBUG_LEGION
+        assert(!fids.empty());
+#endif
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
@@ -12953,7 +13073,7 @@ namespace Legion {
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id)
           field_infos[fid] = 
-            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
+            FieldInfo(sizes[idx],new_indexes[idx],serdez_id,prov,true/*local*/);
         }
       }
       return true;
@@ -13003,7 +13123,8 @@ namespace Legion {
     void FieldSpaceNode::update_local_fields(const std::vector<FieldID> &fids,
                                   const std::vector<size_t> &sizes,
                                   const std::vector<CustomSerdezID> &serdez_ids,
-                                  const std::vector<unsigned> &indexes)
+                                  const std::vector<unsigned> &indexes,
+                                  Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13013,8 +13134,8 @@ namespace Legion {
 #endif
       AutoLock n_lock(node_lock);
       for (unsigned idx = 0; idx < fids.size(); idx++)
-        field_infos[fids[idx]] = 
-          FieldInfo(sizes[idx], indexes[idx], serdez_ids[idx], true/*local*/);
+        field_infos[fids[idx]] = FieldInfo(sizes[idx], indexes[idx], 
+            serdez_ids[idx], provenance, true/*local*/);
     }
 
     //--------------------------------------------------------------------------

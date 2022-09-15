@@ -156,7 +156,8 @@ namespace Legion {
                              FieldID desired_fieldid,
                              CustomSerdezID serdez_id, bool local,
                              const char *provenance);
-      void free_field(FieldID fid, const bool unordered);
+      void free_field(FieldID fid, const bool unordered,
+                      const char *provenance);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
@@ -166,7 +167,8 @@ namespace Legion {
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id, bool local,
                            const char *provenance);
-      void free_fields(const std::set<FieldID> &to_free, const bool unordered);
+      void free_fields(const std::set<FieldID> &to_free, const bool unordered,
+                       const char *provenance = NULL);
     public:
       FieldSpace field_space;
       FieldSpaceNode *const node;

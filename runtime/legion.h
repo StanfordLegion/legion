@@ -539,8 +539,11 @@ namespace Legion {
        * @param fid the field ID to be deallocated
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
-      void free_field(FieldID fid, const bool unordered = false);
+      void free_field(FieldID fid, const bool unordered = false,
+                      const char *provenance = NULL);
 
       /**
        * Same as allocate field, but this field will only
@@ -586,9 +589,12 @@ namespace Legion {
        * @param to_free set of field IDs to be freed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void free_fields(const std::set<FieldID> &to_free, 
-                       const bool unordered = false);
+                       const bool unordered = false,
+                       const char *provenance = NULL);
       /**
        * Same as allocate_fields but the fields that are allocated
        * will only be available locally on the node on which 
@@ -4572,10 +4578,13 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        * @param recurse delete the full index tree
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void destroy_index_space(Context ctx, IndexSpace handle,
                                const bool unordered = false,
-                               const bool recurse = true);
+                               const bool recurse = true,
+                               const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
@@ -4748,10 +4757,13 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        * @param recurse destroy the full sub-tree below this partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void destroy_index_partition(Context ctx, IndexPartition handle,
                                    const bool unordered = false,
-                                   const bool recurse = true);
+                                   const bool recurse = true,
+                                   const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations
@@ -6189,9 +6201,12 @@ namespace Legion {
        * @param handle of the field space to be destroyed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void destroy_field_space(Context ctx, FieldSpace handle, 
-                               const bool unordered = false);
+                               const bool unordered = false,
+                               const char *provenance = NULL);
 
       ///@{
       /**
@@ -6278,9 +6293,12 @@ namespace Legion {
        * @param handle logical region handle to destroy
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void destroy_logical_region(Context ctx, LogicalRegion handle,
-                                  const bool unordered = false);
+                                  const bool unordered = false,
+                                  const char *provenance = NULL);
 
       /**
        * Destroy a logical partition and all of it is logical sub-regions.

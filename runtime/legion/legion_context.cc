@@ -877,52 +877,62 @@ namespace Legion {
     {
       if (!deleted_regions.empty())
       {
-        for (std::vector<LogicalRegion>::const_iterator it = 
+        for (std::vector<DeletedRegion>::const_iterator it = 
               deleted_regions.begin(); it != deleted_regions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed for region (%x,%x,%x) "
-              "in task tree rooted by %s", it->index_space.id, 
-              it->field_space.id, it->tree_id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", 
+              it->region.index_space.id, it->region.field_space.id, 
+              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
       {
-        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it =
+        for (std::vector<DeletedField>::const_iterator it =
               deleted_fields.begin(); it != deleted_fields.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field %d of "
-              "field space %x in task tree rooted by %s", it->second, 
-              it->first.id, get_task_name())
+              "field space %x in task tree rooted by %s (provenance %s)", 
+              it->fid, it->space.id, get_task_name(), 
+              (it->provenance != NULL) ? it->provenance->provenance.c_str() :
+              "unknown")
         deleted_fields.clear();
       }
       if (!deleted_field_spaces.empty())
       {
-        for (std::vector<FieldSpace>::const_iterator it = 
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
               deleted_field_spaces.begin(); it != 
               deleted_field_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field space %x "
-              "in task tree rooted by %s", it->id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
       {
-        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it =
+        for (std::vector<DeletedIndexSpace>::const_iterator it =
               deleted_index_spaces.begin(); it != 
               deleted_index_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index space %x "
-              "in task tree rooted by %s", it->first.id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
       {
-        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it =
+        for (std::vector<DeletedPartition>::const_iterator it =
               deleted_index_partitions.begin(); it !=
               deleted_index_partitions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index partition %x "
-              "in task tree rooted by %s", it->first.id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->partition.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -2567,16 +2577,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -2694,26 +2704,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_region_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
+                                            std::vector<DeletedRegion> &regions,
                                             std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<LogicalRegion> delete_now;
+      std::vector<DeletedRegion> delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<LogicalRegion>::const_iterator rit =
+        for (std::vector<DeletedRegion>::const_iterator rit =
               regions.begin(); rit != regions.end(); rit++)
         {
           std::map<LogicalRegion,unsigned>::iterator region_finder = 
-            created_regions.find(*rit);
+            created_regions.find(rit->region);
           if (region_finder == created_regions.end())
           {
-            if (local_regions.find(*rit) != local_regions.end())
+            if (local_regions.find(rit->region) != local_regions.end())
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
                   "Local logical region (%x,%x,%x) in task %s (UID %lld) was "
                   "not deleted by this task. Local regions can only be deleted "
-                  "by the task that made them.", rit->index_space.id,
-                  rit->field_space.id, rit->tree_id, 
+                  "by the task that made them.", rit->region.index_space.id,
+                  rit->region.field_space.id, rit->region.tree_id, 
                   get_task_name(), get_unique_id())
             // Deletion keeps going up
             deleted_regions.push_back(*rit);
@@ -2727,16 +2737,15 @@ namespace Legion {
             if (--region_finder->second == 0)
             {
               created_regions.erase(region_finder);
-              delete_now.push_back(*rit);
               // Check to see if we have any latent field spaces to clean up
               if (!latent_field_spaces.empty())
               {
                 std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-                  latent_field_spaces.find(rit->get_field_space());
+                  latent_field_spaces.find(rit->region.get_field_space());
                 if (finder != latent_field_spaces.end())
                 {
                   std::set<LogicalRegion>::iterator latent_finder = 
-                    finder->second.find(*rit);
+                    finder->second.find(rit->region);
 #ifdef DEBUG_LEGION
                   assert(latent_finder != finder->second.end());
 #endif
@@ -2762,17 +2771,19 @@ namespace Legion {
                   }
                 }
               }
+              delete_now.emplace_back(*rit);
             }
           }
         }
       }
       if (!delete_now.empty())
       {
-        for (std::vector<LogicalRegion>::const_iterator it = 
+        for (std::vector<DeletedRegion>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
+          op->initialize_logical_region_deletion(this, it->region, 
+              true/*unordered*/, it->provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -2812,47 +2823,52 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_field_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                           std::vector<DeletedField> &fields,
                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::map<FieldSpace,std::set<FieldID> > delete_now;
+      std::map<std::pair<FieldSpace,Provenance*>,std::set<FieldID> > delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator fit =
+        for (std::vector<DeletedField>::const_iterator fit =
               fields.begin(); fit != fields.end(); fit++)
         {
+          const std::pair<FieldSpace,FieldID> key(fit->space, fit->fid);
           std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
-            field_finder = created_fields.find(*fit);
+            field_finder = created_fields.find(key);
           if (field_finder == created_fields.end())
           {
             std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
-              local_finder = local_fields.find(*fit);
+              local_finder = local_fields.find(key);
             if (local_finder != local_fields.end())
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
                   "Local field %d in field space %x in task %s (UID %lld) was "
                   "not deleted by this task. Local fields can only be deleted "
-                  "by the task that made them.", fit->second, fit->first.id,
+                  "by the task that made them.", fit->fid, fit->space.id,
                   get_task_name(), get_unique_id())
-            deleted_fields.push_back(*fit);
+            deleted_fields.emplace_back(*fit);
           }
           else
           {
             // One of ours to delete
-            delete_now[fit->first].insert(fit->second);
+            const std::pair<FieldSpace,Provenance*> 
+              now_key(fit->space, fit->provenance);
+            delete_now[now_key].insert(fit->fid);
             created_fields.erase(field_finder);
           }
         }
       }
       if (!delete_now.empty())
       {
-        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
+        for (std::map<std::pair<FieldSpace,Provenance*>,
+                      std::set<FieldID> >::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          FieldAllocatorImpl *allocator = create_field_allocator(it->first);
-          op->initialize_field_deletions(this, it->first, it->second, 
-                                         true/*unordered*/, allocator);
+          FieldAllocatorImpl *allocator = 
+            create_field_allocator(it->first.first);
+          op->initialize_field_deletions(this, it->first.first, it->second, 
+                           true/*unordered*/, allocator, it->first.second);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -2959,18 +2975,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_field_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &spaces,
+                                         std::vector<DeletedFieldSpace> &spaces,
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<FieldSpace> delete_now;
+      std::vector<DeletedFieldSpace> delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<FieldSpace>::const_iterator fit = 
+        for (std::vector<DeletedFieldSpace>::const_iterator fit = 
               spaces.begin(); fit != spaces.end(); fit++)
         {
           std::map<FieldSpace,unsigned>::iterator finder = 
-            created_field_spaces.find(*fit);
+            created_field_spaces.find(fit->space);
           if (finder != created_field_spaces.end())
           {
 #ifdef DEBUG_LEGION
@@ -2978,7 +2994,7 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(*fit);
+              delete_now.emplace_back(*fit);
               created_field_spaces.erase(finder);
               // Count how many regions are still using this field space
               // that still need to be deleted before we can remove the
@@ -2986,11 +3002,11 @@ namespace Legion {
               std::set<LogicalRegion> remaining_regions;
               for (std::map<LogicalRegion,unsigned>::const_iterator it = 
                     created_regions.begin(); it != created_regions.end(); it++)
-                if (it->first.get_field_space() == *fit)
+                if (it->first.get_field_space() == fit->space)
                   remaining_regions.insert(it->first);
               for (std::map<LogicalRegion,bool>::const_iterator it = 
                     local_regions.begin(); it != local_regions.end(); it++)
-                if (it->first.get_field_space() == *fit)
+                if (it->first.get_field_space() == fit->space)
                   remaining_regions.insert(it->first);
               if (remaining_regions.empty())
               {
@@ -2999,7 +3015,7 @@ namespace Legion {
                       created_fields.begin(); it != 
                       created_fields.end(); /*nothing*/)
                 {
-                  if (it->first == *fit)
+                  if (it->first == fit->space)
                   {
                     std::set<std::pair<FieldSpace,FieldID> >::iterator 
                       to_delete = it++;
@@ -3010,23 +3026,24 @@ namespace Legion {
                 }
               }
               else
-                latent_field_spaces[*fit] = remaining_regions;
+                latent_field_spaces[fit->space] = remaining_regions;
             }
           }
           else
             // If we didn't make this field space, record the deletion
             // and keep going. It will be handled by the context that
             // made the field space
-            deleted_field_spaces.push_back(*fit);
+            deleted_field_spaces.emplace_back(*fit);
         }
       }
       if (!delete_now.empty())
       {
-        for (std::vector<FieldSpace>::const_iterator it = 
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_field_space_deletion(this, *it, true/*unordered*/);
+          op->initialize_field_space_deletion(this, it->space,
+                            true/*unordered*/, it->provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3066,19 +3083,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_index_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                               std::vector<std::pair<IndexSpace,bool> > &spaces,
+                                         std::vector<DeletedIndexSpace> &spaces,
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexSpace> delete_now;
+      std::vector<DeletedIndexSpace> delete_now;
       std::vector<std::vector<IndexPartition> > sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator sit =
+        for (std::vector<DeletedIndexSpace>::const_iterator sit =
               spaces.begin(); sit != spaces.end(); sit++)
         {
           std::map<IndexSpace,unsigned>::iterator finder = 
-            created_index_spaces.find(sit->first);
+            created_index_spaces.find(sit->space);
           if (finder != created_index_spaces.end())
           {
 #ifdef DEBUG_LEGION
@@ -3086,10 +3103,10 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(sit->first);
+              delete_now.emplace_back(*sit);
               sub_partitions.resize(sub_partitions.size() + 1);
               created_index_spaces.erase(finder);
-              if (sit->second)
+              if (sit->recurse)
               {
                 std::vector<IndexPartition> &subs = sub_partitions.back();
                 // Also remove any index partitions for this index space tree
@@ -3097,7 +3114,7 @@ namespace Legion {
                       created_index_partitions.begin(); it !=
                       created_index_partitions.end(); /*nothing*/)
                 {
-                  if (it->first.get_tree_id() == sit->first.get_tree_id()) 
+                  if (it->first.get_tree_id() == sit->space.get_tree_id()) 
                   {
 #ifdef DEBUG_LEGION
                     assert(it->second > 0);
@@ -3121,7 +3138,7 @@ namespace Legion {
           else
             // If we didn't make the index space in this context, just
             // record it and keep going, it will get handled later
-            deleted_index_spaces.push_back(*sit);
+            deleted_index_spaces.emplace_back(*sit);
         }
       }
       if (!delete_now.empty())
@@ -3132,8 +3149,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_index_space_deletion(this, delete_now[idx], 
-                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_index_space_deletion(this, delete_now[idx].space,
+            sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3173,19 +3190,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_index_partition_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
+                                           std::vector<DeletedPartition> &parts, 
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexPartition> delete_now;
+      std::vector<DeletedPartition> delete_now;
       std::vector<std::vector<IndexPartition> > sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator pit =
+        for (std::vector<DeletedPartition>::const_iterator pit =
               parts.begin(); pit != parts.end(); pit++)
         {
           std::map<IndexPartition,unsigned>::iterator finder = 
-            created_index_partitions.find(pit->first);
+            created_index_partitions.find(pit->partition);
           if (finder != created_index_partitions.end())
           {
 #ifdef DEBUG_LEGION
@@ -3193,10 +3210,10 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(pit->first);
+              delete_now.emplace_back(*pit);
               sub_partitions.resize(sub_partitions.size() + 1);
               created_index_partitions.erase(finder);
-              if (pit->second)
+              if (pit->recurse)
               {
                 std::vector<IndexPartition> &subs = sub_partitions.back();
                 // Remove any other partitions that this partition dominates
@@ -3204,9 +3221,9 @@ namespace Legion {
                       created_index_partitions.begin(); it !=
                       created_index_partitions.end(); /*nothing*/)
                 {
-                  if ((pit->first.get_tree_id() == it->first.get_tree_id()) &&
-                      runtime->forest->is_dominated_tree_only(it->first, 
-                                                              pit->first))
+                  if ((pit->partition.get_tree_id() == it->first.get_tree_id()) 
+                        && runtime->forest->is_dominated_tree_only(it->first, 
+                                                                pit->partition))
                   {
 #ifdef DEBUG_LEGION
                     assert(it->second > 0);
@@ -3229,7 +3246,7 @@ namespace Legion {
           }
           else
             // If we didn't make the partition, record it and keep going
-            deleted_index_partitions.push_back(*pit);
+            deleted_index_partitions.emplace_back(*pit);
         }
       }
       if (!delete_now.empty())
@@ -3240,8 +3257,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_index_part_deletion(this, delete_now[idx], 
-                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_index_part_deletion(this, delete_now[idx].partition,
+            sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3593,7 +3610,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3611,6 +3628,7 @@ namespace Legion {
             "which is not a top-level index space. Legion only permits "
             "top-level index spaces to be destroyed.", handle.get_id(),
             get_task_name(), get_unique_id())
+      Provenance *prov = NULL;
       // Check to see if this is one that we should be allowed to destory
       std::vector<IndexPartition> sub_partitions;
       {
@@ -3619,9 +3637,12 @@ namespace Legion {
           created_index_spaces.find(handle);
         if (finder == created_index_spaces.end())
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make the index space in this context, just
           // record it and keep going, it will get handled later
-          deleted_index_spaces.push_back(std::make_pair(handle,recurse));
+          deleted_index_spaces.emplace_back(
+              DeletedIndexSpace(handle, recurse, prov));
           return;
         }
         else
@@ -3660,8 +3681,11 @@ namespace Legion {
           }
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
+      op->initialize_index_space_deletion(this, handle, sub_partitions,
+                                          unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -3677,7 +3701,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3687,6 +3711,7 @@ namespace Legion {
       log_index.debug("Destroying index partition %x in task %s (ID %lld)",
                       handle.id, get_task_name(), get_unique_id());
 #endif
+      Provenance *prov = NULL;
       std::vector<IndexPartition> sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
@@ -3730,14 +3755,19 @@ namespace Legion {
         }
         else
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make the partition, record it and keep going
-          deleted_index_partitions.push_back(std::make_pair(handle,recurse));
+          deleted_index_partitions.push_back(
+              DeletedPartition(handle, recurse, prov));
           return;
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
-                                         sub_partitions, unordered);
+                                         sub_partitions, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5185,7 +5215,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_field_space(FieldSpace handle,
-                                           const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5195,6 +5225,7 @@ namespace Legion {
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
+      Provenance *prov = NULL;
       // Check to see if this is one that we should be allowed to destory
       {
         AutoLock priv_lock(privilege_lock);
@@ -5243,15 +5274,19 @@ namespace Legion {
         }
         else
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make this field space, record the deletion
           // and keep going. It will be handled by the context that
           // made the field space
-          deleted_field_spaces.push_back(handle);
+          deleted_field_spaces.emplace_back(DeletedFieldSpace(handle, prov));
           return;
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_space_deletion(this, handle, unordered);
+      op->initialize_field_space_deletion(this, handle, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5344,6 +5379,7 @@ namespace Legion {
       // to this data structure are serialized
       infos.push_back(LocalFieldInfo(fid, field_size, serdez_id, 
                                      new_indexes[0], false));
+      const size_t prov_size = (provenance != NULL) ? strlen(provenance) : 0;
       AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
       // Have to send notifications to any remote nodes
       for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
@@ -5356,6 +5392,9 @@ namespace Legion {
           rez.serialize(it->second);
           rez.serialize<size_t>(1); // field space count
           rez.serialize(space);
+          rez.serialize(prov_size);
+          if (prov_size > 0)
+            rez.serialize(provenance, prov_size);
           rez.serialize<size_t>(1); // field count
           rez.serialize(infos.back());
           rez.serialize(done_event);
@@ -5454,6 +5493,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
         infos.push_back(LocalFieldInfo(resulting_fields[idx], 
                    sizes[idx], serdez_id, new_indexes[idx], false));
+      const size_t prov_size = (provenance != NULL) ? strlen(provenance) : 0;
       // Have to send notifications to any remote nodes 
       AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
       for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
@@ -5466,6 +5506,9 @@ namespace Legion {
           rez.serialize(it->second);
           rez.serialize<size_t>(1); // field space count
           rez.serialize(space);
+          rez.serialize(prov_size);
+          if (prov_size > 0)
+            rez.serialize(provenance, prov_size);
           rez.serialize<size_t>(resulting_fields.size()); // field count
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             rez.serialize(infos[offset+idx]);
@@ -5478,10 +5521,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::free_field(FieldAllocatorImpl *allocator, 
-                            FieldSpace space, FieldID fid, const bool unordered)
+    FieldSpace space, FieldID fid, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         const std::pair<FieldSpace,FieldID> key(space, fid);
@@ -5496,7 +5542,7 @@ namespace Legion {
           {
             // If we didn't make this field, record the deletion and
             // then have a later context handle it
-            deleted_fields.push_back(key);
+            deleted_fields.emplace_back(DeletedField(space, fid, prov));
             return;
           }
           else
@@ -5506,8 +5552,8 @@ namespace Legion {
         // need it as part of the logical dependence analysis for earlier ops
       }
       // Launch off the deletion operation
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletion(this, space, fid, unordered, allocator);
+      DeletionOp *op = runtime->get_available_deletion_op(); 
+      op->initialize_field_deletion(this, space, fid, unordered,allocator,prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5525,10 +5571,13 @@ namespace Legion {
     void InnerContext::free_fields(FieldAllocatorImpl *allocator, 
                                    FieldSpace space,
                                    const std::set<FieldID> &to_free,
-                                   const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       std::set<FieldID> free_now;
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
@@ -5549,7 +5598,7 @@ namespace Legion {
               free_now.insert(*it);
             }
             else
-              deleted_fields.push_back(key);
+              deleted_fields.emplace_back(DeletedField(space, *it, prov));
           }
           else
           {
@@ -5563,7 +5612,8 @@ namespace Legion {
       if (free_now.empty())
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletions(this, space, free_now,unordered,allocator);
+      op->initialize_field_deletions(this, space, free_now, unordered,
+                                     allocator, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5579,12 +5629,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_logical_region(LogicalRegion handle,
-                                              const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       if (!handle.exists())
         return;
+      Provenance *prov = NULL;
+      
 #ifdef DEBUG_LEGION
       log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
                        handle.index_space.id, handle.field_space.id, 
@@ -5614,8 +5666,10 @@ namespace Legion {
           // of the map
           if (local_finder == local_regions.end())
           {
+            if (provenance != NULL)
+              prov = new Provenance(provenance);
             // Record the deletion for later and propagate it up
-            deleted_regions.push_back(handle);
+            deleted_regions.emplace_back(DeletedRegion(handle, prov));
             return;
           }
           else
@@ -5638,8 +5692,10 @@ namespace Legion {
           // operations, but the reference count is zero so we're protected
         }
       }
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_logical_region_deletion(this, handle, unordered);
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+      DeletionOp *op = runtime->get_available_deletion_op(); 
+      op->initialize_logical_region_deletion(this, handle, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -10014,7 +10070,7 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it = 
               local_regions_to_delete.begin(); it != 
               local_regions_to_delete.end(); it++)
-          destroy_logical_region(*it, false/*unordered*/);
+          destroy_logical_region(*it, false/*unordered*/, NULL/*provenace*/);
       }
       if (!local_fields_to_delete.empty())
       {
@@ -10023,7 +10079,8 @@ namespace Legion {
               local_fields_to_delete.end(); it++)
         {
           FieldAllocatorImpl *allocator = create_field_allocator(it->first);
-          free_fields(allocator, it->first, it->second, false/*unordered*/);
+          free_fields(allocator, it->first, it->second, 
+                  false/*unordered*/, NULL/*provenace*/);
         }
       }
       if (!index_launch_spaces.empty())
@@ -10031,7 +10088,8 @@ namespace Legion {
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
+          destroy_index_space(it->second, false/*unordered*/, 
+              true/*recurse*/, NULL/*provenance*/);
       }
       if (overhead_tracker != NULL)
       {
@@ -11304,6 +11362,14 @@ namespace Legion {
       {
         FieldSpace handle;
         derez.deserialize(handle);
+        size_t prov_size;
+        derez.deserialize(prov_size);
+        Provenance *provenance = NULL;
+        if (prov_size > 0)
+        {
+          provenance = new Provenance((const char*)derez.get_current_pointer());
+          derez.advance_pointer(prov_size);
+        }
         size_t num_local;
         derez.deserialize(num_local); 
         std::vector<FieldID> fields(num_local);
@@ -11327,7 +11393,7 @@ namespace Legion {
           }
         }
         runtime->forest->update_local_fields(handle, fields, field_sizes,
-                                             serdez_ids, indexes);
+                                             serdez_ids, indexes, provenance);
       }
     }
 
@@ -11490,16 +11556,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -11670,7 +11736,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11726,7 +11792,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12156,7 +12222,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_field_space(FieldSpace handle, 
-                                          const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12201,7 +12267,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::free_field(FieldAllocatorImpl *allocator,FieldSpace space, 
-                                 FieldID fid, const bool unordered)
+                                 FieldID fid, const bool unordered,
+                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12244,7 +12311,7 @@ namespace Legion {
     void LeafContext::free_fields(FieldAllocatorImpl *allocator, 
                                   FieldSpace space, 
                                   const std::set<FieldID> &to_free,
-                                  const bool unordered)
+                                  const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12347,7 +12414,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_region(LogicalRegion handle,
-                                             const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -13221,7 +13288,8 @@ namespace Legion {
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
+          destroy_index_space(it->second, false/*unordered*/,
+                              true/*recurse*/, NULL/*provenance*/);
       }
       // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
