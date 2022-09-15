@@ -1491,6 +1491,8 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, FenceKind kind, bool need_future,
                         const char *provenance);
+      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future,
+                        Provenance *provenance);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
       inline void record_execution_precondition(ApEvent precondition)

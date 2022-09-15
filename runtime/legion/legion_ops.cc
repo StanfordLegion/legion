@@ -7985,6 +7985,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
+                               bool need_future, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      initialize_memoizable();
+      fence_kind = kind;
+      if (need_future)
+      {
+        result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              runtime->address_space, completion_event, this));
+        // We can set the future result right now because we know that it
+        // will not be complete until we are complete ourselves
+        result.impl->set_result(NULL, 0, true/*own*/); 
+      }
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+                                       unique_op_id, context_index);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void FenceOp::activate(void)
     //--------------------------------------------------------------------------
     {

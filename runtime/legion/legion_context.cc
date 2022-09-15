@@ -8895,15 +8895,20 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in task %s (ID %lld)", 
           tid, get_task_name(), get_unique_id())
+
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+
       std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
       LegionTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
         if (static_trace)
-          trace = new StaticTrace(tid, this, logical_only, trees);
+          trace = new StaticTrace(tid, this, logical_only, prov, trees);
         else
-          trace = new DynamicTrace(tid, this, logical_only);
+          trace = new DynamicTrace(tid, this, logical_only, prov);
         if (!deprecated)
           traces[tid] = trace;
         trace->add_reference();
@@ -8918,14 +8923,14 @@ namespace Legion {
 
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, trace, provenance);
+      begin->initialize_begin(this, trace, prov);
       add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, trace, provenance);
+        replay->initialize_replay(this, trace, prov);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.exchange(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
@@ -9009,7 +9014,7 @@ namespace Legion {
         capture_op->initialize_capture(this, has_blocking_call,
                                        deprecated, provenance);
         // Mark that the current trace is now fixed
-        current_trace->fix_trace();
+        current_trace->fix_trace(capture_op->get_provenance());
         // Remove the current trace now so we block at the end of the
         // trace in the case of program order execution
         current_trace = NULL;
