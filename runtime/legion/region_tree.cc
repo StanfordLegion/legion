@@ -12484,7 +12484,7 @@ namespace Legion {
                     field_infos.begin(); it != field_infos.end(); it++)
               {
                 rez.serialize(it->first);
-                rez.serialize(it->second);
+                it->second.serialize(rez);
               }
               rez.serialize(unallocated_indexes);
               unallocated_indexes.clear();
@@ -15174,7 +15174,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
 #ifdef DEBUG_LEGION
         assert(!unallocated_indexes);
@@ -15236,7 +15236,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
         derez.deserialize(unallocated_indexes);
         size_t num_indexes;
