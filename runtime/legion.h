@@ -5042,7 +5042,12 @@ namespace Legion {
        * common partition of the 'parent' index space. By definition the 
        * resulting partition will be disjoint. Users can also specify a 
        * minimum 'granularity' for the size of the index subspaces. Users 
-       * can specify an optional color for the index partition.
+       * can specify an optional color for the index partition. Note: for
+       * multi-dimensional cases, this implementation will currently only 
+       * split across the first dimension. This is useful for providing an
+       * initial equal partition, but is unlikely to be an ideal partition
+       * for long repetitive use. Do NOT rely on this behavior as the runtime
+       * reserves the right to change the implementation in the future.
        * @param ctx the enclosing task context
        * @param parent index space of the partition to be made
        * @param color_space space of colors to create 
