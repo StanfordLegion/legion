@@ -1965,7 +1965,8 @@ namespace Legion {
         // effectively new "atom" index spaces for Legion Spy's analysis
         const IndexSpaceID fake_space_id = 
           forest->runtime->get_unique_index_space_id();
-        LegionSpy::log_top_index_space(fake_space_id, NULL/*provenance*/);
+        LegionSpy::log_top_index_space(fake_space_id,
+            forest->runtime->address_space, NULL/*provenance*/);
         LegionSpy::log_index_space_expr(fake_space_id, this->expr_id);
         bool all_empty = true;
         for (unsigned idx = 0; idx < num_rects; idx++)

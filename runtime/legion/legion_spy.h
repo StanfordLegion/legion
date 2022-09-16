@@ -85,10 +85,11 @@ namespace Legion {
 
       // Logger calls for the shape of region trees
       static inline void log_top_index_space(IDType unique_id,
+                                             AddressSpaceID owner,
                                              const char *provenance)
       {
-        log_spy.print("Index Space " IDFMT " %s", unique_id,
-            (provenance == NULL) ? "" : provenance);
+        log_spy.print("Index Space " IDFMT " %u %s", unique_id,
+            owner, (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_index_space_name(IDType unique_id,
@@ -100,12 +101,12 @@ namespace Legion {
 
       static inline void log_index_partition(IDType parent_id, 
                 IDType unique_id, int disjoint, int complete,
-                LegionColor point, const char *provenance)
+                LegionColor point, AddressSpaceID owner, const char *provenance)
       {
         // Convert ints from -1,0,1 to 0,1,2
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %s",
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %u %s",
 		      parent_id, unique_id, disjoint+1, complete+1, point,
-                      (provenance == NULL) ? "" : provenance); 
+                      owner, (provenance == NULL) ? "" : provenance); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -115,42 +116,42 @@ namespace Legion {
 		      unique_id, name);
       }
 
-      static inline void log_index_subspace(IDType parent_id, 
-                              IDType unique_id, const DomainPoint &point)
+      static inline void log_index_subspace(IDType parent_id,
+          IDType unique_id, AddressSpaceID owner, const DomainPoint &point)
       {
 #if LEGION_MAX_DIM == 1
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long )point.point_data[0]);
 #elif LEGION_MAX_DIM == 2
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1]);
 #elif LEGION_MAX_DIM == 3
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld",
-		      parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld",
+		      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2]);
 #elif LEGION_MAX_DIM == 4
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
                       (long long)point.point_data[3]);
 #elif LEGION_MAX_DIM == 5
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
                       (long long)point.point_data[3],
                       (long long)point.point_data[4]);
 #elif LEGION_MAX_DIM == 6
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
@@ -158,8 +159,8 @@ namespace Legion {
                       (long long)point.point_data[4],
                       (long long)point.point_data[5]);
 #elif LEGION_MAX_DIM == 7
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
-                      "%lld %lld %lld %lld", parent_id, unique_id, point.dim,
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
+                      "%lld %lld %lld %lld", parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
@@ -168,9 +169,9 @@ namespace Legion {
                       (long long)point.point_data[5],
                       (long long)point.point_data[6]);
 #elif LEGION_MAX_DIM == 8
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
                       "%lld %lld %lld %lld %lld", 
-                      parent_id, unique_id, point.dim,
+                      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
@@ -180,9 +181,9 @@ namespace Legion {
                       (long long)point.point_data[6],
                       (long long)point.point_data[7]);
 #elif LEGION_MAX_DIM == 9
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %lld %lld %lld "
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %u %lld %lld %lld "
                       "%lld %lld %lld %lld %lld %lld", 
-                      parent_id, unique_id, point.dim,
+                      parent_id, unique_id, owner, point.dim,
                       (long long)point.point_data[0],
                       (long long)point.point_data[1],
                       (long long)point.point_data[2],
@@ -198,10 +199,11 @@ namespace Legion {
       }
 
       static inline void log_field_space(unsigned unique_id,
+                                         AddressSpaceID owner,
                                          const char *provenance)
       {
-        log_spy.print("Field Space %u %s", unique_id, 
-            (provenance == NULL) ? "" : provenance);
+        log_spy.print("Field Space %u %u %s", unique_id, 
+            owner, (provenance == NULL) ? "" : provenance);
       }
 
       static inline void log_field_space_name(unsigned unique_id,
@@ -230,10 +232,10 @@ namespace Legion {
 
       static inline void log_top_region(IDType index_space, 
                       unsigned field_space, unsigned tree_id,
-                      const char *provenance)
+                      AddressSpaceID owner, const char *provenance)
       {
-        log_spy.print("Region " IDFMT " %u %u %s", 
-		      index_space, field_space, tree_id,
+        log_spy.print("Region " IDFMT " %u %u %u %s", 
+		      index_space, field_space, tree_id, owner,
                       (provenance == NULL) ? "" : provenance);
       }
 

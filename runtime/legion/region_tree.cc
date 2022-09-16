@@ -267,8 +267,8 @@ namespace Legion {
                 partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
-              complete, partition_color, (provenance == NULL) ? NULL :
-              provenance->provenance.c_str());
+              complete, partition_color, runtime->address_space, 
+              (provenance == NULL) ? NULL : provenance->provenance.c_str());
       }
       else
       {
@@ -286,8 +286,8 @@ namespace Legion {
                     partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
-              complete, partition_color, (provenance == NULL) ? NULL :
-              provenance->provenance.c_str());
+              complete, partition_color, runtime->address_space,
+              (provenance == NULL) ? NULL : provenance->provenance.c_str());
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -10158,7 +10158,7 @@ namespace Legion {
                                 did, initialized, provenance, partition_ready);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
-                          result->get_domain_point_color());
+                runtime->address_space, result->get_domain_point_color());
           if (runtime->profiler != NULL)
 	    runtime->profiler->record_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
