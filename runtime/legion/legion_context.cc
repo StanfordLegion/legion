@@ -7290,31 +7290,35 @@ namespace Legion {
       std::vector<RtEvent> ready_events(vector_width);
       size_t num_ready =
         comp_queue.pop_events(&ready_events.front(), vector_width);
-#ifdef DEBUG_LEGION
-      assert(num_ready > 0);
-#endif
-      ready_events.resize(num_ready);
-      std::sort(ready_events.begin(), ready_events.end());
-      // Find the entries
-      for (typename std::list<QueueEntry<T> >::iterator it =
-            queue.begin(); it != queue.end(); /*nothing*/)
+      // Realm permits spurious wake-ups sometimes on completion queues where
+      // no events are actually ready. The number of times this can happen is
+      // bounded by the number of events that are added into the queue so we
+      // don't need to worry about indefinite starvation.
+      if (num_ready > 0)
       {
-        std::vector<RtEvent>::iterator finder = 
-          std::lower_bound(ready_events.begin(), ready_events.end(), it->ready);
-        if ((finder != ready_events.end()) && (*finder == it->ready))
+        ready_events.resize(num_ready);
+        std::sort(ready_events.begin(), ready_events.end());
+        // Find the entries
+        for (typename std::list<QueueEntry<T> >::iterator it =
+              queue.begin(); it != queue.end(); /*nothing*/)
         {
-          to_perform.push_back(it->op);
-          it = queue.erase(it);
-          ready_events.erase(finder);
-          if (ready_events.empty())
-            break;
+          std::vector<RtEvent>::iterator finder = 
+            std::lower_bound(ready_events.begin(),ready_events.end(),it->ready);
+          if ((finder != ready_events.end()) && (*finder == it->ready))
+          {
+            to_perform.push_back(it->op);
+            it = queue.erase(it);
+            ready_events.erase(finder);
+            if (ready_events.empty())
+              break;
+          }
+          else
+            it++;
         }
-        else
-          it++;
-      }
 #ifdef DEBUG_LEGION
-      assert(ready_events.empty());
+        assert(ready_events.empty());
 #endif
+      }
       if (!queue.empty())
       {
         next_ready = RtEvent(comp_queue.get_nonempty_event());
@@ -7734,32 +7738,36 @@ namespace Legion {
         else // We can just use the comp queue to get the ready events
           num_ready = post_task_comp_queue.pop_events(
             &ready_events.front(), ready_events.size());
-#ifdef DEBUG_LEGION
-        assert(num_ready > 0);
-#endif
-        // Find all the entries for all the ready events
-        for (std::list<PostTaskArgs>::iterator it = post_task_queue.begin();
-              it != post_task_queue.end(); /*nothing*/)
+        // Realm permits spurious wake-ups sometimes on completion queues where
+        // no events are actually ready. The number of times this can happen is
+        // bounded by the number of events that are added into the queue so we
+        // don't need to worry about indefinite starvation.
+        if (num_ready > 0)
         {
-          bool found = false;
-          for (unsigned idx = 0; idx < num_ready; idx++)
+          // Find all the entries for all the ready events
+          for (std::list<PostTaskArgs>::iterator it = post_task_queue.begin();
+                it != post_task_queue.end(); /*nothing*/)
           {
-            if (it->wait_on == ready_events[idx])  
+            bool found = false;
+            for (unsigned idx = 0; idx < num_ready; idx++)
             {
-              found = true;
-              break;
+              if (it->wait_on == ready_events[idx])  
+              {
+                found = true;
+                break;
+              }
             }
+            if (found)
+            {
+              to_perform.push_back(*it);
+              it = post_task_queue.erase(it);
+              // Check to see if we're done early
+              if (to_perform.size() == num_ready)
+                break;
+            }
+            else
+              it++;
           }
-          if (found)
-          {
-            to_perform.push_back(*it);
-            it = post_task_queue.erase(it);
-            // Check to see if we're done early
-            if (to_perform.size() == num_ready)
-              break;
-          }
-          else
-            it++;
         }
         if (!post_task_queue.empty())
         {
