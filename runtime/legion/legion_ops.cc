@@ -14204,8 +14204,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
-      return new FutureMapImpl(ctx, this,
-            Runtime::protect_event(get_completion_event()), launch_node,
+      return new FutureMapImpl(ctx, this, launch_node,
             runtime, runtime->get_available_distributed_id(),
             runtime->address_space);
     }

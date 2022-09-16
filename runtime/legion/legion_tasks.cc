@@ -8445,8 +8445,6 @@ namespace Legion {
         reduction_instances_ready.clear();
       }
       serdez_redop_targets.clear();
-      if (future_map_ready.exists() && !future_map_ready.has_triggered())
-        Runtime::trigger_event(future_map_ready);
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
@@ -9611,8 +9609,6 @@ namespace Legion {
           complete_effects.clear();
         }
       }
-      else if (!elide_future_return)
-        Runtime::trigger_event(future_map_ready);
 #ifdef DEBUG_LEGION
       // Should be empty at this point
       assert(complete_effects.empty());
@@ -9919,11 +9915,7 @@ namespace Legion {
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!future_map_ready.exists() || future_map_ready.has_triggered());
-#endif
-      future_map_ready = Runtime::create_rt_user_event();
-      return new FutureMapImpl(ctx, this, future_map_ready, this->launch_space,
+      return new FutureMapImpl(ctx, this, this->launch_space,
         runtime,runtime->get_available_distributed_id(),runtime->address_space);
     }
 

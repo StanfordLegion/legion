@@ -1109,7 +1109,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!future_map_ready.exists() || future_map_ready.has_triggered());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
@@ -1119,11 +1118,9 @@ namespace Legion {
       IndexSpaceNode *shard_node = 
         ((launch_space == shard_space) || !shard_space.exists()) ?
         launch_node : runtime->forest->get_node(shard_space);
-      future_map_ready = Runtime::create_rt_user_event();
       // Make a replicate future map 
-      return new ReplFutureMapImpl(repl_ctx, this, future_map_ready,
-          launch_node, shard_node, runtime, 
-          runtime->get_available_distributed_id(), runtime->address_space);
+      return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
+        runtime,runtime->get_available_distributed_id(),runtime->address_space);
     } 
 
     //--------------------------------------------------------------------------
@@ -4817,11 +4814,9 @@ namespace Legion {
       IndexSpaceNode *shard_node = 
         ((launch_space == shard_space) || !shard_space.exists()) ?
         launch_node : runtime->forest->get_node(shard_space);
-      return new ReplFutureMapImpl(repl_ctx, this, 
-          Runtime::protect_event(get_completion_event()), launch_node,
-          shard_node, runtime, runtime->get_available_distributed_id(), 
-          runtime->address_space);
-    } 
+      return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
+        runtime,runtime->get_available_distributed_id(),runtime->address_space);
+    }
 
     //--------------------------------------------------------------------------
     MapperManager* ReplMustEpochOp::invoke_mapper(void)
@@ -8721,6 +8716,8 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         semantic_attach_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        future_map_wait_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         if (runtime->program_order_execution)
           inorder_barrier = 
             ApBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -8794,6 +8791,7 @@ namespace Legion {
           attach_reduce_barrier.destroy_barrier();
           dependent_partition_barrier.destroy_barrier();
           semantic_attach_barrier.destroy_barrier();
+          future_map_wait_barrier.destroy_barrier();
           if (inorder_barrier.exists())
             inorder_barrier.destroy_barrier();
           callback_barrier.destroy_barrier();
@@ -9054,6 +9052,7 @@ namespace Legion {
           rez.serialize(attach_reduce_barrier);
           rez.serialize(dependent_partition_barrier);
           rez.serialize(semantic_attach_barrier);
+          rez.serialize(future_map_wait_barrier);
           rez.serialize(inorder_barrier);
           rez.serialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -9144,6 +9143,7 @@ namespace Legion {
         derez.deserialize(attach_reduce_barrier);
         derez.deserialize(dependent_partition_barrier);
         derez.deserialize(semantic_attach_barrier);
+        derez.deserialize(future_map_wait_barrier);
         derez.deserialize(inorder_barrier);
         derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES

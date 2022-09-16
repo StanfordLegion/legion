@@ -565,25 +565,23 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(TaskContext *ctx, Operation *op, 
-                    RtEvent ready, IndexSpaceNode *domain,
+      FutureMapImpl(TaskContext *ctx, Operation *op, IndexSpaceNode *domain,
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index, AddressSpaceID owner_space,
-                    RtEvent ready_event, bool register_now = true); // remote
+                    bool register_now = true); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
                     GenerationID gen, int depth, 
 #ifdef LEGION_SPY
                     UniqueID uid,
 #endif
-                    RtEvent ready, IndexSpaceNode *domain,
-                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
+                    IndexSpaceNode *domain, Runtime *rt, DistributedID did,
+                    AddressSpaceID owner_space);
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
-      inline RtEvent get_ready_event(void) const { return ready_event; }
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -602,7 +600,7 @@ namespace Legion {
                             const char *warning_string = NULL);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
-      bool reset_all_futures(RtEvent new_ready_event);
+      bool reset_all_futures(void);
       // Use this method to detect when we're wrapped by an argument
       // map which is mainly needed in control replication
       virtual void argument_map_wrap(void) { }
@@ -642,7 +640,6 @@ namespace Legion {
       IndexSpaceNode *const future_map_domain;
     protected:
       mutable LocalLock future_map_lock;
-      RtEvent ready_event;
       std::map<DomainPoint,Future> futures;
     };
 
@@ -722,13 +719,13 @@ namespace Legion {
         ReplFutureMapImpl *const impl;
       };
     public:
-      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, RtEvent ready, 
+      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         Runtime *rt, DistributedID did, AddressSpaceID owner);
       ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, size_t index, AddressSpaceID owner,
-                        RtEvent ready_event, bool register_now = true);
+                        bool register_now = true);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:
@@ -3835,7 +3832,7 @@ namespace Legion {
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, size_t index, IndexSpace domain,
-                          RtEvent complete, ReferenceMutator *mutator);
+                          ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   TypeTag type_tag);
     public:

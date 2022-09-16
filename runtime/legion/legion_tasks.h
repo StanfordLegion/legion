@@ -1242,7 +1242,6 @@ namespace Legion {
       unsigned mapped_points;
       unsigned complete_points;
       unsigned committed_points;
-      RtUserEvent future_map_ready;
     protected:
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;

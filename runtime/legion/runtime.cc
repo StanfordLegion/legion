@@ -438,8 +438,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-                                  0/*index*/, runtime->address_space,
-                                  RtEvent::NO_RT_EVENT, true/*reg now*/));
+              0/*index*/, runtime->address_space, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -3369,7 +3368,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, RtEvent ready,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
@@ -3379,7 +3378,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         op_uid(o->get_unique_op_id()),
 #endif
-        future_map_domain(domain), ready_event(ready)
+        future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3396,8 +3395,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, size_t index,
-                                 AddressSpaceID owner_space, RtEvent ready, 
-                                 bool register_now)
+                                 AddressSpaceID owner_space, bool register_now)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
@@ -3405,7 +3403,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         op_uid(0),
 #endif
-        future_map_domain(d), ready_event(ready)
+        future_map_domain(d)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3425,16 +3423,15 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  UniqueID uid,
 #endif
-                                 RtEvent ready, IndexSpaceNode *domain, 
-                                 Runtime *rt, DistributedID did,
-                                 AddressSpaceID owner_space)
+                                 IndexSpaceNode *domain, Runtime *rt,
+                                 DistributedID did, AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), owner_space), 
         context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
 #ifdef LEGION_SPY
         op_uid(uid),
 #endif
-        future_map_domain(domain), ready_event(ready)
+        future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3641,22 +3638,36 @@ namespace Legion {
             (warning_string == NULL) ? "" : warning_string)
       if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
-      // Wait on the event that indicates the entire task has finished
-      if (!ready_event.has_triggered())
+      std::map<DomainPoint,Future> all_futures;
+      get_all_futures(all_futures);
+      std::vector<ApEvent> ready_events;
+      ready_events.reserve(all_futures.size());
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            all_futures.begin(); it != all_futures.end(); it++)
       {
-        if (context != NULL)
+        const ApEvent ready = it->second.impl->get_ready_event();
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
+      if (!ready_events.empty())
+      {
+        const ApEvent wait_on = Runtime::merge_events(NULL, ready_events);
+        if (wait_on.exists())
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          if (context != NULL)
+          {
+            context->begin_task_wait(false/*from runtime*/);
+            wait_on.wait();
+            context->end_task_wait();
+          }
+          else
+            wait_on.wait();
         }
-        else
-          ready_event.wait();
       }
     }
 
     //--------------------------------------------------------------------------
-    bool FutureMapImpl::reset_all_futures(RtEvent new_ready_event)
+    bool FutureMapImpl::reset_all_futures(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3682,7 +3693,6 @@ namespace Legion {
     {
       rez.serialize(did);
       rez.serialize(future_map_domain->handle);
-      rez.serialize(get_ready_event());
       rez.serialize(op_ctx_index);
     }
 
@@ -3697,12 +3707,10 @@ namespace Legion {
         return NULL;
       IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
-      RtEvent ready_event;
-      derez.deserialize(ready_event);
       size_t index;
       derez.deserialize(index);
       return runtime->find_or_create_future_map(future_map_did, ctx, index,
-                                  future_map_domain, ready_event, mutator);
+                                                future_map_domain, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3712,10 +3720,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      if (!ready_event.has_triggered())
+      Domain domain;
+      future_map_domain->get_launch_space_domain(domain);
+      const size_t needed = domain.get_volume();
+      AutoLock fm_lock(future_map_lock);
+#ifdef DEBUG_LEGION
+      assert(futures.size() <= needed);
+#endif
+      if (futures.size() < needed)
       {
-        Domain domain;
-        future_map_domain->get_launch_space_domain(domain);
+        fm_lock.release();
         std::vector<RtEvent> ready_events;
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
         {
@@ -3730,8 +3744,8 @@ namespace Legion {
           if (wait_on.exists() && !wait_on.has_triggered())
             wait_on.wait();
         }
+        fm_lock.reacquire();
       }
-      AutoLock fm_lock(future_map_lock);
       others = futures;
     }
 
@@ -3748,15 +3762,11 @@ namespace Legion {
     FutureImpl* FutureMapImpl::find_shard_local_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      // Wait for all the futures to be ready
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-      // No need for the lock since the map should be fixed now
-      std::map<DomainPoint,Future>::const_iterator finder = futures.find(point);
-      if (finder != futures.end())
-        return finder->second.impl;
-      else
-        return NULL;
+#ifdef DEBUG_LEGION
+      assert(future_map_domain->contains_point(point));
+#endif
+      Future result = get_future(point, true/*internal only*/);
+      return result.impl;
     }
 
     //--------------------------------------------------------------------------
@@ -3889,8 +3899,7 @@ namespace Legion {
 #ifdef LEGION_SPY
           prev->op_uid,
 #endif
-          prev->get_ready_event(), domain,
-          prev->runtime, prev->runtime->get_available_distributed_id(),
+          domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->runtime->address_space),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
@@ -3908,8 +3917,7 @@ namespace Legion {
 #ifdef LEGION_SPY
           prev->op_uid,
 #endif
-          prev->get_ready_event(), domain,
-          prev->runtime, prev->runtime->get_available_distributed_id(),
+          domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prev->runtime->address_space),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
@@ -4145,10 +4153,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
-                                         RtEvent ready, IndexSpaceNode *domain,
+                                         IndexSpaceNode *domain,
                                          IndexSpaceNode *shard_dom, Runtime *rt, 
                                          DistributedID did,AddressSpaceID owner)
-      : FutureMapImpl(ctx, op, ready, domain, rt, did, owner),
+      : FutureMapImpl(ctx, op, domain, rt, did, owner),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -4173,8 +4181,8 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
                             IndexSpaceNode *domain, IndexSpaceNode *shard_dom,
                             DistributedID did, size_t index, 
-                            AddressSpaceID owner, RtEvent ready, bool reg)
-      : FutureMapImpl(ctx, rt, domain, did, index, owner, ready, reg),
+                            AddressSpaceID owner, bool reg)
+      : FutureMapImpl(ctx, rt, domain, did, index, owner, reg),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -4394,12 +4402,45 @@ namespace Legion {
             "performance degredation. Warning string: %s", 
             context->get_task_name(), context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      // As a proxy for this, we will get the names of all the futures
-      // needed for this future map in case we need them in the future
-      // The process of doing this will wait on both our ready event
-      // as well as on the ready events of all other shards
-      std::map<DomainPoint,Future> dummy_others;
-      get_all_futures(dummy_others);
+      if ((op != NULL) && (Internal::implicit_context != NULL))
+        Internal::implicit_context->record_blocking_call();
+      for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
+      {
+        Murmur3Hasher hasher(repl_ctx, 
+            runtime->safe_control_replication > 1, i > 0);
+        hasher.hash(
+            ReplicateContext::REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES, __func__);
+        repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
+        if (hasher.verify(__func__))
+          break;
+      }
+      std::map<DomainPoint,Future> local_futures;
+      get_shard_local_futures(local_futures);
+      std::vector<ApEvent> ready_events;
+      ready_events.reserve(local_futures.size());
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            local_futures.begin(); it != local_futures.end(); it++)
+      {
+        const ApEvent ready = it->second.impl->get_ready_event();
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
+      const ApBarrier wait_bar = repl_ctx->get_next_future_map_wait_barrier();
+      if (!ready_events.empty())
+      {
+        const ApEvent wait_on = Runtime::merge_events(NULL, ready_events);
+        Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, wait_on);
+      }
+      else
+        Runtime::phase_barrier_arrive(wait_bar, 1/*count*/);
+      if (context != NULL)
+      {
+        context->begin_task_wait(false/*from runtime*/);
+        wait_bar.wait();
+        context->end_task_wait();
+      }
+      else
+        wait_bar.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4428,51 +4469,29 @@ namespace Legion {
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      if (!ready_event.has_triggered())
+      IndexSpace local_space = sharding_function->find_shard_space(
+          local_shard, future_map_domain, shard_domain->handle);
+      IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
+      Domain domain;
+      local_points->get_launch_space_domain(domain);
+      std::vector<RtEvent> ready_events;
+      for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
-        IndexSpace local_space = sharding_function->find_shard_space(
-            local_shard, future_map_domain, shard_domain->handle);
-        IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
-        Domain domain;
-        local_points->get_launch_space_domain(domain);
-        std::vector<RtEvent> ready_events;
-        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        const ShardID shard = 
+          sharding_function->find_owner(itr.p, sharding_domain);
+        if (shard == local_shard)
         {
-          const ShardID shard = 
-            sharding_function->find_owner(itr.p, sharding_domain);
-          if (shard == local_shard)
-          {
-            RtEvent ready;
-            others[itr.p] = get_future(itr.p, true/*internal*/, &ready);
-            if (ready.exists())
-              ready_events.push_back(ready);
-          }
-        }
-        if (!ready_events.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(ready_events);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+          RtEvent ready;
+          others[itr.p] = get_future(itr.p, true/*internal*/, &ready);
+          if (ready.exists())
+            ready_events.push_back(ready);
         }
       }
-      else
+      if (!ready_events.empty())
       {
-        // This will just get all the local futures currently
-        FutureMapImpl::get_all_futures(others);
-        // Filter out any that are not part of our local set
-        for (std::map<DomainPoint,Future>::iterator it = 
-              others.begin(); it != others.end(); /*nothing*/)
-        {
-          const ShardID shard =
-            sharding_function->find_owner(it->first, sharding_domain);
-          if (shard != local_shard)
-          {
-            std::map<DomainPoint,Future>::iterator to_delete = it++;
-            others.erase(to_delete);
-          }
-          else
-            it++;
-        }
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
       }
     }
 
@@ -26583,7 +26602,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
                           TaskContext *ctx, size_t index, IndexSpace domain,
-                          RtEvent complete, ReferenceMutator *mutator)
+                          ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -26609,7 +26628,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-                      index, owner_space, complete, false/*register now */);
+                                 index, owner_space, false/*register now */);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);

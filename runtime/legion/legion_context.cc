@@ -2629,7 +2629,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          context_index, runtime->address_space, RtEvent::NO_RT_EVENT);
+          context_index, runtime->address_space);
       if (launcher.predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical = 
@@ -6466,7 +6466,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-          total_children_count++, runtime->address_space, RtEvent::NO_RT_EVENT);
+          total_children_count++, runtime->address_space);
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -6519,9 +6519,8 @@ namespace Legion {
             "does not match the volume of the domain (%zd) for the future map "
             "in task %s (UID %lld)", futures.size(), launch_node->get_volume(),
             get_task_name(), get_unique_id())
-      FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
-                            RtEvent::NO_RT_EVENT, launch_node, runtime, 
-                            did, runtime->address_space);
+      FutureMapImpl *impl = new FutureMapImpl(this, creation_op, launch_node,
+                                        runtime, did, runtime->address_space);
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
@@ -11594,6 +11593,7 @@ namespace Legion {
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
       dependent_partition_barrier = manager->get_dependent_partition_barrier();
       semantic_attach_barrier = manager->get_semantic_attach_barrier();
+      future_map_wait_barrier = manager->get_future_map_wait_barrier();
       inorder_barrier = manager->get_inorder_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
@@ -14510,8 +14510,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-                              total_children_count++, runtime->address_space,
-                              RtEvent::NO_RT_EVENT, true/*reg now*/));
+            total_children_count++, runtime->address_space, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       ShardID shard = 0;
@@ -17440,10 +17439,9 @@ namespace Legion {
       FutureMap result;
       if (collective)
       {
-        ReplFutureMapImpl *repl_impl =
-          new ReplFutureMapImpl(this, runtime, domain_node, domain_node,
-              runtime->get_available_distributed_id(), total_children_count++,
-              runtime->address_space, RtEvent::NO_RT_EVENT);
+        ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, runtime,
+            domain_node, domain_node, runtime->get_available_distributed_id(),
+            total_children_count++, runtime->address_space);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17479,9 +17477,8 @@ namespace Legion {
             "in task %s (UID %lld)", data.size(), domain_node->get_volume(),
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
-        result = FutureMap(
-            new FutureMapImpl(this, runtime, domain_node, did,
-         total_children_count++, runtime->address_space, RtEvent::NO_RT_EVENT));
+        result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
+         total_children_count++, runtime->address_space));
       }
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
@@ -17544,9 +17541,8 @@ namespace Legion {
       {
         // Make one future map for all the shards
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, creation_op,
-                            RtEvent::NO_RT_EVENT, domain_node, domain_node,
-                            runtime, runtime->get_available_distributed_id(),
-                            runtime->address_space);
+            domain_node, domain_node, runtime,
+            runtime->get_available_distributed_id(), runtime->address_space);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17584,9 +17580,8 @@ namespace Legion {
             "in task %s (UID %lld)", futures.size(), domain_node->get_volume(),
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
-        result = FutureMap(
-            new FutureMapImpl(this, creation_op, RtEvent::NO_RT_EVENT,
-                      domain_node, runtime, did, runtime->address_space));
+        result = FutureMap(new FutureMapImpl(this, creation_op, domain_node,
+                                      runtime, did, runtime->address_space));
       }
       add_to_dependence_queue(creation_op);
       result.impl->set_all_futures(futures);
@@ -20775,6 +20770,15 @@ namespace Legion {
     {
       const RtBarrier result = detach_resource_barrier;
       advance_logical_barrier(detach_resource_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::get_next_future_map_wait_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const ApBarrier result = future_map_wait_barrier;
+      advance_replicate_barrier(future_map_wait_barrier, total_shards);
       return result;
     }
 

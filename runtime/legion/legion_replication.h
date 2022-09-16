@@ -2523,6 +2523,8 @@ namespace Legion {
         { return dependent_partition_barrier; }
       inline RtBarrier get_semantic_attach_barrier(void) const
         { return semantic_attach_barrier; }
+      inline ApBarrier get_future_map_wait_barrier(void) const
+        { return future_map_wait_barrier; }
       inline ApBarrier get_inorder_barrier(void) const
         { return inorder_barrier; }
       inline RtBarrier get_callback_barrier(void) const
@@ -2710,6 +2712,7 @@ namespace Legion {
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
       RtBarrier semantic_attach_barrier;
+      ApBarrier future_map_wait_barrier;
       ApBarrier inorder_barrier;
       RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES

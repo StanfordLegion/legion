@@ -2062,6 +2062,7 @@ namespace Legion {
         REPLICATE_REDUCE_FUTURE_MAP,
         REPLICATE_CONSTRUCT_FUTURE_MAP,
         REPLICATE_FUTURE_MAP_GET_ALL_FUTURES,
+        REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES,
         REPLICATE_MAP_REGION,
         REPLICATE_REMAP_REGION,
         REPLICATE_FILL_FIELDS,
@@ -2657,6 +2658,7 @@ namespace Legion {
       RtBarrier get_next_deletion_mapping_barrier(void);
       RtBarrier get_next_deletion_execution_barrier(void);
       RtBarrier get_next_detach_resource_barrier(void);
+      ApBarrier get_next_future_map_wait_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -2776,6 +2778,7 @@ namespace Legion {
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
       RtBarrier semantic_attach_barrier;
+      ApBarrier future_map_wait_barrier;
       ApBarrier inorder_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
