@@ -1424,8 +1424,8 @@ namespace Legion {
 
     /**
      * \class ReplRefinementOp
-     * A refinement operatoin that is aware that it is being
-     * executed ina  control replication context.
+     * A refinement operation that is aware that it is being
+     * executed in a control replication context.
      */
     class ReplRefinementOp : public RefinementOp {
     public:
@@ -1440,30 +1440,18 @@ namespace Legion {
     public:
       void set_repl_refinement_info(RtBarrier mapped_barrier, 
                                     RtBarrier refinement_barrier);
-      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
-      void initialize_replicated_set(EquivalenceSet *set,
-          const FieldMask &mask, std::set<RtEvent> &applied_events) const;
-    protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
-      std::vector<ValueBroadcast<DistributedID>*> collective_dids;
-      // Note that this data structure ensures that we do things
-      // for these partitions in a order that is consistent across
-      // shards because all shards will sort the keys the same way
-      std::map<LogicalPartition,PartitionNode*> replicated_partitions;
-      // Same thing for one-off regions
-      std::map<LogicalRegion,RegionNode*> replicated_regions;
+      // Fields for regions that are shared to this node
+      FieldMaskSet<RegionNode> sharded_regions;
       // Version information objects for each of our local regions
       // that we are own after sharding non-replicated partitions
       LegionMap<RegionNode*,VersionInfo> sharded_region_version_infos;
-      // Regions for which we need to propagate refinements for
-      // non-replicated partition refinements
-      std::map<PartitionNode*,std::vector<RegionNode*> > sharded_regions;
-      // Fields for partitions that have refinement regions
-      FieldMaskSet<PartitionNode> sharded_partitions;
+      // Fields for all the partitions that we encounter
+      FieldMaskSet<PartitionNode> refinement_partitions;
     };
 
     /**
@@ -2552,6 +2540,16 @@ namespace Legion {
         { return unique_shard_spaces; }
       inline ReplicateContext* find_local_context(void) const
         { return local_shards[0]->get_shard_execution_context(); }
+      inline size_t count_local_shards(void) const 
+        { return local_shards.size(); }
+      inline unsigned find_local_index(ShardTask *task) const
+        {
+          for (unsigned idx = 0; idx < local_shards.size(); idx++)
+            if (local_shards[idx] == task)
+              return idx;
+          assert(false);
+          return 0;
+        }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);

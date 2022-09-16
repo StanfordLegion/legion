@@ -20625,24 +20625,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplicateContext::replicate_partition_equivalence_sets(
-                                                      PartitionNode *node) const
-    //--------------------------------------------------------------------------
-    {
-      // This is the heuristic that decides whether or not we should replicate
-      // or shard the equivalence sets for a partition node
-      // We'll shard as long as there are at least as many children as there
-      // are shards in some partition along the tree to this partition
-      while (node != NULL)
-      {
-        if (node->get_num_children() >= total_shards)
-          return false;
-        node = node->parent->parent;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
             const AddressSpaceID source, RtUserEvent ready_event)
@@ -20650,7 +20632,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(region->parent != NULL);
-      assert(!replicate_partition_equivalence_sets(region->parent));
 #endif
       // Determine whether we should own the equivalence set data for
       // this region node or not

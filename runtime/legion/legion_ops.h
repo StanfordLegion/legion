@@ -1987,13 +1987,16 @@ namespace Legion {
       void initialize_region(RegionNode *node, const FieldMask &mask,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
                             FieldMaskSet<PartitionNode> &refinement_partitions,
-                            std::set<RtEvent> &map_applied_conditions);
+                            std::set<RtEvent> &map_applied_conditions,
+                            VersionInfo &info, bool record_all = false);
       void initialize_partition(PartitionNode *node, const FieldMask &mask,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
                             FieldMaskSet<PartitionNode> &refinement_partitions,
-                            std::set<RtEvent> &map_applied_conditions);
+                            std::set<RtEvent> &map_applied_conditions,
+                            VersionInfo &info, bool record_all = false);
       void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
-                              std::set<RtEvent> &applied_events);
+                              std::set<RtEvent> &applied_events,
+                              VersionInfo &info, bool record_all);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

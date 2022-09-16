@@ -2642,7 +2642,6 @@ namespace Legion {
     public:
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
-      bool replicate_partition_equivalence_sets(PartitionNode *node) const;
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
           const AddressSpaceID source, RtUserEvent ready_event);

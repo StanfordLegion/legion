@@ -1536,18 +1536,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_refinement();
-      if (!collective_dids.empty())
-      {
-        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
-              collective_dids.begin(); it != collective_dids.end(); it++)
-          delete (*it);
-        collective_dids.clear();
-      }
-      replicated_regions.clear();
-      replicated_partitions.clear();
-      sharded_region_version_infos.clear();
       sharded_regions.clear();
-      sharded_partitions.clear();
+      sharded_region_version_infos.clear();
+      refinement_partitions.clear();
       runtime->free_repl_refinement_op(this);
     }
 
@@ -1565,84 +1556,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplRefinementOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapped_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Iterate through each of the partitions and see if we are going to
-      // shard them or not when making equivalence sets, we always duplicate
-      // the creation of equivalence sets for intermediate regions
-      // Anything that is projected and therefore sharded is not duplicated
-      size_t total_replicate_subregions = 0;
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            make_from.begin(); it != make_from.end(); it++)
-      {
-        // Check to see first if we are not projecting for any fields
-        if (!projections.empty() && 
-            (projections.find(it->first) != projections.end()) &&
-            (it->second == projections[it->first].get_valid_mask()))
-          continue;
-        if (!it->first->is_region())
-        {
-          PartitionNode *part_node = it->first->as_partition_node();
-          if (repl_ctx->replicate_partition_equivalence_sets(part_node))
-          {
-            replicated_partitions[part_node->handle] = part_node;
-            total_replicate_subregions += part_node->get_num_children();
-          }
-        }
-        else
-        {
-          RegionNode *region = it->first->as_region_node();
-          replicated_regions[region->handle] = region;
-          total_replicate_subregions++;
-        }
-      }
-      if (total_replicate_subregions > 0)
-      {
-        // Create collective dids for all subregions of the replicate partitions
-        collective_dids.resize(total_replicate_subregions);
-        for (unsigned idx = 0; idx < total_replicate_subregions; idx++)
-        {
-          const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
-          const CollectiveID collective_id = 
-            repl_ctx->get_next_collective_index(COLLECTIVE_LOC_21,
-                                                true/*logical*/);
-          collective_dids[idx] =
-            new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
-          if (collective_dids[idx]->is_origin())
-          {
-            const DistributedID did = runtime->get_available_distributed_id();
-            collective_dids[idx]->broadcast(did);
-          }
-        }
-      }
-      // Do the base call at this point
-      RefinementOp::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplRefinementOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;      
-      const ContextID ctx = parent_ctx->get_context().get_id();
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      FieldMask replicated_mask;
       const AddressSpaceID local_space = runtime->address_space;
-      // Fill in the sharded_regions and sharded_partitions
-      // data structures, we'll use those to compute the equivalence sets
+      const CollectiveMapping &mapping = 
+        repl_ctx->shard_manager->get_collective_mapping(); 
+      const size_t local_shards = repl_ctx->shard_manager->count_local_shards();
+      const unsigned local_index = 
+        repl_ctx->shard_manager->find_local_index(repl_ctx->owner_shard);
+      // Fill in the sharded_regions data structure,
+      // we'll use those to compute the equivalence sets
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
@@ -1663,42 +1593,86 @@ namespace Legion {
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
             {
-              PartitionNode *parent = (*rit)->parent;
-              std::vector<RegionNode*> &children = sharded_regions[parent];
-              if (children.size() < parent->get_num_children())
-              {
-                bool found = false;
-                for (unsigned idx = 0; idx < children.size(); idx++)
-                {
-                  if ((*rit) != children[idx])
-                    continue;
-                  found = true;
-                  break;
-                }
-                if (!found)
-                  children.push_back(*rit);
-              }
-              sharded_partitions.insert(parent, sit->second);
+              sharded_regions.insert(*rit, sit->second);
+              refinement_partitions.insert((*rit)->parent, sit->second);
             }
           }
           version_mask -= finder->second.get_valid_mask();
           if (!version_mask)
             continue;
         }
-        if (!it->first->is_region() &&
-            (replicated_partitions.find(it->first->as_partition_node()->handle) 
-             == replicated_partitions.end()))
+        if (it->first->is_region())
         {
-          // Only compute equivalence sets for the subregions that
-          // are sharded to this particular shard
-          PartitionNode *part_node = it->first->as_partition_node();
-          IndexPartNode *index_part = part_node->row_source;
-          std::vector<RegionNode*> &children = sharded_regions[part_node];
-          sharded_partitions.insert(part_node, version_mask);
-          // This is probably too conservative a check, but it is sound
-          if (children.size() < index_part->get_num_children())
+          // Region case: see if we are responsible for this region
+          // First see if there is an shard on the owner node for the region
+          RegionNode *region_node = it->first->as_region_node();
+          refinement_partitions.insert(region_node->parent, version_mask);
+          const AddressSpaceID owner_space = region_node->owner_space;
+          const AddressSpaceID shard_space = !mapping.contains(owner_space) ?
+            mapping.find_nearest(owner_space) : owner_space;
+          if (runtime->address_space == shard_space)
           {
-            const size_t max_check = children.size();
+            // Distribute across the shards based on the index space id
+            const unsigned shard_index = 
+              region_node->handle.get_index_space().get_id() % local_shards;
+            if (shard_index == local_index)
+              sharded_regions.insert(region_node, version_mask);
+          }
+        }
+        else
+        {
+          // Partition case: only compute equivalence sets for the 
+          // subregions that are sharded to this particular shard
+          PartitionNode *part_node = it->first->as_partition_node();
+          refinement_partitions.insert(part_node, version_mask);
+          IndexPartNode *index_part = part_node->row_source;
+          // There are two ways that we shard partitions:
+          // If the partition has at least half as many subregions as 
+          // there are shards, then we can shard its subregions
+          // Otherwise, we assign the partition to a shard the same 
+          // as we would do with a region and that shard handles
+          // making the pending equivalence sets for all the subregions
+          if ((2*index_part->get_num_children()) < repl_ctx->total_shards)
+          {
+            // Too few subregions to shard them so assign partition to a shard
+            const AddressSpaceID owner_space = index_part->owner_space;
+            const AddressSpaceID shard_space = !mapping.contains(owner_space) ?
+              mapping.find_nearest(owner_space) : owner_space;
+            if (runtime->address_space == shard_space)
+            {
+              // Distribute across the shards based on the index partition id
+              const unsigned shard_index = 
+                index_part->handle.get_id() % local_shards;
+              if (shard_index == local_index)
+              {
+                if (index_part->total_children == 
+                    index_part->max_linearized_color)
+                {
+                  for (LegionColor color = 0;
+                        color < index_part->total_children; color++)
+                  {
+                    RegionNode *child = part_node->get_child(color);
+                    sharded_regions.insert(child, version_mask);
+                  }
+                }
+                else
+                {
+                  ColorSpaceIterator *itr = 
+                    index_part->color_space->create_color_space_iterator();
+                  while (itr->is_valid())
+                  {
+                    RegionNode *child = 
+                      part_node->get_child(itr->yield_color());
+                    sharded_regions.insert(child, version_mask);
+                  }
+                  delete itr;
+                }
+              }
+            }
+          }
+          else
+          {
+            // Enough subregions to shard them across all the shards
             if (index_part->total_children == index_part->max_linearized_color)
             {
               for (LegionColor color = repl_ctx->owner_shard->shard_id; 
@@ -1706,16 +1680,7 @@ namespace Legion {
                     color += repl_ctx->total_shards)
               {
                 RegionNode *child = part_node->get_child(color);
-                bool found = false;
-                for (unsigned idx = 0; idx < max_check; idx++)
-                {
-                  if (children[idx] != child)
-                      continue;
-                  found = true;
-                  break;
-                }
-                if (!found)
-                  children.push_back(child);
+                sharded_regions.insert(child, version_mask);
               }
             }
             else
@@ -1733,16 +1698,7 @@ namespace Legion {
               while (itr->is_valid())
               {
                 RegionNode *child = part_node->get_child(itr->yield_color());
-                bool found = false;
-                for (unsigned idx = 0; idx < max_check; idx++)
-                {
-                  if (children[idx] != child)
-                    continue;
-                  found = true;
-                  break;
-                }
-                if (!found)
-                  children.push_back(child);
+                sharded_regions.insert(child, version_mask);
                 // Skip ahead to the next color
                 for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
                 {
@@ -1755,45 +1711,32 @@ namespace Legion {
             }
           }
         }
-        else // we can compute versions from the root to_refine
-          replicated_mask |= version_mask;
       }
-      // At this point we know which regions we need equivalence sets for
-      // Start with the root ones which we'll put in the normal version_info
-      if (!!replicated_mask)
-      {
-        if (!!uninitialized_fields)
-          replicated_mask -= uninitialized_fields;
-        if (!!replicated_mask)
-          to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                      replicated_mask, unique_op_id, local_space, ready_events);
-      }
+      // Compute the versioning information for each of our sharded regions
+      std::set<RtEvent> ready_events;      
+      const ContextID ctx = parent_ctx->get_context().get_id();
       // Now compute the shard specific ones
-      for (FieldMaskSet<PartitionNode>::const_iterator pit =
-            sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
+      if (!!uninitialized_fields)
       {
-        const std::vector<RegionNode*> &children = sharded_regions[pit->first];
-        if (!!uninitialized_fields)
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              sharded_regions.begin(); it != sharded_regions.end(); it++)
         {
-          const FieldMask request_mask = pit->second - uninitialized_fields;
-          for (std::vector<RegionNode*>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-          {
-            VersionInfo &region_info = sharded_region_version_infos[*it];
-            if (!!request_mask)
-              (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
-                  request_mask, unique_op_id, local_space, ready_events);
-          }
+          // Make sure we always put an entry in the data structure here
+          VersionInfo &region_info = sharded_region_version_infos[it->first];
+          const FieldMask request_mask = it->second - uninitialized_fields;
+          if (!!request_mask)
+            it->first->perform_versioning_analysis(ctx, parent_ctx,&region_info,
+                request_mask, unique_op_id, local_space, ready_events);
         }
-        else
+      }
+      else
+      {
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              sharded_regions.begin(); it != sharded_regions.end(); it++)
         {
-          for (std::vector<RegionNode*>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-          {
-            VersionInfo &region_info = sharded_region_version_infos[*it];
-            (*it)->perform_versioning_analysis(ctx, parent_ctx, &region_info,
-                pit->second, unique_op_id, local_space, ready_events);
-          }
+          VersionInfo &region_info = sharded_region_version_infos[it->first];
+          it->first->perform_versioning_analysis(ctx, parent_ctx, &region_info,
+              it->second, unique_op_id, local_space, ready_events);
         }
       }
 #ifdef DEBUG_LEGION
@@ -1802,30 +1745,11 @@ namespace Legion {
       // Make sure that everyone is done computing their equivalence sets
       // from the previous set before we allow anyone to do any invalidations
       if (!ready_events.empty())
-      {
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
             Runtime::merge_events(ready_events));
-        ready_events.clear();
-      }
       else
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
-      ready_events.insert(refinement_barrier);
-      if (!collective_dids.empty())
-      {
-        for (std::vector<ValueBroadcast<DistributedID>*>::const_iterator it =
-              collective_dids.begin(); it != collective_dids.end(); it++)
-        {
-          if ((*it)->is_origin())
-            continue;
-          RtEvent ready_event = (*it)->perform_collective_wait(false/*block*/);
-          if (ready_event.exists() && !ready_event.has_triggered())
-            ready_events.insert(ready_event);
-        }
-      }
-      if (!ready_events.empty())
-        enqueue_ready_operation(Runtime::merge_events(ready_events));
-      else
-        enqueue_ready_operation();
+      enqueue_ready_operation(refinement_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -1836,7 +1760,6 @@ namespace Legion {
       assert(mapped_barrier.exists());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
-      assert(replicated_partitions.size() <= make_from.size());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -1844,29 +1767,12 @@ namespace Legion {
       // First we go through and make the pending refinements for any regions
       // which are sharded to us so that we can add valid references before we
       // invalidate the old refinements
-      if (!sharded_region_version_infos.empty())
-      {
-        for (FieldMaskSet<PartitionNode>::const_iterator pit =
-             sharded_partitions.begin(); pit != sharded_partitions.end(); pit++)
-        {
-          const std::vector<RegionNode*> &children = 
-            sharded_regions[pit->first];
-          for (std::vector<RegionNode*>::const_iterator rit =
-                children.begin(); rit != children.end(); rit++)
-          {
-            LegionMap<RegionNode*,VersionInfo>::iterator finder =
-              sharded_region_version_infos.find(*rit);
-#ifdef DEBUG_LEGION
-            assert(finder != sharded_region_version_infos.end());
-#endif
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
-            pending->record_all(finder->second, map_applied_conditions);
-            // Context takes ownership at this point
-            parent_ctx->record_pending_disjoint_complete_set(pending, 
-                                                             pit->second);
-          }
-        }
-      }
+      std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
+      for (FieldMaskSet<RegionNode>::const_iterator it = 
+            sharded_regions.begin(); it != sharded_regions.end(); it++)
+        initialize_region(it->first, it->second, refinement_regions,
+            refinement_partitions, map_applied_conditions, 
+            sharded_region_version_infos[it->first], true/*record all*/);
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -1881,11 +1787,13 @@ namespace Legion {
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
             false/*self*/, *repl_ctx, map_applied_conditions, to_release);
-      // First propagate the refinements for the sharded regions and partitions
+      // Propagate the refinements for the sharded regions and partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
-            sharded_partitions.begin(); it != sharded_partitions.end(); it++)
+            refinement_partitions.begin(); it != 
+            refinement_partitions.end(); it++)
       {
-        const std::vector<RegionNode*> &children = sharded_regions[it->first];
+        const std::vector<RegionNode*> &children = 
+          refinement_regions[it->first];
         if (children.empty())
         {
           // Still propagate the refinement so we can do lookups
@@ -1904,108 +1812,6 @@ namespace Legion {
         it->first->propagate_refinement(ctx, children, it->second, 
                                         map_applied_conditions);
       }
-      // Now we do the replicated partitions and regions
-      if (!replicated_partitions.empty() || !replicated_regions.empty())
-      {
-        unsigned did_index = 0;
-        // Now make the replicated partitions
-        for (std::map<LogicalPartition,PartitionNode*>::const_iterator it =
-              replicated_partitions.begin(); it != 
-              replicated_partitions.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(did_index < collective_dids.size());
-#endif
-          IndexPartNode *index_part = it->second->row_source;
-          FieldMask mask = make_from[it->second];
-          // Prune out any projection fields for this node
-          LegionMap<RegionTreeNode*,
-            FieldMaskSet<RefProjectionSummary> >::const_iterator
-              finder = projections.find(it->second);
-          if (finder != projections.end())
-            mask -= finder->second.get_valid_mask();
-#ifdef DEBUG_LEGION
-          assert(!!mask);
-#endif
-          // Iterate over each child and make an equivalence set  
-          if (index_part->total_children == index_part->max_linearized_color)
-          {
-            for (LegionColor color = 0; 
-                  color < index_part->total_children; color++)
-            {
-              RegionNode *child = it->second->get_child(color);
-              bool first = false;
-              const DistributedID did = 
-                collective_dids[did_index++]->get_value(false/*block*/);
-              EquivalenceSet *set = 
-                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                      child, mask, did, first);
-              if (first)
-                initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, map_applied_conditions);
-              // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_valid_ref(CONTEXT_REF))
-                assert(false); // should never actually hit this
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr = 
-              index_part->color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor color = itr->yield_color();
-              RegionNode *child = it->second->get_child(color);
-              bool first = false;
-              const DistributedID did = 
-                collective_dids[did_index++]->get_value(false/*block*/);
-              EquivalenceSet *set = 
-                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                      child, mask, did, first);
-              if (first)
-                initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, map_applied_conditions);
-              // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_valid_ref(CONTEXT_REF))
-                assert(false); // should never actually hit this
-            }
-            delete itr;
-          }
-        }
-        for (std::map<LogicalRegion,RegionNode*>::const_iterator it =
-              replicated_regions.begin(); it != replicated_regions.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(did_index < collective_dids.size());
-#endif
-          bool first = false;
-          const DistributedID did = 
-            collective_dids[did_index++]->get_value(false/*block*/);
-          FieldMask mask = make_from[it->second];
-          // Prune out any projection fields for this node
-          LegionMap<RegionTreeNode*,
-            FieldMaskSet<RefProjectionSummary> >::const_iterator
-              finder = projections.find(it->second);
-          if (finder != projections.end())
-            mask -= finder->second.get_valid_mask();
-#ifdef DEBUG_LEGION
-          assert(!!mask);
-#endif
-          EquivalenceSet *set = 
-            repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                        it->second, mask, did, first);
-          if (first)
-            initialize_replicated_set(set, mask, map_applied_conditions);
-          it->second->record_refinement(ctx, set, mask, 
-                                        map_applied_conditions);
-          // Remove the CONTEXT_REF on the set now that it is registered
-          if (set->remove_base_valid_ref(CONTEXT_REF))
-            assert(false); // should never actually hit this
-        }
-#ifdef DEBUG_LEGION
-        assert(did_index == collective_dids.size());
-#endif
-      }
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));
@@ -2013,31 +1819,6 @@ namespace Legion {
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
       complete_mapping(mapped_barrier);
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplRefinementOp::initialize_replicated_set(EquivalenceSet *set,
-                 const FieldMask &mask, std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      const FieldMaskSet<EquivalenceSet> &previous_sets = 
-        version_info.get_equivalence_sets();
-      // Import state into this equivalence set
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            previous_sets.begin(); it != previous_sets.end(); it++)
-      {
-        // See if the fields overlap first
-        const FieldMask overlap = it->second & mask;
-        if (!overlap)
-          continue;
-        IndexSpaceExpression *overlap_expr = 
-          runtime->forest->intersect_index_spaces(set->set_expr,
-                            it->first->region_node->row_source);
-        if (overlap_expr->is_empty())
-          continue;
-        set->clone_from(runtime->address_space, it->first, mask,
-                      false/*forward to owner*/, applied_events);
-      }
     }
 
     /////////////////////////////////////////////////////////////

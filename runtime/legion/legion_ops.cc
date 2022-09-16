@@ -10855,25 +10855,29 @@ namespace Legion {
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
               initialize_region(*rit, sit->second, refinement_regions,
-                                refinement_partitions, map_applied_conditions);
+                  refinement_partitions, map_applied_conditions, version_info);
           }
           const FieldMask remaining = it->second - summaries.get_valid_mask();
           if (!!remaining)
           {
             if (it->first->is_region())
               initialize_region(it->first->as_region_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+                  refinement_regions, refinement_partitions,
+                  map_applied_conditions, version_info);
             else
               initialize_partition(it->first->as_partition_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+               refinement_regions, refinement_partitions,
+               map_applied_conditions, version_info);
           }
         }
         else if (it->first->is_region())
           initialize_region(it->first->as_region_node(), it->second,
-             refinement_regions, refinement_partitions, map_applied_conditions);
+              refinement_regions, refinement_partitions,
+              map_applied_conditions, version_info);
         else
           initialize_partition(it->first->as_partition_node(), it->second,
-             refinement_regions, refinement_partitions, map_applied_conditions);
+             refinement_regions, refinement_partitions,
+             map_applied_conditions, version_info);
       }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -10910,14 +10914,15 @@ namespace Legion {
     void RefinementOp::initialize_region(RegionNode *node,const FieldMask &mask, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
-         std::set<RtEvent> &map_applied_conditions)
+         std::set<RtEvent> &map_applied_conditions, 
+         VersionInfo &info, bool record_all)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(node->parent != NULL); // should always have a parent
 #endif
       PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
-      initialize_pending(pending, mask, map_applied_conditions);
+      initialize_pending(pending, mask, map_applied_conditions,info,record_all);
       // Parent context takes ownership here
       parent_ctx->record_pending_disjoint_complete_set(pending, mask);
       std::vector<RegionNode*> &children = refinement_regions[node->parent];
@@ -10944,7 +10949,8 @@ namespace Legion {
          const FieldMask &mask, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
-         std::set<RtEvent> &map_applied_conditions)
+         std::set<RtEvent> &map_applied_conditions,
+         VersionInfo &info, bool record_all)
     //--------------------------------------------------------------------------
     {
       // Make pending refinements for each of the child regions and
@@ -10963,7 +10969,8 @@ namespace Legion {
         {
           RegionNode *child = node->get_child(color);
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-          initialize_pending(pending, mask, map_applied_conditions);
+          initialize_pending(pending, mask, map_applied_conditions, 
+                             info, record_all);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
@@ -10990,7 +10997,8 @@ namespace Legion {
           const LegionColor color = itr->yield_color();
           RegionNode *child = node->get_child(color);
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-          initialize_pending(pending, mask, map_applied_conditions);
+          initialize_pending(pending, mask, map_applied_conditions,
+                             info, record_all);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
@@ -11014,33 +11022,39 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_pending(PendingEquivalenceSet *pending,
-                   const FieldMask &set_mask, std::set<RtEvent> &applied_events)
+                   const FieldMask &set_mask, std::set<RtEvent> &applied_events,
+                   VersionInfo &info, bool record_all)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *child_expr = pending->region_node->row_source;
-      const FieldMaskSet<EquivalenceSet> &previous_sets = 
-        version_info.get_equivalence_sets();
-      if (!previous_sets.empty() && !child_expr->is_empty())
+      if (!record_all)
       {
-        // Import state into this equivalence set
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              previous_sets.begin(); it != previous_sets.end(); it++)
+        IndexSpaceNode *child_expr = pending->region_node->row_source;
+        const FieldMaskSet<EquivalenceSet> &previous_sets = 
+          info.get_equivalence_sets();
+        if (!previous_sets.empty() && !child_expr->is_empty())
         {
-          // See if the fields overlap first
-          const FieldMask overlap = it->second & set_mask;
-          if (!overlap)
-            continue;
-          if (child_expr != it->first->region_node->row_source)
+          // Import state into this equivalence set
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                previous_sets.begin(); it != previous_sets.end(); it++)
           {
-            IndexSpaceExpression *overlap_expr =
-              runtime->forest->intersect_index_spaces(child_expr,
-                            it->first->region_node->row_source);
-            if (overlap_expr->is_empty())
+            // See if the fields overlap first
+            const FieldMask overlap = it->second & set_mask;
+            if (!overlap)
               continue;
+            if (child_expr != it->first->region_node->row_source)
+            {
+              IndexSpaceExpression *overlap_expr =
+                runtime->forest->intersect_index_spaces(child_expr,
+                              it->first->region_node->row_source);
+              if (overlap_expr->is_empty())
+                continue;
+            }
+            pending->record_previous(it->first, overlap, applied_events);
           }
-          pending->record_previous(it->first, overlap, applied_events);
         }
       }
+      else
+        pending->record_all(info, applied_events);
     }
 
     //--------------------------------------------------------------------------
