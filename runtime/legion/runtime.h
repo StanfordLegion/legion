@@ -569,7 +569,7 @@ namespace Legion {
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index, AddressSpaceID owner_space,
-                    bool register_now = true); // remote
+                    ApEvent completion, bool register_now = true); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
                     GenerationID gen, int depth, 
 #ifdef LEGION_SPY
@@ -638,6 +638,7 @@ namespace Legion {
       const UniqueID op_uid;
 #endif
       IndexSpaceNode *const future_map_domain;
+      const ApEvent completion_event;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,Future> futures;
@@ -725,7 +726,7 @@ namespace Legion {
       ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, size_t index, AddressSpaceID owner,
-                        bool register_now = true);
+                        ApEvent completion, bool register_now = true);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:
@@ -3832,7 +3833,7 @@ namespace Legion {
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, size_t index, IndexSpace domain,
-                          ReferenceMutator *mutator);
+                          ApEvent completion, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   TypeTag type_tag);
     public:

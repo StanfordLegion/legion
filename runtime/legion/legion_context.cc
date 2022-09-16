@@ -2629,7 +2629,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          context_index, runtime->address_space);
+          context_index, runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical = 
@@ -6466,7 +6466,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-          total_children_count++, runtime->address_space);
+          total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT);
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -14510,7 +14510,8 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            total_children_count++, runtime->address_space, true/*reg now*/));
+            total_children_count++, runtime->address_space, 
+            ApEvent::NO_AP_EVENT, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       ShardID shard = 0;
@@ -17440,8 +17441,8 @@ namespace Legion {
       if (collective)
       {
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, runtime,
-            domain_node, domain_node, runtime->get_available_distributed_id(),
-            total_children_count++, runtime->address_space);
+          domain_node, domain_node, runtime->get_available_distributed_id(),
+          total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17478,7 +17479,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-         total_children_count++, runtime->address_space));
+         total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT));
       }
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
