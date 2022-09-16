@@ -3762,7 +3762,9 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-      get_all_futures(others);
+      // This is only called on this kind of future map when we know we
+      // already have all the futures so there's no need to wait or lock
+      others = futures;
     }
 
     //--------------------------------------------------------------------------
