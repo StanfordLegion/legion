@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpaceID, Inst,
     Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
-    ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    ProcKind, ProcPoint, State, TimePoint, Timestamp, Operation,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -67,14 +67,17 @@ struct DataRecord<'a> {
     children: &'a str,
     parents: &'a str,
     prof_uid: u64,
+    op_id: Option<u64>,
 }
 
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
     op_id: u64,
+    parent_id: u64,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
+    provenance: Option<&'a str>,
 }
 
 #[derive(Serialize, Copy, Clone)]
@@ -201,7 +204,10 @@ impl Proc {
         let color = format!("#{:06x}", color);
 
         let initiation = match point.entry {
-            ProcEntry::Task(_) => None,
+            ProcEntry::Task(op_id) => {
+                let op = state.operations.get(&op_id);
+                Some(op.unwrap().parent_id.0)
+            }
             ProcEntry::MetaTask(op_id, variant_id, idx) => {
                 let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
                 Some(task.deps.op_id.0)
@@ -216,6 +222,19 @@ impl Proc {
             }
             ProcEntry::RuntimeCall(_) => None,
             ProcEntry::ProfTask(_) => None,
+        };
+
+        let op_id = match point.entry {
+            ProcEntry::Task(op_id) => {
+                let task = &self.tasks.get(&op_id).unwrap();
+                Some(task.op_id.0)
+            }
+            ProcEntry::MetaTask(op_id, variant_id, idx) => None,
+            ProcEntry::MapperCall(idx) => None,
+            ProcEntry::RuntimeCall(_) => None,
+            ProcEntry::ProfTask(idx) => {
+                Some(self.prof_tasks[idx].op_id.0)
+            }
         };
 
         let level = self.max_levels + 1 - base.level.unwrap();
@@ -236,6 +255,7 @@ impl Proc {
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
+            op_id: op_id,
         };
 
         let mut start = time_range.start.unwrap();
@@ -484,6 +504,7 @@ impl Chan {
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
+            op_id: None,
         })?;
 
         Ok(())
@@ -832,6 +853,7 @@ impl Mem {
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
+            op_id: None,
         })?;
 
         Ok(())
@@ -1516,6 +1538,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
+            let parent_id = op.parent_id;
+            let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
                 let proc_record = proc_records.get(&proc_id).unwrap();
@@ -1539,9 +1563,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
+                    provenance: provenance,
                 })?;
             } else if let Some(task) = state.multi_tasks.get(&op_id) {
                 let task_name = state
@@ -1554,20 +1580,25 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
+                    provenance: provenance,
                 })?;
             } else {
                 let desc = op.kind.and_then(|k| state.op_kinds.get(&k)).map_or_else(
                     || format!("Operation <{}>", op_id.0),
                     |k| format!("{} Operation <{}>", k.name, op_id.0),
                 );
+
                 file.serialize(OpRecord {
                     op_id: op_id.0,
+                    parent_id: parent_id.0,
                     desc: &desc,
                     proc: None,
                     level: None,
+                    provenance: provenance,
                 })?;
             }
         }

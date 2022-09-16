@@ -223,16 +223,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(const Domain &bounds, 
-                                               TypeTag type_tag)
+                                       TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(bounds, type_tag); 
+      return create_index_space_internal(bounds, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(
-                                         const std::vector<DomainPoint> &points)
+                 const std::vector<DomainPoint> &points, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -249,7 +249,7 @@ namespace Legion {
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
             return create_index_space_internal(bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -260,7 +260,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects)
+    IndexSpace TaskContext::create_index_space(const std::vector<Domain> &rects,
+                                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -276,7 +277,7 @@ namespace Legion {
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
             return create_index_space_internal(bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -288,7 +289,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space_internal(const Domain &bounds,
-                                                        TypeTag type_tag)
+                                             TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle(runtime->get_unique_index_space_id(),
@@ -299,8 +300,12 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-      runtime->forest->create_index_space(handle, &bounds, did); 
+        LegionSpy::log_top_index_space(handle.id, runtime->address_space, prov);
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
+      // Will take ownership of provenance if not NULL
+      runtime->forest->create_index_space(handle, &bounds, did, provenance); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -332,7 +337,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::union_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (spaces.empty())
@@ -355,16 +360,17 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_union_space(handle, did, spaces);
+      runtime->forest->create_union_space(handle, did, provenance, spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(),
+                    runtime->address_space, provenance);
       return handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::intersect_index_spaces(
-                                          const std::vector<IndexSpace> &spaces)
+                  const std::vector<IndexSpace> &spaces, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (spaces.empty())
@@ -387,16 +393,17 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), spaces[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_intersection_space(handle, did, spaces);
+      runtime->forest->create_intersection_space(handle,did,provenance,spaces);
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(),
+                    runtime->address_space, provenance);
       return handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace TaskContext::subtract_index_spaces(
-                                              IndexSpace left, IndexSpace right)
+                      IndexSpace left, IndexSpace right, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -410,10 +417,12 @@ namespace Legion {
       const IndexSpace handle(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), left.get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_difference_space(handle, did, left, right);
+      runtime->forest->create_difference_space(handle, did, provenance,
+                                               left, right); 
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.get_id());
+        LegionSpy::log_top_index_space(handle.get_id(),
+                    runtime->address_space, provenance);
       return handle;
     }
 
@@ -435,7 +444,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(void)
+    FieldSpace TaskContext::create_field_space(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -446,9 +455,9 @@ namespace Legion {
                       space.id, get_task_name(), get_unique_id());
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id);
+        LegionSpy::log_field_space(space.id, runtime->address_space,provenance);
 
-      runtime->forest->create_field_space(space, did);
+      runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
       return space;
     }
@@ -457,7 +466,8 @@ namespace Legion {
     FieldSpace TaskContext::create_field_space(
                                          const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -468,9 +478,10 @@ namespace Legion {
                       space.id, get_task_name(), get_unique_id());
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_space(space.id);
+        LegionSpy::log_field_space(space.id, runtime->address_space,provenance);
 
-      FieldSpaceNode *node = runtime->forest->create_field_space(space, did);
+      FieldSpaceNode *node =
+        runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
@@ -487,10 +498,10 @@ namespace Legion {
             get_unique_id(), resulting_fields[idx])
 #endif
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, 
-                                        resulting_fields[idx], sizes[idx]);
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+                                        sizes[idx], provenance);
       }
-      node->initialize_fields(sizes, resulting_fields, serdez_id);
+      node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
       return space;
     }
@@ -560,7 +571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID TaskContext::allocate_field(FieldSpace space, size_t field_size,
                                         FieldID fid, bool local,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -574,14 +586,15 @@ namespace Legion {
           "bound set in legion_config.h", get_task_name(), get_unique_id(), fid)
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_field_creation(space.id, fid, field_size);
+        LegionSpy::log_field_creation(space.id, fid, field_size, provenance);
 
       std::set<RtEvent> done_events;
       if (local)
         allocate_local_field(space, field_size, fid, 
-                             serdez_id, done_events);
+                             serdez_id, done_events, provenance);
       else
-        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
+        runtime->forest->allocate_field(space, field_size, fid,
+                                        serdez_id, provenance);
       register_field_creation(space, fid, local);
       if (!done_events.empty())
       {
@@ -595,7 +608,8 @@ namespace Legion {
     void TaskContext::allocate_fields(FieldSpace space,
                                       const std::vector<size_t> &sizes,
                                       std::vector<FieldID> &resulting_fields,
-                                      bool local, CustomSerdezID serdez_id)
+                                      bool local, CustomSerdezID serdez_id,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -614,16 +628,16 @@ namespace Legion {
             get_unique_id(), resulting_fields[idx])
 #endif
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, 
-                                        resulting_fields[idx], sizes[idx]);
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx],
+                                        sizes[idx], provenance);
       }
       std::set<RtEvent> done_events;
       if (local)
         allocate_local_fields(space, sizes, resulting_fields,
-                              serdez_id, done_events);
+                              serdez_id, done_events, provenance);
       else
-        runtime->forest->allocate_fields(space, sizes, 
-                                         resulting_fields, serdez_id);
+        runtime->forest->allocate_fields(space, sizes, resulting_fields,
+                                         serdez_id, provenance);
       register_all_field_creations(space, local, resulting_fields);
       if (!done_events.empty())
       {
@@ -633,10 +647,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion TaskContext::create_logical_region(RegionTreeForest *forest,
-                                                     IndexSpace index_space,
+    LogicalRegion TaskContext::create_logical_region(IndexSpace index_space,
                                                      FieldSpace field_space,
-                                                     bool task_local)
+                                                     bool task_local,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -649,10 +663,11 @@ namespace Legion {
                        index_space.id, field_space.id, tid);
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+        LegionSpy::log_top_region(index_space.id, field_space.id,
+                                  tid, runtime->address_space, provenance);
 
       const DistributedID did = runtime->get_available_distributed_id(); 
-      forest->create_logical_region(region, did);
+      runtime->forest->create_logical_region(region, did, provenance);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;
@@ -866,52 +881,62 @@ namespace Legion {
     {
       if (!deleted_regions.empty())
       {
-        for (std::vector<LogicalRegion>::const_iterator it = 
+        for (std::vector<DeletedRegion>::const_iterator it = 
               deleted_regions.begin(); it != deleted_regions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed for region (%x,%x,%x) "
-              "in task tree rooted by %s", it->index_space.id, 
-              it->field_space.id, it->tree_id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", 
+              it->region.index_space.id, it->region.field_space.id, 
+              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
       {
-        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it =
+        for (std::vector<DeletedField>::const_iterator it =
               deleted_fields.begin(); it != deleted_fields.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field %d of "
-              "field space %x in task tree rooted by %s", it->second, 
-              it->first.id, get_task_name())
+              "field space %x in task tree rooted by %s (provenance %s)", 
+              it->fid, it->space.id, get_task_name(), 
+              (it->provenance != NULL) ? it->provenance->provenance.c_str() :
+              "unknown")
         deleted_fields.clear();
       }
       if (!deleted_field_spaces.empty())
       {
-        for (std::vector<FieldSpace>::const_iterator it = 
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
               deleted_field_spaces.begin(); it != 
               deleted_field_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field space %x "
-              "in task tree rooted by %s", it->id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
       {
-        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it =
+        for (std::vector<DeletedIndexSpace>::const_iterator it =
               deleted_index_spaces.begin(); it != 
               deleted_index_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index space %x "
-              "in task tree rooted by %s", it->first.id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->space.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
       {
-        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it =
+        for (std::vector<DeletedPartition>::const_iterator it =
               deleted_index_partitions.begin(); it !=
               deleted_index_partitions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index partition %x "
-              "in task tree rooted by %s", it->first.id, get_task_name())
+              "in task tree rooted by %s (provenance %s)", it->partition.id,
+              get_task_name(), (it->provenance != NULL) ?
+              it->provenance->provenance.c_str() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -2002,7 +2027,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::remap_unmapped_regions(LegionTrace *trace,
-                            const std::vector<PhysicalRegion> &unmapped_regions)
+                            const std::vector<PhysicalRegion> &unmapped_regions,
+                            const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2026,7 +2052,7 @@ namespace Legion {
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
-        const ApEvent ready = remap_region(unmapped_regions[idx]);
+        const ApEvent ready = remap_region(unmapped_regions[idx], provenance);
         if (ready.exists())
           mapped_events.insert(ready);
       }
@@ -2250,7 +2276,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::find_index_launch_space(const Domain &domain)
+    IndexSpace TaskContext::find_index_launch_space(const Domain &domain,
+                                                    const std::string &prov)
     //--------------------------------------------------------------------------
     {
       std::map<Domain,IndexSpace>::const_iterator finder =
@@ -2264,7 +2291,8 @@ namespace Legion {
         case DIM: \
           { \
             result = TaskContext::create_index_space(domain, \
-              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+              (prov.length() > 0) ? prov.c_str() : NULL); \
             break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -2553,16 +2581,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -2680,26 +2708,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_region_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
+                                            std::vector<DeletedRegion> &regions,
                                             std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<LogicalRegion> delete_now;
+      std::vector<DeletedRegion> delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<LogicalRegion>::const_iterator rit =
+        for (std::vector<DeletedRegion>::const_iterator rit =
               regions.begin(); rit != regions.end(); rit++)
         {
           std::map<LogicalRegion,unsigned>::iterator region_finder = 
-            created_regions.find(*rit);
+            created_regions.find(rit->region);
           if (region_finder == created_regions.end())
           {
-            if (local_regions.find(*rit) != local_regions.end())
+            if (local_regions.find(rit->region) != local_regions.end())
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
                   "Local logical region (%x,%x,%x) in task %s (UID %lld) was "
                   "not deleted by this task. Local regions can only be deleted "
-                  "by the task that made them.", rit->index_space.id,
-                  rit->field_space.id, rit->tree_id, 
+                  "by the task that made them.", rit->region.index_space.id,
+                  rit->region.field_space.id, rit->region.tree_id, 
                   get_task_name(), get_unique_id())
             // Deletion keeps going up
             deleted_regions.push_back(*rit);
@@ -2713,16 +2741,15 @@ namespace Legion {
             if (--region_finder->second == 0)
             {
               created_regions.erase(region_finder);
-              delete_now.push_back(*rit);
               // Check to see if we have any latent field spaces to clean up
               if (!latent_field_spaces.empty())
               {
                 std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-                  latent_field_spaces.find(rit->get_field_space());
+                  latent_field_spaces.find(rit->region.get_field_space());
                 if (finder != latent_field_spaces.end())
                 {
                   std::set<LogicalRegion>::iterator latent_finder = 
-                    finder->second.find(*rit);
+                    finder->second.find(rit->region);
 #ifdef DEBUG_LEGION
                   assert(latent_finder != finder->second.end());
 #endif
@@ -2748,17 +2775,19 @@ namespace Legion {
                   }
                 }
               }
+              delete_now.emplace_back(*rit);
             }
           }
         }
       }
       if (!delete_now.empty())
       {
-        for (std::vector<LogicalRegion>::const_iterator it = 
+        for (std::vector<DeletedRegion>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
+          op->initialize_logical_region_deletion(this, it->region, 
+              true/*unordered*/, it->provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -2798,47 +2827,52 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_field_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                           std::vector<DeletedField> &fields,
                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::map<FieldSpace,std::set<FieldID> > delete_now;
+      std::map<std::pair<FieldSpace,Provenance*>,std::set<FieldID> > delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator fit =
+        for (std::vector<DeletedField>::const_iterator fit =
               fields.begin(); fit != fields.end(); fit++)
         {
+          const std::pair<FieldSpace,FieldID> key(fit->space, fit->fid);
           std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
-            field_finder = created_fields.find(*fit);
+            field_finder = created_fields.find(key);
           if (field_finder == created_fields.end())
           {
             std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
-              local_finder = local_fields.find(*fit);
+              local_finder = local_fields.find(key);
             if (local_finder != local_fields.end())
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
                   "Local field %d in field space %x in task %s (UID %lld) was "
                   "not deleted by this task. Local fields can only be deleted "
-                  "by the task that made them.", fit->second, fit->first.id,
+                  "by the task that made them.", fit->fid, fit->space.id,
                   get_task_name(), get_unique_id())
-            deleted_fields.push_back(*fit);
+            deleted_fields.emplace_back(*fit);
           }
           else
           {
             // One of ours to delete
-            delete_now[fit->first].insert(fit->second);
+            const std::pair<FieldSpace,Provenance*> 
+              now_key(fit->space, fit->provenance);
+            delete_now[now_key].insert(fit->fid);
             created_fields.erase(field_finder);
           }
         }
       }
       if (!delete_now.empty())
       {
-        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
+        for (std::map<std::pair<FieldSpace,Provenance*>,
+                      std::set<FieldID> >::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          FieldAllocatorImpl *allocator = create_field_allocator(it->first);
-          op->initialize_field_deletions(this, it->first, it->second, 
-                                         true/*unordered*/, allocator);
+          FieldAllocatorImpl *allocator = 
+            create_field_allocator(it->first.first);
+          op->initialize_field_deletions(this, it->first.first, it->second, 
+                           true/*unordered*/, allocator, it->first.second);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -2945,18 +2979,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_field_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &spaces,
+                                         std::vector<DeletedFieldSpace> &spaces,
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<FieldSpace> delete_now;
+      std::vector<DeletedFieldSpace> delete_now;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<FieldSpace>::const_iterator fit = 
+        for (std::vector<DeletedFieldSpace>::const_iterator fit = 
               spaces.begin(); fit != spaces.end(); fit++)
         {
           std::map<FieldSpace,unsigned>::iterator finder = 
-            created_field_spaces.find(*fit);
+            created_field_spaces.find(fit->space);
           if (finder != created_field_spaces.end())
           {
 #ifdef DEBUG_LEGION
@@ -2964,7 +2998,7 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(*fit);
+              delete_now.emplace_back(*fit);
               created_field_spaces.erase(finder);
               // Count how many regions are still using this field space
               // that still need to be deleted before we can remove the
@@ -2972,11 +3006,11 @@ namespace Legion {
               std::set<LogicalRegion> remaining_regions;
               for (std::map<LogicalRegion,unsigned>::const_iterator it = 
                     created_regions.begin(); it != created_regions.end(); it++)
-                if (it->first.get_field_space() == *fit)
+                if (it->first.get_field_space() == fit->space)
                   remaining_regions.insert(it->first);
               for (std::map<LogicalRegion,bool>::const_iterator it = 
                     local_regions.begin(); it != local_regions.end(); it++)
-                if (it->first.get_field_space() == *fit)
+                if (it->first.get_field_space() == fit->space)
                   remaining_regions.insert(it->first);
               if (remaining_regions.empty())
               {
@@ -2985,7 +3019,7 @@ namespace Legion {
                       created_fields.begin(); it != 
                       created_fields.end(); /*nothing*/)
                 {
-                  if (it->first == *fit)
+                  if (it->first == fit->space)
                   {
                     std::set<std::pair<FieldSpace,FieldID> >::iterator 
                       to_delete = it++;
@@ -2996,23 +3030,24 @@ namespace Legion {
                 }
               }
               else
-                latent_field_spaces[*fit] = remaining_regions;
+                latent_field_spaces[fit->space] = remaining_regions;
             }
           }
           else
             // If we didn't make this field space, record the deletion
             // and keep going. It will be handled by the context that
             // made the field space
-            deleted_field_spaces.push_back(*fit);
+            deleted_field_spaces.emplace_back(*fit);
         }
       }
       if (!delete_now.empty())
       {
-        for (std::vector<FieldSpace>::const_iterator it = 
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_field_space_deletion(this, *it, true/*unordered*/);
+          op->initialize_field_space_deletion(this, it->space,
+                            true/*unordered*/, it->provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3052,19 +3087,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_index_space_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                               std::vector<std::pair<IndexSpace,bool> > &spaces,
+                                         std::vector<DeletedIndexSpace> &spaces,
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexSpace> delete_now;
+      std::vector<DeletedIndexSpace> delete_now;
       std::vector<std::vector<IndexPartition> > sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator sit =
+        for (std::vector<DeletedIndexSpace>::const_iterator sit =
               spaces.begin(); sit != spaces.end(); sit++)
         {
           std::map<IndexSpace,unsigned>::iterator finder = 
-            created_index_spaces.find(sit->first);
+            created_index_spaces.find(sit->space);
           if (finder != created_index_spaces.end())
           {
 #ifdef DEBUG_LEGION
@@ -3072,10 +3107,10 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(sit->first);
+              delete_now.emplace_back(*sit);
               sub_partitions.resize(sub_partitions.size() + 1);
               created_index_spaces.erase(finder);
-              if (sit->second)
+              if (sit->recurse)
               {
                 std::vector<IndexPartition> &subs = sub_partitions.back();
                 // Also remove any index partitions for this index space tree
@@ -3083,7 +3118,7 @@ namespace Legion {
                       created_index_partitions.begin(); it !=
                       created_index_partitions.end(); /*nothing*/)
                 {
-                  if (it->first.get_tree_id() == sit->first.get_tree_id()) 
+                  if (it->first.get_tree_id() == sit->space.get_tree_id()) 
                   {
 #ifdef DEBUG_LEGION
                     assert(it->second > 0);
@@ -3107,7 +3142,7 @@ namespace Legion {
           else
             // If we didn't make the index space in this context, just
             // record it and keep going, it will get handled later
-            deleted_index_spaces.push_back(*sit);
+            deleted_index_spaces.emplace_back(*sit);
         }
       }
       if (!delete_now.empty())
@@ -3118,8 +3153,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_index_space_deletion(this, delete_now[idx], 
-                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_index_space_deletion(this, delete_now[idx].space,
+            sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3159,19 +3194,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::register_index_partition_deletions(ApEvent precondition,
                            const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
+                                           std::vector<DeletedPartition> &parts, 
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<IndexPartition> delete_now;
+      std::vector<DeletedPartition> delete_now;
       std::vector<std::vector<IndexPartition> > sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
-        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator pit =
+        for (std::vector<DeletedPartition>::const_iterator pit =
               parts.begin(); pit != parts.end(); pit++)
         {
           std::map<IndexPartition,unsigned>::iterator finder = 
-            created_index_partitions.find(pit->first);
+            created_index_partitions.find(pit->partition);
           if (finder != created_index_partitions.end())
           {
 #ifdef DEBUG_LEGION
@@ -3179,10 +3214,10 @@ namespace Legion {
 #endif
             if (--finder->second == 0)
             {
-              delete_now.push_back(pit->first);
+              delete_now.emplace_back(*pit);
               sub_partitions.resize(sub_partitions.size() + 1);
               created_index_partitions.erase(finder);
-              if (pit->second)
+              if (pit->recurse)
               {
                 std::vector<IndexPartition> &subs = sub_partitions.back();
                 // Remove any other partitions that this partition dominates
@@ -3190,9 +3225,9 @@ namespace Legion {
                       created_index_partitions.begin(); it !=
                       created_index_partitions.end(); /*nothing*/)
                 {
-                  if ((pit->first.get_tree_id() == it->first.get_tree_id()) &&
-                      runtime->forest->is_dominated_tree_only(it->first, 
-                                                              pit->first))
+                  if ((pit->partition.get_tree_id() == it->first.get_tree_id()) 
+                        && runtime->forest->is_dominated_tree_only(it->first, 
+                                                                pit->partition))
                   {
 #ifdef DEBUG_LEGION
                     assert(it->second > 0);
@@ -3215,7 +3250,7 @@ namespace Legion {
           }
           else
             // If we didn't make the partition, record it and keep going
-            deleted_index_partitions.push_back(*pit);
+            deleted_index_partitions.emplace_back(*pit);
         }
       }
       if (!delete_now.empty())
@@ -3226,8 +3261,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
-          op->initialize_index_part_deletion(this, delete_now[idx], 
-                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_index_part_deletion(this, delete_now[idx].partition,
+            sub_partitions[idx], true/*unordered*/, delete_now[idx].provenance);
           op->set_deletion_preconditions(precondition, dependences);
           if (!add_to_dependence_queue(op, true/*unordered*/))
           {
@@ -3553,7 +3588,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(const Future &future, 
-                                                TypeTag type_tag)
+                                       TypeTag type_tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3565,13 +3600,14 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
+        LegionSpy::log_top_index_space(handle.id,
+              runtime->address_space, provenance);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
-      IndexSpaceNode *node = 
-        runtime->forest->create_index_space(handle, NULL, did, ready);
-      creator_op->initialize_index_space(this, node, future);
+      IndexSpaceNode *node = runtime->forest->create_index_space(handle, 
+          NULL, did, creator_op->get_provenance(), ready);
+      creator_op->initialize_index_space(this, node, future, provenance);
       register_index_space_creation(handle);
       add_to_dependence_queue(creator_op);
       return handle;
@@ -3579,7 +3615,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3597,6 +3633,7 @@ namespace Legion {
             "which is not a top-level index space. Legion only permits "
             "top-level index spaces to be destroyed.", handle.get_id(),
             get_task_name(), get_unique_id())
+      Provenance *prov = NULL;
       // Check to see if this is one that we should be allowed to destory
       std::vector<IndexPartition> sub_partitions;
       {
@@ -3605,9 +3642,12 @@ namespace Legion {
           created_index_spaces.find(handle);
         if (finder == created_index_spaces.end())
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make the index space in this context, just
           // record it and keep going, it will get handled later
-          deleted_index_spaces.push_back(std::make_pair(handle,recurse));
+          deleted_index_spaces.emplace_back(
+              DeletedIndexSpace(handle, recurse, prov));
           return;
         }
         else
@@ -3646,8 +3686,11 @@ namespace Legion {
           }
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
+      op->initialize_index_space_deletion(this, handle, sub_partitions,
+                                          unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -3663,7 +3706,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3673,6 +3716,7 @@ namespace Legion {
       log_index.debug("Destroying index partition %x in task %s (ID %lld)",
                       handle.id, get_task_name(), get_unique_id());
 #endif
+      Provenance *prov = NULL;
       std::vector<IndexPartition> sub_partitions;
       {
         AutoLock priv_lock(privilege_lock);
@@ -3716,14 +3760,19 @@ namespace Legion {
         }
         else
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make the partition, record it and keep going
-          deleted_index_partitions.push_back(std::make_pair(handle,recurse));
+          deleted_index_partitions.push_back(
+              DeletedPartition(handle, recurse, prov));
           return;
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
-                                         sub_partitions, unordered);
+                                         sub_partitions, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -3742,7 +3791,8 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       size_t granularity,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
@@ -3759,12 +3809,12 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_equal_partition(this, pid, granularity);
+      part_op->initialize_equal_partition(this, pid, granularity, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
                     color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                    did, term_event);
+                    did, part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3777,7 +3827,8 @@ namespace Legion {
     IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights, 
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
@@ -3794,13 +3845,14 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      part_op->initialize_weight_partition(this, pid, weights, 
+                                           granularity, provenance);
       const ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RegionTreeForest *forest = runtime->forest;
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
                   color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                  did, term_event);
+                  did, part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3815,7 +3867,8 @@ namespace Legion {
                                           IndexPartition handle1,
                                           IndexPartition handle2,
                                           IndexSpace color_space,
-                                          PartitionKind kind, Color color)
+                                          PartitionKind kind, Color color,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3845,7 +3898,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_union_partition(this, pid, handle1, handle2);
+      part_op->initialize_union_partition(this, pid, handle1, 
+                                          handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -3879,7 +3933,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+            parent, color_space, partition_color, kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3896,7 +3951,8 @@ namespace Legion {
                                               IndexPartition handle1,
                                               IndexPartition handle2,
                                               IndexSpace color_space,
-                                              PartitionKind kind, Color color)
+                                              PartitionKind kind, Color color,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3926,7 +3982,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
+      part_op->initialize_intersection_partition(this, pid, handle1, 
+                                                 handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -3959,7 +4016,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+            parent, color_space, partition_color, kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3975,7 +4033,8 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexPartition partition,
                                               PartitionKind kind, Color color,
-                                              bool dominates)
+                                              bool dominates,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4000,7 +4059,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_intersection_partition(this,pid,partition,dominates);
+      part_op->initialize_intersection_partition(this, pid, partition,
+                                                 dominates, provenance);
       ApEvent term_event = part_op->get_completion_event();
       IndexPartNode *part_node = runtime->forest->get_node(partition);
       // See if we can determine disjointness if we weren't told
@@ -4020,7 +4080,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
-        part_node->color_space->handle, partition_color, kind, did, term_event);
+                     part_node->color_space->handle, partition_color, kind, did,
+                     part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4038,7 +4099,8 @@ namespace Legion {
                                                   IndexPartition handle2,
                                                   IndexSpace color_space,
                                                   PartitionKind kind, 
-                                                  Color color)
+                                                  Color color,
+                                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4070,7 +4132,8 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_difference_partition(this, pid, handle1, handle2);
+      part_op->initialize_difference_partition(this, pid, handle1, 
+                                               handle2, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -4090,7 +4153,8 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, partition_color, kind, did, term_event);
+                         parent, color_space, partition_color, kind, did,
+                         part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4107,7 +4171,8 @@ namespace Legion {
                                                       IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
                                                       PartitionKind kind,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4133,8 +4198,10 @@ namespace Legion {
       // Tell the region tree forest about this partition
       std::set<RtEvent> safe_events;
       runtime->forest->create_pending_cross_product(this, handle1, handle2, 
-                  handles, kind, partition_color, term_event, safe_events);
-      part_op->initialize_cross_product(this, handle1, handle2,partition_color);
+                                  handles, kind, part_op->get_provenance(),
+                                  partition_color, term_event, safe_events);
+      part_op->initialize_cross_product(this, handle1, handle2,
+                                        partition_color, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       if (!safe_events.empty())
@@ -4192,7 +4259,8 @@ namespace Legion {
                                           FieldID domain_fid,
                                           IndexSpace range,
                                           MapperID id, MappingTagID tag,
-                                          const UntypedBuffer &marg)
+                                          const UntypedBuffer &marg,
+                                          const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4203,7 +4271,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op();
       part_op->initialize_by_association(this, domain, domain_parent, 
-                                         domain_fid, range, id, tag, marg);
+                              domain_fid, range, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4224,7 +4292,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
     }
 
     //--------------------------------------------------------------------------
@@ -4236,7 +4304,8 @@ namespace Legion {
                                               const void *extent,
                                               size_t extent_size,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4256,11 +4325,12 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_restricted_partition(this, pid, transform, 
-                                transform_size, extent, extent_size);
+                    transform_size, extent, extent_size, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4278,7 +4348,8 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4297,11 +4368,13 @@ namespace Legion {
         part_color = color; 
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_by_domain(this, pid, domains, perform_intersections);
+      part_op->initialize_by_domain(this, pid, domains, 
+                      perform_intersections, provenance);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did, 
+            part_op->get_provenance(), term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4321,7 +4394,8 @@ namespace Legion {
                                               Color color,
                                               MapperID id, MappingTagID tag,
                                               PartitionKind part_kind,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4346,11 +4420,12 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            parent, color_space, part_color, part_kind, did, term_event);
+            parent, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
-                                   fid, id, tag, marg);
+                                   fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4371,7 +4446,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4391,7 +4466,8 @@ namespace Legion {
                                                     Color color,
                                                     MapperID id, 
                                                     MappingTagID tag,
-                                                    const UntypedBuffer &marg)
+                                                    const UntypedBuffer &marg,
+                                                    const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4414,10 +4490,12 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            handle, color_space, part_color, part_kind, did, term_event);
+            handle, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
-      part_op->initialize_by_image(this,pid,projection,parent,fid,id,tag,marg);
+      part_op->initialize_by_image(this, pid, projection, parent,
+                                   fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4438,7 +4516,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4458,7 +4536,8 @@ namespace Legion {
                                                     Color color,
                                                     MapperID id, 
                                                     MappingTagID tag,
-                                                    const UntypedBuffer &marg)
+                                                    const UntypedBuffer &marg,
+                                                    const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4481,11 +4560,12 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-            handle, color_space, part_color, part_kind, did, term_event);
+            handle, color_space, part_color, part_kind, did,
+            part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, projection, parent, 
-                                         fid, id, tag, marg);
+                                         fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4506,7 +4586,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4525,7 +4605,8 @@ namespace Legion {
                                                   PartitionKind part_kind,
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
-                                                  const UntypedBuffer &marg)
+                                                  const UntypedBuffer &marg,
+                                                  const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4567,11 +4648,12 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, did, term_event);
+                                       part_color, part_kind, did,
+                                       part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
-                                      parent, fid, id, tag, marg);
+                                      parent, fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4592,7 +4674,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4611,7 +4693,8 @@ namespace Legion {
                                                   PartitionKind part_kind,
                                                   Color color,
                                                   MapperID id, MappingTagID tag,
-                                                  const UntypedBuffer &marg)
+                                                  const UntypedBuffer &marg,
+                                                  const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -4636,11 +4719,12 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, did, term_event);
+                                       part_color, part_kind, did,
+                                       part_op->get_provenance(), term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
-                                            parent, fid, id, tag, marg);
+                                            parent, fid, id, tag, marg, prov);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -4661,7 +4745,7 @@ namespace Legion {
       add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions, prov);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4675,7 +4759,7 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4692,10 +4776,18 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+      {
+        provenance = new Provenance(prov);
+        provenance->add_reference();
+      }
       const ApUserEvent partition_ready = Runtime::create_ap_user_event(NULL);
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-                                parent, color_space, part_color, part_kind, 
-                                did, partition_ready, partition_ready);
+                            parent, color_space, part_color, part_kind, 
+                            did, provenance, partition_ready, partition_ready);
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4715,7 +4807,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4728,7 +4821,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_union(this, result, handles);
+      part_op->initialize_index_space_union(this, result, handles, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4739,7 +4832,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                                      IndexPartition handle)
+                                                      IndexPartition handle,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4752,7 +4846,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_union(this, result, handle);
+      part_op->initialize_index_space_union(this, result, handle, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4764,7 +4858,8 @@ namespace Legion {
                                                       IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4777,7 +4872,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_intersection(this, result, handles);
+      part_op->initialize_index_space_intersection(this, result, handles, prov);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4789,7 +4884,8 @@ namespace Legion {
                                                       IndexPartition parent,
                                                       const void *realm_color,
                                                       TypeTag type_tag,
-                                                      IndexPartition handle)
+                                                      IndexPartition handle,
+                                                      const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4802,7 +4898,7 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_intersection(this, result, handle);
+      part_op->initialize_index_space_intersection(this, result, handle, prov);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -4815,7 +4911,8 @@ namespace Legion {
                                                     const void *realm_color,
                                                     TypeTag type_tag,
                                                     IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles)
+                                        const std::vector<IndexSpace> &handles,
+                                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4828,7 +4925,8 @@ namespace Legion {
                                 realm_color, type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      part_op->initialize_index_space_difference(this, result, initial,handles);
+      part_op->initialize_index_space_difference(this, result, initial,
+                                                 handles, provenance);
       Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5080,10 +5178,11 @@ namespace Legion {
     FieldSpace InnerContext::create_field_space(
                                          const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
-      const FieldSpace space = TaskContext::create_field_space();
+      const FieldSpace space = TaskContext::create_field_space(provenance);
       AutoRuntimeCall call(this);
       FieldSpaceNode *node = runtime->forest->get_node(space);
       if (resulting_fields.size() < sizes.size())
@@ -5110,8 +5209,10 @@ namespace Legion {
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();  
       const ApEvent ready = creator_op->get_completion_event();
-      node->initialize_fields(ready, resulting_fields, serdez_id);
-      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+      node->initialize_fields(ready, resulting_fields, serdez_id,
+                              creator_op->get_provenance());
+      creator_op->initialize_fields(this, node, resulting_fields,
+                                    sizes, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
       add_to_dependence_queue(creator_op);
       return space;
@@ -5119,7 +5220,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_field_space(FieldSpace handle,
-                                           const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5129,6 +5230,7 @@ namespace Legion {
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
+      Provenance *prov = NULL;
       // Check to see if this is one that we should be allowed to destory
       {
         AutoLock priv_lock(privilege_lock);
@@ -5177,15 +5279,19 @@ namespace Legion {
         }
         else
         {
+          if (provenance != NULL)
+            prov = new Provenance(provenance);
           // If we didn't make this field space, record the deletion
           // and keep going. It will be handled by the context that
           // made the field space
-          deleted_field_spaces.push_back(handle);
+          deleted_field_spaces.emplace_back(DeletedFieldSpace(handle, prov));
           return;
         }
       }
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_space_deletion(this, handle, unordered);
+      op->initialize_field_space_deletion(this, handle, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5203,7 +5309,8 @@ namespace Legion {
     FieldID InnerContext::allocate_field(FieldSpace space, 
                                          const Future &field_size,
                                          FieldID fid, bool local,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5229,8 +5336,8 @@ namespace Legion {
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
       FieldSpaceNode *node = 
-        runtime->forest->allocate_field(space, ready, fid, serdez_id);
-      creator_op->initialize_field(this, node, fid, field_size); 
+        runtime->forest->allocate_field(space, ready, fid,serdez_id,provenance);
+      creator_op->initialize_field(this, node, fid, field_size, provenance); 
       register_field_creation(space, fid, local);
       add_to_dependence_queue(creator_op);
       return fid;
@@ -5239,7 +5346,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::allocate_local_field(FieldSpace space, size_t field_size,
                                           FieldID fid, CustomSerdezID serdez_id,
-                                          std::set<RtEvent> &done_events)
+                                          std::set<RtEvent> &done_events,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       // See if we've exceeded our local field allocations 
@@ -5261,7 +5369,7 @@ namespace Legion {
       std::vector<size_t> sizes(1, field_size);
       std::vector<unsigned> new_indexes;
       if (!runtime->forest->allocate_local_fields(space, fields, sizes, 
-                              serdez_id, current_indexes, new_indexes))
+                  serdez_id, current_indexes, new_indexes, provenance))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -5276,6 +5384,7 @@ namespace Legion {
       // to this data structure are serialized
       infos.push_back(LocalFieldInfo(fid, field_size, serdez_id, 
                                      new_indexes[0], false));
+      const size_t prov_size = (provenance != NULL) ? strlen(provenance) : 0;
       AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
       // Have to send notifications to any remote nodes
       for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
@@ -5288,6 +5397,9 @@ namespace Legion {
           rez.serialize(it->second);
           rez.serialize<size_t>(1); // field space count
           rez.serialize(space);
+          rez.serialize(prov_size);
+          if (prov_size > 0)
+            rez.serialize(provenance, prov_size);
           rez.serialize<size_t>(1); // field count
           rez.serialize(infos.back());
           rez.serialize(done_event);
@@ -5301,7 +5413,8 @@ namespace Legion {
     void InnerContext::allocate_fields(FieldSpace space,
                                        const std::vector<Future> &sizes,
                                        std::vector<FieldID> &resulting_fields,
-                                       bool local, CustomSerdezID serdez_id)
+                                       bool local, CustomSerdezID serdez_id,
+                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5334,9 +5447,10 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
-      FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready, 
-                                              resulting_fields, serdez_id);
-      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+      FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
+                                  resulting_fields, serdez_id, provenance);
+      creator_op->initialize_fields(this, node, resulting_fields, 
+                                    sizes, provenance);
       register_all_field_creations(space, local, resulting_fields);
       add_to_dependence_queue(creator_op);
     }
@@ -5346,7 +5460,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resulting_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance)
     //--------------------------------------------------------------------------
     {
       // See if we've exceeded our local field allocations 
@@ -5366,7 +5481,7 @@ namespace Legion {
         current_indexes.insert(it->index);
       std::vector<unsigned> new_indexes;
       if (!runtime->forest->allocate_local_fields(space, resulting_fields, 
-                          sizes, serdez_id, current_indexes, new_indexes))
+              sizes, serdez_id, current_indexes, new_indexes, provenance))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -5383,6 +5498,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
         infos.push_back(LocalFieldInfo(resulting_fields[idx], 
                    sizes[idx], serdez_id, new_indexes[idx], false));
+      const size_t prov_size = (provenance != NULL) ? strlen(provenance) : 0;
       // Have to send notifications to any remote nodes 
       AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
       for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
@@ -5395,6 +5511,9 @@ namespace Legion {
           rez.serialize(it->second);
           rez.serialize<size_t>(1); // field space count
           rez.serialize(space);
+          rez.serialize(prov_size);
+          if (prov_size > 0)
+            rez.serialize(provenance, prov_size);
           rez.serialize<size_t>(resulting_fields.size()); // field count
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             rez.serialize(infos[offset+idx]);
@@ -5407,10 +5526,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::free_field(FieldAllocatorImpl *allocator, 
-                            FieldSpace space, FieldID fid, const bool unordered)
+    FieldSpace space, FieldID fid, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         const std::pair<FieldSpace,FieldID> key(space, fid);
@@ -5425,7 +5547,7 @@ namespace Legion {
           {
             // If we didn't make this field, record the deletion and
             // then have a later context handle it
-            deleted_fields.push_back(key);
+            deleted_fields.emplace_back(DeletedField(space, fid, prov));
             return;
           }
           else
@@ -5435,8 +5557,8 @@ namespace Legion {
         // need it as part of the logical dependence analysis for earlier ops
       }
       // Launch off the deletion operation
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletion(this, space, fid, unordered, allocator);
+      DeletionOp *op = runtime->get_available_deletion_op(); 
+      op->initialize_field_deletion(this, space, fid, unordered,allocator,prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5454,10 +5576,13 @@ namespace Legion {
     void InnerContext::free_fields(FieldAllocatorImpl *allocator, 
                                    FieldSpace space,
                                    const std::set<FieldID> &to_free,
-                                   const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       std::set<FieldID> free_now;
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
@@ -5478,7 +5603,7 @@ namespace Legion {
               free_now.insert(*it);
             }
             else
-              deleted_fields.push_back(key);
+              deleted_fields.emplace_back(DeletedField(space, *it, prov));
           }
           else
           {
@@ -5492,7 +5617,8 @@ namespace Legion {
       if (free_now.empty())
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletions(this, space, free_now,unordered,allocator);
+      op->initialize_field_deletions(this, space, free_now, unordered,
+                                     allocator, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5508,12 +5634,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_logical_region(LogicalRegion handle,
-                                              const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       if (!handle.exists())
         return;
+      Provenance *prov = NULL;
+      
 #ifdef DEBUG_LEGION
       log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
                        handle.index_space.id, handle.field_space.id, 
@@ -5543,8 +5671,10 @@ namespace Legion {
           // of the map
           if (local_finder == local_regions.end())
           {
+            if (provenance != NULL)
+              prov = new Provenance(provenance);
             // Record the deletion for later and propagate it up
-            deleted_regions.push_back(handle);
+            deleted_regions.emplace_back(DeletedRegion(handle, prov));
             return;
           }
           else
@@ -5567,8 +5697,10 @@ namespace Legion {
           // operations, but the reference count is zero so we're protected
         }
       }
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_logical_region_deletion(this, handle, unordered);
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+      DeletionOp *op = runtime->get_available_deletion_op(); 
+      op->initialize_logical_region_deletion(this, handle, unordered, prov);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -5709,7 +5841,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexTask *task = runtime->get_available_index_task();
       FutureMap result = task->initialize_task(this, launcher, launch_space);
 #ifdef DEBUG_LEGION
@@ -5735,7 +5868,8 @@ namespace Legion {
         MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
         epoch_launcher.add_index_task(launcher);
         FutureMap result = execute_must_epoch(epoch_launcher);
-        return reduce_future_map(result, redop, deterministic);
+        return reduce_future_map(result, redop, deterministic,
+                                 launcher.provenance.c_str());
       }
       AutoRuntimeCall call(this);
       // Quick out for predicate false
@@ -5757,7 +5891,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexTask *task = runtime->get_available_index_task();
       Future result = task->initialize_task(this, launcher, launch_space, 
                                             redop, deterministic);
@@ -5775,7 +5910,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+                      ReductionOpID redop, bool deterministic, const char *prov)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -5791,7 +5926,7 @@ namespace Legion {
       }
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = 
-        all_reduce_op->initialize(this, future_map, redop, deterministic);
+        all_reduce_op->initialize(this, future_map, redop, deterministic, prov);
       add_to_dependence_queue(all_reduce_op);
       return result;
     }
@@ -5845,19 +5980,22 @@ namespace Legion {
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective, 
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       Domain domain;
       runtime->forest->find_launch_space_domain(space, domain);
-      return construct_future_map(domain, futures, internal, collective, sid);
+      return construct_future_map(domain, futures, internal, collective, sid,
+                                  provenance);
     }
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -5870,10 +6008,10 @@ namespace Legion {
             "in task %s (UID %lld)", futures.size(), domain.get_volume(),
             get_task_name(), get_unique_id())
         return construct_future_map(domain, futures, true/*internal*/,
-                                    collective, sid);
+                                    collective, sid, provenance);
       }
       CreationOp *creation_op = runtime->get_available_creation_op();
-      creation_op->initialize_map(this, futures);
+      creation_op->initialize_map(this, provenance, futures);
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
           RtEvent::NO_RT_EVENT, runtime, did, runtime->address_space);
@@ -5942,7 +6080,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::remap_region(PhysicalRegion region)
+    ApEvent InnerContext::remap_region(const PhysicalRegion &region,
+                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5962,7 +6101,7 @@ namespace Legion {
                       current_trace->tid, get_task_name(), get_unique_id())
       }
       MapOp *map_op = runtime->get_available_map_op();
-      map_op->initialize(this, region);
+      map_op->initialize(this, region, provenance);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
@@ -6046,7 +6185,8 @@ namespace Legion {
       add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6071,7 +6211,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexFillOp *fill_op = runtime->get_available_index_fill_op();
       fill_op->initialize(this, launcher, launch_space); 
 #ifdef DEBUG_LEGION
@@ -6100,7 +6241,8 @@ namespace Legion {
       add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6136,7 +6278,8 @@ namespace Legion {
       add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6154,7 +6297,8 @@ namespace Legion {
       }
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
-        launch_space = find_index_launch_space(launcher.launch_domain);
+        launch_space = find_index_launch_space(launcher.launch_domain,
+                                               launcher.provenance);
       IndexCopyOp *copy_op = runtime->get_available_index_copy_op();
       copy_op->initialize(this, launcher, launch_space); 
 #ifdef DEBUG_LEGION
@@ -6183,7 +6327,8 @@ namespace Legion {
       add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6218,7 +6363,8 @@ namespace Legion {
       add_to_dependence_queue(acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6253,7 +6399,8 @@ namespace Legion {
       add_to_dependence_queue(release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
     }
 
     //--------------------------------------------------------------------------
@@ -6314,7 +6461,8 @@ namespace Legion {
       // Compute the upper bound partition node from this launcher
       RegionTreeNode *node = compute_index_attach_upper_bound(launcher,indexes);
       IndexSpaceNode *launch_space = runtime->forest->get_node(
-       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1))));
+       find_index_launch_space(Domain(Point<1>(0),Point<1>(indexes.size()-1)),
+                               launcher.provenance));
       IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
       ExternalResources result = 
         attach_op->initialize(this, node, launch_space, launcher, indexes);
@@ -6574,7 +6722,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resource(PhysicalRegion region,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6586,7 +6734,8 @@ namespace Legion {
         unregister_inline_mapped_region(region);
       }
       DetachOp *op = runtime->get_available_detach_op();
-      Future result = op->initialize_detach(this, region, flush, unordered);
+      Future result =
+        op->initialize_detach(this, region, flush, unordered, provenance);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -6603,14 +6752,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::detach_resources(ExternalResources resources,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       if (resources.impl == NULL)
         return Future();
       IndexDetachOp *op = runtime->get_available_index_detach_op();
-      Future result = resources.impl->detach(this, op, flush, unordered);
+      Future result =
+        resources.impl->detach(this, op, flush, unordered, provenance);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -6701,7 +6851,8 @@ namespace Legion {
       add_to_dependence_queue(epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions,
+                               launcher.provenance.c_str());
       return result;
     }
 
@@ -6736,7 +6887,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::issue_mapping_fence(void)
+    Future InnerContext::issue_mapping_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6745,13 +6896,14 @@ namespace Legion {
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
+      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE,
+                                      true/*return future*/, provenance);
       add_to_dependence_queue(fence_op);
       return f;
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::issue_execution_fence(void)
+    Future InnerContext::issue_execution_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6760,13 +6912,14 @@ namespace Legion {
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
+      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE,
+                                      true/*return future*/, provenance);
       add_to_dependence_queue(fence_op);
       return f; 
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::complete_frame(void)
+    void InnerContext::complete_frame(const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6775,12 +6928,13 @@ namespace Legion {
       log_run.debug("Issuing a frame in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      frame_op->initialize(this);
+      frame_op->initialize(this, provenance);
       add_to_dependence_queue(frame_op);
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::create_predicate(const Future &f)
+    Predicate InnerContext::create_predicate(const Future &f,
+                                             const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6792,20 +6946,21 @@ namespace Legion {
       FuturePredOp *pred_op = runtime->get_available_future_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
-      pred_op->initialize(this, f);
+      pred_op->initialize(this, f, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::predicate_not(const Predicate &p)
+    Predicate InnerContext::predicate_not(const Predicate &p,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       NotPredOp *pred_op = runtime->get_available_not_pred_op();
       // Hold a reference before initialization
       Predicate result(pred_op);
-      pred_op->initialize(this, p);
+      pred_op->initialize(this, p, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
@@ -6843,7 +6998,7 @@ namespace Legion {
         AndPredOp *pred_op = runtime->get_available_and_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates);
+        pred_op->initialize(this, actual_predicates, launcher.provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -6868,7 +7023,7 @@ namespace Legion {
         OrPredOp *pred_op = runtime->get_available_or_pred_op();
         // Hold a reference before initialization
         Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates);
+        pred_op->initialize(this, actual_predicates, launcher.provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -8307,7 +8462,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::register_inline_mapped_region(PhysicalRegion &region)
+    void InnerContext::register_inline_mapped_region(
+                                                   const PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
       // Because of 'remap_region', this method can be called
@@ -8325,7 +8481,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::unregister_inline_mapped_region(PhysicalRegion &region)
+    void InnerContext::unregister_inline_mapped_region(
+                                                   const PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
       // Need lock because of unordered detach operations
@@ -8733,7 +8890,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
+        bool static_trace, const std::set<RegionTreeID> *trees,
+        bool deprecated, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -8750,15 +8908,20 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in task %s (ID %lld)", 
           tid, get_task_name(), get_unique_id())
+
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+
       std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
       LegionTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
         if (static_trace)
-          trace = new StaticTrace(tid, this, logical_only, trees);
+          trace = new StaticTrace(tid, this, logical_only, prov, trees);
         else
-          trace = new DynamicTrace(tid, this, logical_only);
+          trace = new DynamicTrace(tid, this, logical_only, prov);
         if (!deprecated)
           traces[tid] = trace;
         trace->add_reference();
@@ -8773,14 +8936,14 @@ namespace Legion {
 
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, trace);
+      begin->initialize_begin(this, trace, prov);
       add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, trace);
+        replay->initialize_replay(this, trace, prov);
         // Record the event for when the trace replay is ready
         physical_trace_replay_status.exchange(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
@@ -8825,7 +8988,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::end_trace(TraceID tid, bool deprecated)
+    void InnerContext::end_trace(TraceID tid, bool deprecated,
+                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -8850,7 +9014,7 @@ namespace Legion {
       {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-        complete_op->initialize_complete(this, has_blocking_call);
+        complete_op->initialize_complete(this, has_blocking_call, provenance);
         // Remove the current trace now so we block at the end of the
         // trace in the case of program order execution
         current_trace = NULL;
@@ -8860,9 +9024,10 @@ namespace Legion {
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this, has_blocking_call, deprecated);
+        capture_op->initialize_capture(this, has_blocking_call,
+                                       deprecated, provenance);
         // Mark that the current trace is now fixed
-        current_trace->fix_trace();
+        current_trace->fix_trace(capture_op->get_provenance());
         // Remove the current trace now so we block at the end of the
         // trace in the case of program order execution
         current_trace = NULL;
@@ -9269,7 +9434,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc,
+                                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -9279,7 +9445,7 @@ namespace Legion {
 #endif
       DynamicCollectiveOp *collective = 
         runtime->get_available_dynamic_collective_op();
-      Future result = collective->initialize(this, dc);
+      Future result = collective->initialize(this, dc, provenance);
       add_to_dependence_queue(collective);
       return result;
     }
@@ -9922,7 +10088,7 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it = 
               local_regions_to_delete.begin(); it != 
               local_regions_to_delete.end(); it++)
-          destroy_logical_region(*it, false/*unordered*/);
+          destroy_logical_region(*it, false/*unordered*/, NULL/*provenace*/);
       }
       if (!local_fields_to_delete.empty())
       {
@@ -9931,7 +10097,8 @@ namespace Legion {
               local_fields_to_delete.end(); it++)
         {
           FieldAllocatorImpl *allocator = create_field_allocator(it->first);
-          free_fields(allocator, it->first, it->second, false/*unordered*/);
+          free_fields(allocator, it->first, it->second, 
+                  false/*unordered*/, NULL/*provenace*/);
         }
       }
       if (!index_launch_spaces.empty())
@@ -9939,7 +10106,8 @@ namespace Legion {
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
+          destroy_index_space(it->second, false/*unordered*/, 
+              true/*recurse*/, NULL/*provenance*/);
       }
       if (overhead_tracker != NULL)
       {
@@ -10620,7 +10788,11 @@ namespace Legion {
         add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
-          remap_unmapped_regions(current_trace, unmapped_regions);
+        {
+          Provenance *prov = task->get_provenance();
+          remap_unmapped_regions(current_trace, unmapped_regions,
+              (prov == NULL) ? (const char*)NULL : prov->provenance.c_str());
+        }
       }
     }
 
@@ -11208,6 +11380,14 @@ namespace Legion {
       {
         FieldSpace handle;
         derez.deserialize(handle);
+        size_t prov_size;
+        derez.deserialize(prov_size);
+        Provenance *provenance = NULL;
+        if (prov_size > 0)
+        {
+          provenance = new Provenance((const char*)derez.get_current_pointer());
+          derez.advance_pointer(prov_size);
+        }
         size_t num_local;
         derez.deserialize(num_local); 
         std::vector<FieldID> fields(num_local);
@@ -11231,7 +11411,7 @@ namespace Legion {
           }
         }
         runtime->forest->update_local_fields(handle, fields, field_sizes,
-                                             serdez_ids, indexes);
+                                             serdez_ids, indexes, provenance);
       }
     }
 
@@ -11394,16 +11574,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -11562,7 +11742,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag)
+    IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag,
+                                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
@@ -11573,7 +11754,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle, 
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11629,7 +11810,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+               const bool unordered, const bool recurse, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11704,7 +11885,8 @@ namespace Legion {
     IndexPartition LeafContext::create_equal_partition(
                                              IndexSpace parent,
                                              IndexSpace color_space,
-                                             size_t granularity, Color color)
+                                             size_t granularity, Color color,
+                                             const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
@@ -11717,7 +11899,8 @@ namespace Legion {
     IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
@@ -11732,7 +11915,8 @@ namespace Legion {
                                           IndexPartition handle1,
                                           IndexPartition handle2,
                                           IndexSpace color_space,
-                                          PartitionKind kind, Color color)
+                                          PartitionKind kind, Color color,
+                                          const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_UNION_PARTITION_CREATION,
@@ -11747,7 +11931,8 @@ namespace Legion {
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color)
+                                                PartitionKind kind, Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERSECTION_PARTITION_CREATION,
@@ -11761,7 +11946,8 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexPartition partition,
                                                 PartitionKind kind, Color color,
-                                                bool dominates)
+                                                bool dominates,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERSECTION_PARTITION_CREATION,
@@ -11777,7 +11963,8 @@ namespace Legion {
                                                       IndexPartition handle2,
                                                       IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      Color color)
+                                                      Color color,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DIFFERENCE_PARTITION_CREATION,
@@ -11791,7 +11978,8 @@ namespace Legion {
                                                        IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
                                                        PartitionKind kind,
-                                                       Color color)
+                                                       Color color,
+                                                       const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_CROSS_PRODUCT_PARTITION,
@@ -11805,7 +11993,8 @@ namespace Legion {
                                          LogicalRegion domain_parent,
                                          FieldID domain_fid, IndexSpace range,
                                          MapperID id, MappingTagID tag,
-                                         const UntypedBuffer &marg)
+                                         const UntypedBuffer &marg,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_ASSOCIATION,
@@ -11822,7 +12011,8 @@ namespace Legion {
                                                 const void *extent,
                                                 size_t extent_size,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_RESTRICTED_PARTITION,
@@ -11838,7 +12028,8 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
@@ -11856,7 +12047,8 @@ namespace Legion {
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
                                                 PartitionKind part_kind,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_FIELD,
@@ -11875,7 +12067,8 @@ namespace Legion {
                                               PartitionKind part_kind,
                                               Color color,
                                               MapperID id, MappingTagID tag,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE,
@@ -11894,7 +12087,8 @@ namespace Legion {
                                               PartitionKind part_kind,
                                               Color color,
                                               MapperID id, MappingTagID tag,
-                                              const UntypedBuffer &marg)
+                                              const UntypedBuffer &marg,
+                                              const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_IMAGE_RANGE,
@@ -11913,7 +12107,8 @@ namespace Legion {
                                                 PartitionKind part_kind,
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE,
@@ -11932,7 +12127,8 @@ namespace Legion {
                                                 PartitionKind part_kind,
                                                 Color color,
                                                 MapperID id, MappingTagID tag,
-                                                const UntypedBuffer &marg)
+                                                const UntypedBuffer &marg,
+                                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_PREIMAGE_RANGE,
@@ -11946,7 +12142,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_PENDING_PARTITION,
@@ -11959,7 +12155,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles) 
+                                        const std::vector<IndexSpace> &handles,
+                                                     const char *provenance) 
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION,
@@ -11972,7 +12169,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                                     IndexPartition handle)
+                                                     IndexPartition handle,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION,
@@ -11986,7 +12184,8 @@ namespace Legion {
                                                      IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles) 
+                                        const std::vector<IndexSpace> &handles,
+                                                      const char *provenance) 
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION,
@@ -12000,7 +12199,8 @@ namespace Legion {
                                                      IndexPartition parent,
                                                      const void *realm_color,
                                                      TypeTag type_tag,
-                                                     IndexPartition handle)
+                                                     IndexPartition handle,
+                                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION,
@@ -12015,7 +12215,8 @@ namespace Legion {
                                                   const void *realm_color,
                                                   TypeTag type_tag,
                                                   IndexSpace initial,
-                                          const std::vector<IndexSpace> &handles)
+                                          const std::vector<IndexSpace> &handles,
+                                                  const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_DIFFERENCE,
@@ -12027,7 +12228,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12038,7 +12240,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_field_space(FieldSpace handle, 
-                                          const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12083,7 +12285,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::free_field(FieldAllocatorImpl *allocator,FieldSpace space, 
-                                 FieldID fid, const bool unordered)
+                                 FieldID fid, const bool unordered,
+                                 const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12126,7 +12329,7 @@ namespace Legion {
     void LeafContext::free_fields(FieldAllocatorImpl *allocator, 
                                   FieldSpace space, 
                                   const std::set<FieldID> &to_free,
-                                  const bool unordered)
+                                  const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12178,7 +12381,8 @@ namespace Legion {
     FieldID LeafContext::allocate_field(FieldSpace space, 
                                         const Future &field_size,
                                         FieldID fid, bool local,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
@@ -12190,7 +12394,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events)
+                                     std::set<RtEvent> &done_events,
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
@@ -12202,7 +12407,8 @@ namespace Legion {
     void LeafContext::allocate_fields(FieldSpace space,
                                       const std::vector<Future> &sizes,
                                       std::vector<FieldID> &resuling_fields,
-                                      bool local, CustomSerdezID serdez_id)
+                                      bool local, CustomSerdezID serdez_id,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12215,7 +12421,8 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events)
+                                   std::set<RtEvent> &done_events,
+                                   const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
@@ -12225,7 +12432,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_region(LogicalRegion handle,
-                                             const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12356,7 +12563,8 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain);
+          launch_space = find_index_launch_space(launcher.launch_domain,
+                                                 launcher.provenance);
         FutureMap result = task->initialize_task(parent, launcher, 
                                                  launch_space, false/*track*/);
         inline_child_task(task);
@@ -12384,7 +12592,8 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
-          launch_space = find_index_launch_space(launcher.launch_domain);
+          launch_space = find_index_launch_space(launcher.launch_domain,
+                                                 launcher.provenance);
         Future result = task->initialize_task(parent, launcher, launch_space, 
                                         redop, deterministic, false/*track*/);
         inline_child_task(task);
@@ -12401,7 +12610,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::reduce_future_map(const FutureMap &future_map,
-                                        ReductionOpID redop, bool deterministic)
+                ReductionOpID redop, bool deterministic, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12438,7 +12647,8 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12451,7 +12661,8 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(const Domain &domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool internal, bool collective,
-                                    ShardingID sid, bool implicit)
+                                    ShardingID sid, bool implicit,
+                                    const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -12471,7 +12682,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::remap_region(PhysicalRegion region)
+    ApEvent LeafContext::remap_region(const PhysicalRegion &region,
+                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_REMAP_OPERATION,
@@ -12575,7 +12787,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     Future LeafContext::detach_resource(PhysicalRegion region, const bool flush,
-                                        const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -12586,7 +12798,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::detach_resources(ExternalResources resources,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -12635,7 +12847,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::issue_mapping_fence(void)
+    Future LeafContext::issue_mapping_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_MAPPING_FENCE_CALL,
@@ -12645,7 +12857,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::issue_execution_fence(void)
+    Future LeafContext::issue_execution_fence(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_EXECUTION_FENCE_CALL,
@@ -12655,7 +12867,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::complete_frame(void)
+    void LeafContext::complete_frame(const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_COMPLETE_FRAME_CALL,
@@ -12664,7 +12876,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate LeafContext::create_predicate(const Future &f)
+    Predicate LeafContext::create_predicate(const Future &f,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (f.impl == NULL)
@@ -12682,7 +12895,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate LeafContext::predicate_not(const Predicate &p)
+    Predicate LeafContext::predicate_not(const Predicate &p,
+                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (p == Predicate::TRUE_PRED)
@@ -12885,7 +13099,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
+        bool static_trace, const std::set<RegionTreeID> *trees,
+        bool deprecated, const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -12894,7 +13109,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::end_trace(TraceID tid, bool deprecated)
+    void LeafContext::end_trace(TraceID tid, bool deprecated,
+                                const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,
@@ -13090,7 +13306,8 @@ namespace Legion {
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
+          destroy_index_space(it->second, false/*unordered*/,
+                              true/*recurse*/, NULL/*provenance*/);
       }
       // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
@@ -13292,7 +13509,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
+    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc,
+                                                      const char *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,

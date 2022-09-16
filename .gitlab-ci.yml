@@ -750,7 +750,7 @@ gcc9_cxx11_debug_openmp_regent:
 gcc9_cxx11_debug_python3_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion, *jupyter, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *python3, *legion, *prof, *jupyter, *short]
 #   * LLVM
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]

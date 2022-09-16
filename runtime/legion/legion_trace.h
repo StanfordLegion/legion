@@ -78,7 +78,8 @@ namespace Legion {
         PHYSICAL_REPLAY,
       };
     public:
-      LegionTrace(InnerContext *ctx, TraceID tid, bool logical_only);
+      LegionTrace(InnerContext *ctx, TraceID tid, bool logical_only, 
+                  Provenance *provenance);
       virtual ~LegionTrace(void);
     public:
       virtual bool is_static_trace(void) const = 0;
@@ -107,7 +108,7 @@ namespace Legion {
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }
-      void fix_trace(void);
+      void fix_trace(Provenance *provenance);
     public:
       bool has_physical_trace(void) { return physical_trace != NULL; }
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
@@ -140,6 +141,9 @@ namespace Legion {
     public:
       InnerContext *const ctx;
       const TraceID tid;
+      Provenance *const begin_provenance;
+      // Set after end_trace is called
+      Provenance *end_provenance;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations; 
       // We also need a data structure to record when there are
@@ -174,7 +178,7 @@ namespace Legion {
       static const AllocationType alloc_type = STATIC_TRACE_ALLOC;
     public:
       StaticTrace(TraceID tid, InnerContext *ctx, bool logical_only,
-                  const std::set<RegionTreeID> *trees);
+                  Provenance *p, const std::set<RegionTreeID> *trees);
       StaticTrace(const StaticTrace &rhs);
       virtual ~StaticTrace(void);
     public:
@@ -236,7 +240,8 @@ namespace Legion {
         unsigned count;
       }; 
     public:
-      DynamicTrace(TraceID tid, InnerContext *ctx, bool logical_only);
+      DynamicTrace(TraceID tid, InnerContext *ctx, 
+                   bool logical_only, Provenance *p);
       DynamicTrace(const DynamicTrace &rhs);
       virtual ~DynamicTrace(void);
     public:
@@ -331,7 +336,7 @@ namespace Legion {
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
       void initialize_capture(InnerContext *ctx, bool has_blocking_call,
-                              bool remove_trace_reference);
+                    bool remove_trace_reference, const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -364,7 +369,8 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(InnerContext *ctx, bool has_blocking_call);
+      void initialize_complete(InnerContext *ctx, bool has_blocking_call,
+                               const char *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -396,7 +402,8 @@ namespace Legion {
     public:
       TraceReplayOp& operator=(const TraceReplayOp &rhs);
     public:
-      void initialize_replay(InnerContext *ctx, LegionTrace *trace);
+      void initialize_replay(InnerContext *ctx, LegionTrace *trace,
+                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -423,7 +430,8 @@ namespace Legion {
     public:
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
-      void initialize_begin(InnerContext *ctx, LegionTrace *trace);
+      void initialize_begin(InnerContext *ctx, LegionTrace *trace,
+                            Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -443,7 +451,8 @@ namespace Legion {
     public:
       void initialize_summary(InnerContext *ctx,
                               PhysicalTemplate *tpl,
-                              Operation *invalidator);
+                              Operation *invalidator,
+                              Provenance *provenance);
       void perform_logging(void);
     public:
       virtual void activate(void);
@@ -708,7 +717,8 @@ namespace Legion {
       void execute_slice(unsigned slice_idx, bool recurrent_replay);
     public:
       void issue_summary_operations(InnerContext* context,
-                                    Operation *invalidator);
+                                    Operation *invalidator,
+                                    Provenance *provenance);
     public:
       void dump_template(void);
     private:

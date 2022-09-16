@@ -519,24 +519,31 @@ namespace Legion {
        *   custom serdez object for serializing and deserializing
        *   a field when it is moved.
        * @param local_field whether this is a local field or not
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return field ID for the allocated field
        */
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
-                             bool local_field = false);
+                             bool local_field = false,
+                             const char *provenance = NULL);
       FieldID allocate_field(const Future &field_size,
                              FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
-                             bool local_field = false);
+                             bool local_field = false,
+                             const char *provenance = NULL);
       ///@}
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
-      void free_field(FieldID fid, const bool unordered = false);
+      void free_field(FieldID fid, const bool unordered = false,
+                      const char *provenance = NULL);
 
       /**
        * Same as allocate field, but this field will only
@@ -547,7 +554,7 @@ namespace Legion {
        */
       FieldID allocate_local_field(size_t field_size,
           FieldID desired_fieldid = LEGION_AUTO_GENERATE_ID,
-          CustomSerdezID serdez_id = 0);
+          CustomSerdezID serdez_id = 0, const char *provenance = NULL);
       ///@{
       /**
        * Allocate a collection of fields with the specified sizes.
@@ -561,26 +568,33 @@ namespace Legion {
        * @param field_sizes size in bytes of the fields to be allocated
        * @param resulting_fields optional field names for allocated fields
        * @param local_fields whether these should be local fields or not
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return resulting_fields vector with length equivalent to
        *    the length of field_sizes with field IDs specified
        */
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
-                           bool local_fields = false);
+                           bool local_fields = false,
+                           const char *provenance = NULL);
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
-                           bool local_fields = false);
+                           bool local_fields = false,
+                           const char *provenance = NULL);
       ///@}
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void free_fields(const std::set<FieldID> &to_free, 
-                       const bool unordered = false);
+                       const bool unordered = false,
+                       const char *provenance = NULL);
       /**
        * Same as allocate_fields but the fields that are allocated
        * will only be available locally on the node on which 
@@ -590,7 +604,8 @@ namespace Legion {
        */
       void allocate_local_fields(const std::vector<size_t> &field_sizes,
                                  std::vector<FieldID> &resulting_fields,
-                                 CustomSerdezID serdez_id = 0);
+                                 CustomSerdezID serdez_id = 0,
+                                 const char *provenance = NULL);
       /**
        * @return field space associated with this allocator
        */
@@ -1451,7 +1466,8 @@ namespace Legion {
                    Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0,
                    MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   const char *provenance = "");
     public:
       inline IndexSpaceRequirement&
               add_index_requirement(const IndexSpaceRequirement &req);
@@ -1496,6 +1512,9 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       UntypedBuffer                      predicate_false_result;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                        provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1553,7 +1572,8 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexTaskLauncher(TaskID tid,
                         IndexSpace launch_space,
                         UntypedBuffer global_arg,
@@ -1562,7 +1582,8 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
     public:
       inline IndexSpaceRequirement&
                   add_index_requirement(const IndexSpaceRequirement &req);
@@ -1613,6 +1634,9 @@ namespace Legion {
       Future                             predicate_false_future;
       UntypedBuffer                      predicate_false_result;
     public:
+      // Provenance string for the runtime and tools to use
+      std::string                        provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1655,7 +1679,8 @@ namespace Legion {
                      MapperID id = 0,
                      MappingTagID tag = 0,
                      LayoutConstraintID layout_id = 0,
-                     UntypedBuffer map_arg = UntypedBuffer());
+                     UntypedBuffer map_arg = UntypedBuffer(),
+                     const char *provenance = "");
     public:
       inline void add_field(FieldID fid, bool inst = true);
     public:
@@ -1674,6 +1699,9 @@ namespace Legion {
       UntypedBuffer                   map_arg;
     public:
       LayoutConstraintID              layout_constraint_id;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1708,7 +1736,8 @@ namespace Legion {
     public:
       CopyLauncher(Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   const char *provenance = "");
     public:
       inline unsigned add_copy_requirements(const RegionRequirement &src,
 					    const RegionRequirement &dst);
@@ -1756,6 +1785,9 @@ namespace Legion {
       // will use an index space of size 1 containing 'point'
       IndexSpace                      sharding_space;
     public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1786,10 +1818,12 @@ namespace Legion {
       IndexCopyLauncher(void);
       IndexCopyLauncher(Domain domain, Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexCopyLauncher(IndexSpace space, Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
     public:
       inline unsigned add_copy_requirements(const RegionRequirement &src,
 					    const RegionRequirement &dst);
@@ -1837,6 +1871,9 @@ namespace Legion {
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
     public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1870,11 +1907,13 @@ namespace Legion {
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
                    UntypedBuffer arg, Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   const char *provenance = "");
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
                    Future f, Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0,
-                   UntypedBuffer map_arg = UntypedBuffer());
+                   UntypedBuffer map_arg = UntypedBuffer(),
+                   const char *provenance = "");
     public:
       inline void set_argument(UntypedBuffer arg);
       inline void set_future(Future f);
@@ -1903,6 +1942,9 @@ namespace Legion {
       // will use an index space of size 1 containing 'point'
       IndexSpace                      sharding_space;
     public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
@@ -1928,50 +1970,58 @@ namespace Legion {
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(Domain domain, LogicalRegion handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       // Partition projection
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
                         LogicalRegion parent, UntypedBuffer arg,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
       IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0,
-                        UntypedBuffer map_arg = UntypedBuffer());
+                        UntypedBuffer map_arg = UntypedBuffer(),
+                        const char *provenance = "");
     public:
       inline void set_argument(UntypedBuffer arg);
       inline void set_future(Future f);
@@ -2001,6 +2051,9 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -2050,6 +2103,9 @@ namespace Legion {
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
       bool                                          mapped; /*= true*/
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                                   provenance;
     public:
       // Data for files
       const char                                    *file_name;
@@ -2112,6 +2168,9 @@ namespace Legion {
       // same resource to different shards if this is set to false
       bool                                          deduplicate_across_shards;
     public:
+      // Provenance string for the runtime and tools to use
+      std::string                                   provenance;
+    public:
       // Data for files
       LegionFileMode                                mode;
       std::vector<const char*>                      file_names;
@@ -2146,6 +2205,7 @@ namespace Legion {
     public:
       bool                            and_op; // if not 'and' then 'or'
       std::vector<Predicate>          predicates;
+      std::string                     provenance;
     };
 
     /**
@@ -2161,6 +2221,9 @@ namespace Legion {
     public:
       TimingMeasurement               measurement;
       std::set<Future>                preconditions;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
     };
 
     /**
@@ -2179,6 +2242,9 @@ namespace Legion {
       MappingTagID                        tag;
       UntypedBuffer                       arg;
       std::vector<Future>                 futures;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                        provenance;
     };
 
     //==========================================================================
@@ -3449,7 +3515,8 @@ namespace Legion {
                       PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0,
-                      UntypedBuffer map_arg = UntypedBuffer());
+                      UntypedBuffer map_arg = UntypedBuffer(),
+                      const char *provenance = "");
     public:
       inline void add_field(FieldID f);
       inline void add_grant(Grant g);
@@ -3472,6 +3539,9 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -3493,7 +3563,8 @@ namespace Legion {
                       PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0,
-                      UntypedBuffer map_arg = UntypedBuffer());
+                      UntypedBuffer map_arg = UntypedBuffer(),
+                      const char *provenance = "");
     public:
       inline void add_field(FieldID f);
       inline void add_grant(Grant g);
@@ -3516,6 +3587,9 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       UntypedBuffer                   map_arg;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -3559,6 +3633,9 @@ namespace Legion {
       // Will only be used in control replication context. If left
       // unset the runtime will use launch_space/launch_domain
       IndexSpace                     sharding_space;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                    provenance;
     public:
       bool                           silence_warnings;
     };
@@ -4334,17 +4411,22 @@ namespace Legion {
        * @param ctx the enclosing task context
        * @param bounds the bounds for the new index space
        * @param type_tag optional type tag to use for the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, const Domain &bounds,
-                                    TypeTag type_tag = 0);
+                                    TypeTag type_tag = 0,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                      const Rect<DIM,COORD_T> &bounds);
+                                      const Rect<DIM,COORD_T> &bounds,
+                                      const char *provenance = NULL);
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                    const DomainT<DIM,COORD_T> &bounds);
+                                    const DomainT<DIM,COORD_T> &bounds,
+                                    const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4356,40 +4438,52 @@ namespace Legion {
        * @param future the future value containing the bounds
        * @param type_tag optional type tag to use for the index space
        *                 defaults to 'coord_t'
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, size_t dimensions, 
-                                    const Future &f, TypeTag type_tag = 0);
+                                    const Future &f, TypeTag type_tag = 0,
+                                    const char *provenance = NULL);
       template<int DIM, typename COORD_T>
-      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f);
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f,
+                                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space from a vector of points
        * @param ctx the enclosing task context
        * @param points a vector of points to have in the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, 
-                                    const std::vector<DomainPoint> &points);
+                                    const std::vector<DomainPoint> &points,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                      const std::vector<Point<DIM,COORD_T> > &points);
+                      const std::vector<Point<DIM,COORD_T> > &points,
+                      const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space from a vector of rectangles
        * @param ctx the enclosing task context
        * @param rects a vector of rectangles to have in the index space
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx,
-                                    const std::vector<Domain> &rects);
+                                    const std::vector<Domain> &rects,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                      const std::vector<Rect<DIM,COORD_T> > &rects);
+                      const std::vector<Rect<DIM,COORD_T> > &rects,
+                      const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4397,14 +4491,18 @@ namespace Legion {
        * several existing index spaces
        * @param ctx the enclosing task context
        * @param spaces the index spaces to union together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace union_index_spaces(Context ctx, 
-                                    const std::vector<IndexSpace> &spaces);
+                                    const std::vector<IndexSpace> &spaces,
+                                    const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> union_index_spaces(Context ctx,
-                     const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+                     const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces,
+                     const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4412,26 +4510,34 @@ namespace Legion {
        * several existing index spaces
        * @param ctx the enclosing task context
        * @param spaces the index spaces to intersect
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        * @return the handle for the new index space
        */
       IndexSpace intersect_index_spaces(Context ctx,
-                                        const std::vector<IndexSpace> &spaces);
+                                        const std::vector<IndexSpace> &spaces,
+                                        const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> intersect_index_spaces(Context ctx,
-                         const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+                         const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces,
+                         const char *provenance = NULL);
       ///@}
       ///@{
       /**
        * Create a new top-level index space by taking the
        * set difference of two different index spaces
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       IndexSpace subtract_index_spaces(Context ctx, 
-                                       IndexSpace left, IndexSpace right);
+                                       IndexSpace left, IndexSpace right,
+                                       const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> subtract_index_spaces(Context ctx,
-           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right);
+           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right,
+           const char *provenance = NULL);
       ///@}
       /**
        * @deprecated
@@ -4472,10 +4578,13 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        * @param recurse delete the full index tree
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void destroy_index_space(Context ctx, IndexSpace handle,
                                const bool unordered = false,
-                               const bool recurse = true);
+                               const bool recurse = true,
+                               const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
@@ -4648,10 +4757,13 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        * @param recurse destroy the full sub-tree below this partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this index space
        */
       void destroy_index_partition(Context ctx, IndexPartition handle,
                                    const bool unordered = false,
-                                   const bool recurse = true);
+                                   const bool recurse = true,
+                                   const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations
@@ -4673,20 +4785,24 @@ namespace Legion {
        * @param color_space space of colors to create 
        * @param granularity the minimum size of the index subspaces
        * @param color optional color paramter for the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return name of the created index partition
        */
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
                                             size_t granularity = 1,
                                             Color color = 
-                                                    LEGION_AUTO_GENERATE_ID);
+                                                    LEGION_AUTO_GENERATE_ID,
+                                            const char *provenance = NULL);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
                         IndexSpaceT<DIM,COORD_T> parent,
                         IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                         size_t granularity = 1, 
-                        Color color = LEGION_AUTO_GENERATE_ID);
+                        Color color = LEGION_AUTO_GENERATE_ID,
+                        const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4702,32 +4818,38 @@ namespace Legion {
        * @param color_space space of the colors to create
        * @param granularity the minimum size of the index subspaces
        * @param color optional color parameter for the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
                                        const std::map<DomainPoint,int> &weights,
                                        IndexSpace color_space,
                                        size_t granularity = 1,
-                                       Color color = LEGION_AUTO_GENERATE_ID);
+                                       Color color = LEGION_AUTO_GENERATE_ID,
+                                       const char *provenance = NULL);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
                     IndexSpaceT<DIM,COORD_T> parent,
                     const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
                     IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                     size_t granularity = 1, 
-                    Color color = LEGION_AUTO_GENERATE_ID);
+                    Color color = LEGION_AUTO_GENERATE_ID,
+                    const char *provenance = NULL);
       // 64-bit versions
       IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
                                     const std::map<DomainPoint,size_t> &weights,
                                     IndexSpace color_space,
                                     size_t granularity = 1,
-                                    Color color = LEGION_AUTO_GENERATE_ID);
+                                    Color color = LEGION_AUTO_GENERATE_ID,
+                                    const char *provenance = NULL);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
                  IndexSpaceT<DIM,COORD_T> parent,
                  const std::map<Point<COLOR_DIM,COLOR_COORD_T>,size_t> &weights,
                  IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                 size_t granularity = 1, Color color = LEGION_AUTO_GENERATE_ID);
+                 size_t granularity = 1, Color color = LEGION_AUTO_GENERATE_ID,
+                 const char *provenance = NULL);
       // Alternate versions of the above method that take a future map where
       // the values in the future map will be interpretted as integer weights
       // You can use this method with both 32 and 64 bit weights
@@ -4736,14 +4858,16 @@ namespace Legion {
                                                  IndexSpace color_space,
                                                  size_t granularity = 1,
                                                  Color color =
-                                                        LEGION_AUTO_GENERATE_ID);
+                                                        LEGION_AUTO_GENERATE_ID,
+                                                 const char *provenance = NULL);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
                                IndexSpaceT<DIM,COORD_T> parent,
                                const FutureMap &weights,
                                IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                                size_t granularity = 1, 
-                               Color color = LEGION_AUTO_GENERATE_ID);
+                               Color color = LEGION_AUTO_GENERATE_ID,
+                               const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4766,6 +4890,8 @@ namespace Legion {
        * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_union(Context ctx,
@@ -4774,7 +4900,8 @@ namespace Legion {
                                  IndexPartition handle2,
                                  IndexSpace color_space,
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                 Color color = LEGION_AUTO_GENERATE_ID);
+                                 Color color = LEGION_AUTO_GENERATE_ID,
+                                 const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_union(Context ctx,
@@ -4783,7 +4910,8 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                              Color color = LEGION_AUTO_GENERATE_ID);
+                              Color color = LEGION_AUTO_GENERATE_ID,
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4807,6 +4935,8 @@ namespace Legion {
        * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_intersection(Context ctx,
@@ -4815,7 +4945,8 @@ namespace Legion {
                                   IndexPartition handle2,
                                   IndexSpace color_space,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(
@@ -4825,7 +4956,8 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                              Color color = LEGION_AUTO_GENERATE_ID);
+                              Color color = LEGION_AUTO_GENERATE_ID,
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4844,6 +4976,8 @@ namespace Legion {
        * @param partition the partition to mirror
        * @param part_kind optinally specify the completenss of the partition
        * @param color optional new color for the mirrored partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @param dominates whether the parent dominates the partition
        */
       IndexPartition create_partition_by_intersection(Context ctx,
@@ -4851,14 +4985,16 @@ namespace Legion {
                                    IndexPartition partition,
                                    PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                    Color color = LEGION_AUTO_GENERATE_ID,
-                                   bool dominates = false);
+                                   bool dominates = false,
+                                   const char *provenance = NULL);
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(Context ctx,
                                  IndexSpaceT<DIM,COORD_T> parent,
                                  IndexPartitionT<DIM,COORD_T> partition,
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                  Color color = LEGION_AUTO_GENERATE_ID,
-                                         bool dominates = false);
+                                         bool dominates = false,
+                                         const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4882,6 +5018,8 @@ namespace Legion {
        * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_difference(Context ctx,
@@ -4890,7 +5028,8 @@ namespace Legion {
                                   IndexPartition handle2,
                                   IndexSpace color_space,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_difference(Context ctx,
@@ -4899,7 +5038,8 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                              Color color = LEGION_AUTO_GENERATE_ID);
+                              Color color = LEGION_AUTO_GENERATE_ID,
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4923,6 +5063,8 @@ namespace Legion {
        * @param handle optional map for new partitions (can be empty)
        * @param part_kind indicate the kinds for the partitions
        * @param color optional color for each of the new partitions
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return the color used for each of the partitions
        */
       Color create_cross_product_partitions(Context ctx,
@@ -4930,7 +5072,8 @@ namespace Legion {
                                   IndexPartition handle2,
                                   std::map<IndexSpace,IndexPartition> &handles,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       Color create_cross_product_partitions(Context ctx,
@@ -4940,7 +5083,8 @@ namespace Legion {
                                     IndexSpaceT<DIM,COORD_T>,
                                     IndexPartitionT<DIM,COORD_T> > &handles,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -4962,8 +5106,10 @@ namespace Legion {
        * @param fid the field of domain in which to place the results
        * @param range the index space to serve as the range of the mapping
        * @param id the ID of the mapper to use for mapping the fields
-       * @param map_arg an untyped buffer for the mapper data of the Partition
        * @param tag the tag to pass to the mapper for context
+       * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void create_association(Context ctx,
                               LogicalRegion domain,
@@ -4972,7 +5118,8 @@ namespace Legion {
                               IndexSpace range,
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer marg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       void create_bidirectional_association(Context ctx,
                                             LogicalRegion domain,
                                             LogicalRegion domain_parent,
@@ -4983,7 +5130,8 @@ namespace Legion {
                                             MapperID id = 0,
                                             MappingTagID tag = 0,
                                             UntypedBuffer map_arg = 
-                                                    UntypedBuffer());
+                                                    UntypedBuffer(),
+                                            const char *provenance = NULL);
       // Template versions
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
       void create_association(Context ctx,
@@ -4993,7 +5141,8 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> range,
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
       void create_bidirectional_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
@@ -5004,7 +5153,8 @@ namespace Legion {
                               FieldID range_fid, // type: Point<DIM1,COORD_T1>
                               MapperID id = 0,
                               MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5028,6 +5178,8 @@ namespace Legion {
        * @param extent the rectangle shape of each of the bounds
        * @param part_kind the specify the partition kind
        * @param color optional new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_restriction(Context ctx,
@@ -5036,7 +5188,8 @@ namespace Legion {
                                   DomainTransform transform,
                                   Domain extent,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       // Template version
       template<int DIM, int COLOR_DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
@@ -5045,7 +5198,8 @@ namespace Legion {
                                 Transform<DIM,COLOR_DIM,COORD_T> transform,
                                 Rect<DIM,COORD_T> extent,
                                 PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                Color color = LEGION_AUTO_GENERATE_ID);
+                                Color color = LEGION_AUTO_GENERATE_ID,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5059,18 +5213,22 @@ namespace Legion {
        * @param parent the parent index space to be partitioned
        * @param blocking factor the blocking factors for each dimension
        * @param color optional new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_blockify(Context ctx,
                                         IndexSpace parent,
                                         DomainPoint blocking_factor,
-                                        Color color = LEGION_AUTO_GENERATE_ID);
+                                        Color color = LEGION_AUTO_GENERATE_ID,
+                                        const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
                                     Point<DIM,COORD_T> blocking_factor,
-                                    Color color = LEGION_AUTO_GENERATE_ID);
+                                    Color color = LEGION_AUTO_GENERATE_ID,
+                                    const char *provenance = NULL);
       /**
        * An alternate version of create partition by blockify that also
        * takes an origin to use for the computation of the extent.
@@ -5079,20 +5237,24 @@ namespace Legion {
        * @param blocking factor the blocking factors for each dimension
        * @param origin the origin to use for computing the extent
        * @param color optional new color for the index partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_blockify(Context ctx,
                                         IndexSpace parent,
                                         DomainPoint blockify_factor,
                                         DomainPoint origin,
-                                        Color color = LEGION_AUTO_GENERATE_ID);
+                                        Color color = LEGION_AUTO_GENERATE_ID,
+                                        const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
                                     Point<DIM,COORD_T> blocking_factor,
                                     Point<DIM,COORD_T> origin,
-                                    Color color = LEGION_AUTO_GENERATE_ID);
+                                    Color color = LEGION_AUTO_GENERATE_ID,
+                                    const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5111,6 +5273,8 @@ namespace Legion {
        * @param perform_intersections intersect domains with parent space
        * @param part_kind specify the partition kind or ask to compute it 
        * @param color the color of the result of the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_domain(Context ctx,
@@ -5119,7 +5283,8 @@ namespace Legion {
                                   IndexSpace color_space,
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
                                   IndexSpaceT<DIM,COORD_T> parent,
@@ -5130,7 +5295,8 @@ namespace Legion {
                                               COLOR_COORD_T> color_space,
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       /**
        * This is an alternate version of create_partition_by_domain that
        * instead takes a future map for the list of domains to be used.
@@ -5144,6 +5310,8 @@ namespace Legion {
        * @param perform_intersections intersect domains with parent space
        * @param part_kind specify the partition kind or ask to compute it 
        * @param color the color of the result of the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_domain(Context ctx,
@@ -5152,7 +5320,8 @@ namespace Legion {
                                   IndexSpace color_space,
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
                                   IndexSpaceT<DIM,COORD_T> parent,
@@ -5161,7 +5330,8 @@ namespace Legion {
                                               COLOR_COORD_T> color_space,
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5188,6 +5358,8 @@ namespace Legion {
        * @param tag the context tag to pass to the mapper
        * @param part_kind the kind of the partition
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
@@ -5202,7 +5374,8 @@ namespace Legion {
                                                PartitionKind part_kind = 
                                                          LEGION_DISJOINT_KIND,
                                                UntypedBuffer map_arg = 
-                                                         UntypedBuffer());
+                                                         UntypedBuffer(),
+                                               const char *provenance = NULL);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
@@ -5213,7 +5386,8 @@ namespace Legion {
                           Color color = LEGION_AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0,
                           PartitionKind part_kind = LEGION_DISJOINT_KIND,
-                          UntypedBuffer map_arg = UntypedBuffer());
+                          UntypedBuffer map_arg = UntypedBuffer(),
+                          const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5245,6 +5419,8 @@ namespace Legion {
        * @param id the ID of the mapper to use for mapping field
        * @param tag the mapper tag to provide context to the mapper
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
@@ -5256,7 +5432,8 @@ namespace Legion {
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                  Color color = LEGION_AUTO_GENERATE_ID,
                                  MapperID id = 0, MappingTagID tag = 0,
-                                 UntypedBuffer map_arg = UntypedBuffer());
+                                 UntypedBuffer map_arg = UntypedBuffer(),
+                                 const char *provenance = NULL);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5269,7 +5446,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       // Range versions of image
       IndexPartition create_partition_by_image_range(Context ctx,
                                  IndexSpace handle,
@@ -5280,7 +5458,8 @@ namespace Legion {
                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                  Color color = LEGION_AUTO_GENERATE_ID,
                                  MapperID id = 0, MappingTagID tag = 0,
-                                 UntypedBuffer map_arg = UntypedBuffer());
+                                 UntypedBuffer map_arg = UntypedBuffer(),
+                                 const char *provenance = NULL);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5294,7 +5473,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       ///@}                                    
       ///@{
       /**
@@ -5323,6 +5503,8 @@ namespace Legion {
        * @param id the ID of the mapper to use for mapping field
        * @param tag the mapper tag to provide context to the mapper
        * @param map_arg an untyped buffer for the mapper data of the Partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new index partition of the index space of 'handle'
        */
       IndexPartition create_partition_by_preimage(Context ctx, 
@@ -5334,7 +5516,8 @@ namespace Legion {
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
                                   MapperID id = 0, MappingTagID tag = 0,
-                                  UntypedBuffer map_arg = UntypedBuffer());
+                                  UntypedBuffer map_arg = UntypedBuffer(),
+                                  const char *provenance = NULL);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5347,7 +5530,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       // Range versions of preimage 
       IndexPartition create_partition_by_preimage_range(Context ctx, 
                                   IndexPartition projection,
@@ -5358,7 +5542,8 @@ namespace Legion {
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
                                   MapperID id = 0, MappingTagID tag = 0,
-                                  UntypedBuffer map_arg = UntypedBuffer());
+                                  UntypedBuffer map_arg = UntypedBuffer(),
+                                  const char *provenance = NULL);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -5372,7 +5557,8 @@ namespace Legion {
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = LEGION_AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0,
-                              UntypedBuffer map_arg = UntypedBuffer());
+                              UntypedBuffer map_arg = UntypedBuffer(),
+                              const char *provenance = NULL);
       ///@} 
     public:
       //------------------------------------------------------------------------
@@ -5401,20 +5587,24 @@ namespace Legion {
        * @param color_space the color space for the new partition
        * @param part_kind optionally specify the partition kind
        * @param color optionally assign a color to the partition
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index partition
        */
       IndexPartition create_pending_partition(Context ctx,
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                                  Color color = LEGION_AUTO_GENERATE_ID);
+                                  Color color = LEGION_AUTO_GENERATE_ID,
+                                  const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_pending_partition(Context ctx,
                               IndexSpaceT<DIM,COORD_T> parent,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = LEGION_COMPUTE_KIND,
-                              Color color = LEGION_AUTO_GENERATE_ID);
+                              Color color = LEGION_AUTO_GENERATE_ID,
+                              const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5429,18 +5619,22 @@ namespace Legion {
        * @param parent the parent index partition 
        * @param color the color to assign the index space to in the parent
        * @param handles a vector index space handles to union
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent, 
                                         const DomainPoint &color,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5452,17 +5646,21 @@ namespace Legion {
        * @param parent the parent index partition 
        * @param color the color to assign the index space to in the parent
        * @param handle an index partition to union together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
                                           const DomainPoint &color,
-                                          IndexPartition handle);
+                                          IndexPartition handle,
+                                          const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-                                IndexPartitionT<DIM,COORD_T> handle);
+                                IndexPartitionT<DIM,COORD_T> handle,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5477,19 +5675,23 @@ namespace Legion {
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
        * @param handles a vector index space handles to intersect 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
-                                       const std::vector<IndexSpace> &handles);
+                                       const std::vector<IndexSpace> &handles,
+                                       const char *provenance = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5501,18 +5703,22 @@ namespace Legion {
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
        * @param handle an index partition to intersect together
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
-                                                 IndexPartition handle);
+                                                 IndexPartition handle,
+                                                 const char *provenannce=NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-                                IndexPartitionT<DIM,COORD_T> handle);
+                                IndexPartitionT<DIM,COORD_T> handle,
+                                const char *provenance = NULL);
       ///@}
       ///@{
       /**
@@ -5532,13 +5738,16 @@ namespace Legion {
        * @param color the color to assign the index space to in the parent
        * @param initial the starting index space
        * @param handles a vector index space handles to subtract 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle of the new index space
        */
       IndexSpace create_index_space_difference(Context ctx, 
                                                IndexPartition parent,
                                                const DomainPoint &color,
                                                IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        const char *provenancne = NULL);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_difference(Context ctx,
@@ -5546,7 +5755,8 @@ namespace Legion {
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
                                 IndexSpaceT<DIM,COORD_T> initial,
                                 const typename std::vector<
-                                  IndexSpaceT<DIM,COORD_T> > &handles);
+                                  IndexSpaceT<DIM,COORD_T> > &handles,
+                                const char *provenance = NULL);
       ///@}
     public:
       //------------------------------------------------------------------------
@@ -5942,9 +6152,11 @@ namespace Legion {
       /**
        * Create a new field space.
        * @param ctx enclosing task context
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
-      FieldSpace create_field_space(Context ctx);
+      FieldSpace create_field_space(Context ctx, const char *provenance = NULL);
       /**
        * Create a new field space with an existing set of fields
        * @param ctx enclosing task context
@@ -5952,12 +6164,15 @@ namespace Legion {
        * @param resulting_fields optional field snames for fields
        * @param serdez_id optional parameter for specifying a custom
        *        serdez object for serializing and deserializing fields
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
       FieldSpace create_field_space(Context ctx,
                                     const std::vector<size_t> &field_sizes,
                                     std::vector<FieldID> &resulting_fields,
-                                    CustomSerdezID serdez_id = 0);
+                                    CustomSerdezID serdez_id = 0,
+                                    const char *provenance = NULL);
       /**
        * Create a new field space with an existing set of fields
        * @param ctx enclosing task context
@@ -5965,12 +6180,15 @@ namespace Legion {
        * @param resulting_fields optional field snames for fields
        * @param serdez_id optional parameter for specifying a custom
        *        serdez object for serializing and deserializing fields
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the new field space
        */
       FieldSpace create_field_space(Context ctx,
                                     const std::vector<Future> &field_sizes,
                                     std::vector<FieldID> &resulting_fields,
-                                    CustomSerdezID serdez_id = 0);
+                                    CustomSerdezID serdez_id = 0,
+                                    const char *provenance = NULL);
       /**
        * Create a new shared ownership of a field space to prevent it 
        * from being destroyed by other potential owners. Every call to this
@@ -5988,9 +6206,12 @@ namespace Legion {
        * @param handle of the field space to be destroyed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void destroy_field_space(Context ctx, FieldSpace handle, 
-                               const bool unordered = false);
+                               const bool unordered = false,
+                               const char *provenance = NULL);
 
       ///@{
       /**
@@ -6045,17 +6266,21 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param index handle for the index space of the logical region
        * @param fields handle for the field space of the logical region
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return handle for the logical region created
        */
       LogicalRegion create_logical_region(Context ctx, IndexSpace index, 
                                           FieldSpace fields,
-                                          bool task_local = false);
+                                          bool task_local = false,
+                                          const char *provenance = NULL);
       // Template version
       template<int DIM, typename COORD_T>
       LogicalRegionT<DIM,COORD_T> create_logical_region(Context ctx,
                                       IndexSpaceT<DIM,COORD_T> index,
                                       FieldSpace fields,
-                                      bool task_local = false);
+                                      bool task_local = false,
+                                      const char *provenance = NULL);
       /**
        * Create a new shared ownership of a top-level logical region to prevent 
        * it  from being destroyed by other potential owners. Every call to this
@@ -6073,9 +6298,12 @@ namespace Legion {
        * @param handle logical region handle to destroy
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
       void destroy_logical_region(Context ctx, LogicalRegion handle,
-                                  const bool unordered = false);
+                                  const bool unordered = false,
+                                  const char *provenance = NULL);
 
       /**
        * Destroy a logical partition and all of it is logical sub-regions.
@@ -6468,11 +6696,14 @@ namespace Legion {
        * @param redop ID for the reduction op to use for reducing values
        * @param deterministic request that the reduced future be computed
        *        in a deterministic way (more expensive than non-deterministic)
+       * @param provenance an optional string for describing the provenance
+       *        of this invocation
        * @return a future result representing the the reduction of all the
        *         values in the future map
        */
       Future reduce_future_map(Context ctx, const FutureMap &future_map, 
-                               ReductionOpID redop, bool deterministic = false);
+                               ReductionOpID redop, bool deterministic = false,
+                               const char *provenance = NULL);
 
       /**
        * Construct a future map from a collection of buffers. The user must
@@ -6528,12 +6759,15 @@ namespace Legion {
        * @param implicit_sharding if collective=true this says whether the
        *                   sharding should be implicitly handled by the
        *                   runtime and the sharding function ID ignored
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain,
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0,
-                           bool implicit_sharding = false);
+                           bool implicit_sharding = false,
+                           const char *provenance = NULL);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
@@ -6658,10 +6892,13 @@ namespace Legion {
        * @param req the region requirement for the inline mapping
        * @param id the mapper ID to associate with the operation
        * @param tag the mapping tag to pass to any mapping calls
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a physical region for the resulting data
        */
       PhysicalRegion map_region(Context ctx, const RegionRequirement &req, 
-                                MapperID id = 0, MappingTagID tag = 0);
+                                MapperID id = 0, MappingTagID tag = 0,
+                                const char *provenance = NULL);
 
       /**
        * Perform an inline mapping operation that re-maps a physical region
@@ -6670,10 +6907,13 @@ namespace Legion {
        * @param idx index of the region requirement from the enclosing task
        * @param id the mapper ID to associate with the operation
        * @param the mapping tag to pass to any mapping calls 
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return a physical region for the resulting data 
        */
       PhysicalRegion map_region(Context ctx, unsigned idx, 
-                                MapperID id = 0, MappingTagID tag = 0);
+                                MapperID id = 0, MappingTagID tag = 0,
+                                const char *provenance = NULL);
 
       /**
        * Remap a region from an existing physical region.  It will
@@ -6681,8 +6921,11 @@ namespace Legion {
        * physical region is valid again before using it.
        * @param ctx enclosing task context
        * @param region the physical region to be remapped
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        */
-      void remap_region(Context ctx, PhysicalRegion region);
+      void remap_region(Context ctx, PhysicalRegion region,
+                        const char *provenance = NULL);
 
       /**
        * Unmap a physical region.  This can unmap either a previous
@@ -6839,11 +7082,14 @@ namespace Legion {
        * @param flush copy out data to the physical region before detaching
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return an empty future indicating when the resource is detached
        */
       Future detach_external_resource(Context ctx, PhysicalRegion region,
                                       const bool flush = true,
-                                      const bool unordered = false);
+                                      const bool unordered = false,
+                                      const char *provenance = NULL);
 
       /**
        * Attach multiple external resources to logical regions using an
@@ -6873,11 +7119,14 @@ namespace Legion {
        * @param flush copy out data to the physical region before detaching
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return an empty future indicating when the resources are detached
        */
       Future detach_external_resources(Context ctx, ExternalResources external,
                                        const bool flush = true,
-                                       const bool unordered = false);
+                                       const bool unordered = false,
+                                       const char *provenance = NULL);
 
       /**
        * Force progress on unordered operations. After performing one
@@ -6995,18 +7244,24 @@ namespace Legion {
        * must be a boolean future.
        * @param ctx enclosing task context
        * @param f future value to convert to a predicate
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return predicate value wrapping the future
        */
-      Predicate create_predicate(Context ctx, const Future &f);
+      Predicate create_predicate(Context ctx, const Future &f,
+                                 const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical 
        * negation of another predicate value.
        * @param ctx enclosing task context
        * @param p predicate value to logically negate
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return predicate value logically negating previous predicate
        */
-      Predicate predicate_not(Context ctx, const Predicate &p);
+      Predicate predicate_not(Context ctx, const Predicate &p,
+                              const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical
@@ -7014,10 +7269,13 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param p1 first predicate to logically and 
        * @param p2 second predicate to logically and
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return predicate value logically and-ing two predicates
        */
-      Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2);
+      Predicate predicate_and(Context ctx,
+                              const Predicate &p1, const Predicate &p2,
+                              const char *provenance = NULL);
 
       /**
        * Create a new predicate value that is the logical
@@ -7025,10 +7283,13 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param p1 first predicate to logically or
        * @param p2 second predicate to logically or
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return predicate value logically or-ing two predicates
        */
-      Predicate predicate_or(Context ctx, const Predicate &p1, 
-                                          const Predicate &p2);
+      Predicate predicate_or(Context ctx,
+                             const Predicate &p1, const Predicate &p2,
+                             const char *provenance = NULL);
 
       /**
        * Generic predicate constructor for an arbitrary number of predicates
@@ -7202,9 +7463,12 @@ namespace Legion {
        * future just like all other futures.
        * @param ctx enclosing task context
        * @param dc dynamic collective on which to get the result
+       * @param provenance an optional string describing the provenance 
+       *                   information for this operation
        * @return future value that contains the result of the collective
        */
-      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc); 
+      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc,
+                                           const char *provenance = NULL); 
 
       /**
        * Advance an existing dynamic collective to the next
@@ -7247,7 +7511,7 @@ namespace Legion {
        * useful as a performance optimization to minimize the
        * number of mapping independence tests required.
        */
-      Future issue_mapping_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx, const char *provenance = NULL);
 
       /**
        * Issue a Legion execution fence in the current context.  A 
@@ -7258,7 +7522,7 @@ namespace Legion {
        * such as modifications to the region tree made prior
        * to the fence visible to tasks issued after the fence.
        */
-      Future issue_execution_fence(Context ctx); 
+      Future issue_execution_fence(Context ctx, const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Tracing Operations 
@@ -7293,11 +7557,12 @@ namespace Legion {
        *                in the case of a static trace
        */
       void begin_trace(Context ctx, TraceID tid, bool logical_only = false,
-       bool static_trace = false, const std::set<RegionTreeID> *managed = NULL);
+       bool static_trace = false, const std::set<RegionTreeID> *managed = NULL,
+       const char *provenance = NULL);
       /**
        * Mark the end of trace that was being performed.
        */
-      void end_trace(Context ctx, TraceID tid);
+      void end_trace(Context ctx, TraceID tid, const char *provenance = NULL);
       /**
        * Start a new static trace of operations. Inside of this trace
        * it is the application's responsibility to specify any dependences
@@ -7365,7 +7630,7 @@ namespace Legion {
        * frames that make up the operation window. It is best to place these
        * calls at the end of a frame of tasks.
        */
-      void complete_frame(Context ctx);
+      void complete_frame(Context ctx, const char *provenance = NULL);
     public:
       //------------------------------------------------------------------------
       // Must Parallelism 
@@ -9244,28 +9509,34 @@ namespace Legion {
                                       size_t transform_size,
                                       const void *extent, 
                                       size_t extent_size,
-                                      PartitionKind part_kind, Color color);
+                                      PartitionKind part_kind, Color color,
+                                      const char *provenance);
       IndexSpace create_index_space_union_internal(Context ctx,
                                       IndexPartition parent,
                                       const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace create_index_space_union_internal(Context ctx, 
                                       IndexPartition parent, 
                                       const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      IndexPartition handle,
+                                      const char *provenance);
       IndexSpace create_index_space_intersection_internal(Context ctx,
                                       IndexPartition parent,
                                       const void *realm_color, TypeTag type_tag,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace create_index_space_intersection_internal(Context ctx, 
                                       IndexPartition parent, 
                                       const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      IndexPartition handle,
+                                      const char *provenance);
       IndexSpace create_index_space_difference_internal(Context ctx,
                                       IndexPartition paretn,
                                       const void *realm_color, TypeTag type_tag,
                                       IndexSpace initial,
-                                      const std::vector<IndexSpace> &handles);
+                                      const std::vector<IndexSpace> &handles,
+                                      const char *provenance);
       IndexSpace get_index_subspace_internal(IndexPartition handle, 
                                       const void *realm_color,TypeTag type_tag);
       bool has_index_subspace_internal(IndexPartition handle,

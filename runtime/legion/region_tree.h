@@ -174,19 +174,21 @@ namespace Legion {
     public:
       IndexSpaceNode* create_index_space(IndexSpace handle, 
                               const Domain *domain, DistributedID did, 
+                              Provenance *provenance,
                               ApEvent ready = ApEvent::NO_AP_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
+                              const char *provenance,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_intersection_space(IndexSpace handle, 
-                              DistributedID did,
+                              DistributedID did, const char *provenance,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_difference_space(IndexSpace handle,
-                              DistributedID did,
+                              DistributedID did, const char *provenance,
                               IndexSpace left, IndexSpace right,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               std::set<RtEvent> *applied = NULL);
@@ -197,6 +199,7 @@ namespace Legion {
                                        LegionColor partition_color,
                                        PartitionKind part_kind,
                                        DistributedID did,
+                                       Provenance *provenance,
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT,
                                        std::set<RtEvent> *applied = NULL);
@@ -205,6 +208,7 @@ namespace Legion {
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
                                         PartitionKind kind,
+                                        Provenance *provenance,
                                         LegionColor &part_color,
                                         ApEvent domain_ready,
                                         std::set<RtEvent> &safe_events);
@@ -317,24 +321,26 @@ namespace Legion {
       bool has_index_partition(IndexSpace parent, Color color);
     public:
       FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
-                                         std::set<RtEvent> *applied = NULL);
+                   const char *provenance, std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &preconditions);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, CustomSerdezID serdez_id);
+                          FieldID fid, CustomSerdezID serdez_id,
+                          const char *provenance);
       FieldSpaceNode* allocate_field(FieldSpace handle, ApEvent ready,
-                                     FieldID fid, CustomSerdezID serdez_id);
+                                     FieldID fid, CustomSerdezID serdez_id,
+                                     const char *provenance);
       void free_field(FieldSpace handle, FieldID fid,
                       std::set<RtEvent> &preconditions);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id, const char *provenance);
       FieldSpaceNode* allocate_fields(FieldSpace handle, ApEvent ready, 
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id, const char *provenance);
       void free_fields(FieldSpace handle, 
                        const std::vector<FieldID> &to_free,
                        std::set<RtEvent> &preconditions);
@@ -346,7 +352,8 @@ namespace Legion {
                                  const std::vector<size_t> &sizes,
                                  CustomSerdezID serdez_id,
                                  const std::set<unsigned> &allocated_indexes,
-                                 std::vector<unsigned> &new_indexes);
+                                 std::vector<unsigned> &new_indexes,
+                                 const char *provenance);
       void free_local_fields(FieldSpace handle,
                              const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes);
@@ -354,7 +361,8 @@ namespace Legion {
                                const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
-                               const std::vector<unsigned> &indexes);
+                               const std::vector<unsigned> &indexes,
+                               Provenance *provenance);
       void remove_local_fields(FieldSpace handle,
                                const std::vector<FieldID> &to_remove);
     public:
@@ -367,6 +375,7 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle, DistributedID did,
+                                 const char *provenance,
                                  std::set<RtEvent> *applied = NULL);
       void destroy_logical_region(LogicalRegion handle, 
                                   std::set<RtEvent> &preconditions);
@@ -669,7 +678,7 @@ namespace Legion {
       IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
                                   bool is_domain, IndexPartNode *par, 
                                   LegionColor color, DistributedID did,
-                                  RtEvent initialized,
+                                  RtEvent initialized, Provenance *provenance,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   std::set<RtEvent> *applied = NULL,
@@ -678,30 +687,34 @@ namespace Legion {
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
-                                  ApUserEvent is_ready,
+                                  Provenance *provenance, ApUserEvent is_ready,
                                   std::set<RtEvent> *applied = NULL,
                                   unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,int complete,
-                                  DistributedID did, ApEvent partition_ready, 
+                                  DistributedID did, Provenance *provenance,
+                                  ApEvent partition_ready, 
                                   ApUserEvent partial_pending, RtEvent init,
                                   std::set<RtEvent> *applied = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,int complete,
-                                  DistributedID did, ApEvent partition_ready, 
+                                  DistributedID did, Provenance *provenance,
+                                  ApEvent partition_ready, 
                                   ApUserEvent partial_pending, RtEvent init,
                                   std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did, 
-                                  RtEvent initialized, 
+                                  RtEvent initialized, Provenance *provenance, 
                                   std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did, 
-                                  RtEvent initialized, Deserializer &derez);
+                                  RtEvent initialized, Provenance *provenance,
+                                  Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par, 
                                   RtEvent initialized, DistributedID did,
+                                  Provenance *provenance = NULL,
                                   std::set<RtEvent> *applied = NULL);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
                                   std::set<RtEvent> *applied = NULL);
@@ -1268,7 +1281,7 @@ namespace Legion {
     public:
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
-                      std::set<RtEvent> *applied) = 0;
+                      Provenance *provenance, std::set<RtEvent> *applied) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
@@ -1541,7 +1554,7 @@ namespace Legion {
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
-                      std::set<RtEvent> *applied) = 0;
+                      Provenance *provenance, std::set<RtEvent> *applied) = 0;
     public:
       RegionTreeForest *const context;
       IndexSpaceOperation *const origin_expr;
@@ -1577,7 +1590,7 @@ namespace Legion {
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                           DistributedID did, RtEvent initialized,
-                          std::set<RtEvent> *applied);
+                          Provenance *provenance, std::set<RtEvent> *applied);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -1881,7 +1894,8 @@ namespace Legion {
     public:
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
-                    AddressSpaceID owner, RtEvent init_event); 
+                    AddressSpaceID owner, RtEvent init_event,
+                    Provenance *provenance);
       virtual ~IndexTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator) { }
@@ -1922,6 +1936,7 @@ namespace Legion {
       RegionTreeForest *const context;
       const unsigned depth;
       const LegionColor color;
+      Provenance *const provenance;
     public:
       RtEvent initialized;
       NodeSet child_creation;
@@ -2030,7 +2045,7 @@ namespace Legion {
                      IndexPartNode *parent, LegionColor color,
                      DistributedID did, ApEvent index_space_ready,
                      IndexSpaceExprID expr_id, RtEvent initialized,
-                     unsigned depth);
+                     unsigned depth, Provenance *provenance);
       IndexSpaceNode(const IndexSpaceNode &rhs);
       virtual ~IndexSpaceNode(void);
     public:
@@ -2150,7 +2165,7 @@ namespace Legion {
     public:
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                     DistributedID did, RtEvent initialized,
-                    std::set<RtEvent> *applied) = 0; 
+                    Provenance *provenance, std::set<RtEvent> *applied) = 0; 
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
@@ -2312,7 +2327,7 @@ namespace Legion {
                       const void *bounds, bool is_domain,
                       DistributedID did, ApEvent ready_event,
                       IndexSpaceExprID expr_id, RtEvent init,
-                      unsigned depth);
+                      unsigned depth, Provenance *provenance);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -2331,8 +2346,8 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual IndexSpaceNode* create_node(IndexSpace handle,
-                                DistributedID did, RtEvent initialized,
-                                std::set<RtEvent> *applied);
+                            DistributedID did, RtEvent initialized,
+                            Provenance *provenance, std::set<RtEvent> *applied);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
@@ -2773,18 +2788,18 @@ namespace Legion {
       IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
                         bool is_dom, IndexPartNode *p, LegionColor c, 
                         DistributedID d, ApEvent r, IndexSpaceExprID e,
-                        RtEvent init, unsigned dp)
+                        RtEvent init, unsigned dp, Provenance *prov)
         : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
           color(c), did(d), ready(r), expr_id(e), initialized(init), depth(dp),
-          result(NULL) { }
+          provenance(prov), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
       {
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
             creator->space, creator->parent, creator->color, creator->bounds,
-            creator->is_domain, creator->did, creator->ready, 
-            creator->expr_id, creator->initialized, creator->depth);
+            creator->is_domain, creator->did, creator->ready, creator->expr_id,
+            creator->initialized, creator->depth, creator->provenance);
       }
     public:
       RegionTreeForest *const forest;
@@ -2798,6 +2813,7 @@ namespace Legion {
       const IndexSpaceExprID expr_id;
       const RtEvent initialized;
       const unsigned depth;
+      Provenance *const provenance;
       IndexSpaceNode *result;
     };
 
@@ -2908,12 +2924,14 @@ namespace Legion {
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, bool disjoint, int complete, 
                     DistributedID did, ApEvent partition_ready, 
-                    ApUserEvent partial_pending, RtEvent init);
+                    ApUserEvent partial_pending, RtEvent init,
+                    Provenance *provenance);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
                     int complete, DistributedID did, ApEvent partition_ready,
-                    ApUserEvent partial_pending, RtEvent init);
+                    ApUserEvent partial_pending, RtEvent init,
+                    Provenance *provenance);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
     public:
@@ -3063,12 +3081,14 @@ namespace Legion {
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint, int complete,
                      DistributedID did, ApEvent partition_ready, 
-                     ApUserEvent pending, RtEvent initialized);
+                     ApUserEvent pending, RtEvent initialized,
+                     Provenance *provenance);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready, 
                      int complete, DistributedID did, ApEvent partition_ready,
-                     ApUserEvent pending, RtEvent initialized);
+                     ApUserEvent pending, RtEvent initialized,
+                     Provenance *provenance);
       IndexPartNodeT(const IndexPartNodeT &rhs);
       virtual ~IndexPartNodeT(void);
     public:
@@ -3084,17 +3104,19 @@ namespace Legion {
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, bool d, int k, DistributedID id,
-                       ApEvent r, ApUserEvent pend, RtEvent initialized)
+                       ApEvent r, ApUserEvent pend, RtEvent initialized,
+                       Provenance *prov)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(d), complete(k), did(id), ready(r), 
-          pending(pend), init(initialized) { }
+          pending(pend), init(initialized), provenance(prov) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, RtEvent d, int k, DistributedID id, 
-                       ApEvent r, ApUserEvent pend, RtEvent initialized)
+                       ApEvent r, ApUserEvent pend, RtEvent initialized,
+                       Provenance *prov)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(false), complete(k), disjoint_ready(d),
-          did(id), ready(r), pending(pend), init(initialized) { }
+          color(c), disjoint(false), complete(k), disjoint_ready(d), did(id),
+          ready(r), pending(pend), init(initialized), provenance(prov) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -3103,12 +3125,14 @@ namespace Legion {
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint_ready, creator->complete,
-              creator->did, creator->ready, creator->pending, creator->init);
+              creator->did, creator->ready, creator->pending, 
+              creator->init, creator->provenance);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint, creator->complete, 
-              creator->did, creator->ready, creator->pending, creator->init);
+              creator->did, creator->ready, creator->pending,
+              creator->init, creator->provenance);
       }
     public:
       RegionTreeForest *const forest;
@@ -3123,6 +3147,7 @@ namespace Legion {
       const ApEvent ready;
       const ApUserEvent pending;
       const RtEvent init;
+      Provenance *const provenance;
       IndexPartNode *result;
     };
 
@@ -3144,17 +3169,26 @@ namespace Legion {
     public:
       struct FieldInfo {
       public:
-        FieldInfo(void) : field_size(0), idx(0), serdez_id(0), local(false) { }
-        FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
-          : field_size(size), idx(id), serdez_id(sid), local(loc) { }
-        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
-          : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
-            local(loc) { }
+        FieldInfo(void);
+        FieldInfo(size_t size, unsigned id, CustomSerdezID sid,
+                  Provenance *prov, bool loc=false);
+        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,
+                  Provenance *prov, bool loc=false);
+        FieldInfo(const FieldInfo &rhs);
+        FieldInfo(FieldInfo &&rhs);
+        ~FieldInfo(void);
+      public:
+        FieldInfo& operator=(const FieldInfo &rhs);
+        FieldInfo& operator=(FieldInfo &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
       public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
+        Provenance *provenance;
         bool local;
       };
       struct FindTargetsFunctor {
@@ -3213,9 +3247,11 @@ namespace Legion {
       };
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, 
-                     DistributedID did, RtEvent initialized);
+                     DistributedID did, RtEvent initialized,
+                     Provenance *provenance);
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
-                     RtEvent initialized, Deserializer &derez);
+                     RtEvent initialized, Provenance *provenance, 
+                     Deserializer &derez);
       FieldSpaceNode(const FieldSpaceNode &rhs);
       virtual ~FieldSpaceNode(void);
     public:
@@ -3262,20 +3298,26 @@ namespace Legion {
     public:
       void initialize_fields(const std::vector<size_t> &sizes,
                              const std::vector<FieldID> &resulting_fields,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       void initialize_fields(ApEvent sizes_ready,
                              const std::vector<FieldID> &resulting_fields,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             Provenance *provenance);
       RtEvent allocate_field(FieldID fid, size_t size,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       RtEvent allocate_field(FieldID fid, ApEvent size_ready,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             const char *provenance);
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              const char *provenance);
       RtEvent allocate_fields(ApEvent sizes_ready,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              const char *provenance);
       void update_field_size(FieldID fid, size_t field_size, 
           std::set<RtEvent> &update_events, AddressSpaceID source);
       void free_field(FieldID fid, AddressSpaceID source,
@@ -3289,13 +3331,15 @@ namespace Legion {
                                  const std::vector<size_t> &sizes,
                                  CustomSerdezID serdez_id,
                                  const std::set<unsigned> &indexes,
-                                 std::vector<unsigned> &new_indexes);
+                                 std::vector<unsigned> &new_indexes,
+                                 const char *provenance);
       void free_local_fields(const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes);
       void update_local_fields(const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
-                               const std::vector<unsigned> &indexes);
+                               const std::vector<unsigned> &indexes,
+                               Provenance *provenance);
       void remove_local_fields(const std::vector<FieldID> &to_removes);
     public:
       bool has_field(FieldID fid);
@@ -3424,6 +3468,7 @@ namespace Legion {
     public:
       const FieldSpace handle;
       RegionTreeForest *const context;
+      Provenance *const provenance;
       RtEvent initialized;
     private:
       mutable LocalLock node_lock;
@@ -3473,7 +3518,7 @@ namespace Legion {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
                      RtEvent initialized, RtEvent tree_init, 
-                     DistributedID did = 0);
+                     Provenance *provenance = NULL, DistributedID did = 0);
       virtual ~RegionTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -3684,6 +3729,7 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
+      Provenance *const provenance;
       RtEvent initialized;
       const RtEvent tree_initialized; // top level tree initialization
     public:
@@ -3733,7 +3779,8 @@ namespace Legion {
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
-             DistributedID did, RtEvent initialized, RtEvent tree_initialized);
+             DistributedID did, RtEvent initialized, 
+             RtEvent tree_initialized, Provenance *provenance);
       RegionNode(const RegionNode &rhs);
       virtual ~RegionNode(void);
     public:

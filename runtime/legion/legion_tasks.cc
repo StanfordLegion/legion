@@ -38,6 +38,485 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion::DeletedRegion(void)
+      : provenance(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion::DeletedRegion(LogicalRegion r,
+                                                  Provenance *p)
+      : region(r), provenance(p)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion::DeletedRegion(const DeletedRegion &rhs)
+      : region(rhs.region), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion::DeletedRegion(DeletedRegion &&rhs)
+      : region(rhs.region), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion::~DeletedRegion(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion& ResourceTracker::DeletedRegion::operator=(
+                                                       const DeletedRegion &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      region = rhs.region;
+      provenance = rhs.provenance;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedRegion& ResourceTracker::DeletedRegion::operator=(
+                                                            DeletedRegion &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      region = rhs.region;
+      provenance = rhs.provenance;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedRegion::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(region);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedRegion::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(region);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField::DeletedField(void)
+      : fid(0), provenance(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField::DeletedField(FieldSpace sp, FieldID f,
+                                                Provenance *p)
+      : space(sp), fid(f), provenance(p)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField::DeletedField(const DeletedField&rhs)
+      : space(rhs.space), fid(rhs.fid), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField::DeletedField(DeletedField &&rhs)
+      : space(rhs.space), fid(rhs.fid), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField::~DeletedField(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField& ResourceTracker::DeletedField::operator=(
+                                                        const DeletedField &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      fid = rhs.fid;
+      provenance = rhs.provenance;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedField& ResourceTracker::DeletedField::operator=(
+                                                             DeletedField &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      fid = rhs.fid;
+      provenance = rhs.provenance;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedField::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(space);
+      rez.serialize(fid);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedField::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(space);
+      derez.deserialize(fid);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace::DeletedFieldSpace(void)
+      : provenance(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace::DeletedFieldSpace(FieldSpace sp,
+                                                          Provenance *p)
+      : space(sp), provenance(p)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace::DeletedFieldSpace(
+                                                   const DeletedFieldSpace &rhs)
+      : space(rhs.space), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace::DeletedFieldSpace(
+                                                        DeletedFieldSpace &&rhs)
+      : space(rhs.space), provenance(rhs.provenance)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace::~DeletedFieldSpace(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace& 
+      ResourceTracker::DeletedFieldSpace::operator=(
+                                                   const DeletedFieldSpace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      provenance = rhs.provenance;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedFieldSpace& 
+      ResourceTracker::DeletedFieldSpace::operator=(DeletedFieldSpace &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      provenance = rhs.provenance;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedFieldSpace::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(space);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedFieldSpace::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(space);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace::DeletedIndexSpace(void)
+      : provenance(NULL), recurse(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace::DeletedIndexSpace(IndexSpace sp,
+                                                          bool r, Provenance *p)
+      : space(sp), provenance(p), recurse(r)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace::DeletedIndexSpace(
+                                                   const DeletedIndexSpace &rhs)
+      : space(rhs.space), provenance(rhs.provenance), recurse(rhs.recurse)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace::DeletedIndexSpace(
+                                                        DeletedIndexSpace &&rhs)
+      : space(rhs.space), provenance(rhs.provenance), recurse(rhs.recurse)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace::~DeletedIndexSpace(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace& 
+      ResourceTracker::DeletedIndexSpace::operator=(
+                                                   const DeletedIndexSpace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      recurse = rhs.recurse;
+      provenance = rhs.provenance;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedIndexSpace& 
+          ResourceTracker::DeletedIndexSpace::operator=(DeletedIndexSpace &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      space = rhs.space;
+      recurse = rhs.recurse;
+      provenance = rhs.provenance;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedIndexSpace::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(space);
+      rez.serialize<bool>(recurse);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedIndexSpace::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(space);
+      derez.deserialize<bool>(recurse);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition::DeletedPartition(void)
+      : provenance(NULL), recurse(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition::DeletedPartition(IndexPartition ip,
+                                                        bool r, Provenance *p)
+      : partition(ip), provenance(p), recurse(r)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition::DeletedPartition(
+                                                     const DeletedPartition&rhs)
+      : partition(rhs.partition),provenance(rhs.provenance),recurse(rhs.recurse)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition::DeletedPartition(DeletedPartition&&rhs)
+      : partition(rhs.partition),provenance(rhs.provenance),recurse(rhs.recurse)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition::~DeletedPartition(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition& 
+      ResourceTracker::DeletedPartition::operator=(const DeletedPartition &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      partition = rhs.partition;
+      recurse = rhs.recurse;
+      provenance = rhs.provenance;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::DeletedPartition& 
+            ResourceTracker::DeletedPartition::operator=(DeletedPartition &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      partition = rhs.partition;
+      recurse = rhs.recurse;
+      provenance = rhs.provenance;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedPartition::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(partition);
+      rez.serialize<bool>(recurse);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::DeletedPartition::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(partition);
+      derez.deserialize<bool>(recurse);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
     ResourceTracker::ResourceTracker(void)
     //--------------------------------------------------------------------------
     {
@@ -119,9 +598,9 @@ namespace Legion {
       rez.serialize<size_t>(deleted_regions.size());
       if (!deleted_regions.empty())
       {
-        for (std::vector<LogicalRegion>::const_iterator it = 
+        for (std::vector<DeletedRegion>::const_iterator it = 
               deleted_regions.begin(); it != deleted_regions.end(); it++)
-          rez.serialize(*it);
+          it->serialize(rez);
         deleted_regions.clear();
       }
       rez.serialize<size_t>(created_fields.size());
@@ -138,12 +617,9 @@ namespace Legion {
       rez.serialize<size_t>(deleted_fields.size());
       if (!deleted_fields.empty())
       {
-        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it =
+        for (std::vector<DeletedField>::const_iterator it =
               deleted_fields.begin(); it != deleted_fields.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
+          it->serialize(rez);
         deleted_fields.clear();
       }
       rez.serialize<size_t>(created_field_spaces.size());
@@ -176,10 +652,10 @@ namespace Legion {
       rez.serialize<size_t>(deleted_field_spaces.size());
       if (!deleted_field_spaces.empty())
       {
-        for (std::vector<FieldSpace>::const_iterator it = 
+        for (std::vector<DeletedFieldSpace>::const_iterator it = 
               deleted_field_spaces.begin(); it != 
               deleted_field_spaces.end(); it++)
-          rez.serialize(*it);
+          it->serialize(rez);
         deleted_field_spaces.clear();
       }
       rez.serialize<size_t>(created_index_spaces.size());
@@ -197,13 +673,10 @@ namespace Legion {
       rez.serialize<size_t>(deleted_index_spaces.size());
       if (!deleted_index_spaces.empty())
       {
-        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it = 
+        for (std::vector<DeletedIndexSpace>::const_iterator it = 
               deleted_index_spaces.begin(); it != 
               deleted_index_spaces.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize<bool>(it->second);
-        }
+          it->serialize(rez);
         deleted_index_spaces.clear();
       }
       rez.serialize<size_t>(created_index_partitions.size());
@@ -221,13 +694,10 @@ namespace Legion {
       rez.serialize<size_t>(deleted_index_partitions.size());
       if (!deleted_index_partitions.empty())
       {
-        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it = 
+        for (std::vector<DeletedPartition>::const_iterator it = 
               deleted_index_partitions.begin(); it !=
               deleted_index_partitions.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize<bool>(it->second);
-        }
+          it->serialize(rez);
         deleted_index_partitions.clear();
       }
     }
@@ -253,9 +723,9 @@ namespace Legion {
       }
       size_t num_deleted_regions;
       derez.deserialize(num_deleted_regions);
-      std::vector<LogicalRegion> deleted_regions(num_deleted_regions);
+      std::vector<DeletedRegion> deleted_regions(num_deleted_regions);
       for (unsigned idx = 0; idx < num_deleted_regions; idx++)
-        derez.deserialize(deleted_regions[idx]);
+        deleted_regions[idx].deserialize(derez);
       size_t num_created_fields;
       derez.deserialize(num_created_fields);
       std::set<std::pair<FieldSpace,FieldID> > created_fields;
@@ -268,13 +738,9 @@ namespace Legion {
       }
       size_t num_deleted_fields;
       derez.deserialize(num_deleted_fields);
-      std::vector<std::pair<FieldSpace,FieldID> > 
-          deleted_fields(num_deleted_fields);
+      std::vector<DeletedField> deleted_fields(num_deleted_fields);
       for (unsigned idx = 0; idx < num_deleted_fields; idx++)
-      {
-        derez.deserialize(deleted_fields[idx].first);
-        derez.deserialize(deleted_fields[idx].second);
-      }
+        deleted_fields[idx].deserialize(derez);
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
       std::map<FieldSpace,unsigned> created_field_spaces;
@@ -303,9 +769,10 @@ namespace Legion {
       }
       size_t num_deleted_field_spaces;
       derez.deserialize(num_deleted_field_spaces);
-      std::vector<FieldSpace> deleted_field_spaces(num_deleted_field_spaces);
+      std::vector<DeletedFieldSpace> 
+        deleted_field_spaces(num_deleted_field_spaces);
       for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
-        derez.deserialize(deleted_field_spaces[idx]);
+        deleted_field_spaces[idx].deserialize(derez);
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
       std::map<IndexSpace,unsigned> created_index_spaces;
@@ -317,13 +784,10 @@ namespace Legion {
       }
       size_t num_deleted_index_spaces;
       derez.deserialize(num_deleted_index_spaces);
-      std::vector<std::pair<IndexSpace,bool> > 
+      std::vector<DeletedIndexSpace> 
           deleted_index_spaces(num_deleted_index_spaces);
       for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-      {
-        derez.deserialize(deleted_index_spaces[idx].first);
-        derez.deserialize<bool>(deleted_index_spaces[idx].second);
-      }
+        deleted_index_spaces[idx].deserialize(derez);
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       std::map<IndexPartition,unsigned> created_index_partitions;
@@ -335,13 +799,10 @@ namespace Legion {
       }
       size_t num_deleted_index_partitions;
       derez.deserialize(num_deleted_index_partitions);
-      std::vector<std::pair<IndexPartition,bool> > 
-          deleted_index_partitions(num_deleted_index_partitions);
+      std::vector<DeletedPartition> 
+        deleted_index_partitions(num_deleted_index_partitions);
       for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-      {
-        derez.deserialize(deleted_index_partitions[idx].first);
-        derez.deserialize<bool>(deleted_index_partitions[idx].second);
-      }
+        deleted_index_partitions[idx].deserialize(derez);
       std::set<RtEvent> preconditions;
       target->receive_resources(return_index, created_regions, deleted_regions,
           created_fields, deleted_fields, created_field_spaces,
@@ -751,7 +1212,7 @@ namespace Legion {
       {
         rez.serialize(it->first);
         it->second.pack_references(rez);
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -930,11 +1391,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
-                  const std::vector<StaticDependence> *dependences,
-                  const Predicate &p, Processor::TaskFuncID tid)
+                const std::vector<StaticDependence> *dependences,
+                const Predicate &p, Processor::TaskFuncID tid, const char *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_speculation(ctx, track, regions.size(), dependences, p);
+      initialize_speculation(ctx, track, regions.size(), dependences, p, prov);
+      initialize_memoizable();
+      parent_task = ctx->get_task(); // initialize the parent task
+      // Fill in default values for all of the Task fields
+      orig_proc = ctx->get_executing_processor();
+      current_proc = orig_proc;
+      steal_count = 0;
+      speculated = false;
+      local_function = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
+                const std::vector<StaticDependence> *dependences,
+                const Predicate &p, Processor::TaskFuncID tid, Provenance *prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize_speculation(ctx, track, regions.size(), dependences, p, prov);
       initialize_memoizable();
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
@@ -4767,7 +5245,7 @@ namespace Legion {
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
           slice.domain_is = 
             runtime->find_or_create_index_slice_space(slice.domain,
-                                    internal_space.get_type_tag());
+                                    internal_space.get_type_tag(), provenance);
         if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
@@ -5315,7 +5793,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+          launcher.predicate, task_id, launcher.provenance.c_str());
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -5964,6 +6442,10 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6035,11 +6517,20 @@ namespace Legion {
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
       }
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       // Figure out what our parent context is
       RtEvent ctx_ready;
       parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      {
+        // Wait if the profiler is going to ask for the context
+        if (runtime->profiler != NULL)
+          ctx_ready.wait();
+        else
+          ready_events.insert(ctx_ready);
+      }
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Have to do this before resolving speculation in case
@@ -6048,6 +6539,8 @@ namespace Legion {
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       // Return true to add ourselves to the ready queue
       return true;
     } 
@@ -6630,6 +7123,9 @@ namespace Legion {
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
+      provenance = slice_owner->get_provenance();
+      if (provenance != NULL)
+        provenance->add_reference();
       // We should always just apply these things now since we were mapped 
       // on the owner node
 #ifdef DEBUG_LEGION
@@ -6637,6 +7133,8 @@ namespace Legion {
 #endif
       slice_owner->record_point_mapped(deferred_complete_mapping,
                          ApEvent::NO_AP_EVENT, acquired_instances);
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       return false;
     }
 
@@ -7099,7 +7597,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+          launcher.predicate, task_id, launcher.provenance.c_str());
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -7205,7 +7703,7 @@ namespace Legion {
       else
         initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+          launcher.predicate, task_id, launcher.provenance.c_str());
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -8132,7 +8630,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
@@ -9197,10 +9695,12 @@ namespace Legion {
       rez.serialize(predicate_false_size);
       if (predicate_false_size > 0)
         rez.serialize(predicate_false_result, predicate_false_size);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
         points[idx]->pack_task(rez, target);
-      }
       // If we don't have any points, we have to pack up the argument map
       // and any trace info that we need for doing remote tracing
       if (points.empty())
@@ -9267,8 +9767,14 @@ namespace Legion {
       {
         RtEvent ctx_ready;
         parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-        if (ctx_ready.exists())
-          ready_events.insert(ctx_ready);
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        {
+          // Need to wait if the profiler is going to want to check this
+          if (runtime->profiler != NULL)
+            ctx_ready.wait();
+          else
+            ready_events.insert(ctx_ready);
+        }
       }
       else
         parent_ctx = index_owner->parent_ctx;
@@ -9303,6 +9809,11 @@ namespace Legion {
         predicate_false_result = malloc(predicate_false_size);
         derez.deserialize(predicate_false_result, predicate_false_size);
       }
+      // Unpack the provenance before unpacking any point tasks so
+      // that they can pick it up as well
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = runtime->get_available_point_task(); 
@@ -9349,6 +9860,8 @@ namespace Legion {
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       // Return true to add this to the ready queue
       return true;
     }
@@ -9419,7 +9932,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
@@ -9534,7 +10047,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task();
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, provenance);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
@@ -9944,16 +10457,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SliceTask::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {

@@ -150,19 +150,25 @@ namespace Legion {
     public:
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid,
-                             CustomSerdezID serdez_id, bool local);
+                             CustomSerdezID serdez_id, bool local,
+                             const char *provenance);
       FieldID allocate_field(const Future &field_size, 
                              FieldID desired_fieldid,
-                             CustomSerdezID serdez_id, bool local);
-      void free_field(FieldID fid, const bool unordered);
+                             CustomSerdezID serdez_id, bool local,
+                             const char *provenance);
+      void free_field(FieldID fid, const bool unordered,
+                      const char *provenance);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id, bool local);
+                           CustomSerdezID serdez_id, bool local,
+                           const char *provenance);
       void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id, bool local);
-      void free_fields(const std::set<FieldID> &to_free, const bool unordered);
+                           CustomSerdezID serdez_id, bool local,
+                           const char *provenance);
+      void free_fields(const std::set<FieldID> &to_free, const bool unordered,
+                       const char *provenance = NULL);
     public:
       FieldSpace field_space;
       FieldSpaceNode *const node;
@@ -527,7 +533,8 @@ namespace Legion {
       void set_projection(ProjectionID pid);
       inline ProjectionID get_projection(void) const { return pid; }
       Future detach(InnerContext *context, IndexDetachOp *op, 
-                    const bool flush, const bool unordered);
+                    const bool flush, const bool unordered,
+                    const char *provenance);
     public:
       InnerContext *const context;
       // Save these for when we go to do the detach
@@ -1931,9 +1938,6 @@ namespace Legion {
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      LogicalRegion create_logical_region(Context ctx, IndexSpace index,
-                                          FieldSpace fields, bool task_local);
-    public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
       LogicalPartition get_logical_partition(LogicalRegion parent,
@@ -2006,8 +2010,10 @@ namespace Legion {
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
-                                MapperID id = 0, MappingTagID tag = 0);
-      void remap_region(Context ctx, PhysicalRegion region);
+                                MapperID id, MappingTagID tag,
+                                const char *provenance);
+      void remap_region(Context ctx, const PhysicalRegion &region,
+                        const char *provenance = NULL);
       void unmap_region(Context ctx, PhysicalRegion region);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
@@ -2015,20 +2021,12 @@ namespace Legion {
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
-      Predicate create_predicate(Context ctx, const Future &f);
-      Predicate predicate_not(Context ctx, const Predicate &p);
-      Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
-      Future get_predicate_future(Context ctx, const Predicate &p);
-    public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
-      Future issue_mapping_fence(Context ctx);
-      Future issue_execution_fence(Context ctx);
       TraceID generate_dynamic_trace_id(bool check_context = true);
       TraceID generate_library_trace_ids(const char *name, size_t count);
       static TraceID& get_current_static_trace_id(void);
       static TraceID generate_static_trace_id(void);
-      void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
       Future issue_timing_measurement(Context ctx,
@@ -2806,7 +2804,7 @@ namespace Legion {
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                 TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
-                                                  TypeTag type_tag);
+                                    TypeTag type_tag, Provenance *provenance);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);

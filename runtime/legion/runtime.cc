@@ -370,75 +370,78 @@ namespace Legion {
     FieldID FieldAllocatorImpl::allocate_field(size_t field_size,
                                                FieldID desired_fieldid,
                                                CustomSerdezID serdez_id, 
-                                               bool local)
+                                               bool local, const char *prov)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid,
-                                     local, serdez_id);
+                                     local, serdez_id, prov);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocatorImpl::allocate_field(const Future &field_size,
                                                FieldID desired_fieldid,
                                                CustomSerdezID serdez_id, 
-                                               bool local)
+                                               bool local, const char *prov)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid, 
-                                     local, serdez_id);
+                                     local, serdez_id, prov);
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
+    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Don't need to wait here since deletion operations catch
       // dependences on the allocator themselves
-      context->free_field(this, field_space, fid, unordered);
+      context->free_field(this, field_space, fid, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id, bool local)
+                                        CustomSerdezID serdez_id, bool local,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields,
-                               local, serdez_id);
+                               local, serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<Future> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id, bool local)
+                                        CustomSerdezID serdez_id, bool local,
+                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Need to wait for this allocator to be ready
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields, 
-                               local, serdez_id);
+                               local, serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free,
-                                         const bool unordered)
+                                   const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Don't need to wait here since deletion operations catch
       // dependences on the allocator themselves
-      context->free_fields(this, field_space, to_free, unordered);
+      context->free_fields(this, field_space, to_free, unordered, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2756,7 +2759,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ExternalResourcesImpl::detach(InnerContext *ctx, IndexDetachOp *op,
-                                         const bool flush, const bool unordered)
+                 const bool flush, const bool unordered, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx != context)
@@ -2782,7 +2785,7 @@ namespace Legion {
       }
       // Now initialize the detach operation
       return op->initialize_detach(ctx, parent, upper_bound, launch_bounds,
-                        this, privilege_fields, regions, flush, unordered);
+            this, privilege_fields, regions, flush, unordered, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12492,14 +12495,14 @@ namespace Legion {
                                         MapperID map_id)
     //--------------------------------------------------------------------------
     {
-      // Get an individual task to be the top-level task
-      IndividualTask *mapper_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *map_context = 
         new TopLevelContext(this, get_unique_operation_id());
       map_context->add_reference();
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
+      // Get an individual task to be the top-level task
+      IndividualTask *mapper_task = get_available_individual_task();
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                               false/*track parent*/);
       mapper_task->set_current_proc(proc);
@@ -13126,18 +13129,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::create_logical_region(Context ctx, 
-                IndexSpace index_space, FieldSpace field_space, bool task_local)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create logical region!");
-      return ctx->create_logical_region(forest, index_space, field_space,
-                                        task_local); 
-    }
-
-    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition(Context ctx, 
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -13490,7 +13481,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                                                  MapperID id, MappingTagID tag)
+                          MapperID id, MappingTagID tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -13498,17 +13489,18 @@ namespace Legion {
       PhysicalRegion result = ctx->get_physical_region(idx);
       // Check to see if we are already mapped, if not, then remap it
       if (!result.impl->is_mapped())
-        remap_region(ctx, result);
+        remap_region(ctx, result, provenance);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, const PhysicalRegion &region,
+                               const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context remap region!");
-      ctx->remap_region(region); 
+      ctx->remap_region(region, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -13558,45 +13550,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create predicate!");
-      return ctx->create_predicate(f);
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create predicate not!");
-      return ctx->predicate_not(p); 
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, 
-                                        const PredicateLauncher &launcher) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create predicate!");
-      return ctx->create_predicate(launcher);
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context get predicate future!");
-      return ctx->get_predicate_future(p);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -13612,26 +13565,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context issue release!");
       ctx->issue_release(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_mapping_fence(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue mapping fence!");
-      return ctx->issue_mapping_fence(); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_execution_fence(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue execution fence!");
-      return ctx->issue_execution_fence(); 
     }
 
     //--------------------------------------------------------------------------
@@ -13776,15 +13709,6 @@ namespace Legion {
                       "Illegal call to 'generate_static_trace_id' after "
                       "the runtime has been started!")
       return next_trace++;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::complete_frame(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context issue frame!");
-      ctx->complete_frame(); 
     }
 
     //--------------------------------------------------------------------------
@@ -19836,7 +19760,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
-                                                         TypeTag type_tag)
+                                       TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19853,9 +19777,10 @@ namespace Legion {
       const IndexSpace result(get_unique_index_space_id(),
                               get_unique_index_tree_id(), type_tag);
       const DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, &domain, did);
+      forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.id);
+        LegionSpy::log_top_index_space(result.id, address_space,
+            (provenance == NULL) ? NULL : provenance->provenance.c_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -22604,8 +22529,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(target.exists());
 #endif
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -22613,6 +22536,8 @@ namespace Legion {
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
       // Mark that this task is the top-level task
       Future result = top_task->initialize_task(top_context, launcher, 
                                 false/*track parent*/,true/*top level task*/);
@@ -22666,8 +22591,6 @@ namespace Legion {
         attach_semantic_information(top_task_id, 
             LEGION_NAME_SEMANTIC_TAG, task_name, 
             strlen(task_name) + 1, true/*mutable*/);
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
@@ -22702,6 +22625,8 @@ namespace Legion {
       top_context->set_executing_processor(proxy);
       TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
       // Mark that this task is the top-level task
       top_task->initialize_task(top_context, launcher, false/*track parent*/,
                     true/*top level task*/, true/*implicit top level task*/);

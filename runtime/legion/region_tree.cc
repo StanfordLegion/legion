@@ -125,17 +125,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
                                         const Domain *domain, DistributedID did,
+                                        Provenance *provenance,
                                         ApEvent ready /*=ApEvent::NO_AP_EVENT*/,
                                         std::set<RtEvent> *applied /*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, domain, true/*domain*/, NULL/*parent*/, 
-          0/*color*/, did, RtEvent::NO_RT_EVENT, ready, 0/*expr id*/, applied);
+      return create_node(handle, domain, true/*domain*/, NULL/*parent*/,
+                         0/*color*/, did, RtEvent::NO_RT_EVENT,
+                         provenance, ready, 0/*expr id*/, applied);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_union_space(IndexSpace handle,
-                    DistributedID did, const std::vector<IndexSpace> &sources, 
+                    DistributedID did, const char *prov,
+                    const std::vector<IndexSpace> &sources, 
                     RtEvent initialized, std::set<RtEvent> *applied /*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -151,13 +154,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
 #endif
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, applied);
+      return expr->create_node(handle, did, initialized, provenance, applied);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_intersection_space(
                                       IndexSpace handle, DistributedID did,
+                                      const char *prov,
                                       const std::vector<IndexSpace> &sources, 
                                       RtEvent init, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
@@ -174,13 +181,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
 #endif
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      return expr->create_node(handle, did, init, applied);
+      return expr->create_node(handle, did, init, provenance, applied);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_difference_space(
                                        IndexSpace handle, DistributedID did,
+                                       const char *prov,
                                        IndexSpace left, IndexSpace right, 
                                        RtEvent init, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
@@ -189,11 +200,14 @@ namespace Legion {
       assert(left.exists());
 #endif
       IndexSpaceNode *lhs = get_node(left);
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
       if (!right.exists())
-        return lhs->create_node(handle, did, init, applied);
+        return lhs->create_node(handle, did, init, provenance, applied);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      return expr->create_node(handle, did, init, applied);
+      return expr->create_node(handle, did, init, provenance, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -204,6 +218,7 @@ namespace Legion {
                                                     LegionColor partition_color,
                                                        PartitionKind part_kind,
                                                        DistributedID did,
+                                                       Provenance *provenance,
                                                        ApEvent partition_ready,
                                                     ApUserEvent partial_pending,
                                                     std::set<RtEvent> *applied)
@@ -248,11 +263,12 @@ namespace Legion {
                          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         disjointness_event = Runtime::create_rt_user_event();
         node = create_node(pid, parent_node, color_node, partition_color,
-                    disjointness_event, complete, did, partition_ready, 
-                    partial_pending, RtEvent::NO_RT_EVENT, applied);
+                disjointness_event, complete, did, provenance, partition_ready,
+                partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
-                                         complete, partition_color);
+              complete, partition_color, runtime->address_space, 
+              (provenance == NULL) ? NULL : provenance->provenance.c_str());
       }
       else
       {
@@ -266,11 +282,12 @@ namespace Legion {
                              ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         node = create_node(pid, parent_node, color_node, partition_color, 
-                    disjoint, complete, did, partition_ready, partial_pending, 
-                    RtEvent::NO_RT_EVENT, applied);
+                    disjoint, complete, did, provenance, partition_ready,
+                    partial_pending, RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
-                                         complete, partition_color);
+              complete, partition_color, runtime->address_space,
+              (provenance == NULL) ? NULL : provenance->provenance.c_str());
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -302,6 +319,7 @@ namespace Legion {
                                                  IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,
                                                  PartitionKind kind,
+                                                 Provenance *provenance,
                                                  LegionColor &part_color,
                                                  ApEvent domain_ready,
                                                  std::set<RtEvent> &safe_events)
@@ -436,7 +454,8 @@ namespace Legion {
           const RtEvent safe =
             create_pending_partition(ctx, pid, child_node->handle, 
                                      source->color_space->handle, 
-                                     part_color, kind, did, domain_ready, 
+                                     part_color, kind, did,
+                                     provenance, domain_ready,
                                      ApUserEvent::NO_AP_USER_EVENT, 
                                      &safe_events);
           // If the user requested the handle for this point return it
@@ -460,7 +479,8 @@ namespace Legion {
           const RtEvent safe =
             create_pending_partition(ctx, pid, child_node->handle, 
                                      source->color_space->handle, 
-                                     part_color, kind, did, domain_ready, 
+                                     part_color, kind, did,
+                                     provenance, domain_ready, 
                                      ApUserEvent::NO_AP_USER_EVENT, 
                                      &safe_events);
           // If the user requested the handle for this point return it
@@ -487,7 +507,8 @@ namespace Legion {
           const RtEvent safe = 
             create_pending_partition(ctx, pid, child_node->handle, 
                                      source->color_space->handle, 
-                                     part_color, kind, did, domain_ready, 
+                                     part_color, kind, did,
+                                     provenance, domain_ready, 
                                      ApUserEvent::NO_AP_USER_EVENT,
                                      &safe_events);
           // If the user requested the handle for this point return it
@@ -1019,10 +1040,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::create_field_space(FieldSpace handle,
-                                  DistributedID did, std::set<RtEvent> *applied)
+                DistributedID did, const char *prov, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, RtEvent::NO_RT_EVENT, applied);
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+        provenance = new Provenance(prov);
+      return create_node(handle, did, RtEvent::NO_RT_EVENT, provenance,applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1045,11 +1069,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_field(FieldSpace handle, size_t field_size,
-                                          FieldID fid, CustomSerdezID serdez_id)
+                        FieldID fid, CustomSerdezID serdez_id, const char *prov)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
+      RtEvent ready = node->allocate_field(fid, field_size, serdez_id, prov);
       if (ready.exists())
         ready.wait();
       return false;
@@ -1057,11 +1081,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::allocate_field(FieldSpace handle,
-                      ApEvent size_ready, FieldID fid, CustomSerdezID serdez_id)
+    ApEvent size_ready, FieldID fid, CustomSerdezID serdez_id, const char *prov)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_field(fid, size_ready, serdez_id);
+      RtEvent ready = node->allocate_field(fid, size_ready, serdez_id, prov);
       if (ready.exists())
         ready.wait();
       return node;
@@ -1078,9 +1102,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::allocate_fields(FieldSpace handle, 
-                                           const std::vector<size_t> &sizes,
-                                           const std::vector<FieldID> &fields,
-                                           CustomSerdezID serdez_id)
+                                     const std::vector<size_t> &sizes,
+                                     const std::vector<FieldID> &fields,
+                                     CustomSerdezID serdez_id, const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1088,7 +1112,7 @@ namespace Legion {
 #endif
       // We know that none of these field allocations are local
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_fields(sizes, fields, serdez_id);
+      RtEvent ready = node->allocate_fields(sizes, fields, serdez_id, prov);
       // Wait for this to exist
       if (ready.exists())
         ready.wait();
@@ -1096,14 +1120,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::allocate_fields(FieldSpace handle, 
-                                           ApEvent sizes_ready,
-                                           const std::vector<FieldID> &fields,
-                                           CustomSerdezID serdez_id)
+                                     ApEvent sizes_ready,
+                                     const std::vector<FieldID> &fields,
+                                     CustomSerdezID serdez_id, const char *prov)
     //--------------------------------------------------------------------------
     {
       // We know that none of these field allocations are local
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_fields(sizes_ready, fields, serdez_id);
+      RtEvent ready = node->allocate_fields(sizes_ready, fields,serdez_id,prov);
       // Wait for this to exist
       if (ready.exists())
         ready.wait();
@@ -1136,12 +1160,13 @@ namespace Legion {
                                       const std::vector<size_t> &sizes,
                                       CustomSerdezID serdez_id, 
                                       const std::set<unsigned> &current_indexes,
-                                            std::vector<unsigned> &new_indexes)
+                                            std::vector<unsigned> &new_indexes,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
       return node->allocate_local_fields(fields, sizes, serdez_id,
-                                         current_indexes, new_indexes);
+                         current_indexes, new_indexes, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -1159,11 +1184,12 @@ namespace Legion {
                                   const std::vector<FieldID> &fields,
                                   const std::vector<size_t> &sizes,
                                   const std::vector<CustomSerdezID> &serdez_ids,
-                                  const std::vector<unsigned> &indexes)
+                                  const std::vector<unsigned> &indexes,
+                                  Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      node->update_local_fields(fields, sizes, serdez_ids, indexes);
+      node->update_local_fields(fields, sizes, serdez_ids, indexes, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -1209,10 +1235,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_logical_region(LogicalRegion handle,
-                                  DistributedID did, std::set<RtEvent> *applied)
+                                      DistributedID did, const char *provenance,
+                                      std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, NULL/*parent*/, RtEvent::NO_RT_EVENT, did, applied);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance); 
+      create_node(handle, NULL/*parent*/,RtEvent::NO_RT_EVENT,did,prov,applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3343,6 +3373,7 @@ namespace Legion {
                                                   LegionColor color,
                                                   DistributedID did,
                                                   RtEvent initialized,
+                                                  Provenance *provenance,
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
                                                   std::set<RtEvent> *applied,
@@ -3361,7 +3392,7 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
-                                did, is_ready, expr_id, initialized, depth);
+                    did, is_ready, expr_id, initialized, depth, provenance);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3447,6 +3478,7 @@ namespace Legion {
                                                   LegionColor color,
                                                   DistributedID did,
                                                   RtEvent initialized,
+                                                  Provenance *provenance,
                                                   ApUserEvent is_ready,
                                                   std::set<RtEvent> *applied,
                                                   unsigned depth)
@@ -3463,7 +3495,7 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, parent,
-                        color, did, is_ready, 0/*expr id*/, initialized, depth);
+            color, did, is_ready, 0/*expr id*/, initialized, depth, provenance);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3542,6 +3574,7 @@ namespace Legion {
                                                  LegionColor color,
                                                  bool disjoint, int complete,
                                                  DistributedID did,
+                                                 Provenance *provenance,
                                                  ApEvent part_ready,
                                                  ApUserEvent pending,
                                                  RtEvent initialized,
@@ -3559,7 +3592,7 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint, 
-                               complete, did, part_ready, pending, initialized);
+                 complete, did, part_ready, pending, initialized, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3617,6 +3650,7 @@ namespace Legion {
                                                  RtEvent disjointness_ready,
                                                  int complete, 
                                                  DistributedID did,
+                                                 Provenance *provenance,
                                                  ApEvent part_ready,
                                                  ApUserEvent pending,
                                                  RtEvent initialized,
@@ -3634,7 +3668,8 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexPartCreator creator(this, p, parent, color_space, color, 
-           disjointness_ready, complete, did, part_ready, pending, initialized);
+          disjointness_ready, complete, did, part_ready, pending, 
+          initialized, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3687,6 +3722,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space,
                                          DistributedID did, RtEvent initialized,
+                                         Provenance *provenance,
                                          std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
@@ -3700,7 +3736,8 @@ namespace Legion {
           local_applied.insert(initialized);
         initialized = local_initialized;
       }
-      FieldSpaceNode *result = new FieldSpaceNode(space, this, did,initialized);
+      FieldSpaceNode *result = 
+        new FieldSpaceNode(space, this, did, initialized, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
       assert(applied != NULL);
@@ -3747,6 +3784,7 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space,
                                                   DistributedID did,
                                                   RtEvent initialized,
+                                                  Provenance *provenance,
                                                   Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -3756,7 +3794,7 @@ namespace Legion {
         local_applied.insert(initialized);
       initialized = local_initialized;
       FieldSpaceNode *result = 
-        new FieldSpaceNode(space, this, did, initialized, derez);
+        new FieldSpaceNode(space, this, did, initialized, provenance, derez);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -3798,7 +3836,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::create_node(LogicalRegion r, 
                                   PartitionNode *parent, RtEvent initialized,
-                                  DistributedID did, std::set<RtEvent> *applied)
+                                  DistributedID did, Provenance *provenance,
+                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3852,8 +3891,11 @@ namespace Legion {
       }
       else if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready); 
-      RegionNode *result = new RegionNode(r, parent, row_src, col_src, this,did,
-        initialized, (parent == NULL) ? initialized : parent->tree_initialized);
+      if ((provenance == NULL) && (parent != NULL))
+        provenance = parent->provenance;
+      RegionNode *result = new RegionNode(r, parent, row_src, col_src, this,
+          did, initialized, (parent == NULL) ? initialized :
+          parent->tree_initialized, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
       assert(applied != NULL);
@@ -3960,7 +4002,7 @@ namespace Legion {
       else if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready);
       PartitionNode *result = new PartitionNode(p, parent, row_src, col_src, 
-                                this, initialized, parent->tree_initialized);
+                                  this, initialized, parent->tree_initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
       assert(applied != NULL);
@@ -7738,14 +7780,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
-        LegionColor c, DistributedID did, AddressSpaceID owner, RtEvent init)
+        LegionColor c, DistributedID did, AddressSpaceID owner, 
+        RtEvent init, Provenance *prov)
       : DistributedCollectable(ctx->runtime, did, owner, false/*register*/),
-        context(ctx), depth(d), color(c), initialized(init)
+        context(ctx), depth(d), color(c), provenance(prov), initialized(init)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
+      if (provenance != NULL)
+        provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -7768,6 +7813,8 @@ namespace Legion {
       for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     } 
 
     //--------------------------------------------------------------------------
@@ -7961,11 +8008,11 @@ namespace Legion {
                                    IndexPartNode *par, LegionColor c,
                                    DistributedID did, ApEvent ready,
                                    IndexSpaceExprID exp_id, RtEvent init,
-                                   unsigned dep)
+                                   unsigned dep, Provenance *prov)
       : IndexTreeNode(ctx,
           (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
-          get_owner_space(h, ctx->runtime), init),
+          get_owner_space(h, ctx->runtime), init, prov),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
@@ -7998,7 +8045,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
-      : IndexTreeNode(NULL, 0, 0, 0, 0, RtEvent::NO_RT_EVENT),
+      : IndexTreeNode(NULL, 0, 0, 0, 0, RtEvent::NO_RT_EVENT, NULL),
         IndexSpaceExpression(node_lock), handle(IndexSpace::NO_SPACE), 
         parent(NULL), index_space_ready(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -8884,6 +8931,10 @@ namespace Legion {
           rez.serialize(initialized);
           rez.serialize(depth);
           rez.serialize<bool>(record.add_root_reference);
+          if (provenance != NULL)
+            provenance->serialize(rez);
+          else
+            Provenance::serialize_null(rez);
           if (record.pack_space)
             pack_index_space(rez, true/*include size*/);
           else
@@ -8896,7 +8947,7 @@ namespace Legion {
             rez.serialize(it->second.size);
             rez.serialize(it->second.buffer, it->second.size);
             rez.serialize(it->second.is_mutable);
-          }
+          } 
         }
         if (record.has_reference)
         {
@@ -8990,6 +9041,7 @@ namespace Legion {
       derez.deserialize(depth);
       bool add_root_reference;
       derez.deserialize(add_root_reference);
+      Provenance *provenance = Provenance::deserialize(derez);
       size_t index_space_size;
       derez.deserialize(index_space_size);
       const void *index_space_ptr = 
@@ -9000,7 +9052,7 @@ namespace Legion {
         parent_node = context->get_node(parent, NULL/*defer*/,
                         true/*can fail*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
-          false/*is domain*/, parent_node, color, did, initialized,
+          false/*is domain*/, parent_node, color, did, initialized, provenance,
           ready_event, expr_id, NULL/*applied*/, add_root_reference, depth);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
@@ -9588,10 +9640,11 @@ namespace Legion {
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, bool dis, int comp, 
                                  DistributedID did, ApEvent part_ready, 
-                                 ApUserEvent partial, RtEvent init)
+                                 ApUserEvent partial, RtEvent init,
+                                 Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init), 
+                      get_owner_space(p, ctx->runtime), init, prov), 
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
@@ -9625,10 +9678,10 @@ namespace Legion {
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready, 
                                  int comp, DistributedID did,ApEvent part_ready,
-                                 ApUserEvent part, RtEvent init)
+                                 ApUserEvent part,RtEvent init,Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init), handle(p), 
+                      get_owner_space(p, ctx->runtime), init, prov), handle(p), 
         parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
@@ -9660,7 +9713,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(const IndexPartNode &rhs)
-      : IndexTreeNode(NULL,0,0,0,0,RtEvent::NO_RT_EVENT), 
+      : IndexTreeNode(NULL,0,0,0,0,RtEvent::NO_RT_EVENT,NULL), 
         handle(IndexPartition::NO_PART), parent(NULL), color_space(NULL),
         total_children(0), max_linearized_color(0)
     //--------------------------------------------------------------------------
@@ -10082,7 +10135,7 @@ namespace Legion {
           {
             ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
             result = context->create_node(is, NULL/*realm is*/, this, c, did, 
-                                          initialized, partial_event);
+                                          initialized,provenance,partial_event);
             add_pending_child(c, partial_event);
             // Now check to see if we need to trigger our partition ready event
             std::set<ApEvent> child_ready_events;
@@ -10102,10 +10155,10 @@ namespace Legion {
           else
             // Make a new index space node ready when the partition is ready
             result = context->create_node(is, NULL/*realm is*/, false, this, c,
-                                          did, initialized, partition_ready);
+                                did, initialized, provenance, partition_ready);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
-                          result->get_domain_point_color());
+                runtime->address_space, result->get_domain_point_color());
           if (runtime->profiler != NULL)
 	    runtime->profiler->record_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
@@ -11014,6 +11067,10 @@ namespace Legion {
         rez.serialize(partition_ready);
         rez.serialize(partial_pending);
         rez.serialize(initialized);
+        if (provenance != NULL)
+          provenance->serialize(rez);
+        else
+          Provenance::serialize_null(rez);
         rez.serialize<size_t>(semantic_info.size());
         for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
               semantic_info.begin(); it != semantic_info.end(); it++)
@@ -11060,6 +11117,7 @@ namespace Legion {
       derez.deserialize(partial_pending);
       RtEvent initialized;
       derez.deserialize(initialized);
+      Provenance *provenance = Provenance::deserialize(derez);
       IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(color_space);
 #ifdef DEBUG_LEGION
@@ -11069,11 +11127,13 @@ namespace Legion {
       RtUserEvent dis_ready;
       if (!has_disjoint)
         dis_ready = Runtime::create_rt_user_event();
-      IndexPartNode *node = has_disjoint ? 
+      IndexPartNode *node = has_disjoint ?
         context->create_node(handle, parent_node, color_space_node, color, 
-         disjoint, complete, did, ready_event, partial_pending, initialized) :
+            disjoint, complete, did, provenance, ready_event,
+            partial_pending, initialized) :
         context->create_node(handle, parent_node, color_space_node, color,
-         dis_ready, complete, did, ready_event, partial_pending, initialized);
+            dis_ready, complete, did, provenance, ready_event, 
+            partial_pending, initialized);
       if (!has_disjoint)
         node->record_remote_disjoint_ready(dis_ready);
 #ifdef DEBUG_LEGION
@@ -11287,11 +11347,11 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
-                                   DistributedID did, RtEvent init)
+                              DistributedID did, RtEvent init, Provenance *prov)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), initialized(init), 
+        handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state(FIELD_ALLOC_READ_ONLY), outstanding_allocators(0),
         outstanding_invalidations(0)
     //--------------------------------------------------------------------------
@@ -11302,6 +11362,8 @@ namespace Legion {
       unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       local_index_infos.resize(runtime->max_local_fields, 
           std::pair<size_t,CustomSerdezID>(0, 0));
+      if (provenance != NULL)
+        provenance->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
@@ -11310,11 +11372,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
-                           DistributedID did, RtEvent init, Deserializer &derez)
+         DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), initialized(init), 
+        handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state(FIELD_ALLOC_INVALID), outstanding_allocators(0),
         outstanding_invalidations(0)
     //--------------------------------------------------------------------------
@@ -11331,9 +11393,11 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
       }
+      if (provenance != NULL)
+        provenance->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
@@ -11343,7 +11407,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(const FieldSpaceNode &rhs)
       : DistributedCollectable(NULL, 0, 0), handle(FieldSpace::NO_SPACE), 
-        context(NULL), initialized(rhs.initialized), node_lock(rhs.node_lock)
+        context(NULL), provenance(NULL), initialized(rhs.initialized),
+        node_lock(rhs.node_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11380,6 +11445,8 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
       // Unregister ourselves from the context
       if (registered_with_runtime)
         context->remove_node(handle);
@@ -11392,6 +11459,125 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(void)
+      : field_size(0), idx(0), serdez_id(0), provenance(NULL), local(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(size_t size, unsigned id, 
+                                 CustomSerdezID sid, Provenance *prov, bool loc)
+      : field_size(size), idx(id), serdez_id(sid), provenance(prov), local(loc)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(ApEvent ready, unsigned id,
+                                 CustomSerdezID sid, Provenance *prov, bool loc)
+      : field_size(0), size_ready(ready), idx(id), serdez_id(sid),
+        provenance(prov), local(loc)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(const FieldInfo &rhs)
+      : field_size(rhs.field_size), size_ready(rhs.size_ready), idx(rhs.idx),
+        serdez_id(rhs.serdez_id), provenance(rhs.provenance), local(rhs.local)
+    //--------------------------------------------------------------------------
+    {
+      if (provenance != NULL)
+        provenance->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::FieldInfo(FieldInfo &&rhs)
+      : field_size(rhs.field_size), size_ready(rhs.size_ready), idx(rhs.idx),
+        serdez_id(rhs.serdez_id), provenance(rhs.provenance), local(rhs.local)
+    //--------------------------------------------------------------------------
+    {
+      rhs.provenance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo::~FieldInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo& FieldSpaceNode::FieldInfo::operator=(
+                                                           const FieldInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      field_size = rhs.field_size;
+      size_ready = rhs.size_ready;
+      idx = rhs.idx;
+      serdez_id = rhs.serdez_id;
+      provenance = rhs.provenance;
+      local = rhs.local;
+      if (provenance != NULL)
+        provenance->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpaceNode::FieldInfo& FieldSpaceNode::FieldInfo::operator=(
+                                                                FieldInfo &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      field_size = rhs.field_size;
+      size_ready = rhs.size_ready;
+      idx = rhs.idx;
+      serdez_id = rhs.serdez_id;
+      provenance = rhs.provenance;
+      local = rhs.local;
+      rhs.provenance = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::FieldInfo::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(field_size);
+      rez.serialize(size_ready);
+      rez.serialize(idx);
+      rez.serialize<bool>(local);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::FieldInfo::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
+      derez.deserialize(field_size);
+      derez.deserialize(size_ready);
+      derez.deserialize(idx);
+      derez.deserialize<bool>(local);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -12154,7 +12340,7 @@ namespace Legion {
                           field_infos.end(); /*nothing*/)
                     {
                       rez.serialize(it->first);
-                      rez.serialize(it->second);
+                      it->second.serialize(rez);
                       if (!it->second.local)
                       {
                         std::map<FieldID,FieldInfo>::iterator to_delete = it++;
@@ -12300,7 +12486,7 @@ namespace Legion {
                     field_infos.begin(); it != field_infos.end(); it++)
               {
                 rez.serialize(it->first);
-                rez.serialize(it->second);
+                it->second.serialize(rez);
               }
               rez.serialize(unallocated_indexes);
               unallocated_indexes.clear();
@@ -12324,9 +12510,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::initialize_fields(const std::vector<size_t> &sizes,
-                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id)
+                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id,
+                     const char *provenance)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!fids.empty());
+#endif
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       for (unsigned idx = 0; idx < fids.size(); idx++)
       {
         FieldID fid = fids[idx];
@@ -12347,13 +12540,14 @@ namespace Legion {
         assert(!dummy_event.exists());
 #endif
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id, prov);
       }
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::initialize_fields(ApEvent sizes_ready,
-                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id)
+                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id,
+                     Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < fids.size(); idx++)
@@ -12376,13 +12570,13 @@ namespace Legion {
         assert(!dummy_event.exists());
 #endif
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id, provenance);
       }
     }
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_field(FieldID fid, size_t size, 
-                                           CustomSerdezID serdez_id)
+                               CustomSerdezID serdez_id, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -12401,6 +12595,14 @@ namespace Legion {
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
           rez.serialize(ApEvent::NO_AP_EVENT);
+          if (provenance != NULL)
+          {
+            const size_t length = strlen(provenance);
+            rez.serialize<size_t>(length);
+            rez.serialize(provenance, length);
+          }
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(1); // only allocating one field
           rez.serialize(fid);
           rez.serialize(size);
@@ -12422,14 +12624,17 @@ namespace Legion {
                         "field space %x. Change LEGION_MAX_FIELDS from %d and"
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size, index, serdez_id);
+      field_infos[fid] = FieldInfo(size, index, serdez_id, prov);
       return ready_event;
     }
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_field(FieldID fid, ApEvent size_ready, 
-                                           CustomSerdezID serdez_id)
+                               CustomSerdezID serdez_id, const char *provenance)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -12448,6 +12653,14 @@ namespace Legion {
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
           rez.serialize(size_ready); // size ready
+          if (provenance != NULL)
+          {
+            const size_t length = strlen(provenance);
+            rez.serialize<size_t>(length);
+            rez.serialize(provenance, length);
+          }
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(1); // only allocating one field
           rez.serialize(fid);
         }
@@ -12469,17 +12682,22 @@ namespace Legion {
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size_ready, index, serdez_id);
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
+      field_infos[fid] = FieldInfo(size_ready, index, serdez_id, prov);
       return ready_event;
     }
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_fields(const std::vector<size_t> &sizes,
                                             const std::vector<FieldID> &fids,
-                                            CustomSerdezID serdez_id)
+                                            CustomSerdezID serdez_id,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!fids.empty());
       assert(sizes.size() == fids.size());
 #endif
       AutoLock n_lock(node_lock);
@@ -12495,6 +12713,14 @@ namespace Legion {
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
           rez.serialize(ApEvent::NO_AP_EVENT);
+          if (provenance != NULL)
+          {
+            const size_t length = strlen(provenance);
+            rez.serialize<size_t>(length);
+            rez.serialize(provenance, length);
+          }
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(fids.size());
           for (unsigned idx = 0; idx < fids.size(); idx++)
           {
@@ -12505,6 +12731,9 @@ namespace Legion {
         context->runtime->send_field_alloc_request(owner_space, rez);
         return allocated_event;
       }
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       // We're the owner so do the field allocation
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
@@ -12526,7 +12755,7 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id, prov);
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -12537,7 +12766,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_fields(ApEvent sizes_ready,
                                             const std::vector<FieldID> &fids,
-                                            CustomSerdezID serdez_id)
+                                            CustomSerdezID serdez_id,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     { 
       AutoLock n_lock(node_lock);
@@ -12553,6 +12783,14 @@ namespace Legion {
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
           rez.serialize(sizes_ready);
+          if (provenance != NULL)
+          {
+            const size_t length = strlen(provenance);
+            rez.serialize<size_t>(length);
+            rez.serialize(provenance, length);
+          }
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(fids.size());
           for (unsigned idx = 0; idx < fids.size(); idx++)
             rez.serialize(fids[idx]);
@@ -12560,6 +12798,9 @@ namespace Legion {
         context->runtime->send_field_alloc_request(owner_space, rez);
         return allocated_event;
       }
+      Provenance *prov = NULL;
+      if (provenance != NULL)
+        prov = new Provenance(provenance);
       // We're the owner so do the field allocation
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
@@ -12581,7 +12822,7 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id, prov);
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -12783,7 +13024,8 @@ namespace Legion {
                                             const std::vector<size_t> &sizes,
                                             CustomSerdezID serdez_id,
                                             const std::set<unsigned> &indexes,
-                                            std::vector<unsigned> &new_indexes)
+                                            std::vector<unsigned> &new_indexes,
+                                            const char *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12801,6 +13043,14 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(allocated_event);
           rez.serialize(serdez_id);
+          if (provenance != NULL)
+          {
+            const size_t length = strlen(provenance);
+            rez.serialize<size_t>(length);
+            rez.serialize(provenance, length);
+          }
+          else
+            rez.serialize<size_t>(0);
           rez.serialize<size_t>(fids.size());
           for (unsigned idx = 0; idx < fids.size(); idx++)
           {
@@ -12818,16 +13068,20 @@ namespace Legion {
         allocated_event.wait();
         if (new_indexes.empty())
           return false;
+        Provenance *prov = NULL;
+        if (provenance != NULL)
+          prov = new Provenance(provenance);
         // When we wake up then fill in the field information
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
+        assert(!fids.empty());
         assert(new_indexes.size() == fids.size());
 #endif
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
           field_infos[fid] = 
-            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
+            FieldInfo(sizes[idx],new_indexes[idx],serdez_id,prov,true/*local*/);
         }
       }
       else
@@ -12836,6 +13090,12 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         if (!allocate_local_indexes(serdez_id, sizes, indexes, new_indexes))
           return false;
+        Provenance *prov = NULL;
+        if (provenance != NULL)
+          prov = new Provenance(provenance);
+#ifdef DEBUG_LEGION
+        assert(!fids.empty());
+#endif
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
@@ -12844,7 +13104,7 @@ namespace Legion {
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id)
           field_infos[fid] = 
-            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
+            FieldInfo(sizes[idx],new_indexes[idx],serdez_id,prov,true/*local*/);
         }
       }
       return true;
@@ -12894,7 +13154,8 @@ namespace Legion {
     void FieldSpaceNode::update_local_fields(const std::vector<FieldID> &fids,
                                   const std::vector<size_t> &sizes,
                                   const std::vector<CustomSerdezID> &serdez_ids,
-                                  const std::vector<unsigned> &indexes)
+                                  const std::vector<unsigned> &indexes,
+                                  Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12904,8 +13165,8 @@ namespace Legion {
 #endif
       AutoLock n_lock(node_lock);
       for (unsigned idx = 0; idx < fids.size(); idx++)
-        field_infos[fids[idx]] = 
-          FieldInfo(sizes[idx], indexes[idx], serdez_ids[idx], true/*local*/);
+        field_infos[fids[idx]] = FieldInfo(sizes[idx], indexes[idx], 
+            serdez_ids[idx], provenance, true/*local*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13531,6 +13792,14 @@ namespace Legion {
       derez.deserialize(serdez_id);
       ApEvent sizes_ready;
       derez.deserialize(sizes_ready);
+      size_t length;
+      derez.deserialize(length);
+      const char *provenance = NULL;
+      if (length > 0)
+      {
+        provenance = (const char*)derez.get_current_pointer();
+        derez.advance_pointer(length);
+      }
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<FieldID> fids(num_fields);
@@ -13544,14 +13813,14 @@ namespace Legion {
           derez.deserialize(sizes[idx]);
         }
         FieldSpaceNode *node = forest->get_node(handle);
-        ready = node->allocate_fields(sizes, fids, serdez_id);
+        ready = node->allocate_fields(sizes, fids, serdez_id, provenance);
       }
       else
       {
         for (unsigned idx = 0; idx < num_fields; idx++)
           derez.deserialize(fids[idx]);
         FieldSpaceNode *node = forest->get_node(handle);
-        ready = node->allocate_fields(sizes_ready, fids, serdez_id);
+        ready = node->allocate_fields(sizes_ready, fids, serdez_id, provenance);
       }
       Runtime::trigger_event(done, ready);
     }
@@ -13635,6 +13904,14 @@ namespace Legion {
       derez.deserialize(done_event);
       CustomSerdezID serdez_id;
       derez.deserialize(serdez_id);
+      size_t length;
+      derez.deserialize(length);
+      const char *provenance = NULL;
+      if (length > 0)
+      {
+        provenance = (const char*)derez.get_current_pointer();
+        derez.advance_pointer(length);
+      }
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<FieldID> fields(num_fields);
@@ -13659,7 +13936,7 @@ namespace Legion {
       FieldSpaceNode *node = forest->get_node(handle);
       std::vector<unsigned> new_indexes;
       if (node->allocate_local_fields(fields, sizes, serdez_id,
-                                      current_indexes, new_indexes))
+                                      current_indexes, new_indexes, provenance))
       {
         Serializer rez;
         {
@@ -14063,6 +14340,10 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(did);
           rez.serialize(initialized);
+          if (provenance != NULL)
+            provenance->serialize(rez);
+          else
+            Provenance::serialize_null(rez);
           // Pack the field infos
           if (allocation_state == FIELD_ALLOC_READ_ONLY)
           {
@@ -14072,7 +14353,7 @@ namespace Legion {
                   field_infos.begin(); it != field_infos.end(); it++)
             {
               rez.serialize(it->first);
-              rez.serialize(it->second);
+              it->second.serialize(rez);
             }
             remote_field_infos.insert(target);
           }
@@ -14118,7 +14399,9 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent initialized;
       derez.deserialize(initialized);
-      FieldSpaceNode *node = context->create_node(handle,did,initialized,derez);
+      Provenance *provenance = Provenance::deserialize(derez);
+      FieldSpaceNode *node =
+        context->create_node(handle, did, initialized, provenance, derez);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -14311,7 +14594,7 @@ namespace Legion {
       {
         FieldID fid;
         derez.deserialize(fid);
-        derez.deserialize((*target)[fid]);
+        (*target)[fid].deserialize(derez);
       } 
       FieldSpace handle;
       derez.deserialize(handle);
@@ -14633,7 +14916,7 @@ namespace Legion {
                       field_infos.begin(); it != field_infos.end(); it++)
                 {
                   rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  it->second.serialize(rez);
                 }
                 std::set<AddressSpaceID>::const_iterator finder = 
                   remote_field_infos.find(source);
@@ -14678,7 +14961,7 @@ namespace Legion {
                       field_infos.begin(); it != field_infos.end(); it++)
                 {
                   rez.serialize(it->first);
-                  rez.serialize(it->second);
+                  it->second.serialize(rez);
                 }
                 rez.serialize(FieldSpace::NO_SPACE);
                 rez.serialize(to_trigger);
@@ -14718,7 +15001,7 @@ namespace Legion {
                     field_infos.begin(); it != field_infos.end(); it++)
               {
                 rez.serialize(it->first);
-                rez.serialize(it->second);
+                it->second.serialize(rez);
               }
               // We can't give them read-only privileges 
               rez.serialize(FieldSpace::NO_SPACE);
@@ -14789,7 +15072,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
       }
       derez.deserialize(unallocated_indexes);
@@ -14828,7 +15111,7 @@ namespace Legion {
               field_infos.begin(); it != field_infos.end(); /*nothing*/)
         {
           rez.serialize(it->first);
-          rez.serialize(it->second);
+          it->second.serialize(rez);
           if (!it->second.local)
           {
             std::map<FieldID,FieldInfo>::iterator to_delete = it++;
@@ -14893,7 +15176,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
 #ifdef DEBUG_LEGION
         assert(!unallocated_indexes);
@@ -14955,7 +15238,7 @@ namespace Legion {
         {
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          field_infos[fid].deserialize(derez);
         }
         derez.deserialize(unallocated_indexes);
         size_t num_indexes;
@@ -15037,19 +15320,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
-       FieldSpaceNode *column_src, RtEvent init, RtEvent tree, DistributedID id)
+                         FieldSpaceNode *column_src, RtEvent init, RtEvent tree,
+                         Provenance *prov, DistributedID id)
       : DistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
               ctx->runtime->get_available_distributed_id(),
               REGION_TREE_NODE_DC), (id > 0) ? ctx->runtime->determine_owner(id)
             : ctx->runtime->address_space, false/*register with runtime*/),
-        context(ctx), column_source(column_src), initialized(init),
-        tree_initialized(tree), registered(false)
+        context(ctx), column_source(column_src), provenance(prov),
+        initialized(init), tree_initialized(tree), registered(false)
 #ifdef DEBUG_LEGION
         , currently_active(true)
 #endif
     //--------------------------------------------------------------------------
     {
+      if (provenance != NULL)
+        provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -15061,6 +15347,8 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -17831,8 +18119,8 @@ namespace Legion {
     RegionNode::RegionNode(LogicalRegion r, PartitionNode *par,
                            IndexSpaceNode *row_src, FieldSpaceNode *col_src,
                            RegionTreeForest *ctx, DistributedID id,
-                           RtEvent init, RtEvent tree)
-      : RegionTreeNode(ctx, col_src, init, tree, id), handle(r),
+                           RtEvent init, RtEvent tree, Provenance *prov)
+      : RegionTreeNode(ctx, col_src, init, tree, prov, id), handle(r),
         parent(par), row_source(row_src)
 #ifdef DEBUG_LEGION
         , currently_valid(true)
@@ -18344,6 +18632,10 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(did);
           rez.serialize(initialized);
+          if (provenance != NULL)
+            provenance->serialize(rez);
+          else
+            Provenance::serialize_null(rez);
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -18368,9 +18660,10 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent initialized;
       derez.deserialize(initialized);
+      Provenance *prov = Provenance::deserialize(derez);
 
       RegionNode *node = 
-        context->create_node(handle, NULL/*parent*/, initialized, did);
+        context->create_node(handle, NULL/*parent*/, initialized, did, prov);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -19139,7 +19432,7 @@ namespace Legion {
                                  IndexPartNode *row_src, 
                                  FieldSpaceNode *col_src, RegionTreeForest *ctx,
                                  RtEvent init, RtEvent tree)
-      : RegionTreeNode(ctx, col_src, init, tree), handle(p), 
+      : RegionTreeNode(ctx, col_src, init, tree, par->provenance), handle(p), 
         parent(par), row_source(row_src)
     //--------------------------------------------------------------------------
     {
