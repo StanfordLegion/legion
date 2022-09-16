@@ -576,7 +576,7 @@ namespace Legion {
                     UniqueID uid,
 #endif
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    AddressSpaceID owner_space);
+                    ApEvent completion, AddressSpaceID owner_space);
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:

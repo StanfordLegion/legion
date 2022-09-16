@@ -3426,14 +3426,15 @@ namespace Legion {
                                  UniqueID uid,
 #endif
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, AddressSpaceID owner_space)
+                                 DistributedID did, ApEvent completion,
+                                 AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), owner_space), 
         context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
 #ifdef LEGION_SPY
         op_uid(uid),
 #endif
-        future_map_domain(domain), completion_event(o->get_completion_event())
+        future_map_domain(domain), completion_event(completion)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3887,7 +3888,7 @@ namespace Legion {
           prev->op_uid,
 #endif
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->runtime->address_space),
+          prev->completion_event, prev->runtime->address_space),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -3905,7 +3906,7 @@ namespace Legion {
           prev->op_uid,
 #endif
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->runtime->address_space),
+          prev->completion_event, prev->runtime->address_space),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
