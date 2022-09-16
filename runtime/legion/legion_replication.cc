@@ -6822,6 +6822,11 @@ namespace Legion {
           // Record that we're mapped once everyone else does
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
+#ifdef LEGION_SPY
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                            completion_event);
+#endif
           complete_execution(Runtime::protect_event(broadcast_barrier));
         }
       }
