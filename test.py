@@ -548,6 +548,20 @@ def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, time
         env=env,
         cwd=build_dir)
 
+def run_test_legion_prof_mypy(root_dir):
+    mypy_cmd = [
+        "mypy",
+        "--disallow-any-unimported",
+        "--disallow-any-explicit",
+        "--disallow-untyped-defs",
+        "--disallow-incomplete-defs",
+        "--warn-redundant-casts",
+        "--warn-unused-ignores",
+        os.path.join(root_dir, 'tools', 'legion_prof.py'),
+    ]
+    print('Running mypy test:', cmd)
+    cmd(mypy_cmd)
+
 def hostname():
     return subprocess.check_output(['hostname']).strip()
 
@@ -1075,6 +1089,7 @@ def run_tests(test_modules=None,
         with Stage('build'):
             if use_prof:
                 build_legion_prof_rs(root_dir, tmp_dir, env)
+                run_test_legion_prof_mypy(root_dir)
             if use_cmake:
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
