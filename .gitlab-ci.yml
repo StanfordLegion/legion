@@ -451,6 +451,12 @@ before_script:
     if [[ "$TEST_JUPYTER" -eq 1 ]]; then
       pip3 install notebook==6.4.10
     fi
+  - |
+    if [[ "$USE_PROF" -eq 1 ]]; then
+      wget https://bootstrap.pypa.io/get-pip.py
+      python3 get-pip.py
+      pip3 install mypy==0.971
+    fi
 
 
 ###
