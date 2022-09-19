@@ -880,7 +880,8 @@ namespace Legion {
       void project_refinement(RegionTreeNode *node, 
                               std::vector<RegionNode*> &regions) const;
       void project_refinement(RegionTreeNode *node, ShardID shard,
-                              std::vector<RegionNode*> &regions) const;
+                              std::vector<RegionNode*> &regions,
+                              Provenance *provenance) const;
     };
 
     /**

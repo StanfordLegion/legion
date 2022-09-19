@@ -1609,10 +1609,11 @@ namespace Legion {
     TaskLauncher::TaskLauncher(TaskID tid, UntypedBuffer arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer*/)
+                               UntypedBuffer marg /*=UntypedBuffer*/,
+                               const char *prov /*=UntypedBuffer*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
         map_arg(marg), point(DomainPoint(0)),
-        sharding_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), provenance(prov),
         static_dependences(NULL), enable_inlining(false),
         local_function_task(false), independent_requirements(false), 
         elide_future_return(false), silence_warnings(false)
@@ -1643,13 +1644,14 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     const char *prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
-        tag(t), map_arg(marg), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1661,13 +1663,14 @@ namespace Legion {
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      bool must /*=false*/, MapperID mid /*=0*/,
-                                     MappingTagID t /*=0*/, UntypedBuffer marg)
+                                     MappingTagID t /*=0*/, UntypedBuffer marg,
+                                     const char *prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
-        tag(t), map_arg(marg), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1687,9 +1690,10 @@ namespace Legion {
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
                                    MapperID mid /*=0*/, MappingTagID t /*=0*/,
                                    LayoutConstraintID lay_id /*=0*/,
-                                   UntypedBuffer marg /*= UntypedBuffer()*/)
+                                   UntypedBuffer marg /*= UntypedBuffer()*/,
+                                   const char *prov /*= UntypedBuffer()*/)
       : requirement(req), map_id(mid), tag(t), map_arg(marg),
-        layout_constraint_id(lay_id), static_dependences(NULL)
+        layout_constraint_id(lay_id), provenance(prov), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1701,10 +1705,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
-      : predicate(pred), map_id(mid), tag(t), map_arg(marg), 
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
+      : predicate(pred), map_id(mid), tag(t), map_arg(marg),
         point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE),
-        static_dependences(NULL), possible_src_indirect_out_of_range(true),
+        provenance(prov), static_dependences(NULL),
+        possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
@@ -1733,10 +1739,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    const char *prov /*=NULL*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid),
-        tag(t), map_arg(marg), static_dependences(NULL),
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
@@ -1750,10 +1757,11 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(IndexSpace space, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                    UntypedBuffer marg /*=UntypedBuffer()*/) 
+                                    UntypedBuffer marg /*=UntypedBuffer()*/,
+                                    const char *prov /*=NULL*/) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         sharding_space(IndexSpace::NO_SPACE), predicate(pred), map_id(mid), 
-        tag(t), map_arg(marg), static_dependences(NULL),
+        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
         possible_dst_indirect_aliasing(true), 
@@ -1772,9 +1780,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     const char *prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1789,9 +1798,10 @@ namespace Legion {
                                      PhysicalRegion phy,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                     UntypedBuffer marg /*=UntypedBuffer()*/)
+                                     UntypedBuffer marg /*=UntypedBuffer()*/,
+                                     const char *prov /*=UntypedBuffer()*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), map_arg(marg),
+        predicate(pred), map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1815,10 +1825,11 @@ namespace Legion {
                                UntypedBuffer arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), argument(arg), predicate(pred), map_id(id), 
-        tag(t), map_arg(marg), point(DomainPoint(0)), static_dependences(NULL), 
-        silence_warnings(false)
+        tag(t), map_arg(marg), point(DomainPoint(0)), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1827,10 +1838,11 @@ namespace Legion {
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=UntypedBuffer()*/)
       : handle(h), parent(p), future(f), predicate(pred), map_id(id), tag(t), 
-        map_arg(marg), point(DomainPoint(0)), static_dependences(NULL),
-        silence_warnings(false) 
+        map_arg(marg), point(DomainPoint(0)), provenance(prov), 
+        static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1854,12 +1866,12 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1869,12 +1881,13 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                const char *prov /*=NULL*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1884,12 +1897,13 @@ namespace Legion {
                                LogicalRegion p, UntypedBuffer arg, 
                                ProjectionID proj, Predicate pred,
                                MapperID id /*=0*/, MappingTagID t /*=0*/,
-                               UntypedBuffer marg /*=UntypedBuffer()*/)
+                               UntypedBuffer marg /*=UntypedBuffer()*/,
+                               const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         argument(arg), predicate(pred), map_id(id), tag(t), map_arg(marg),
-        static_dependences(NULL), silence_warnings(false)
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1899,11 +1913,29 @@ namespace Legion {
                                 LogicalRegion p, Future f,
                                 ProjectionID proj, Predicate pred,
                                 MapperID id /*=0*/, MappingTagID t /*=0*/,
-                                UntypedBuffer marg /*=UntypedBuffer()*/)
+                                UntypedBuffer marg /*=UntypedBuffer()*/,
+                                const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         sharding_space(IndexSpace::NO_SPACE), region(h), 
         partition(LogicalPartition::NO_PART), parent(p), projection(proj), 
         future(f), predicate(pred), map_id(id), tag(t), map_arg(marg),
+        provenance(prov), static_dependences(NULL), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, UntypedBuffer arg,
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/,
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
+      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
+        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
+        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
         static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1911,32 +1943,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
-                                         LogicalRegion p, UntypedBuffer arg,
-                                         ProjectionID proj, Predicate pred,
-                                         MapperID id /*=0*/, 
-                                         MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
-      : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
-        sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
-        partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
-        map_id(id), tag(t), map_arg(marg), static_dependences(NULL),
-        silence_warnings(false)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
                                          LogicalRegion p, Future f,
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov/*=UntypedBuffer()*/)
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), 
         sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
         partition(h), parent(p), projection(proj), future(f), predicate(pred),
-        map_id(id), tag(t), map_arg(marg), static_dependences(NULL),
-        silence_warnings(false)
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1947,12 +1964,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION), 
         partition(h), parent(p), projection(proj),argument(arg),predicate(pred),
-        map_id(id), tag(t), map_arg(marg), static_dependences(NULL),
-        silence_warnings(false)
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1963,12 +1981,13 @@ namespace Legion {
                                          ProjectionID proj, Predicate pred,
                                          MapperID id /*=0*/, 
                                          MappingTagID t /*=0*/,
-                                         UntypedBuffer marg/*=UntypedBuffer()*/)
+                                         UntypedBuffer marg/*=UntypedBuffer()*/,
+                                         const char *prov /*=NULL*/)
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), 
         sharding_space(IndexSpace::NO_SPACE), region(LogicalRegion::NO_REGION),
         partition(h), parent(p), projection(proj), future(f), predicate(pred),
-        map_id(id), tag(t), map_arg(marg), static_dependences(NULL),
-        silence_warnings(false)
+        map_id(id), tag(t), map_arg(marg), provenance(prov),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2465,33 +2484,38 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Creating Legion Future objects from a buffer is only permitted "
             "to be performed inside of Legion tasks.")
-      return Internal::implicit_context->from_value(value, value_size, owned);
+      return Internal::implicit_context->from_value(value, value_size, 
+                                                    owned, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_untyped_pointer(
-                               const void *value, size_t value_size, bool owned)
+             const void *value, size_t value_size, bool owned, const char *prov)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Creating Legion Future objects from a buffer is only permitted "
             "to be performed inside of Legion tasks.")
-      return Internal::implicit_context->from_value(value, value_size, owned);
+      Internal::AutoProvenance provenance(prov);
+      return Internal::implicit_context->from_value(value, value_size,
+                                                    owned, provenance);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Future Future::from_value(const void *buffer, size_t size,
         bool owned, const Realm::ExternalInstanceResource &resource,
-        void (*freefunc)(const Realm::ExternalInstanceResource&))
+        void (*freefunc)(const Realm::ExternalInstanceResource&),
+        const char *prov)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Creating Legion Future objects from a buffer is only permitted "
             "to be performed inside of Legion tasks.")
+      Internal::AutoProvenance provenance(prov);
       return Internal::implicit_context->from_value(buffer, size, owned,
-                                                    resource, freefunc);
+                                        resource, freefunc, provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2898,8 +2922,14 @@ namespace Legion {
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
       const Processor exec_proc = Processor::get_executing_processor();
-      finder.has_affinity_to(exec_proc);
+      finder.best_affinity_to(exec_proc);
       finder.only_kind(memkind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(exec_proc);
+        finder.only_kind(memkind);
+      }
       if (finder.count() == 0)
       {
         const char *mem_names[] = {
@@ -2950,6 +2980,13 @@ namespace Legion {
     {
       Runtime::legion_task_postamble(ctx,instance.pointer_untyped(0,field_size),
                                      field_size, true/*owner*/, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance UntypedDeferredValue::get_instance() const
+    //--------------------------------------------------------------------------
+    {
+      return instance;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3496,97 +3533,116 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(size_t field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      Internal::AutoProvenance provenance(prov);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_field(const Future &field_size,
                                            FieldID desired_fieldid,
-                                           CustomSerdezID serdez_id, bool local)
+                                           CustomSerdezID serdez_id, bool local,
+                                           const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+      Internal::AutoProvenance provenance(prov);
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,
+                                  local, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocator::free_field(FieldID fid, const bool unordered)
+    void FieldAllocator::free_field(FieldID fid, const bool unordered,
+                                    const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif     
-      impl->free_field(fid, unordered);
+      Internal::AutoProvenance provenance(prov);
+      impl->free_field(fid, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldID FieldAllocator::allocate_local_field(size_t field_size,
                                                  FieldID desired_fieldid,
-                                                 CustomSerdezID serdez_id)
+                                                 CustomSerdezID serdez_id,
+                                                 const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
+      Internal::AutoProvenance provenance(prov);
       return impl->allocate_field(field_size, desired_fieldid, 
-                                  serdez_id, true/*local*/);
+                                  serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      Internal::AutoProvenance provenance(prov);
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id,
+                            local, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id, bool local)
+                                         CustomSerdezID serdez_id, bool local,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+      Internal::AutoProvenance provenance(prov);
+      impl->allocate_fields(field_sizes, resulting_fields,
+                            serdez_id, local, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::free_fields(const std::set<FieldID> &to_free,
-                                     const bool unordered)
+                                     const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->free_fields(to_free, unordered);
+      Internal::AutoProvenance provenance(prov);
+      impl->free_fields(to_free, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_local_fields(
                                         const std::vector<size_t> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id)
+                                        CustomSerdezID serdez_id,
+                                        const char *prov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
+      Internal::AutoProvenance provenance(prov);
       impl->allocate_fields(field_sizes, resulting_fields, 
-                            serdez_id, true/*local*/); 
+                            serdez_id, true/*local*/, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4137,14 +4193,15 @@ namespace Legion {
       const Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
                                    (Point<1,coord_t>(max_num_elmts-1)));
       const Domain domain(bounds);
-      return create_index_space(ctx, domain, TYPE_TAG_1D);
+      return create_index_space(ctx, domain, TYPE_TAG_1D, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
-                                           TypeTag type_tag)
+                                           TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (domain.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4152,7 +4209,7 @@ namespace Legion {
           {                             \
             if (type_tag == 0) \
               type_tag = TYPE_TAG_##DIM##D; \
-            return ctx->create_index_space(domain, type_tag); \
+            return ctx->create_index_space(domain, type_tag, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4164,9 +4221,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, size_t dimensions,
-                                         const Future &future, TypeTag type_tag)
+                       const Future &future, TypeTag type_tag, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       if (type_tag == 0)
       {
         switch (dimensions)
@@ -4183,7 +4241,7 @@ namespace Legion {
           assert(false);
         }
       }
-      return ctx->create_index_space(future, type_tag); 
+      return ctx->create_index_space(future, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4192,47 +4250,52 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<Domain> rects(domains.begin(), domains.end());
-      return create_index_space(ctx, rects); 
+      return create_index_space(ctx, rects, NULL/*provenance*/); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                         const std::vector<DomainPoint> &points)
+                       const std::vector<DomainPoint> &points, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(points); 
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space(points, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx,
-                                           const std::vector<Domain> &rects)
+                              const std::vector<Domain> &rects, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space(rects); 
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_index_space(rects, provenance); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::union_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                        const std::vector<IndexSpace> &spaces, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->union_index_spaces(spaces);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->union_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::intersect_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
+                        const std::vector<IndexSpace> &spaces, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->intersect_index_spaces(spaces);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->intersect_index_spaces(spaces, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::subtract_index_spaces(Context ctx,
-                                              IndexSpace left, IndexSpace right)
+                            IndexSpace left, IndexSpace right, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->subtract_index_spaces(left, right);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->subtract_index_spaces(left, right, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4244,10 +4307,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered, const bool recurse)
+                     const bool unordered, const bool recurse, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_space(handle, unordered, recurse);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_index_space(handle, unordered, recurse, provenance);
     } 
 
     //--------------------------------------------------------------------------
@@ -4546,10 +4610,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                       const bool unordered, const bool recurse)
+                     const bool unordered, const bool recurse, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_partition(handle, unordered, recurse);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_index_partition(handle, unordered, recurse, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4557,10 +4622,13 @@ namespace Legion {
                                                    IndexSpace parent,
                                                    IndexSpace color_space,
                                                    size_t granularity,
-                                                   Color color)
+                                                   Color color,
+                                                   const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_equal_partition(parent, color_space,granularity,color);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_equal_partition(parent, color_space, granularity,
+                                         color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4568,17 +4636,19 @@ namespace Legion {
                                        IndexSpace parent,
                                        const std::map<DomainPoint,int> &weights,
                                        IndexSpace color_space,
-                                       size_t granularity, Color color)
+                                       size_t granularity, Color color,
+                                       const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       ArgumentMap argmap;
       for (std::map<DomainPoint,int>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
         argmap.set_point(it->first,
             UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
+      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
       return ctx->create_partition_by_weights(parent, future_map, color_space,
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4586,17 +4656,19 @@ namespace Legion {
                                     IndexSpace parent,
                                     const std::map<DomainPoint,size_t> &weights,
                                     IndexSpace color_space,
-                                    size_t granularity, Color color)
+                                    size_t granularity, Color color,
+                                    const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       ArgumentMap argmap;
       for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
         argmap.set_point(it->first,
             UntypedBuffer(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
+      FutureMap future_map(argmap.impl->freeze(ctx, provenance));
       return ctx->create_partition_by_weights(parent, future_map, color_space,
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4604,11 +4676,13 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,
-                                                size_t granularity, Color color)
+                                                size_t granularity, Color color,
+                                                const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_weights(parent, weights, color_space, 
-                                              granularity, color);
+                                              granularity, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4616,11 +4690,12 @@ namespace Legion {
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, 
                                     IndexSpace color_space, PartitionKind kind,
-                                    Color color)
+                                    Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_union(parent, handle1, handle2, 
-                                            color_space, kind, color);
+                                color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4629,21 +4704,25 @@ namespace Legion {
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color) 
+                                                PartitionKind kind, Color color,
+                                                const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_intersection(parent, handle1, handle2, 
-                                                   color_space, kind, color);
+                                       color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_intersection(Context ctx,
                            IndexSpace parent, IndexPartition partition,
-                           PartitionKind part_kind, Color color, bool dominates)
+                           PartitionKind part_kind, Color color, 
+                           bool dominates, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_intersection(parent, partition, part_kind,
-                                                   color, dominates);
+                                                   color, dominates,provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4652,22 +4731,25 @@ namespace Legion {
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, Color color)
+                                                PartitionKind kind, Color color,
+                                                const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_difference(parent, handle1, handle2, 
-                                                 color_space, kind, color);
+                                     color_space, kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::create_cross_product_partitions(Context ctx,
-                                IndexPartition handle1, IndexPartition handle2,
-                                std::map<IndexSpace,IndexPartition> &handles,
-                                PartitionKind kind, Color color)
+                              IndexPartition handle1, IndexPartition handle2,
+                              std::map<IndexSpace,IndexPartition> &handles,
+                              PartitionKind kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_cross_product_partitions(handle1, handle2, handles, 
-                                                  kind, color);
+                                                  kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4677,11 +4759,12 @@ namespace Legion {
                                      FieldID domain_fid,
                                      IndexSpace range,
                                      MapperID id, MappingTagID tag,
-                                     UntypedBuffer marg)
+                                     UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       ctx->create_association(domain, domain_parent, domain_fid, range,
-                              id, tag, marg);
+                              id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4693,15 +4776,15 @@ namespace Legion {
                                       LogicalRegion range_parent,
                                       FieldID range_fid,
                                       MapperID id, MappingTagID tag,
-                                      UntypedBuffer marg)
+                                      UntypedBuffer marg,const char *provenance)
     //--------------------------------------------------------------------------
     {
       // Realm guarantees that creating association in either direction
       // will produce the same result, so we can do these separately
       create_association(ctx, domain, domain_parent, domain_fid, 
-                         range.get_index_space(), id, tag, marg);
+                         range.get_index_space(), id, tag, marg, provenance);
       create_association(ctx, range, range_parent, range_fid, 
-                         domain.get_index_space(), id, tag, marg);
+                         domain.get_index_space(), id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4711,7 +4794,8 @@ namespace Legion {
                                                         DomainTransform tran,
                                                         Domain ext,
                                                         PartitionKind part_kind,
-                                                        Color color)
+                                                        Color color,
+                                                        const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch ((ext.get_dim()-1) * LEGION_MAX_DIM + (tran.n-1))
@@ -4723,8 +4807,8 @@ namespace Legion {
             const Rect<D1,coord_t> extent(ext); \
             const Transform<D1,D2> transform(tran); \
             const IndexSpaceT<D2,coord_t> color_space(cs); \
-            return create_partition_by_restriction<D1,D2,coord_t>(ctx, \
-                parent, color_space, transform, extent, part_kind, color); \
+            return create_partition_by_restriction<D1,D2,coord_t>(ctx, parent, \
+              color_space, transform, extent, part_kind, color, provenance); \
           }
         LEGION_FOREACH_NN(DIMFUNC)
 #undef DIMFUNC
@@ -4736,7 +4820,8 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_blockify(Context ctx,
                                                          IndexSpace par,
                                                          DomainPoint bf,
-                                                         Color color)
+                                                         Color color,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (bf.get_dim())
@@ -4747,7 +4832,7 @@ namespace Legion {
             const IndexSpaceT<DIM,coord_t> parent(par); \
             const Point<DIM,coord_t> blocking_factor(bf); \
             return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
-                                                blocking_factor, color); \
+                                      blocking_factor, color, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4762,7 +4847,8 @@ namespace Legion {
                                                          IndexSpace par,
                                                          DomainPoint bf,
                                                          DomainPoint orig,
-                                                         Color color)
+                                                         Color color,
+                                                         const char *provenance)
     //--------------------------------------------------------------------------
     {
       switch (bf.get_dim())
@@ -4774,7 +4860,7 @@ namespace Legion {
             const Point<DIM,coord_t> blocking_factor(bf); \
             const Point<DIM,coord_t> origin(orig); \
             return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
-                                        blocking_factor, origin, color); \
+                              blocking_factor, origin, color, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4793,109 +4879,123 @@ namespace Legion {
                                                         const void *extent, 
                                                         size_t extent_size,
                                                         PartitionKind part_kind,
-                                                        Color color)
+                                                        Color color,
+                                                        const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_restricted_partition(parent, color_space, transform, 
-                      transform_size, extent, extent_size, part_kind, color);
+            transform_size, extent, extent_size, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_domain(Context ctx,
                  IndexSpace parent, const std::map<DomainPoint,Domain> &domains,
                  IndexSpace color_space, bool perform_intersections,
-                 PartitionKind part_kind, Color color)
+                 PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_domain(parent, domains, color_space,
-                                  perform_intersections, part_kind, color);
+                      perform_intersections, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_domain(Context ctx,
-                             IndexSpace parent, const FutureMap &domains,
-                             IndexSpace color_space, bool perform_intersections,
-                             PartitionKind part_kind, Color color)
+                         IndexSpace parent, const FutureMap &domains,
+                         IndexSpace color_space, bool perform_intersections,
+                         PartitionKind part_kind, Color color, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_domain(parent, domains, color_space, 
-                                      perform_intersections, part_kind, color);
+                           perform_intersections, part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                   LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                   IndexSpace color_space, Color color, MapperID id,
-                  MappingTagID tag, PartitionKind part_kind, UntypedBuffer marg)
+                  MappingTagID tag, PartitionKind part_kind, 
+                  UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_field(handle, parent, fid, color_space, 
-                                            color, id, tag, part_kind, marg);
+                                color, id, tag, part_kind, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_image(handle, projection, parent, fid, 
-                                color_space, part_kind, color, id, tag, marg);
+                  color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image_range(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color, 
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_image_range(handle, projection, parent, 
-                          fid, color_space, part_kind, color, id, tag, marg);
+              fid, color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id, 
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_preimage(projection, handle, parent,
-                        fid, color_space, part_kind, color, id, tag, marg);
+            fid, color_space, part_kind, color, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color,
-                  MapperID id, MappingTagID tag, UntypedBuffer marg)
+                  PartitionKind part_kind, Color color, MapperID id,
+                  MappingTagID tag, UntypedBuffer marg, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_partition_by_preimage_range(projection, handle, parent,
-                             fid, color_space, part_kind, color, id, tag, marg);
+                 fid, color_space, part_kind, color, id, tag, marg, provenance);
     } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, IndexSpace color_space, 
-                             PartitionKind part_kind, Color color)
+                             PartitionKind part_kind, Color color,
+                             const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_pending_partition(parent, color_space,part_kind,color);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_pending_partition(parent, color_space,
+                                           part_kind, color, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles, const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4903,7 +5003,7 @@ namespace Legion {
           { \
             Point<DIM,coord_t> point = color; \
             return ctx->create_index_space_union(parent, &point, sizeof(point),\
-                                                 TYPE_TAG_##DIM##D, handles); \
+                                      TYPE_TAG_##DIM##D, handles, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4916,19 +5016,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                     IndexPartition parent, const void *color, size_t color_size,
-                    TypeTag type_tag, const std::vector<IndexSpace> &handles)
+                    TypeTag type_tag, const char *prov,
+                    const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_index_space_union(parent, color, color_size, 
-                                           type_tag, handles);
+                                           type_tag, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
-                      IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                                IndexPartition parent, const DomainPoint &color,
+                                IndexPartition handle, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4936,7 +5039,7 @@ namespace Legion {
           { \
             Point<DIM,coord_t> point = color; \
             return ctx->create_index_space_union(parent, &point, sizeof(point),\
-                                                 TYPE_TAG_##DIM##D, handle); \
+                                       TYPE_TAG_##DIM##D, handle, provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4949,19 +5052,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                         IndexPartition parent, const void *realm_color, 
-                        size_t size, TypeTag type_tag, IndexPartition handle)
+                        size_t size, TypeTag type_tag,
+                        const char *prov, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_index_space_union(parent, realm_color, size,
-                                           type_tag, handle);
+                                           type_tag, handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      const std::vector<IndexSpace> &handles) 
+                      const std::vector<IndexSpace> &handles,
+                      const char *prov) 
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -4969,7 +5076,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                          sizeof(point), TYPE_TAG_##DIM##D, handles); \
+              sizeof(point), TYPE_TAG_##DIM##D, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4982,19 +5089,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
                     IndexPartition parent, const void *color, size_t color_size,
-                    TypeTag type_tag, const std::vector<IndexSpace> &handles)
+                    TypeTag type_tag, const char *prov,
+                    const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_index_space_intersection(parent, color, color_size, 
-                                                  type_tag, handles);
+                                              type_tag, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                       IndexPartition parent, const DomainPoint &color,
-                      IndexPartition handle)
+                      IndexPartition handle, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -5002,7 +5112,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                            sizeof(point), TYPE_TAG_##DIM##D, handle); \
+                sizeof(point), TYPE_TAG_##DIM##D, handle, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -5015,19 +5125,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
                      IndexPartition parent, const void *realm_color, 
-                     size_t color_size, TypeTag type_tag, IndexPartition handle)
+                     size_t color_size, TypeTag type_tag,
+                     const char *prov, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_index_space_intersection(parent, realm_color, 
-                                                  color_size, type_tag, handle);
+                            color_size, type_tag, handle, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference(Context ctx,
           IndexPartition parent, const DomainPoint &color, IndexSpace initial, 
-          const std::vector<IndexSpace> &handles)
+          const std::vector<IndexSpace> &handles, const char *prov)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       switch (color.get_dim())
       {
 #define DIMFUNC(DIM) \
@@ -5035,7 +5148,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_difference(parent, &point, \
-                sizeof(point), TYPE_TAG_##DIM##D, initial, handles); \
+            sizeof(point), TYPE_TAG_##DIM##D, initial, handles, provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -5048,12 +5161,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference_internal(Context ctx,
         IndexPartition parent, const void *realm_color, size_t color_size,
-        TypeTag type_tag, IndexSpace initial, 
+        TypeTag type_tag, const char *prov, IndexSpace initial, 
         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
+      Internal::AutoProvenance provenance(prov);
       return ctx->create_index_space_difference(parent, realm_color, color_size,
-                                                type_tag, initial, handles);
+                                        type_tag, initial, handles, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5614,30 +5728,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace Runtime::create_field_space(Context ctx)
+    FieldSpace Runtime::create_field_space(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space();
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<size_t> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id, 
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx,
                                          const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         CustomSerdezID serdez_id)
+                                         CustomSerdezID serdez_id,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_field_space(field_sizes, resulting_fields,
+                                     serdez_id, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5649,10 +5770,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
-                                      const bool unordered)
+                                      const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_field_space(handle, unordered);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_field_space(handle, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5708,10 +5830,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
-                           IndexSpace index, FieldSpace fields, bool task_local)
+                           IndexSpace index, FieldSpace fields,
+                           bool task_local, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_logical_region(ctx, index, fields, task_local);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_logical_region(index, fields, task_local, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -5723,10 +5847,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
-                                         const bool unordered)
+                                         const bool unordered, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_logical_region(handle, unordered);
+      Internal::AutoProvenance provenance(prov);
+      ctx->destroy_logical_region(handle, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6166,19 +6291,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
                                       ReductionOpID redop, bool deterministic,
-                                      MapperID map, MappingTagID tag)
+                                      MapperID map, MappingTagID tag,
+                                      const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->reduce_future_map(future_map, redop, deterministic, map, tag);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->reduce_future_map(future_map, redop, deterministic,
+                                    map, tag, provenance);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid, bool implicit)
+                                bool collective, ShardingID sid, bool implicit,
+                                const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, data, collective, sid, implicit);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->construct_future_map(domain, data, provenance,
+                                       collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
@@ -6193,10 +6324,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                  const std::map<DomainPoint,Future> &futures,
-                                 bool collective, ShardingID sid, bool implicit)
+                                 bool collective, ShardingID sid, bool implicit,
+                                 const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures, false,
+      Internal::AutoProvenance provenance(prov);
+      return ctx->construct_future_map(domain, futures, provenance, false,
                                        collective, sid, implicit);
     }
 
@@ -6212,18 +6345,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
-                               IndexSpace new_domain, PointTransformFnptr fnptr)
+             IndexSpace new_domain, PointTransformFnptr fnptr, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->transform_future_map(fm, new_domain, fnptr);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->transform_future_map(fm, new_domain, fnptr, provenance);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
-                IndexSpace new_domain, PointTransformFunctor *functor, bool own)
+                          IndexSpace new_domain, PointTransformFunctor *functor,
+                          bool own, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->transform_future_map(fm, new_domain, functor, own);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->transform_future_map(fm, new_domain, functor, own,provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6301,26 +6437,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, 
-                    const RegionRequirement &req, MapperID id, MappingTagID tag)
+                                    const RegionRequirement &req, MapperID id,
+                                    MappingTagID tag, const char *provenance)
     //--------------------------------------------------------------------------
     {
       InlineLauncher launcher(req, id, tag);
+      if (provenance != NULL)
+        launcher.provenance = provenance;
       return runtime->map_region(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     PhysicalRegion Runtime::map_region(Context ctx, unsigned idx, 
-                                                  MapperID id, MappingTagID tag)
+                        MapperID id, MappingTagID tag, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->map_region(ctx, idx, id, tag);
+      Internal::AutoProvenance provenance(prov);
+      return runtime->map_region(ctx, idx, id, tag, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::remap_region(Context ctx, PhysicalRegion region)
+    void Runtime::remap_region(Context ctx, PhysicalRegion region,
+                               const char *prov)
     //--------------------------------------------------------------------------
     {
-      runtime->remap_region(ctx, region);
+      Internal::AutoProvenance provenance(prov);
+      runtime->remap_region(ctx, region, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6435,20 +6577,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
                                              const bool flush /*= true*/,
-                                             const bool unordered/*= false*/)
+                                             const bool unordered/*= false*/,
+                                             const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->detach_resource(region, flush, unordered);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->detach_resource(region, flush, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resources(Context ctx,
                                               ExternalResources resources,
                                               const bool flush /*= true*/,
-                                              const bool unordered /*= false*/)
+                                              const bool unordered /*= false*/,
+                                              const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->detach_resources(resources, flush, unordered);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->detach_resources(resources, flush, unordered, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6516,39 +6662,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::create_predicate(Context ctx, const Future &f)
+    Predicate Runtime::create_predicate(Context ctx, const Future &f,
+                                        const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, f);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->create_predicate(f, provenance);
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_not(Context ctx, const Predicate &p) 
+    Predicate Runtime::predicate_not(Context ctx, const Predicate &p,
+                                     const char *prov) 
     //--------------------------------------------------------------------------
     {
-      return runtime->predicate_not(ctx, p);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->predicate_not(p, provenance);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_and(Context ctx, 
-                                       const Predicate &p1, const Predicate &p2)
+                                     const Predicate &p1, const Predicate &p2,
+                                     const char *provenance)
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(true/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_or(Context ctx,
-                                       const Predicate &p1, const Predicate &p2)  
+                                    const Predicate &p1, const Predicate &p2,
+                                    const char *provenance)  
     //--------------------------------------------------------------------------
     {
       PredicateLauncher launcher(false/*and*/);
       launcher.add_predicate(p1);
       launcher.add_predicate(p2);
-      return runtime->create_predicate(ctx, launcher);
+      if (provenance != NULL)
+        launcher.provenance.assign(provenance);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6556,14 +6712,16 @@ namespace Legion {
                                         const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_predicate(ctx, launcher);
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
+    Future Runtime::get_predicate_future(Context ctx, const Predicate &p,
+                                         const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_predicate_future(ctx, p);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->get_predicate_future(p, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6661,10 +6819,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::get_dynamic_collective_result(Context ctx,
-                                                           DynamicCollective dc)
+                                         DynamicCollective dc, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->get_dynamic_collective_result(dc);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->get_dynamic_collective_result(dc, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6692,33 +6851,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_mapping_fence(ctx);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->issue_mapping_fence(provenance);
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_execution_fence(ctx);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->issue_execution_fence(provenance);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::begin_trace(
-                        Context ctx, TraceID tid, bool logical_only /*= false*/,
-                        bool static_trace, const std::set<RegionTreeID> *trees)
+       Context ctx, TraceID tid, bool logical_only /*= false*/,
+       bool static_trace, const std::set<RegionTreeID> *trees, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->begin_trace(tid, logical_only, static_trace, trees, false/*dep*/);
+      Internal::AutoProvenance provenance(prov);
+      ctx->begin_trace(tid, logical_only, static_trace, trees, 
+                       false/*dep*/, provenance);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::end_trace(Context ctx, TraceID tid)
+    void Runtime::end_trace(Context ctx, TraceID tid, const char *prov)
     //--------------------------------------------------------------------------
     {
-      ctx->end_trace(tid, false/*deprecated*/);
+      Internal::AutoProvenance provenance(prov);
+      ctx->end_trace(tid, false/*deprecated*/, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -6726,14 +6890,15 @@ namespace Legion {
                                      const std::set<RegionTreeID> *managed)
     //--------------------------------------------------------------------------
     {
-      ctx->begin_trace(0, true/*logical only*/, true/*static*/, managed, true);
+      ctx->begin_trace(0, true/*logical only*/, true/*static*/, managed,
+                       true/*deprecated*/, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::end_static_trace(Context ctx)
     //--------------------------------------------------------------------------
     {
-      ctx->end_trace(0, true/*deprecated*/);
+      ctx->end_trace(0, true/*deprecated*/, NULL/*provenance*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6758,10 +6923,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::complete_frame(Context ctx)
+    void Runtime::complete_frame(Context ctx, const char *prov)
     //--------------------------------------------------------------------------
     {
-      runtime->complete_frame(ctx);
+      Internal::AutoProvenance provenance(prov);
+      ctx->complete_frame(provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -7887,10 +8053,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::consensus_match(Context ctx, const void *input,void *output,
-                                    size_t num_elements, size_t element_size)
+                     size_t num_elements, size_t element_size, const char *prov)
     //--------------------------------------------------------------------------
     {
-      return ctx->consensus_match(input, output, num_elements, element_size);
+      Internal::AutoProvenance provenance(prov);
+      return ctx->consensus_match(input, output, num_elements, 
+                                  element_size, provenance);
     }
 
     //--------------------------------------------------------------------------

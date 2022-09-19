@@ -312,6 +312,7 @@ function filterAndMergeBlocks(state) {
             if (count > 1) {
               state.dataToDraw.push({
                 id: d.id,
+                op_id: d.op_id,
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
@@ -329,6 +330,7 @@ function filterAndMergeBlocks(state) {
             } else {
               var elem = {
                 id: d.id,
+                op_id: d.op_id,
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
@@ -351,6 +353,7 @@ function filterAndMergeBlocks(state) {
           } else {
             var elem = {
               id: d.id,
+              op_id: d.op_id,
               prof_uid: d.prof_uid,
               proc: timelineElement,
               level: d.level,

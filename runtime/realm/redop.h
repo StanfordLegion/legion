@@ -78,6 +78,14 @@ namespace Realm {
       //  to look up the actual kernels
       void *cuda_apply_excl_fn, *cuda_apply_nonexcl_fn;
       void *cuda_fold_excl_fn, *cuda_fold_nonexcl_fn;
+
+      // These function pointers make the connection to the app's runtime
+      // instance in order to properly translate and capture the correct
+      // function to launch.
+      // The runtime function pointer to launch these shadow symbols
+      void *cudaLaunchKernel_fn;
+      // The runtime function pointer to translate the host shadow symbol to a driver function
+      void *cudaGetFuncBySymbol_fn;
 #endif
 #ifdef REALM_USE_HIP
       // HIP kernels for apply/fold - these are not actually the functions,
@@ -103,6 +111,8 @@ namespace Realm {
       , cuda_apply_nonexcl_fn(0)
       , cuda_fold_excl_fn(0)
       , cuda_fold_nonexcl_fn(0)
+      , cudaLaunchKernel_fn(0)
+      , cudaGetFuncBySymbol_fn(0)
 #endif
 #ifdef REALM_USE_HIP
       , hip_apply_excl_fn(0)

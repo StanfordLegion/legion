@@ -26,7 +26,7 @@
 #include "legion/legion_allocation.h"
 
 namespace Legion {
-  namespace Internal { 
+  namespace Internal {
 
     /**
      * \class ExternalTask
@@ -163,7 +163,8 @@ namespace Legion {
       void mark_stolen(void);
       void initialize_base_task(InnerContext *ctx, bool track,
             const std::vector<StaticDependence> *dependences,
-            const Predicate &p, Processor::TaskFuncID tid);
+            const Predicate &p, Processor::TaskFuncID tid,
+            Provenance *provenance);
       void check_empty_field_requirements(void);
     public:
       bool select_task_options(bool prioritize);
@@ -747,6 +748,7 @@ namespace Legion {
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
+                             Provenance *provenance,
                              bool track = true, bool top_level=false,
                              bool implicit_top_level = false,
                              std::vector<OutputRequirement> *outputs = NULL);
@@ -1126,11 +1128,13 @@ namespace Legion {
       FutureMap initialize_task(InnerContext *ctx,
                                 const IndexTaskLauncher &launcher,
                                 IndexSpace launch_space,
+                                Provenance *provenance,
                                 bool track = true,
                                 std::vector<OutputRequirement> *outputs = NULL);
       Future initialize_task(InnerContext *ctx,
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
+                             Provenance *provenance,
                              ReductionOpID redop,
                              bool deterministic,
                              bool track = true,
@@ -1261,7 +1265,6 @@ namespace Legion {
       unsigned mapped_points;
       unsigned complete_points;
       unsigned committed_points;
-      RtUserEvent future_map_ready;
     protected:
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
@@ -1416,16 +1419,16 @@ namespace Legion {
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
       // From MemoizableOp

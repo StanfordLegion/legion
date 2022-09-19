@@ -101,12 +101,14 @@ namespace Legion {
 #endif
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
-      virtual Future from_value(const void *value,size_t value_size,bool owned);
+      virtual Future from_value(const void *value, size_t value_size,
+                                bool owned, Provenance *provenance);
       virtual Future from_value(const void *value, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
-          void (*freefunc)(const Realm::ExternalInstanceResource&));
+          void (*freefunc)(const Realm::ExternalInstanceResource&),
+          Provenance *provenance);
       virtual Future consensus_match(const void *input, void *output,
-                                     size_t num_elements, size_t element_size);
+          size_t num_elements, size_t element_size, Provenance *provenance);
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
@@ -127,83 +129,102 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
-                                            TypeTag type_tag);
+                                            TypeTag type_tag,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,
-                                            TypeTag type_tag) = 0;
+                                            TypeTag type_tag,
+                                            Provenance *provenance) = 0;
       virtual IndexSpace create_index_space(
-                           const std::vector<DomainPoint> &points);
+                           const std::vector<DomainPoint> &points,
+                           Provenance *provenance);
       virtual IndexSpace create_index_space(
-                           const std::vector<Domain> &rects);
+                           const std::vector<Domain> &rects,
+                           Provenance *provenance);
       // This variant creates an uninitialized index space
       // that later is set by a task
-      virtual IndexSpace create_unbound_index_space(TypeTag type_tag);
+      virtual IndexSpace create_unbound_index_space(TypeTag type_tag,
+                                              Provenance *provenance);
     protected:
       IndexSpace create_index_space_internal(const Domain *bounds,
-                                             TypeTag type_tag);
+                                             TypeTag type_tag,
+                                             Provenance *provenance);
     public:
       virtual IndexSpace union_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
+                           const std::vector<IndexSpace> &spaces,
+                           Provenance *provenance);
       virtual IndexSpace intersect_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
+                           const std::vector<IndexSpace> &spaces,
+                           Provenance *provenance);
       virtual IndexSpace subtract_index_spaces(
-                           IndexSpace left, IndexSpace right);
+                           IndexSpace left, IndexSpace right,
+                           Provenance *provenance);
       virtual void create_shared_ownership(IndexSpace handle);
       virtual void destroy_index_space(IndexSpace handle,
                                        const bool unordered,
-                                       const bool recurse) = 0;
+                                       const bool recurse,
+                                       Provenance *provenance) = 0;
       virtual void create_shared_ownership(IndexPartition handle);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered,
-                                           const bool recurse) = 0;
+                                           const bool recurse,
+                                           Provenance *provenance) = 0;
       virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color, 
-                                            bool dominates) = 0;
+                                            bool dominates,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -212,14 +233,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                   const std::map<DomainPoint,Domain> &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            Provenance *provenance) = 0;
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
@@ -227,6 +250,7 @@ namespace Legion {
                                             bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color, 
+                                            Provenance *provenance,
                                             bool skip_check = false) = 0;
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
@@ -236,7 +260,8 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -246,7 +271,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -256,7 +282,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -266,7 +293,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -276,90 +304,110 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg) = 0;
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov) = 0;
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *prov,
                                             bool trust = false) = 0;
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles) = 0;
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance) = 0;
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle) = 0;
+                                            IndexPartition handle,
+                                            Provenance *provenance) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles) = 0;
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle) = 0;
+                                            IndexPartition handle,
+                                            Provenance *provenance) = 0;
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles) = 0;
-      virtual FieldSpace create_field_space(void);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance) = 0;
+      virtual FieldSpace create_field_space(Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id) = 0;
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance) = 0;
       virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle,
-                                       const bool unordered) = 0;
+                                       const bool unordered,
+                                       Provenance *provenance) = 0;
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id) = 0;
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance) = 0;
       virtual void allocate_local_field(
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events) = 0;
+                                     std::set<RtEvent> &done_events,
+                                     Provenance *provenance) = 0;
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered) = 0;
+                              FieldID fid, const bool unordered,
+                              Provenance *provenance) = 0;
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id) = 0;
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance) = 0;
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events) = 0;
+                                   std::set<RtEvent> &done_events,
+                                   Provenance *provenance) = 0;
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space, 
                                const std::set<FieldID> &to_free,
-                               const bool unordered) = 0; 
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                               const bool unordered,
+                               Provenance *provenance) = 0; 
+      virtual LogicalRegion create_logical_region(
                                           IndexSpace index_space,
                                           FieldSpace field_space,
                                           const bool task_local,
+                                          Provenance *provenance,
                                           const bool output_region = false) = 0;
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
-                                          const bool unordered) = 0;
+                                          const bool unordered,
+                                          Provenance *provenance) = 0;
       virtual void advise_analysis_subtree(LogicalRegion parent,
                                       const std::set<LogicalRegion> &regions,
                                       const std::set<LogicalPartition> &parts,
@@ -388,9 +436,11 @@ namespace Legion {
                                    std::vector<OutputRequirement> *outputs) = 0;
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic,
-                                   MapperID map_id, MappingTagID tag) = 0;
+                                   MapperID map_id, MappingTagID tag,
+                                   Provenance *provenance) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
+                                             Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false) = 0;
@@ -401,6 +451,7 @@ namespace Legion {
                                              bool implicit = false) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,Future> &futures,
+                                             Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
@@ -413,13 +464,16 @@ namespace Legion {
                                              bool implicit = false) = 0;
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
-                      TransformFutureMapImpl::PointTransformFnptr fnptr) = 0;
+                      TransformFutureMapImpl::PointTransformFnptr fnptr,
+                                             Provenance *provenance) = 0;
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
-                                             bool own_functor) = 0;
+                                             bool own_functor,
+                                             Provenance *provenance) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
-      virtual ApEvent remap_region(PhysicalRegion region) = 0;
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   Provenance *provenance) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
@@ -433,22 +487,27 @@ namespace Legion {
       virtual ExternalResources attach_resources(
                                   const IndexAttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
-                                     const bool flush,const bool unordered) = 0;
+                                     const bool flush,const bool unordered,
+                                     Provenance *provenance = NULL) = 0;
       virtual Future detach_resources(ExternalResources resources,
-                                    const bool flush, const bool unordered) = 0;
+                                    const bool flush, const bool unordered,
+                                    Provenance *provenance) = 0;
       virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
                                     const TimingLauncher &launcher) = 0;
       virtual Future select_tunable_value(const TunableLauncher &launcher) = 0;
-      virtual Future issue_mapping_fence(void) = 0;
-      virtual Future issue_execution_fence(void) = 0;
-      virtual void complete_frame(void) = 0;
-      virtual Predicate create_predicate(const Future &f) = 0;
-      virtual Predicate predicate_not(const Predicate &p) = 0;
+      virtual Future issue_mapping_fence(Provenance *provenance) = 0;
+      virtual Future issue_execution_fence(Provenance *provenance) = 0;
+      virtual void complete_frame(Provenance *provenance) = 0;
+      virtual Predicate create_predicate(const Future &f,
+                                         Provenance *provenance) = 0;
+      virtual Predicate predicate_not(const Predicate &p,
+                                      Provenance *provenance) = 0;
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
-      virtual Future get_predicate_future(const Predicate &p) = 0;
+      virtual Future get_predicate_future(const Predicate &p,
+                                          Provenance *provenance) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -482,8 +541,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op) = 0;
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-        bool static_trace, const std::set<RegionTreeID> *managed, bool dep) = 0;
-      virtual void end_trace(TraceID tid, bool deprecated) = 0;
+        bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+        Provenance *provenance) = 0;
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             Provenance *provenance) = 0;
       virtual void record_previous_trace(LegionTrace *trace) = 0;
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator) = 0;
@@ -573,7 +634,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count) = 0;
-      virtual Future get_dynamic_collective_result(DynamicCollective dc) = 0;
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   Provenance *provenance) = 0;
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc) = 0;
     public:
@@ -666,7 +728,8 @@ namespace Legion {
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void); 
       void remap_unmapped_regions(LegionTrace *current_trace,
-                           const std::vector<PhysicalRegion> &unmapped_regions);
+                           const std::vector<PhysicalRegion> &unmapped_regions,
+                           Provenance *provenance);
     public:
       void* get_local_task_variable(LocalVariableID id);
       void set_local_task_variable(LocalVariableID id, const void *value,
@@ -675,13 +738,17 @@ namespace Legion {
       void yield(void);
       void release_task_local_instances(void);
     protected:
-      Future predicate_task_false(const TaskLauncher &launcher);
+      Future predicate_task_false(const TaskLauncher &launcher,
+                                  Provenance *provenance);
       FutureMap predicate_index_task_false(size_t context_index,
-                                           const IndexTaskLauncher &launcher);
-      Future predicate_index_task_reduce_false(const IndexTaskLauncher &launch);
+                                           const IndexTaskLauncher &launcher,
+                                           Provenance *provenance);
+      Future predicate_index_task_reduce_false(const IndexTaskLauncher &launch,
+                                               Provenance *provenance);
     public:
       // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain);
+      IndexSpace find_index_launch_space(const Domain &domain,
+                                         Provenance *provenance);
     public:
       Runtime *const runtime;
       SingleTask *const owner_task;
@@ -1026,32 +1093,32 @@ namespace Legion {
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public: // Murmur3Hasher::HashVerifier method
       virtual bool verify_hash(const uint64_t hash[2],
-                               const char *description, bool every);
+          const char *description, Provenance *provenance, bool every);
     protected:
       void register_region_creations(
                      std::map<LogicalRegion,unsigned> &regions);
       void register_region_deletions(ApEvent precondition,
                      const std::map<Operation*,GenerationID> &dependences,
-                     std::vector<LogicalRegion> &regions,
+                     std::vector<DeletedRegion> &regions,
                      std::set<RtEvent> &preconditions);
       void register_field_creations(
             std::set<std::pair<FieldSpace,FieldID> > &fields);
       void register_field_deletions(ApEvent precondition,
             const std::map<Operation*,GenerationID> &dependences,
-            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+            std::vector<DeletedField> &fields,
             std::set<RtEvent> &preconditions);
       void register_field_space_creations(
                           std::map<FieldSpace,unsigned> &spaces);
@@ -1059,19 +1126,19 @@ namespace Legion {
             std::map<FieldSpace,std::set<LogicalRegion> > &spaces);
       void register_field_space_deletions(ApEvent precondition,
                           const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<FieldSpace> &spaces,
+                          std::vector<DeletedFieldSpace> &spaces,
                           std::set<RtEvent> &preconditions);
       void register_index_space_creations(
                           std::map<IndexSpace,unsigned> &spaces);
       void register_index_space_deletions(ApEvent precondition,
                           const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexSpace,bool> > &spaces,
+                          std::vector<DeletedIndexSpace> &spaces,
                           std::set<RtEvent> &preconditions);
       void register_index_partition_creations(
                           std::map<IndexPartition,unsigned> &parts);
       void register_index_partition_deletions(ApEvent precondition,
                           const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexPartition,bool> > &parts,
+                          std::vector<DeletedPartition> &parts,
                           std::set<RtEvent> &preconditions);
       ApEvent compute_return_deletion_dependences(size_t return_index,
                           std::map<Operation*,GenerationID> &dependences);
@@ -1097,8 +1164,8 @@ namespace Legion {
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(FillOp *fill,
                                     std::vector<PhysicalRegion> &conflicting); 
-      void register_inline_mapped_region(PhysicalRegion &region);
-      void unregister_inline_mapped_region(PhysicalRegion &region);
+      void register_inline_mapped_region(const PhysicalRegion &region);
+      void unregister_inline_mapped_region(const PhysicalRegion &region);
     public:
       void print_children(void);
       void perform_window_wait(void);
@@ -1139,61 +1206,72 @@ namespace Legion {
       using TaskContext::allocate_field;
       using TaskContext::allocate_fields;
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
+      virtual IndexSpace create_index_space(const Future &future, TypeTag tag,
+                                            Provenance *provenance);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered,
-                                       const bool recurse);
+                                       const bool recurse,
+                                       Provenance *provenance);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered,
-                                           const bool recurse);
+                                           const bool recurse,
+                                           Provenance *provenance);
       virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
-                                            bool dominates);
+                                            bool dominates,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1202,14 +1280,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                   const std::map<DomainPoint,Domain> &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
@@ -1217,6 +1297,7 @@ namespace Legion {
                                             bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
@@ -1226,7 +1307,8 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1236,7 +1318,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1246,7 +1329,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1256,7 +1340,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1266,82 +1351,100 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual void verify_partition(IndexPartition pid, PartitionKind kind,
                                     const char *function_name);
       static void handle_partition_verification(const void *args);
-      virtual FieldSpace create_field_space(void);
+      virtual FieldSpace create_field_space(Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
-      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
+      virtual void destroy_field_space(FieldSpace handle, const bool unordered,
+                                       Provenance *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events);
+                                     std::set<RtEvent> &done_events,
+                                     Provenance *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance);
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events);
+                                   std::set<RtEvent> &done_events,
+                                   Provenance *provenance);
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered);
+                              FieldID fid, const bool unordered,
+                              Provenance *provenance);
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
-                               const bool unordered);
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                               const bool unordered,
+                               Provenance *provenance);
+      virtual LogicalRegion create_logical_region(
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             const bool task_local,
+                                            Provenance *provenance,
                                             const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
-                                          const bool unordered);
+                                          const bool unordered,
+                                          Provenance *provenance);
       virtual void advise_analysis_subtree(LogicalRegion parent,
                                       const std::set<LogicalRegion> &regions,
                                       const std::set<LogicalPartition> &parts,
@@ -1366,9 +1469,11 @@ namespace Legion {
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
-                                       MapperID map_id, MappingTagID tag);
+                                       MapperID map_id, MappingTagID tag,
+                                       Provenance *provenance);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
+                                             Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false);
@@ -1379,6 +1484,7 @@ namespace Legion {
                                              bool implicit = false);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                    const std::map<DomainPoint,Future> &futures,
+                                             Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
@@ -1391,13 +1497,16 @@ namespace Legion {
                                              bool implicit = false);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
-                      TransformFutureMapImpl::PointTransformFnptr fnptr);
+                      TransformFutureMapImpl::PointTransformFnptr fnptr,
+                                             Provenance *provenance);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
-                                             bool own_functor);
+                                             bool own_functor,
+                                             Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   Provenance *provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -1417,20 +1526,25 @@ namespace Legion {
                                         unsigned local_start, size_t local_size,
                                         std::vector<IndexSpace> &spaces);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
+                                     const bool unordered,
+                                     Provenance *provenance = NULL);
       virtual Future detach_resources(ExternalResources resources,
-                                      const bool flush, const bool unordered);
+                                      const bool flush, const bool unordered,
+                                      Provenance *provenance);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
-      virtual void complete_frame(void);
-      virtual Predicate create_predicate(const Future &f);
-      virtual Predicate predicate_not(const Predicate &p);
+      virtual Future issue_mapping_fence(Provenance *provenance);
+      virtual Future issue_execution_fence(Provenance *provenance);
+      virtual void complete_frame(Provenance *provenance);
+      virtual Predicate create_predicate(const Future &f,
+                                         Provenance *provenance);
+      virtual Predicate predicate_not(const Predicate &p,
+                                      Provenance *provenance);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
-      virtual Future get_predicate_future(const Predicate &p);
+      virtual Future get_predicate_future(const Predicate &p,
+                                          Provenance *provenance);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1520,8 +1634,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+          Provenance *provenance);
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             Provenance *provenance);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
@@ -1623,7 +1739,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   Provenance *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
     public:
@@ -1673,6 +1790,7 @@ namespace Legion {
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
+                               Provenance *provenance, 
                                bool silence_warnings, bool inlining_enabled);
     public:
       void clone_local_fields(
@@ -2058,6 +2176,7 @@ namespace Legion {
         REPLICATE_REDUCE_FUTURE_MAP,
         REPLICATE_CONSTRUCT_FUTURE_MAP,
         REPLICATE_FUTURE_MAP_GET_ALL_FUTURES,
+        REPLICATE_FUTURE_MAP_WAIT_ALL_FUTURES,
         REPLICATE_MAP_REGION,
         REPLICATE_REMAP_REGION,
         REPLICATE_FILL_FIELDS,
@@ -2127,58 +2246,58 @@ namespace Legion {
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public: // Murmur3Hasher::HashVerifier method
       virtual bool verify_hash(const uint64_t hash[2],
-                               const char *description, bool every);
+          const char *description, Provenance *provenance, bool every);
     protected:
       void receive_replicate_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions, RtBarrier &ready_barrier, 
               RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_region_deletions(ApEvent precondition,
                      const std::map<Operation*,GenerationID> &dependences,
-                     std::vector<LogicalRegion> &regions,
+                     std::vector<DeletedRegion> &regions,
                      std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
                      RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_field_deletions(ApEvent precondition,
             const std::map<Operation*,GenerationID> &dependences,
-            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+            std::vector<DeletedField> &fields,
             std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
             RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_field_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
-                    std::vector<FieldSpace> &spaces,
+                    std::vector<DeletedFieldSpace> &spaces,
                     std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
                     RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_index_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
-                    std::vector<std::pair<IndexSpace,bool> > &spaces,
+                    std::vector<DeletedIndexSpace> &spaces,
                     std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
                     RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_index_partition_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
-                    std::vector<std::pair<IndexPartition,bool> > &parts,
+                    std::vector<DeletedPartition> &parts,
                     std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
                     RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
     public:
@@ -2207,12 +2326,14 @@ namespace Legion {
 #endif
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
-      virtual Future from_value(const void *value,size_t value_size,bool owned);
+      virtual Future from_value(const void *value, size_t value_size,
+                                bool owned, Provenance *provenance);
       virtual Future from_value(const void *buffer, size_t size, bool owned,
           const Realm::ExternalInstanceResource &resource,
-          void (*freefunc)(const Realm::ExternalInstanceResource&));
+          void (*freefunc)(const Realm::ExternalInstanceResource&),
+          Provenance *provenance);
       virtual Future consensus_match(const void *input, void *output,
-                                     size_t num_elements, size_t element_size); 
+          size_t num_elements, size_t element_size, Provenance *provenance); 
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
@@ -2250,81 +2371,100 @@ namespace Legion {
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
-                                            TypeTag type_tag);
+                                            TypeTag type_tag,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future, 
-                                            TypeTag type_tag);
+                                            TypeTag type_tag,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space(
-                           const std::vector<DomainPoint> &points);
+                           const std::vector<DomainPoint> &points,
+                           Provenance *provenance);
       virtual IndexSpace create_index_space(
-                           const std::vector<Domain> &rects);
-      virtual IndexSpace create_unbound_index_space(TypeTag type_tag);
+                           const std::vector<Domain> &rects,
+                           Provenance *provenance);
+      virtual IndexSpace create_unbound_index_space(TypeTag type_tag,
+                                                    Provenance *provenance);
     protected:
       IndexSpace create_index_space_replicated(const Domain *bounds,
-                                               TypeTag type_tag);
+                                               TypeTag type_tag,
+                                               Provenance *provenance);
     public:
       virtual IndexSpace union_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
+                           const std::vector<IndexSpace> &spaces,
+                           Provenance *provenance);
       virtual IndexSpace intersect_index_spaces(
-                           const std::vector<IndexSpace> &spaces);
+                           const std::vector<IndexSpace> &spaces,
+                           Provenance *provenance);
       virtual IndexSpace subtract_index_spaces(
-                           IndexSpace left, IndexSpace right);
+                           IndexSpace left, IndexSpace right,
+                           Provenance *provenance);
       virtual void create_shared_ownership(IndexSpace handle);
       virtual void destroy_index_space(IndexSpace handle, 
                                        const bool unordered,
-                                       const bool recurse);
+                                       const bool recurse,
+                                       Provenance *provenance);
       virtual void create_shared_ownership(IndexPartition handle);
       virtual void destroy_index_partition(IndexPartition handle, 
                                            const bool unordered,
-                                           const bool recurse);
+                                           const bool recurse,
+                                           Provenance *provenance);
       virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
-                                            bool dominates);
+                                            bool dominates,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2333,14 +2473,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                   const std::map<DomainPoint,Domain> &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
@@ -2348,6 +2490,7 @@ namespace Legion {
                                             bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
@@ -2357,7 +2500,8 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2367,7 +2511,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2377,7 +2522,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2387,7 +2533,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2397,83 +2544,103 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *provenance);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual void verify_partition(IndexPartition pid, PartitionKind kind,
                                     const char *function_name);
-      virtual FieldSpace create_field_space(void);
+      virtual FieldSpace create_field_space(Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
-      FieldSpace create_replicated_field_space(ShardID *creator_shard = NULL);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
+      FieldSpace create_replicated_field_space(Provenance *provenance,
+                                        ShardID *creator_shard = NULL);
       virtual void create_shared_ownership(FieldSpace handle);
-      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
+      virtual void destroy_field_space(FieldSpace handle,
+                                       const bool unordered,
+                                       Provenance *provenance);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance);
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered);
+                              FieldID fid, const bool unordered,
+                              Provenance *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance);
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space, 
                                const std::set<FieldID> &to_free,
-                               const bool unordered);
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                               const bool unordered,
+                               Provenance *provenance);
+      virtual LogicalRegion create_logical_region(
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             const bool task_local,
+                                            Provenance *provenance,
                                             const bool output_region = false);
       virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
-                                          const bool unordered);
+                                          const bool unordered,
+                                          Provenance *provenance);
       virtual void advise_analysis_subtree(LogicalRegion parent,
                                       const std::set<LogicalRegion> &regions,
                                       const std::set<LogicalPartition> &parts,
@@ -2495,21 +2662,25 @@ namespace Legion {
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
-                                       MapperID map_id, MappingTagID tag);
+                                       MapperID map_id, MappingTagID tag,
+                                       Provenance *provenance);
       using InnerContext::construct_future_map;
       virtual FutureMap construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
+                                             Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false);
       virtual FutureMap construct_future_map(IndexSpace space,
                     const std::map<DomainPoint,Future> &futures,
+                                             Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   Provenance *provenance);
       // Unmapping region is the same as for an inner context
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
@@ -2524,17 +2695,21 @@ namespace Legion {
                                         const IndexAttachLauncher &launcher,
                                         const std::vector<unsigned> &indexes);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
+                                     const bool unordered,
+                                     Provenance *provenance = NULL);
       virtual Future detach_resources(ExternalResources resources,
-                                      const bool flush, const bool unordered);
+                                      const bool flush, const bool unordered,
+                                      Provenance *provenance);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
+      virtual Future issue_mapping_fence(Provenance *provenance);
+      virtual Future issue_execution_fence(Provenance *provenance);
       virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+          Provenance *provenance);
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             Provenance *provenance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_future,
                       const Realm::ExternalInstanceResource *resource,
@@ -2568,7 +2743,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   Provenance *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
     public:
@@ -2615,9 +2791,9 @@ namespace Legion {
       void increase_pending_fields(unsigned count, bool double_buffer);
       void increase_pending_region_trees(unsigned count, bool double_buffer);
       bool create_shard_partition(IndexPartition &pid,
-          IndexSpace parent, IndexSpace color_space, PartitionKind part_kind,
-          LegionColor partition_color, bool color_generated,
-          ValueBroadcast<bool> *disjoint_result = NULL,
+          IndexSpace parent, IndexSpace color_space, Provenance *provenance,
+          PartitionKind part_kind, LegionColor partition_color,
+          bool color_generated, ValueBroadcast<bool> *disjoint_result = NULL,
           ApBarrier partition_ready = ApBarrier::NO_AP_BARRIER);
     public:
       // Collective methods
@@ -2659,6 +2835,7 @@ namespace Legion {
       RtBarrier get_next_deletion_ready_barrier(void);
       RtBarrier get_next_deletion_mapping_barrier(void);
       RtBarrier get_next_deletion_execution_barrier(void);
+      ApBarrier get_next_future_map_wait_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -2693,13 +2870,13 @@ namespace Legion {
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
     public:
-      IndexSpace find_sharding_launch_space(void);
+      IndexSpace find_sharding_launch_space(Provenance *provenance);
       const DomainPoint& get_shard_point(void) const; 
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);
       IndexSpaceNode* compute_index_attach_launch_spaces(
-                                            std::vector<size_t> &shard_sizes);
+          std::vector<size_t> &shard_sizes, Provenance *provenance);
     public:
       void register_collective_instance_handler(size_t context_index,
                                       ReplCollectiveInstanceHandler *handler);
@@ -2789,6 +2966,7 @@ namespace Legion {
       ApBarrier execution_fence_barrier;
       RtBarrier dependent_partition_barrier;
       RtBarrier semantic_attach_barrier;
+      ApBarrier future_map_wait_barrier;
       ApBarrier inorder_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
@@ -3057,16 +3235,16 @@ namespace Legion {
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
       // Interface for task contexts
@@ -3089,62 +3267,73 @@ namespace Legion {
       using TaskContext::allocate_field;
       using TaskContext::allocate_fields;
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
+      virtual IndexSpace create_index_space(const Future &future, TypeTag tag,
+                                            Provenance *provenance);
       virtual void destroy_index_space(IndexSpace handle, 
                                        const bool unordered,
-                                       const bool recurse);
+                                       const bool recurse,
+                                       Provenance *provenance);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered, 
-                                           const bool recurse);
+                                           const bool recurse,
+                                           Provenance *provenance);
       virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_intersection(
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
-                                            bool dominates);
+                                            bool dominates,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                                             IndexSpace color_space,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual Color create_cross_product_partitions(
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -3153,14 +3342,16 @@ namespace Legion {
                                             const void *extent,
                                             size_t extent_size,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                   const std::map<DomainPoint,Domain> &domains,
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            Provenance *provenance);
       virtual IndexPartition create_partition_by_domain(
                                             IndexSpace parent,
                                             const FutureMap &domains,
@@ -3168,6 +3359,7 @@ namespace Legion {
                                             bool perform_intersections,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
@@ -3177,7 +3369,8 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -3187,7 +3380,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -3197,7 +3391,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -3207,7 +3402,8 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -3217,75 +3413,92 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            const UntypedBuffer &marg);
+                                            const UntypedBuffer &marg,
+                                            Provenance *prov);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
+                                            Provenance *provenance,
                                             bool trust = false);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
-                                            IndexPartition handle);
+                                            IndexPartition handle,
+                                            Provenance *provenance);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
                                             size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
-                                const std::vector<IndexSpace> &handles);
+                                const std::vector<IndexSpace> &handles,
+                                            Provenance *provenance);
       virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id);
-      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
+                                        CustomSerdezID serdez_id,
+                                        Provenance *provenance);
+      virtual void destroy_field_space(FieldSpace handle, const bool unordered,
+                                       Provenance *provenance);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
-                                     CustomSerdezID serdez_id);
+                                     CustomSerdezID serdez_id,
+                                     Provenance *provenance);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
-                                     std::set<RtEvent> &done_events);
+                                     std::set<RtEvent> &done_events,
+                                     Provenance *provenance);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<Future> &sizes,
                                    std::vector<FieldID> &resuling_fields,
-                                   bool local, CustomSerdezID serdez_id);
+                                   bool local, CustomSerdezID serdez_id,
+                                   Provenance *provenance);
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
-                                   std::set<RtEvent> &done_events);
+                                   std::set<RtEvent> &done_events,
+                                   Provenance *provenance);
       virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
-                              FieldID fid, const bool unordered);
+                              FieldID fid, const bool unordered,
+                              Provenance *provenance);
       virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
-                               const bool unordered);
-      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                               const bool unordered,
+                               Provenance *provenance);
+      virtual LogicalRegion create_logical_region(
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             const bool task_local,
+                                            Provenance *provenance,
                                             const bool output_region = false);
       virtual void destroy_logical_region(LogicalRegion handle,
-                                          const bool unordered);
+                                          const bool unordered,
+                                          Provenance *provenance);
       virtual void advise_analysis_subtree(LogicalRegion parent,
                                       const std::set<LogicalRegion> &regions,
                                       const std::set<LogicalPartition> &parts,
@@ -3310,9 +3523,11 @@ namespace Legion {
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
-                                       MapperID map_id, MappingTagID tag);
+                                       MapperID map_id, MappingTagID tag,
+                                       Provenance *provenance);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
+                                             Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
                                              bool implicit = false);
@@ -3323,6 +3538,7 @@ namespace Legion {
                                              bool implicit = false);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                    const std::map<DomainPoint,Future> &futures,
+                                             Provenance *provenance,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0,
@@ -3335,13 +3551,16 @@ namespace Legion {
                                              bool implicit = false);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
-                      TransformFutureMapImpl::PointTransformFnptr fnptr);
+                      TransformFutureMapImpl::PointTransformFnptr fnptr,
+                                             Provenance *provenance);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
-                                             bool own_functor);
+                                             bool own_functor,
+                                             Provenance *provenance);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
-      virtual ApEvent remap_region(PhysicalRegion region);
+      virtual ApEvent remap_region(const PhysicalRegion &region,
+                                   Provenance *provenance);
       virtual void unmap_region(PhysicalRegion region);
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
@@ -3354,20 +3573,25 @@ namespace Legion {
       virtual ExternalResources attach_resources(
                                           const IndexAttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
-                                     const bool unordered);
+                                     const bool unordered,
+                                     Provenance *provenance = NULL);
       virtual Future detach_resources(ExternalResources resources,
-                                      const bool flush, const bool unordered);
+                                      const bool flush, const bool unordered,
+                                      Provenance *provenance);
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future select_tunable_value(const TunableLauncher &launcher);
-      virtual Future issue_mapping_fence(void);
-      virtual Future issue_execution_fence(void);
-      virtual void complete_frame(void);
-      virtual Predicate create_predicate(const Future &f);
-      virtual Predicate predicate_not(const Predicate &p);
+      virtual Future issue_mapping_fence(Provenance *provenance);
+      virtual Future issue_execution_fence(Provenance *provenance);
+      virtual void complete_frame(Provenance *provenance);
+      virtual Predicate create_predicate(const Future &f,
+                                         Provenance *provenance);
+      virtual Predicate predicate_not(const Predicate &p,
+                                      Provenance *provenance);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
-      virtual Future get_predicate_future(const Predicate &p);
+      virtual Future get_predicate_future(const Predicate &p,
+                                          Provenance *provenance);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -3397,8 +3621,10 @@ namespace Legion {
       virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
-          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
-      virtual void end_trace(TraceID tid, bool deprecated);
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
+          Provenance *provenance);
+      virtual void end_trace(TraceID tid, bool deprecated,
+                             Provenance *provenance);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
@@ -3470,7 +3696,8 @@ namespace Legion {
       virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
                                                     const Future &future,
                                                     unsigned count);
-      virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc,
+                                                   Provenance *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
     protected:

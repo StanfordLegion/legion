@@ -1713,6 +1713,7 @@ namespace Legion {
     };
 
     // legion_ops.h
+    class Provenance;
     class Operation;
     class SpeculativeOp;
     class Memoizable;
@@ -2240,6 +2241,12 @@ namespace Legion {
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
+    // These type imports are experimental to facilitate coordination and
+    // synchronization between different mappers and may be revoked later
+    // as we develop new abstractions for mappers to interact
+    typedef Internal::AutoLock AutoLock;
+    typedef Internal::AutoTryLock AutoTryLock;
+    typedef Internal::LocalLock LocalLock;
   };
 
   namespace Internal { 

@@ -2265,12 +2265,12 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
     : transforms(_transforms),
       base1_min(0),
       base1_max(0),
-      extent1_min(16),
-      extent1_max(32),
+      extent1_min(4),
+      extent1_max(6),
       base2_min(0),
       base2_max(0),
-      extent2_min(16),
-      extent2_max(32),
+      extent2_min(4),
+      extent2_max(6),
       num_pieces(2),
       num_colors(4) {
   RandStream<> rs(random_seed+2);
@@ -2621,12 +2621,10 @@ TestInterface *run_structured_test(TransformType type, int argc, char **argv) {
        argc, const_cast<const char **>(argv),
        create_affine_transforms<2, int, 2, int, int>());
   case TransformType::TRANSLATION:
-   // TODO(apryakhin): Test other structured transform types.
-   /*return new RandomAffineTest<2, int, 2, int, int,
+   return new RandomAffineTest<2, int, 2, int, int,
                                   TranslationTransform<2, int>>(
        argc, const_cast<const char **>(argv),
-       create_translate_transforms<2, int, 2, int, int>(16));*/
-   break;
+       create_translate_transforms<2, int, 2, int, int>(4));
  }
  return nullptr;
 }

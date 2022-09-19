@@ -3765,6 +3765,15 @@ legion_task_launcher_set_elide_future_return(legion_task_launcher_t launcher_,
   launcher->elide_future_return = elide_future_return;
 }
 
+void
+legion_task_launcher_set_provenance(legion_task_launcher_t launcher_,
+                                    const char *provenance)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -4272,6 +4281,15 @@ legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher_,
   launcher->elide_future_return = elide_future_return;
 }
 
+void
+legion_index_launcher_set_provenance(legion_index_launcher_t launcher_,
+                                     const char *provenance)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
+}
+
 // -----------------------------------------------------------------------
 // Inline Mapping Operations
 // -----------------------------------------------------------------------
@@ -4336,6 +4354,15 @@ legion_inline_launcher_set_mapper_arg(legion_inline_launcher_t launcher_,
   UntypedBuffer arg = CObjectWrapper::unwrap(arg_);
 
   launcher->map_arg = arg;
+}
+
+void
+legion_inline_launcher_set_provenance(legion_inline_launcher_t launcher_,
+                                      const char *provenance)
+{
+  InlineLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 void
@@ -4515,6 +4542,15 @@ legion_fill_launcher_set_mapper_arg(legion_fill_launcher_t launcher_,
   UntypedBuffer arg = CObjectWrapper::unwrap(arg_);
 
   launcher->map_arg = arg;
+}
+
+void
+legion_fill_launcher_set_provenance(legion_fill_launcher_t launcher_,
+                                    const char *provenance)
+{
+  FillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 // -----------------------------------------------------------------------
@@ -4835,6 +4871,15 @@ legion_index_fill_launcher_set_mapper_arg(legion_index_fill_launcher_t launcher_
   launcher->map_arg = arg;
 }
 
+void
+legion_index_fill_launcher_set_provenance(legion_index_fill_launcher_t launcher_,
+                                          const char *provenance)
+{
+  IndexFillLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
+}
+
 legion_region_requirement_t
 legion_fill_get_requirement(legion_fill_t fill_)
 {
@@ -5138,6 +5183,15 @@ legion_copy_launcher_set_mapper_arg(legion_copy_launcher_t launcher_,
   UntypedBuffer arg = CObjectWrapper::unwrap(arg_);
 
   launcher->map_arg = arg;
+}
+
+void
+legion_copy_launcher_set_provenance(legion_copy_launcher_t launcher_,
+                                    const char *provenance)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 legion_region_requirement_t
@@ -5495,6 +5549,15 @@ legion_index_copy_launcher_set_mapper_arg(legion_index_copy_launcher_t launcher_
   launcher->map_arg = arg;
 }
 
+void
+legion_index_copy_launcher_set_provenance(legion_index_copy_launcher_t launcher_,
+                                          const char *provenance)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
+}
+
 // -----------------------------------------------------------------------
 // Acquire Operations
 // -----------------------------------------------------------------------
@@ -5575,6 +5638,15 @@ legion_acquire_launcher_set_mapper_arg(legion_acquire_launcher_t launcher_,
   UntypedBuffer arg = CObjectWrapper::unwrap(arg_);
 
   launcher->map_arg = arg;
+}
+
+void
+legion_acquire_launcher_set_provenance(legion_acquire_launcher_t launcher_,
+                                       const char *provenance)
+{
+  AcquireLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 // -----------------------------------------------------------------------
@@ -5659,6 +5731,15 @@ legion_release_launcher_set_mapper_arg(legion_release_launcher_t launcher_,
   launcher->map_arg = arg;
 }
 
+void
+legion_release_launcher_set_provenance(legion_release_launcher_t launcher_,
+                                       const char *provenance)
+{
+  ReleaseLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
+}
+
 // -----------------------------------------------------------------------
 // Attach/Detach Operations
 // -----------------------------------------------------------------------
@@ -5706,6 +5787,15 @@ legion_attach_launcher_set_mapped(legion_attach_launcher_t handle_,
   AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
 
   handle->mapped = mapped;
+}
+
+void
+legion_attach_launcher_set_provenance(legion_attach_launcher_t handle_,
+                                      const char *provenance)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->provenance = provenance;
 }
 
 void
@@ -5808,6 +5898,15 @@ legion_index_attach_launcher_set_restricted(
   IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
 
   handle->restricted = restricted;
+}
+
+void
+legion_index_attach_launcher_set_provenance(
+    legion_index_attach_launcher_t handle_, const char *provenance)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->provenance = provenance;
 }
 
 void
@@ -6015,6 +6114,15 @@ legion_must_epoch_launcher_set_launch_space(
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
   launcher->launch_space = is;
+}
+
+void
+legion_must_epoch_launcher_set_provenance(
+  legion_must_epoch_launcher_t launcher_, const char *provenance)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 // -----------------------------------------------------------------------

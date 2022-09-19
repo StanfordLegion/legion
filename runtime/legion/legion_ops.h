@@ -34,6 +34,61 @@ namespace Legion {
     typedef PredicateImpl PredicateOp;  
 
     /**
+     * \class Provenance
+     */
+    class Provenance : public Collectable {
+    public:
+      Provenance(const char *prov) : provenance(prov) { }
+      Provenance(const void *buffer, size_t size)
+        : provenance((const char*)buffer, size) { }
+      Provenance(const std::string &prov)
+        : provenance(prov) { }
+      Provenance(const Provenance &rhs) = delete;
+      ~Provenance(void) { }
+    public:
+      Provenance& operator=(const Provenance &rhs) = delete;
+    public:
+      void serialize(Serializer &rez) const;
+      static void serialize_null(Serializer &rez);
+      static Provenance* deserialize(Deserializer &derez);
+    public:
+      inline const char* c_str(void) const { return provenance.c_str(); }
+    public:
+      const std::string provenance;
+    };
+
+    /**
+     * \class AutoProvenance
+     * Make a provenance from a string if it exists
+     * Reclaim references on the provenance at the end
+     * of the scope so it will be cleaned up if needed
+     */
+    class AutoProvenance {
+    public:
+      AutoProvenance(const char *prov)
+        : provenance((prov == NULL) ? NULL : new Provenance(prov))
+        { if (provenance != NULL) provenance->add_reference(); }
+      AutoProvenance(const std::string &prov)
+        : provenance(prov.empty() ? NULL : new Provenance(prov))
+        { if (provenance != NULL) provenance->add_reference(); }
+      AutoProvenance(Provenance *prov)
+        : provenance(prov)
+        { if (provenance != NULL) provenance->add_reference(); }
+      AutoProvenance(AutoProvenance &&rhs) = delete;
+      AutoProvenance(const AutoProvenance &rhs) = delete;
+      ~AutoProvenance(void)
+        { if ((provenance != NULL) && provenance->remove_reference()) 
+            delete provenance; }
+    public:
+      AutoProvenance& operator=(AutoProvenance &&rhs) = delete;
+      AutoProvenance& operator=(const AutoProvenance &rhs) = delete;
+    public:
+      inline operator Provenance*(void) const { return provenance; }
+    private:
+      Provenance *const provenance;
+    };
+
+    /**
      * \class ResourceTracker
      * A helper class for tracking which privileges an
      * operation owns. This is inherited by multi-tasks
@@ -43,6 +98,97 @@ namespace Legion {
      * as part of the execution of the task.
      */
     class ResourceTracker {
+    public:
+      struct DeletedRegion {
+      public:
+        DeletedRegion(void);
+        DeletedRegion(LogicalRegion r, Provenance *provenance = NULL);
+        DeletedRegion(const DeletedRegion &rhs);
+        DeletedRegion(DeletedRegion &&rhs);
+        ~DeletedRegion(void);
+      public:
+        DeletedRegion& operator=(const DeletedRegion &rhs);
+        DeletedRegion& operator=(DeletedRegion &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        LogicalRegion region;
+        Provenance *provenance;
+      };
+      struct DeletedField {
+      public:
+        DeletedField(void);
+        DeletedField(FieldSpace sp, FieldID f, Provenance *provenance = NULL);
+        DeletedField(const DeletedField &rhs);
+        DeletedField(DeletedField &&rhs);
+        ~DeletedField(void);
+      public:
+        DeletedField& operator=(const DeletedField &rhs);
+        DeletedField& operator=(DeletedField &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        FieldSpace space;
+        FieldID fid;
+        Provenance *provenance;
+      };
+      struct DeletedFieldSpace {
+      public:
+        DeletedFieldSpace(void);
+        DeletedFieldSpace(FieldSpace sp, Provenance *provenance = NULL);
+        DeletedFieldSpace(const DeletedFieldSpace &rhs);
+        DeletedFieldSpace(DeletedFieldSpace &&rhs);
+        ~DeletedFieldSpace(void);
+      public:
+        DeletedFieldSpace& operator=(const DeletedFieldSpace &rhs);
+        DeletedFieldSpace& operator=(DeletedFieldSpace &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        FieldSpace space;
+        Provenance *provenance;
+      };
+      struct DeletedIndexSpace {
+      public:
+        DeletedIndexSpace(void);
+        DeletedIndexSpace(IndexSpace sp, bool recurse, 
+                          Provenance *provenance = NULL);
+        DeletedIndexSpace(const DeletedIndexSpace &rhs);
+        DeletedIndexSpace(DeletedIndexSpace &&rhs);
+        ~DeletedIndexSpace(void);
+      public:
+        DeletedIndexSpace& operator=(const DeletedIndexSpace &rhs);
+        DeletedIndexSpace& operator=(DeletedIndexSpace &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        IndexSpace space;
+        Provenance *provenance;
+        bool recurse;
+      };
+      struct DeletedPartition {
+      public:
+        DeletedPartition(void);
+        DeletedPartition(IndexPartition p, bool recurse,
+                         Provenance *provenance = NULL);
+        DeletedPartition(const DeletedPartition &rhs);
+        DeletedPartition(DeletedPartition &&rhs);
+        ~DeletedPartition(void);
+      public:
+        DeletedPartition& operator=(const DeletedPartition &rhs);
+        DeletedPartition& operator=(DeletedPartition &&rhs);
+      public:
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        IndexPartition partition;
+        Provenance *provenance;
+        bool recurse;
+      };
     public:
       ResourceTracker(void);
       ResourceTracker(const ResourceTracker &rhs);
@@ -55,16 +201,16 @@ namespace Legion {
                             std::set<RtEvent> &preconditions);
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions) = 0;
       void pack_resources_return(Serializer &rez, size_t return_index);
       static RtEvent unpack_resources_return(Deserializer &derez,
@@ -72,16 +218,16 @@ namespace Legion {
     protected:
       void merge_received_resources(
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions);
+              std::vector<DeletedPartition> &deleted_partitions);
     protected:
       std::map<LogicalRegion,unsigned>                 created_regions;
       std::map<LogicalRegion,bool>                     local_regions;
@@ -91,12 +237,12 @@ namespace Legion {
       std::map<IndexSpace,unsigned>                    created_index_spaces;
       std::map<IndexPartition,unsigned>                created_index_partitions;
     protected:
-      std::vector<LogicalRegion>                       deleted_regions;
-      std::vector<std::pair<FieldSpace,FieldID> >      deleted_fields;
-      std::vector<FieldSpace>                          deleted_field_spaces;
+      std::vector<DeletedRegion>                       deleted_regions;
+      std::vector<DeletedField>                        deleted_fields;
+      std::vector<DeletedFieldSpace>                   deleted_field_spaces;
       std::map<FieldSpace,std::set<LogicalRegion> >    latent_field_spaces;
-      std::vector<std::pair<IndexSpace,bool> >         deleted_index_spaces;
-      std::vector<std::pair<IndexPartition,bool> >     deleted_index_partitions;
+      std::vector<DeletedIndexSpace>                   deleted_index_spaces;
+      std::vector<DeletedPartition>                    deleted_index_partitions;
     };
 
     /**
@@ -273,6 +419,8 @@ namespace Legion {
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
       inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
+      inline Provenance* get_provenance(void) const 
+        { return provenance; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -319,7 +467,9 @@ namespace Legion {
       // along with the number of regions this task has
       void initialize_operation(InnerContext *ctx, bool track,
                                 unsigned num_regions = 0,
+                                Provenance *provenance = NULL,
           const std::vector<StaticDependence> *dependences = NULL);
+      void set_provenance(Provenance *provenance);
     public:
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -710,6 +860,9 @@ namespace Legion {
       // is always cleaned up after each operation
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+    private:
+      // Provenance information for this operation
+      Provenance *provenance;
     };
 
     /**
@@ -1041,7 +1194,8 @@ namespace Legion {
       void deactivate_speculative(void);
     public:
       void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
-          const std::vector<StaticDependence> *dependences, const Predicate &p);
+          const std::vector<StaticDependence> *dependences, const Predicate &p,
+          Provenance *provenance);
       void register_predicate_dependence(void);
       virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
@@ -1208,8 +1362,10 @@ namespace Legion {
       MapOp& operator=(const MapOp &rhs);
     public:
       PhysicalRegion initialize(InnerContext *ctx,
-                                const InlineLauncher &launcher);
-      void initialize(InnerContext *ctx, const PhysicalRegion &region);
+                                const InlineLauncher &launcher,
+                                Provenance *provenance);
+      void initialize(InnerContext *ctx, const PhysicalRegion &region,
+                      Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     protected:
@@ -1375,7 +1531,7 @@ namespace Legion {
       CopyOp& operator=(const CopyOp &rhs);
     public:
       void initialize(InnerContext *ctx,
-                      const CopyLauncher &launcher);
+                      const CopyLauncher &launcher, Provenance *provenance);
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
@@ -1539,7 +1695,8 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx,
                       const IndexCopyLauncher &launcher,
-                      IndexSpace launch_space);
+                      IndexSpace launch_space,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void); 
@@ -1714,8 +1871,8 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, FenceKind kind, 
-                        bool need_future, bool track=true);
+      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future,
+                        Provenance *provenance, bool track = true);
       inline void add_mapping_applied_condition(RtEvent precondition)
         { map_applied_conditions.insert(precondition); }
       inline void record_execution_precondition(ApEvent precondition)
@@ -1766,7 +1923,7 @@ namespace Legion {
     public:
       FrameOp& operator=(const FrameOp &rhs);
     public:
-      void initialize(InnerContext *ctx);
+      void initialize(InnerContext *ctx, Provenance *provenance);
       void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
@@ -1803,18 +1960,22 @@ namespace Legion {
     public:
       CreationOp& operator=(const CreationOp &rhs);
     public:
-      void initialize_fence(InnerContext *ctx, RtEvent precondition);
+      void initialize_fence(InnerContext *ctx, RtEvent precondition,
+                            Provenance *provenance);
       void initialize_index_space(InnerContext *ctx, IndexSpaceNode *node, 
-                            const Future &future, bool owner = true,
+                            const Future &future, Provenance *provenance,
+                            bool owner = true, 
                             const CollectiveMapping *mapping = NULL);
       void initialize_field(InnerContext *ctx, FieldSpaceNode *node,
                             FieldID fid, const Future &field_size,
-                            RtEvent precondition, bool owner = true);
+                            RtEvent precondition, Provenance *provenance,
+                            bool owner = true);
       void initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                              const std::vector<FieldID> &fids,
                              const std::vector<Future> &field_sizes,
-                             RtEvent precondition, bool owner = true);
-      void initialize_map(InnerContext *ctx,
+                             RtEvent precondition, Provenance *provenance,
+                             bool owner = true);
+      void initialize_map(InnerContext *ctx, Provenance *provenance,
                           const std::map<DomainPoint,Future> &futures);
     public:
       virtual void activate(void);
@@ -1868,26 +2029,30 @@ namespace Legion {
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
-                                   const bool unordered);
+                                   const bool unordered,Provenance *provenance);
       void initialize_index_part_deletion(InnerContext *ctx,IndexPartition part,
                                    std::vector<IndexPartition> &sub_partitions,
-                                   const bool unordered);
+                                   const bool unordered,Provenance *provenance);
       void initialize_field_space_deletion(InnerContext *ctx,
                                            FieldSpace handle,
-                                           const bool unordered);
+                                           const bool unordered,
+                                           Provenance *provenance);
       void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
                                      FieldID fid, const bool unordered,
                                      FieldAllocatorImpl *allocator,
+                                     Provenance *provenance,
                                      const bool non_owner_shard);
       void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
                                       const std::set<FieldID> &to_free,
                                       const bool unordered,
                                       FieldAllocatorImpl *allocator,
+                                      Provenance *provenance,
                                       const bool non_owner_shard,
                                       const bool skip_dep_analysis = false);
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                       LogicalRegion handle, 
                                       const bool unordered,
+                                      Provenance *provenance,
                                       const bool skip_dep_analysis = false);
     public:
       virtual void activate(void);
@@ -2332,7 +2497,8 @@ namespace Legion {
     public:
       AcquireOp& operator=(const AcquireOp &rhs);
     public:
-      void initialize(InnerContext *ctx, const AcquireLauncher &launcher);
+      void initialize(InnerContext *ctx, const AcquireLauncher &launcher,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2452,7 +2618,8 @@ namespace Legion {
     public:
       ReleaseOp& operator=(const ReleaseOp &rhs);
     public:
-      void initialize(InnerContext *ctx, const ReleaseLauncher &launcher);
+      void initialize(InnerContext *ctx, const ReleaseLauncher &launcher,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2564,7 +2731,8 @@ namespace Legion {
     public:
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, const DynamicCollective &dc);
+      Future initialize(InnerContext *ctx, const DynamicCollective &dc,
+                        Provenance *provenance);
     public:
       virtual const VersionInfo& get_version_info(unsigned idx) const
         { assert(false); return *(new VersionInfo()); }
@@ -2603,7 +2771,7 @@ namespace Legion {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(InnerContext *ctx, Future f);
+      void initialize(InnerContext *ctx, Future f, Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2632,7 +2800,8 @@ namespace Legion {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(InnerContext *task, const Predicate &p);
+      void initialize(InnerContext *task, const Predicate &p,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2662,7 +2831,8 @@ namespace Legion {
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
       void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates);
+                      const std::vector<Predicate> &predicates,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2694,7 +2864,8 @@ namespace Legion {
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
       void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates);
+                      const std::vector<Predicate> &predicates,
+                      Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2803,7 +2974,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
     public:
-      FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher);
+      FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher,
+                           Provenance *provenance);
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
@@ -2852,16 +3024,16 @@ namespace Legion {
       // From ResourceTracker
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
       void add_mapping_dependence(RtEvent precondition);
@@ -3236,51 +3408,64 @@ namespace Legion {
     public:
       PendingPartitionOp& operator=(const PendingPartitionOp &rhs);
     public:
-      void initialize_equal_partition(InnerContext *ctx,
-                                      IndexPartition pid, size_t granularity);
+      void initialize_equal_partition(InnerContext *ctx, IndexPartition pid,
+                                      size_t granularity, Provenance *prov);
       void initialize_weight_partition(InnerContext *ctx, IndexPartition pid,
-                                const FutureMap &weights, size_t granularity);
+                                const FutureMap &weights, size_t granularity,
+                                Provenance *provenance);
       void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
-                                      IndexPartition handle2);
+                                      IndexPartition handle2,
+                                      Provenance *provenance);
       void initialize_intersection_partition(InnerContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition handle1,
-                                             IndexPartition handle2);
+                                             IndexPartition handle2,
+                                             Provenance *provenance);
       void initialize_intersection_partition(InnerContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition part,
-                                             const bool dominates);
+                                             const bool dominates,
+                                             Provenance *provenance);
       void initialize_difference_partition(InnerContext *ctx,
                                            IndexPartition pid, 
                                            IndexPartition handle1,
-                                           IndexPartition handle2);
+                                           IndexPartition handle2,
+                                           Provenance *provenance);
       void initialize_restricted_partition(InnerContext *ctx,
                                            IndexPartition pid,
                                            const void *transform,
                                            size_t transform_size,
                                            const void *extent,
-                                           size_t extent_size);
+                                           size_t extent_size,
+                                           Provenance *provenance);
       void initialize_by_domain(InnerContext *ctx, IndexPartition pid,
                                 const FutureMap &future_map,
-                                bool perform_intersections);
+                                bool perform_intersections,
+                                Provenance *provenance);
       void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
-                                    IndexPartition source, LegionColor color);
+                                    IndexPartition source, LegionColor color,
+                                    Provenance *provenance);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        Provenance *provenance);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
-                                        IndexPartition handle);
+                                        IndexPartition handle,
+                                        Provenance *provenance);
       void initialize_index_space_intersection(InnerContext *ctx, 
                                                IndexSpace target,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                               Provenance *provenance);
       void initialize_index_space_intersection(InnerContext *ctx,
                                               IndexSpace target,
-                                              IndexPartition handle);
+                                              IndexPartition handle,
+                                              Provenance *provenance);
       void initialize_index_space_difference(InnerContext *ctx, 
                                              IndexSpace target, 
                                              IndexSpace initial,
-                                        const std::vector<IndexSpace> &handles);
+                                        const std::vector<IndexSpace> &handles,
+                                        Provenance *provenance);
       void perform_logging(void);
     public:
       void activate_pending(void);
@@ -3447,31 +3632,37 @@ namespace Legion {
                                LogicalRegion handle, LogicalRegion parent,
                                IndexSpace color_space, FieldID fid, 
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg); 
+                               const UntypedBuffer &marg,
+                               Provenance *provenance); 
       void initialize_by_image(InnerContext *ctx, IndexPartition pid,
                                IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               Provenance *provenance);
       void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
                                IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               Provenance *provenance);
       void initialize_by_preimage(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               Provenance *provenance);
       void initialize_by_preimage_range(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               Provenance *provenance);
       void initialize_by_association(InnerContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg);
+                               const UntypedBuffer &marg,
+                               Provenance *provenance);
       void perform_logging(void) const;
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;
@@ -3750,7 +3941,8 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(InnerContext *ctx, const FillLauncher &launcher);
+      void initialize(InnerContext *ctx, const FillLauncher &launcher,
+                      Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
       void activate_fill(void);
@@ -3838,7 +4030,7 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx,
                       const IndexFillLauncher &launcher,
-                      IndexSpace launch_space);
+                      IndexSpace launch_space, Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3960,7 +4152,8 @@ namespace Legion {
       AttachOp& operator=(const AttachOp &rhs);
     public:
       PhysicalRegion initialize(InnerContext *ctx,
-                                const AttachLauncher &launcher);
+                                const AttachLauncher &launcher,
+                                Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -4046,7 +4239,8 @@ namespace Legion {
                                    RegionTreeNode *upper_bound,
                                    IndexSpaceNode *launch_bounds,
                                    const IndexAttachLauncher &launcher,
-                                   const std::vector<unsigned> &indexes);
+                                   const std::vector<unsigned> &indexes,
+                                   Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -4132,7 +4326,8 @@ namespace Legion {
       DetachOp& operator=(const DetachOp &rhs);
     public:
       Future initialize_detach(InnerContext *ctx, PhysicalRegion region,
-                               const bool flush, const bool unordered);
+                               const bool flush, const bool unordered,
+                               Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4197,7 +4392,8 @@ namespace Legion {
                                ExternalResourcesImpl *external,
                                const std::vector<FieldID> &privilege_fields,
                                const std::vector<PhysicalRegion> &regions,
-                               bool flush, bool unordered);
+                               bool flush, bool unordered,
+                               Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4274,7 +4470,8 @@ namespace Legion {
     public:
       TimingOp& operator=(const TimingOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, const TimingLauncher &launcher);
+      Future initialize(InnerContext *ctx, const TimingLauncher &launcher,
+                        Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4309,7 +4506,8 @@ namespace Legion {
     public:
       void activate_tunable(void);
       void deactivate_tunable(void);
-      Future initialize(InnerContext *ctx, const TunableLauncher &launcher);
+      Future initialize(InnerContext *ctx, const TunableLauncher &launcher,
+                        Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4351,7 +4549,8 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
                         ReductionOpID redop, bool deterministic,
-                        MapperID mapper_id, MappingTagID tag);
+                        MapperID mapper_id, MappingTagID tag,
+                        Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

@@ -56,15 +56,7 @@ namespace Realm {
 
       static const ID::ID_Types ID_TYPE = ID::ID_LOCK;
 
-      void init(Reservation _me, unsigned _init_owner, size_t _data_size = 0);
-
-      template <class T>
-      void set_local_data(T *data)
-      {
-	local_data = data;
-	local_data_size = sizeof(T);
-        own_local = false;
-      }
+      void init(Reservation _me, unsigned _init_owner);
 
       //protected:
       Reservation me;
@@ -97,11 +89,6 @@ namespace Realm {
       };
       std::map<unsigned, RetryInfo> retries;
       bool requested; // do we have a request for the lock in flight?
-
-      // local data protected by lock
-      void *local_data;
-      size_t local_data_size;
-      bool own_local;
 
       static Mutex freelist_mutex;
       static ReservationImpl *first_free;

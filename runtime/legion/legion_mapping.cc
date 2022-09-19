@@ -947,7 +947,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx, 
-                                   const Domain &bounds, TypeTag type_tag) const
+           const Domain &bounds, TypeTag type_tag, const char *provenance) const
     //--------------------------------------------------------------------------
     {
       if (type_tag == 0)
@@ -967,12 +967,12 @@ namespace Legion {
             assert(false);
         }
       }
-      return ctx->manager->create_index_space(ctx, bounds, type_tag);
+      return ctx->manager->create_index_space(ctx, bounds, type_tag,provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx,
-                                   const std::vector<DomainPoint> &points) const
+           const std::vector<DomainPoint> &points, const char *provenance) const
     //--------------------------------------------------------------------------
     {
       switch (points[0].get_dim())
@@ -987,7 +987,7 @@ namespace Legion {
               (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
           const Domain domain(realm_is); \
           return ctx->manager->create_index_space(ctx, domain, \
-                    Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+           Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(),provenance); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -999,7 +999,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx,
-                                         const std::vector<Domain> &rects) const
+                 const std::vector<Domain> &rects, const char *provenance) const
     //--------------------------------------------------------------------------
     {
       switch (rects[0].get_dim())
@@ -1014,7 +1014,8 @@ namespace Legion {
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain domain(realm_is); \
             return ctx->manager->create_index_space(ctx, domain, \
-                      Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                      Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+                      provenance); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -1026,26 +1027,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::union_index_spaces(MapperContext ctx,
-                                   const std::vector<IndexSpace> &sources) const
+           const std::vector<IndexSpace> &sources, const char *provenance) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->union_index_spaces(ctx, sources);
+      return ctx->manager->union_index_spaces(ctx, sources, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::intersect_index_spaces(MapperContext ctx,
-                                   const std::vector<IndexSpace> &sources) const
+           const std::vector<IndexSpace> &sources, const char *provenance) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->intersect_index_spaces(ctx, sources);
+      return ctx->manager->intersect_index_spaces(ctx, sources, provenance);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::subtract_index_spaces(MapperContext ctx,
-                                        IndexSpace left, IndexSpace right) const
+                IndexSpace left, IndexSpace right, const char *provenance) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->subtract_index_spaces(ctx, left, right);
+      return ctx->manager->subtract_index_spaces(ctx, left, right, provenance);
     }
 
     //--------------------------------------------------------------------------
