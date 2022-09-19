@@ -2599,8 +2599,8 @@ class IndexExpr(object):
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
                  'instances', 'name', 'independent_children',
-                 'depth', 'shape', 'point_set', 'node_name', 
-                 'intersections', 'dominated', 'expr']
+                 'depth', 'shape', 'point_set', 'node_name', 'owner',
+                 'intersections', 'dominated', 'expr', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2616,6 +2616,8 @@ class IndexSpace(object):
         self.intersections = dict() 
         self.dominated = dict()
         self.expr = None
+        self.owner = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -2815,15 +2817,32 @@ class IndexSpace(object):
         printer.println(parent+' -> '+ self.node_name+
                 " [style=solid,color=black,penwidth=2];")
 
+    def get_provenance(self):
+        if self.parent is not None:
+            return self.parent.provenance
+        else:
+            return self.provenance
+
     def print_graph(self, printer):
+        provenance = self.get_provenance()
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = '%s (ID: %s)' % (self.name, self.uid)
+            if provenance is not None:
+                label = '%s [%s] (ID: %s)' % (self.name, provenance, self.uid)
+            else:
+                label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space %s' % self.uid
+                if provenance is not None:
+                    label = 'Index Space %s [%s]' % (self.uid, provenance)
+                else:
+                    label = 'Index Space %s' % self.uid
             else:
-                
-                label = 'subspace %s' % self.uid
+                if provenance is not None:
+                    label = 'Subspace %s [%s]' % (self.uid, provenance)
+                else:
+                    label = 'Subspace %s' % self.uid
         if self.parent is not None:
             color = None
             for c, child in iteritems(self.parent.children):
@@ -2832,6 +2851,8 @@ class IndexSpace(object):
                     break
             assert color is not None
             label += ' (color: %s)' % color
+        if self.owner is not None:
+            label += '\nOwner Node: ' + str(self.owner)
         if self.shape is None or self.shape.empty():
             label += '\nEmpty Bounds'
         else:
@@ -2866,7 +2887,7 @@ class IndexSpace(object):
 class IndexPartition(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 
                  'disjoint', 'complete', 'name', 'depth', 'shape', 'point_set',
-                 'node_name', 'intersections', 'dominated']
+                 'node_name', 'intersections', 'dominated', 'owner', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2883,6 +2904,8 @@ class IndexPartition(object):
         self.node_name = 'index_part_node_%s' % uid
         self.intersections = dict()
         self.dominated = dict()
+        self.owner = None
+        self.provenance = None
 
     def set_parent(self, parent, color):
         self.parent = parent
@@ -3049,10 +3072,19 @@ class IndexPartition(object):
                 ' [style=dotted,color=black,penwidth=2];')
 
     def print_graph(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name + ' (ID: ' + str(self.uid) + ')'
+            if provenance is not None:
+                label = self.name + ' [' + provenance + '] (ID: ' + str(self.uid) + ')'
+            else:
+                label = self.name + ' (ID: ' + str(self.uid) + ')'
         else:
-            label = 'Index Partition '+str(self.uid)
+            if provenance is not None:
+                label = 'Index Partition '+str(self.uid) + ' [' + provenance + ']'
+            else:
+                label = 'Index Partition '+str(self.uid)
         color = None
         for c,child in iteritems(self.parent.children):
             if child == self:
@@ -3060,6 +3092,8 @@ class IndexPartition(object):
                 break
         assert color is not None
         label += ' (color: %s)' % color
+        if self.owner is not None:
+            label += '\nOwner Node: ' + str(self.owner)
         label += '\nDisjoint=%s, Complete=%s' % (self.disjoint, self.is_complete())
         printer.println(
             '%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="times italic"];' %
@@ -3077,12 +3111,13 @@ class IndexPartition(object):
             child.print_tree()
 
 class Field(object):
-    __slots__ = ['space', 'fid', 'size', 'name']
+    __slots__ = ['space', 'fid', 'size', 'name', 'provenance']
     def __init__(self, space, fid):
         self.space = space
         self.fid = fid
         self.size = None
         self.name = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -3100,13 +3135,15 @@ class Field(object):
     __repr__ = __str__
 
 class FieldSpace(object):
-    __slots__ = ['state', 'uid', 'name', 'fields', 'node_name']
+    __slots__ = ['state', 'uid', 'name', 'fields', 'node_name', 'owner', 'provenance']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
         self.name = None
         self.fields = dict()
         self.node_name = 'field_space_node_'+str(uid)
+        self.owner = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -3127,20 +3164,40 @@ class FieldSpace(object):
     __repr__ = __str__
 
     def print_graph(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name + ' (ID: '+str(self.uid) + ')'
+            if provenance is not None:
+                label = self.name + ' [' + provenance + '] (ID: '+str(self.uid) + ')'
+            else:
+                label = self.name + ' (ID: '+str(self.uid) + ')'
         else:
-            label = str(self)
+            if provenance is not None:
+                lavel = str(self) + ' [' + provenance + ']'
+            else:
+                label = str(self)
+        if self.owner is not None:
+            label += '\nOwner Node: ' + str(self.owner)
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="Helvetica"];')
 
         for fid,field in iteritems(self.fields):
             field_id = "field_node_"+str(self.uid)+"_"+str(fid)
+            provenance = field.provenance
+            if provenance is not None and len(provenance) == 0:
+                provenance = None
             if field.name is not None:
-                field_name = field.name + '(FID: ' + str(fid) + ')'
+                if provenance is not None:
+                    field_name = field.name + ' [' + provenance + '] (FID: ' + str(fid) + ')'
+                else:
+                    field_name = field.name + ' (FID: ' + str(fid) + ')'
             else:
-                field_name = 'FID: ' + str(fid)
+                if provenance is not None:
+                    field_name = 'FID: ' + str(fid) + ' [' + provenance + ']'
+                else:
+                    field_name = 'FID: ' + str(fid)
             printer.println(field_id+' [label="'+field_name+
                     '",shape=plaintext,fontsize=14,'+
                     'fontcolor=black,fontname="Helvetica"]')
@@ -3150,7 +3207,7 @@ class FieldSpace(object):
 class LogicalRegion(object):
     __slots__ = ['state', 'index_space', 'field_space', 'tree_id', 'children',
                  'name', 'parent', 'logical_state', 'verification_state', 
-                 'node_name', 'has_named_children']
+                 'node_name', 'has_named_children', 'owner', 'provenance']
     def __init__(self, state, iid, fid, tid):
         self.state = state
         self.index_space = iid
@@ -3165,6 +3222,8 @@ class LogicalRegion(object):
         self.node_name = 'region_node_'+str(self.index_space.uid)+\
             '_'+str(self.field_space.uid)+'_'+str(self.tree_id)
         self.has_named_children = False
+        self.owner = None
+        self.provenance = None
 
     def set_name(self, name):
         self.name = name
@@ -3390,20 +3449,20 @@ class LogicalRegion(object):
                 state = self.get_verification_state(depth, field, point)
                 op.record_current_version(point, field, tree, state.version_number)
 
-    def perform_fill_verification(self, depth, field, op, req, point_set=None):
+    def perform_fill_verification(self, depth, field, op, req, perform_checks, point_set=None):
         if point_set is None:
             # First get the point set
-            return self.perform_fill_verification(depth, field, op, req,
+            return self.perform_fill_verification(depth, field, op, req, perform_checks,
                                                   self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
-            return self.parent.parent.perform_fill_verification(depth, field, op, 
-                                                                req, point_set)
+            return self.parent.parent.perform_fill_verification(depth, field, op, req,
+                                                                perform_checks, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                if not state.perform_fill_verification(op, req):
+                if not state.perform_fill_verification(op, req, perform_checks):
                     return False
             return True
 
@@ -3533,13 +3592,25 @@ class LogicalRegion(object):
                 'tree: '+str(self.tree_id)
 
     def print_node(self, printer):
+        provenance = self.provenance
+        if provenance is not None and len(provenance) == 0:
+            provenance = None
         if self.name is not None:
-            label = self.name+' ('+self.gen_id()+')'
+            if provenance is not None:
+                label = self.name+' [' + provenance + '] ('+self.gen_id()+')'
+            else:
+                label = self.name+' ('+self.gen_id()+')'
         else:
             if self.parent is None:
-                label = 'region ('+self.gen_id()+')'
+                if provenance is not None:
+                    label = 'Region ('+self.gen_id()+') [' + provenance + ']'
+                else:
+                    label = 'Region ('+self.gen_id()+')'
             else:
-                label = 'subregion ('+self.gen_id()+')'
+                assert provenance is None
+                label = 'Subregion ('+self.gen_id()+')'
+        if self.owner is not None:
+            label += '\nOwner Node: ' + str(self.owner)
         shape = self.get_shape()
         if shape is None or shape.empty():
             label += '\nEmpty Bounds'
@@ -3550,7 +3621,6 @@ class LogicalRegion(object):
                 label += '\nSparse Bounds: '
             lo,hi = shape.bounds
             label += lo.to_string()+' - '+hi.to_string()
-
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="Helvetica"];')
@@ -5137,6 +5207,16 @@ class DataflowTraverser(object):
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dst_fields:
                         self.run(copy, src_key)
+            if op.realm_fills:
+                for fill in op.realm_fills:
+                    eq_privileges = fill.get_equivalence_privileges()
+                    if src_key not in eq_privileges:
+                        continue
+                    # Only look at these if the destination is correct
+                    if self.target in fill.dsts and \
+                            self.dst_tree == fill.dst_tree_id and \
+                            self.dst_field in fill.fields:
+                        self.run(fill, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
             self.run(op, src_key)
@@ -5180,12 +5260,19 @@ class EquivalenceSet(object):
         if restricted:
             self.restricted_inst = inst
 
-    def perform_fill_verification(self, op, req):
+    def perform_fill_verification(self, op, req, perform_checks):
         # Fills clear everything out so we are just done
         self.reset()
         self.pending_fill = True
         assert op.kind == FILL_OP_KIND
         self.fill_op = op
+        # If this instance is restricted then we need to perform the fill eagerly
+        if self.restricted_inst is not None:
+            error_str = "region requirement "+str(req.index)+" of "+str(op)
+            if not self.issue_update_copies(self.restricted_inst, op, req,
+                                perform_checks, error_str, restricted=True):
+                return False
+            self.valid_instances.add(self.restricted_inst)
         return True
 
     def add_restriction(self, op, req, inst):
@@ -5778,7 +5865,7 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node',
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', 'replayed', 'restricted']
+                 'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5852,6 +5939,8 @@ class Operation(object):
         self.replayed = False
         # For attach ops only - whether we should add a restriction
         self.restricted = False
+        # Provenance string from the application
+        self.provenance = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -5870,11 +5959,23 @@ class Operation(object):
     def is_index_op(self):
         return self.launch_shape is not None
 
+    def get_provenance(self):
+        if  self.index_owner is not None:
+            return self.index_owner.get_provenance()
+        return self.provenance
+
     def __str__(self):
-        if self.name is None:
-            return OpNames[self.kind] + " " + str(self.uid)
+        provenance = self.get_provenance()
+        if provenance is None:
+            if self.name is None:
+                return OpNames[self.kind] + " " + str(self.uid)
+            else:
+                return self.name
         else:
-            return self.name
+            if self.name is None:
+                return OpNames[self.kind] + " [" + provenance + "] " + str(self.uid)
+            else:
+                return self.name + " [" + provenance + "]"
 
     __repr__ = __str__
 
@@ -6233,6 +6334,10 @@ class Operation(object):
             assert self.context == other.context
         if self.name is None:
             self.name = other.name
+        if self.provenance is None:
+            self.provenance = other.provenance
+        elif other.provenance is not None:
+            assert self.provenance == other.provenance
         self.fully_logged = self.fully_logged or other.fully_logged
         if not self.reqs:
             self.reqs = other.reqs
@@ -7695,7 +7800,7 @@ class Operation(object):
         mappings = self.find_mapping(index)
         depth = self.context.find_enclosing_context_depth(req, mappings)
         for field in req.fields:
-            if not req.logical_node.perform_fill_verification(depth, field, self, req):
+            if not req.logical_node.perform_fill_verification(depth, field, self, req, perform_checks):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
@@ -10960,26 +11065,27 @@ mem_mem_pat              = re.compile(
            "(?P<lat>[0-9]+)")
 # Patterns for the shape of region trees
 top_index_pat            = re.compile(
-    prefix+"Index Space (?P<uid>[0-9a-f]+)")
+    prefix+"Index Space (?P<uid>[0-9a-f]+) (?P<owner>[0-9]+) (?P<provenance>.*)")
 index_name_pat           = re.compile(
     prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_part_pat           = re.compile(
     prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-2]) "+
-           "(?P<complete>[0-2]) (?P<color>[0-9]+)")
+           "(?P<complete>[0-2]) (?P<color>[0-9]+) (?P<owner>[0-9]+) (?P<provenance>.*)")
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_subspace_pat       = re.compile(
-    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<owner>[0-9]+) "+
+           "(?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
-    prefix+"Field Space (?P<uid>[0-9]+)")
+    prefix+"Field Space (?P<uid>[0-9]+) (?P<owner>[0-9]+) (?P<provenance>.*)")
 field_space_name_pat     = re.compile(
     prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>.+)")
 field_create_pat         = re.compile(
-    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
+    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+) (?P<provenance>.*)")
 field_name_pat           = re.compile(
     prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>.+)")
 region_pat               = re.compile(
-    prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<owner>[0-9]+) (?P<provenance>.*)")
 region_name_pat          = re.compile(
     prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
             "(?P<name>.+)")
@@ -11095,6 +11201,8 @@ intra_space_pat          = re.compile(
     prefix+"Intra Space Dependence (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
+op_provenance_pat        = re.compile(
+    prefix+"Operation Provenance (?P<uid>[0-9]+) (?P<provenance>.*)")
 close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 predicate_false_pat      = re.compile(
@@ -11936,6 +12044,11 @@ def parse_legion_spy_line(line, state):
         task.add_operation_index(int(m.group('index')),
                                  int(m.group('child')))
         return True
+    m = op_provenance_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.provenance = m.group('provenance')
+        return True
     m = close_index_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('parent')))
@@ -11950,7 +12063,9 @@ def parse_legion_spy_line(line, state):
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
     if m is not None:
-        state.get_index_space(int(m.group('uid'),16)) 
+        space = state.get_index_space(int(m.group('uid'),16)) 
+        space.owner = int(m.group('owner'))
+        space.provenance = m.group('provenance')
         return True
     m = index_name_pat.match(line)
     if m is not None:
@@ -11970,6 +12085,8 @@ def parse_legion_spy_line(line, state):
         complete = int(m.group('complete'))
         if complete > 0:
             part.set_complete(True if complete == 2 else False)
+        part.owner = int(m.group('owner'))
+        part.provenance = m.group('provenance')
         return True
     m = index_part_name_pat.match(line)
     if m is not None:
@@ -11986,10 +12103,13 @@ def parse_legion_spy_line(line, state):
         for index in xrange(dim):
             color.vals[index] = int(values[index])
         ispace.set_parent(parent, color)
+        ispace.owner = int(m.group('owner'))
         return True
     m = field_space_pat.match(line)
     if m is not None:
-        state.get_field_space(int(m.group('uid')))
+        space = state.get_field_space(int(m.group('uid')))
+        space.owner = int(m.group('owner'))
+        space.provenance = m.group('provenance')
         return True
     m = field_space_name_pat.match(line)
     if m is not None:
@@ -12001,6 +12121,7 @@ def parse_legion_spy_line(line, state):
         space = state.get_field_space(int(m.group('uid')))
         field = space.get_field(int(m.group('fid')))
         field.size = int(m.group('size'))
+        field.provenance = m.group('provenance')
         return True
     m = field_name_pat.match(line)
     if m is not None:
@@ -12010,8 +12131,10 @@ def parse_legion_spy_line(line, state):
         return True
     m = region_pat.match(line)
     if m is not None:
-        state.get_region(int(m.group('iid'),16),
+        region = state.get_region(int(m.group('iid'),16),
             int(m.group('fid')),int(m.group('tid')))
+        region.owner = int(m.group('owner'))
+        region.provenance = m.group('provenance')
         return True
     m = region_name_pat.match(line)
     if m is not None:
@@ -12358,6 +12481,10 @@ class State(object):
         # Check to see if we have any unknown operations
         for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
+                # Ignore provenances for slice tasks we might have recorded
+                if op.uid in self.slice_index or op.uid in self.slice_slice:
+                    assert op.provenance is not None
+                    continue
                 print('WARNING: operation %d has unknown operation kind!' % op.uid)
                 if self.assert_on_warning:
                     assert False

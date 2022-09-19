@@ -3108,6 +3108,13 @@ extern "C" {
                                                bool elide_future_return);
 
   /**
+   * @see Legion::TaskLauncher::provenance
+   */
+  void
+  legion_task_launcher_set_provenance(legion_task_launcher_t launcher,
+                                      const char *provenance);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
@@ -3429,6 +3436,13 @@ extern "C" {
   legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher,
                                                 bool elide_future_return);
 
+  /**
+   * @see Legion::IndexTaskLauncher::provenance
+   */
+  void
+  legion_index_launcher_set_provenance(legion_index_launcher_t launcher,
+                                       const char *provenance);
+
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
   // -----------------------------------------------------------------------
@@ -3481,6 +3495,13 @@ extern "C" {
   void
   legion_inline_launcher_set_mapper_arg(legion_inline_launcher_t launcher,
                                         legion_untyped_buffer_t arg);
+
+  /**
+   * @see Legion::InlineLauncher::provenance
+   */
+  void
+  legion_inline_launcher_set_provenance(legion_inline_launcher_t launcher,
+                                        const char *provenance);
 
   /**
    * @see Legion::Runtime::remap_region()
@@ -3609,6 +3630,13 @@ extern "C" {
   void
   legion_fill_launcher_set_mapper_arg(legion_fill_launcher_t launcher,
                                       legion_untyped_buffer_t arg);
+
+  /**
+   * @see Legion::FillLauncher::provenance
+   */
+  void
+  legion_fill_launcher_set_provenance(legion_fill_launcher_t launcher,
+                                      const char *provenance);
 
   // -----------------------------------------------------------------------
   // Index Fill Field Operations
@@ -3830,6 +3858,13 @@ extern "C" {
                                             legion_untyped_buffer_t arg);
 
   /**
+   * @see Legion::IndexFillLauncher::provenance
+   */
+  void
+  legion_index_fill_launcher_set_provenance(legion_index_fill_launcher_t launcher,
+                                            const char *provenance);
+
+  /**
    * @return Caller does **NOT** take ownership of return value.
    *
    * @see Legion::Fill::requirement
@@ -4047,6 +4082,13 @@ extern "C" {
   void
   legion_copy_launcher_set_mapper_arg(legion_copy_launcher_t launcher,
                                       legion_untyped_buffer_t arg);
+
+  /**
+   * @see Legion::CopyLauncher::provenance
+   */
+  void
+  legion_copy_launcher_set_provenance(legion_copy_launcher_t launcher,
+                                      const char *provenance);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -4297,6 +4339,13 @@ extern "C" {
   legion_index_copy_launcher_set_mapper_arg(legion_index_copy_launcher_t launcher,
                                             legion_untyped_buffer_t arg);
 
+  /**
+   * @see Legion::IndexCopyLauncher::provenance
+   */
+  void
+  legion_index_copy_launcher_set_provenance(legion_index_copy_launcher_t launcher,
+                                            const char *provenance);
+
   // -----------------------------------------------------------------------
   // Acquire Operations
   // -----------------------------------------------------------------------
@@ -4367,6 +4416,13 @@ extern "C" {
   void
   legion_acquire_launcher_set_mapper_arg(legion_acquire_launcher_t launcher,
                                          legion_untyped_buffer_t arg);
+
+  /**
+   * @see Legion::AcquireLauncher::provenance
+   */
+  void
+  legion_acquire_launcher_set_provenance(legion_acquire_launcher_t launcher,
+                                         const char *provenance);
 
   // -----------------------------------------------------------------------
   // Release Operations
@@ -4439,6 +4495,13 @@ extern "C" {
   legion_release_launcher_set_mapper_arg(legion_release_launcher_t launcher,
                                          legion_untyped_buffer_t arg);
 
+  /**
+   * @see Legion::ReleaseLauncher::provenance
+   */
+  void
+  legion_release_launcher_set_provenance(legion_release_launcher_t launcher,
+                                         const char *provenance);
+
   // -----------------------------------------------------------------------
   // Attach/Detach Operations
   // -----------------------------------------------------------------------
@@ -4476,6 +4539,13 @@ extern "C" {
   void
   legion_attach_launcher_set_mapped(legion_attach_launcher_t handle,
                                     bool mapped);
+
+  /**
+   * @see Legion::AttachLauncher::provenance
+   */
+  void
+  legion_attach_launcher_set_provenance(legion_attach_launcher_t handle,
+                                        const char *provenance);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -4565,6 +4635,13 @@ extern "C" {
   void
   legion_index_attach_launcher_set_restricted(
       legion_index_attach_launcher_t handle, bool restricted);
+
+  /**
+   * @see Legion::IndexAttachLauncher::provenance
+   */
+  void
+  legion_index_attach_launcher_set_provenance(
+      legion_index_attach_launcher_t handle, const char *provenance);
 
   /**
    * @see Legion::IndexAttachLauncher::deduplicate_across_shards
@@ -4713,6 +4790,13 @@ extern "C" {
   legion_must_epoch_launcher_set_launch_space(
     legion_must_epoch_launcher_t launcher,
     legion_index_space_t is);
+
+  /**
+   * @see Legion::Must_EpochLauncher::provenance
+   */
+  void
+  legion_must_epoch_launcher_set_provenance(
+    legion_must_epoch_launcher_t launcher, const char *provenance);
 
   // -----------------------------------------------------------------------
   // Fence Operations

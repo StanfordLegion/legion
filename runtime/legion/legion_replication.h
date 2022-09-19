@@ -1121,7 +1121,7 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_counts(size_t count);
-      IndexSpaceNode* get_launch_space(void);
+      IndexSpaceNode* get_launch_space(Provenance *provenance);
     protected:
       std::vector<size_t> sizes;
       unsigned nonzeros;
@@ -1791,7 +1791,8 @@ namespace Legion {
                                IndexSpace color_space, FieldID fid, 
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
       void initialize_by_image(ReplicateContext *ctx,
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
@@ -1802,7 +1803,8 @@ namespace Legion {
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
                                ShardID shard, size_t total_shards,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
       void initialize_by_image_range(ReplicateContext *ctx,
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
@@ -1813,26 +1815,30 @@ namespace Legion {
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
                                ShardID shard, size_t total_shards,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
       void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
       void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
       void initialize_by_association(ReplicateContext *ctx,LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
-                               RtBarrier &dependent_partition_bar);
+                               RtBarrier &dependent_partition_bar,
+                               Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1883,16 +1889,16 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
-              std::vector<LogicalRegion> &deleted_regions,
+              std::vector<DeletedRegion> &deleted_regions,
               std::set<std::pair<FieldSpace,FieldID> > &created_fields,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::vector<DeletedField> &deleted_fields,
               std::map<FieldSpace,unsigned> &created_field_spaces,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
-              std::vector<FieldSpace> &deleted_field_spaces,
+              std::vector<DeletedFieldSpace> &deleted_field_spaces,
               std::map<IndexSpace,unsigned> &created_index_spaces,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::vector<DeletedIndexSpace> &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
       void map_replicate_tasks(void) const;
@@ -2204,7 +2210,7 @@ namespace Legion {
     public:
       ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
     public:
-      void initialize_capture(ReplicateContext *ctx, 
+      void initialize_capture(ReplicateContext *ctx, Provenance *provenance,
           bool has_blocking_call, bool remove_trace_reference);
     public:
       virtual void activate(void);
@@ -2242,7 +2248,8 @@ namespace Legion {
     public:
       ReplTraceCompleteOp& operator=(const ReplTraceCompleteOp &rhs);
     public:
-      void initialize_complete(ReplicateContext *ctx, bool has_blocking_call);
+      void initialize_complete(ReplicateContext *ctx, Provenance *provenance,
+                               bool has_blocking_call);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2280,7 +2287,8 @@ namespace Legion {
     public:
       ReplTraceReplayOp& operator=(const ReplTraceReplayOp &rhs);
     public:
-      void initialize_replay(ReplicateContext *ctx, LegionTrace *trace);
+      void initialize_replay(ReplicateContext *ctx, LegionTrace *trace,
+                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2315,7 +2323,8 @@ namespace Legion {
     public:
       ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
     public:
-      void initialize_begin(ReplicateContext *ctx, LegionTrace *trace);
+      void initialize_begin(ReplicateContext *ctx, LegionTrace *trace,
+                            Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2339,7 +2348,8 @@ namespace Legion {
     public:
       void initialize_summary(ReplicateContext *ctx,
                               ShardedPhysicalTemplate *tpl,
-                              Operation *invalidator);
+                              Operation *invalidator,
+                              Provenance *provenance);
       void perform_logging(void);
     public:
       virtual void activate(void);

@@ -1663,6 +1663,7 @@ namespace Legion {
     };
 
     // legion_ops.h
+    class Provenance;
     class Operation;
     class SpeculativeOp;
     class Memoizable;

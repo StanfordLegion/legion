@@ -316,8 +316,16 @@ namespace Realm {
         int ret = syscall(SYS_futex,
                           &dbi->state, FUTEX_WAIT, STATE_PENDING_ASLEEP,
                           nullptr, nullptr, 0);
+        // acceptable results are:
+        //  ret==0 (_probably_ woken up by another thread, but have to check)
+        //  errno=EINTR (_probably_ a spurious wakeup, have to check though)
+        //  errno=EAGAIN (FUTEX_WAKE preceded FUTEX_WAIT, no need to check
+        //                 state but no harm in it either)
         if(ret < 0) {
-          assert(errno == EAGAIN);
+          if((errno != EINTR) && (errno != EAGAIN)) {
+            log_mutex.fatal() << "unexpected futex_wait return: ret=" << ret << " errno=" << errno;
+            abort();
+          }
           errno = 0;
         }
         val = state.load_acquire();

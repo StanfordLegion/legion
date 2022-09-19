@@ -570,11 +570,12 @@ namespace Legion {
       class HashVerifier {
       public:
         virtual bool verify_hash(const uint64_t hash[2],
-                                 const char *description, bool every) = 0;
+            const char *description, Provenance *provenance, bool every) = 0;
       };
     public:
       Murmur3Hasher(HashVerifier *verifier, bool precise,
-                    bool verify_every_call, uint64_t seed = 0xCC892563);
+                    bool verify_every_call, Provenance *provenance = NULL,
+                    uint64_t seed = 0xCC892563);
       Murmur3Hasher(const Murmur3Hasher&) = delete;
       Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
     public:
@@ -588,8 +589,10 @@ namespace Legion {
       inline void hash(const void *value, size_t size);
       inline uint64_t rotl64(uint64_t x, uint8_t r);
       inline uint64_t fmix64(uint64_t k);
-    protected:
+    public:
       HashVerifier *const verifier;
+      Provenance *const provenance;
+    protected:
       uint8_t blocks[16];
       uint64_t h1, h2, len;
       uint8_t bytes;
@@ -1753,9 +1756,9 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     inline Murmur3Hasher::Murmur3Hasher(HashVerifier *v, bool pre, bool every, 
-                                        uint64_t seed)
-      : verifier(v), h1(seed), h2(seed), len(0), bytes(0), precise(pre),
-        verify_every_call(every)
+                                        Provenance *prov, uint64_t seed)
+      : verifier(v), provenance(prov), h1(seed), h2(seed), len(0), bytes(0),
+        precise(pre), verify_every_call(every)
     //-------------------------------------------------------------------------
     {
     }
@@ -1910,7 +1913,7 @@ namespace Legion {
       h2 += h1;
 
       uint64_t hash[2] = { h1, h2 };
-      return verifier->verify_hash(hash, description, every_call);
+      return verifier->verify_hash(hash, description, provenance, every_call);
     }
 
     //-------------------------------------------------------------------------
