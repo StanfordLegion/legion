@@ -3197,7 +3197,6 @@ namespace Legion {
             if (--region_finder->second == 0)
             {
               // No need to delete this here, it will be deleted by the op
-              delete_now.push_back(*rit);
               // Check to see if we have any latent field spaces to clean up
               if (!latent_field_spaces.empty())
               {
