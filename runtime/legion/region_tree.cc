@@ -16757,7 +16757,7 @@ namespace Legion {
           {
             FieldID fid;
             derez.deserialize(fid);
-            derez.deserialize(field_infos[fid]);
+            field_infos[fid].deserialize(derez);
           }
 #ifdef DEBUG_LEGION
           assert(!unallocated_indexes);

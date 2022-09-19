@@ -21514,7 +21514,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx, 
             IndexPartition(parent), &color, sizeof(color), 
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-            untyped_handles, provenance));
+            provenance, untyped_handles));
     }
 
     //--------------------------------------------------------------------------
@@ -21529,7 +21529,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx,
           IndexPartition(parent), &color, sizeof(color),
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-          IndexPartition(handle), provenance));
+          provenance, IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------
@@ -21548,7 +21548,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
             IndexPartition(parent), &color, sizeof(color),
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
-            untyped_handles, provenance));
+            provenance, untyped_handles));
     }
 
     //--------------------------------------------------------------------------
@@ -21563,7 +21563,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
           IndexPartition(parent), &color, sizeof(color),
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
-          IndexPartition(handle), provenance));
+          provenance, IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------
@@ -21583,7 +21583,7 @@ namespace Legion {
       return IndexSpaceT<DIM,T>(create_index_space_difference_internal(ctx,
             IndexPartition(parent), &color, sizeof(color),
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
-            IndexSpace(initial), untyped_handles, provenance));
+            provenance, IndexSpace(initial), untyped_handles));
     }
 
     //--------------------------------------------------------------------------

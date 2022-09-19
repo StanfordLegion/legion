@@ -388,7 +388,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id, runtime->address_space, 
-            (prov != NULL) ? NULL : prov->c_str());
+            (prov == NULL) ? NULL : prov->c_str());
       // Will take ownership of provenance if not NULL
       runtime->forest->create_index_space(handle, bounds, did, prov); 
       register_index_space_creation(handle);
