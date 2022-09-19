@@ -2765,7 +2765,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefProjectionSummary::project_refinement(RegionTreeNode *node,
-                      ShardID shard_id, std::vector<RegionNode*> &regions) const
+                      ShardID shard_id, std::vector<RegionNode*> &regions,
+                      Provenance *provenance) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2773,7 +2774,8 @@ namespace Legion {
 #endif
       // Find the domain of points for this shard
       IndexSpace shard_handle = sharding->find_shard_space(shard_id, domain,
-          (sharding_domain != NULL) ? sharding_domain->handle : domain->handle);
+          (sharding_domain != NULL) ? sharding_domain->handle : domain->handle,
+          provenance);
       IndexSpaceNode *shard_domain = node->context->get_node(shard_handle);
       projection->project_refinement(shard_domain, node, regions);
     }

@@ -647,9 +647,9 @@ namespace Legion {
       future_map = must_epoch->get_future_map();
       const IndexSpace local_space = sharding_space.exists() ?
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, sharding_space) :
+              launch_space, sharding_space, get_provenance()) :
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                          launch_space, launch_space->handle);
+              launch_space, launch_space->handle, get_provenance());
       // Figure out which points to enumerate
       Domain local_domain;
       runtime->forest->find_launch_space_domain(local_space, local_domain);
@@ -736,11 +736,11 @@ namespace Legion {
       if (sharding_space.exists())
         internal_space = 
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, sharding_space);
+              launch_space, sharding_space, get_provenance());
       else
         internal_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                          launch_space, launch_space->handle);
+              launch_space, launch_space->handle, get_provenance());
       // If we're recording then record the local_space
       if (is_recording())
       {
@@ -1045,11 +1045,11 @@ namespace Legion {
         if (sharding_space.exists())
           internal_space = 
             sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                                launch_space, sharding_space);
+                launch_space, sharding_space, get_provenance());
         else
           internal_space =
             sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                            launch_space, launch_space->handle);
+                launch_space, launch_space->handle, get_provenance());
       }
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
@@ -1120,7 +1120,8 @@ namespace Legion {
         launch_node : runtime->forest->get_node(shard_space);
       // Make a replicate future map 
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
-        runtime,runtime->get_available_distributed_id(),runtime->address_space);
+          runtime, runtime->get_available_distributed_id(),
+          runtime->address_space, get_provenance());
     } 
 
     //--------------------------------------------------------------------------
@@ -1640,6 +1641,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       FieldMask replicated_mask;
+      Provenance *provenance = get_provenance();
       const AddressSpaceID local_space = runtime->address_space;
       // Fill in the sharded_regions and sharded_partitions
       // data structures, we'll use those to compute the equivalence sets
@@ -1659,7 +1661,7 @@ namespace Legion {
           {
             std::vector<RegionNode*> regions;
             sit->first->project_refinement(it->first, 
-                repl_ctx->owner_shard->shard_id, regions);
+                repl_ctx->owner_shard->shard_id, regions, provenance);
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
             {
@@ -2390,12 +2392,12 @@ namespace Legion {
       IndexSpace local_space;
       if (sharding_space.exists())
         local_space =
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
-                                              launch_space, sharding_space);
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+              launch_space, sharding_space, get_provenance());
       else
         local_space =
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
-                                          launch_space, launch_space->handle);
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+              launch_space, launch_space->handle, get_provenance());
       // If we're recording then record the local_space
       if (is_recording())
       {
@@ -2904,11 +2906,11 @@ namespace Legion {
       if (sharding_space.exists())
         local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, sharding_space);
+              launch_space, sharding_space, get_provenance());
       else
         local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                          launch_space, launch_space->handle);
+              launch_space, launch_space->handle, get_provenance());
       // If we're recording then record the local_space
       if (is_recording())
       {
@@ -3939,11 +3941,12 @@ namespace Legion {
                                                        MapperID id, 
                                                        MappingTagID t,
                                                        const UntypedBuffer &arg,
-                                                       RtBarrier &deppart_bar)
+                                                       RtBarrier &deppart_bar,
+                                                       Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/); 
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -3986,11 +3989,12 @@ namespace Legion {
                                                    MapperID id, MappingTagID t,
                                                    const UntypedBuffer &marg,
                                                    ShardID shard, size_t total,
-                                                        RtBarrier &deppart_bar)
+                                                        RtBarrier &deppart_bar,
+                                                        Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -4045,11 +4049,12 @@ namespace Legion {
                                                 const UntypedBuffer &marg,
                                                 ShardID shard, 
                                                 size_t total_shards,
-                                                RtBarrier &deppart_bar) 
+                                                RtBarrier &deppart_bar,
+                                                Provenance *provenance) 
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
@@ -4095,11 +4100,12 @@ namespace Legion {
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
+                              Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -4136,11 +4142,12 @@ namespace Legion {
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
+                              Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = 
@@ -4175,13 +4182,14 @@ namespace Legion {
                               ReplicateContext *ctx, LogicalRegion domain,
                               LogicalRegion domain_parent, FieldID fid,
                               IndexSpace range, MapperID id, MappingTagID tag,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
+                              Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       mapping_barrier = deppart_bar;
       ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       DependentPartitionOp::initialize_by_association(ctx, domain, 
-                          domain_parent, fid, range, id, tag, marg);
+                          domain_parent, fid, range, id, tag, marg, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4341,7 +4349,7 @@ namespace Legion {
         // Compute the local index space of points for this shard
         IndexSpace local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                          launch_space, launch_space->handle);
+              launch_space, launch_space->handle, get_provenance());
         // If it's empty we're done, otherwise we go back on the queue
         if (!local_space.exists())
         {
@@ -4749,6 +4757,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
+      Provenance *provenance = get_provenance();
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -4758,7 +4767,8 @@ namespace Legion {
       {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
-        task->initialize_task(ctx, launcher.single_tasks[idx], false/*track*/);
+        task->initialize_task(ctx, launcher.single_tasks[idx],
+                              provenance, false/*track*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -4780,10 +4790,10 @@ namespace Legion {
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
           launch_space = ctx->find_index_launch_space(
-                          launcher.index_tasks[idx].launch_domain);
+                          launcher.index_tasks[idx].launch_domain, provenance);
         ReplIndexTask *task = runtime->get_available_repl_index_task();
         task->initialize_task(ctx, launcher.index_tasks[idx],
-                              launch_space, false/*track*/);
+                              launch_space, provenance, false/*track*/);
         task->set_must_epoch(this, indiv_tasks.size()+idx, true/*register*/);
         if (trace != NULL)
           task->set_trace(trace, NULL);
@@ -4815,7 +4825,8 @@ namespace Legion {
         ((launch_space == shard_space) || !shard_space.exists()) ?
         launch_node : runtime->forest->get_node(shard_space);
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
-        runtime,runtime->get_available_distributed_id(),runtime->address_space);
+          runtime, runtime->get_available_distributed_id(),
+          runtime->address_space, get_provenance());
     }
 
     //--------------------------------------------------------------------------
@@ -5069,16 +5080,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplMustEpochOp::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -7425,10 +7436,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceCaptureOp::initialize_capture(ReplicateContext *ctx, 
-                                          bool has_block, bool remove_trace_ref)
+                  Provenance *provenance, bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -7655,10 +7666,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceCompleteOp::initialize_complete(ReplicateContext *ctx, 
-                                                  bool has_block)
+                                         Provenance *provenance, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -7967,10 +7978,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::initialize_replay(ReplicateContext *ctx, 
-                                              LegionTrace *trace)
+                                     LegionTrace *trace, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -8207,10 +8218,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::initialize_begin(ReplicateContext *ctx, 
-                                            LegionTrace *trace)
+                                     LegionTrace *trace, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -8287,13 +8298,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplTraceSummaryOp::initialize_summary(ReplicateContext *ctx,
                                                 ShardedPhysicalTemplate *tpl,
-                                                Operation *invalidator)
+                                                Operation *invalidator,
+                                                Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
-      initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/,
+                 provenance, false/*track*/);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -14908,11 +14921,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* IndexAttachLaunchSpace::get_launch_space(void)
+    IndexSpaceNode* IndexAttachLaunchSpace::get_launch_space(
+                                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
-      return context->compute_index_attach_launch_spaces(sizes);
+      return context->compute_index_attach_launch_spaces(sizes, provenance);
     }
 
     /////////////////////////////////////////////////////////////

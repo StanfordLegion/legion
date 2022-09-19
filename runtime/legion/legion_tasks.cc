@@ -31,7 +31,7 @@
 namespace Legion {
   namespace Internal {
 
-    LEGION_EXTERN_LOGGER_DECLARATIONS 
+    LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
     // External Task 
@@ -641,11 +641,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
-                  const std::vector<StaticDependence> *dependences,
-                  const Predicate &p, Processor::TaskFuncID tid)
+                const std::vector<StaticDependence> *dependences,
+                const Predicate &p, Processor::TaskFuncID tid, Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_speculation(ctx, track, get_region_count(), dependences, p);
+      initialize_speculation(ctx, track, get_region_count(),dependences,p,prov);
       initialize_memoizable();
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
@@ -5281,7 +5281,7 @@ namespace Legion {
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
           slice.domain_is = 
             runtime->find_or_create_index_slice_space(slice.domain,
-                                    internal_space.get_type_tag());
+                  internal_space.get_type_tag(), get_provenance());
         if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
@@ -5837,6 +5837,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future IndividualTask::initialize_task(InnerContext *ctx,
                                            const TaskLauncher &launcher,
+                                           Provenance *provenance,
                                            bool track /*=true*/,
                                            bool top_level /*=false*/,
                                            bool implicit_top_level /*=false*/,
@@ -5873,7 +5874,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, provenance);
       // If the task has any output requirements, we create fresh region names
       // return them back to the user
       if (outputs != NULL)
@@ -5939,7 +5940,7 @@ namespace Legion {
 #ifdef LEGION_SPY
               unique_op_id,
 #endif
-              parent_ctx->get_depth()));
+              parent_ctx->get_depth(), provenance));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -5991,6 +5992,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       valid_output_regions.resize(outputs.size());
+      Provenance *provenance = get_provenance();
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
@@ -6000,11 +6002,11 @@ namespace Legion {
         {
           // Create a deferred index space
           IndexSpace index_space =
-            parent_ctx->create_unbound_index_space(req.type_tag);
+            parent_ctx->create_unbound_index_space(req.type_tag, provenance);
           // Create an output region
           LogicalRegion region = parent_ctx->create_logical_region(
-              runtime->forest, index_space, req.field_space, 
-              false/*local region*/, true/*output region*/);
+              index_space, req.field_space, false/*local region*/,
+              provenance, true/*output region*/);
 
           // Set the region back to the output requirement so the caller
           // can use it for downstream tasks
@@ -6611,6 +6613,11 @@ namespace Legion {
         if (predicate_false_size > 0)
           rez.serialize(predicate_false_result, predicate_false_size);
       }
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6685,11 +6692,18 @@ namespace Legion {
           derez.deserialize(predicate_false_result, predicate_false_size);
         }
       }
+      set_provenance(Provenance::deserialize(derez));
       // Figure out what our parent context is
       RtEvent ctx_ready;
       parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      {
+        // Wait if the profiler is going to ask for the context
+        if (runtime->profiler != NULL)
+          ctx_ready.wait();
+        else
+          ready_events.insert(ctx_ready);
+      }
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Have to do this before resolving speculation in case
@@ -6698,6 +6712,8 @@ namespace Legion {
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -7334,6 +7350,7 @@ namespace Legion {
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
+      set_provenance(slice_owner->get_provenance());
       // We should always just apply these things now since we were mapped 
       // on the owner node
 #ifdef DEBUG_LEGION
@@ -7341,6 +7358,8 @@ namespace Legion {
 #endif
       slice_owner->record_point_mapped(deferred_complete_mapping,
                          ApEvent::NO_AP_EVENT, acquired_instances);
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       return false;
     }
 
@@ -8658,6 +8677,7 @@ namespace Legion {
     FutureMap IndexTask::initialize_task(InnerContext *ctx,
                                          const IndexTaskLauncher &launcher,
                                          IndexSpace launch_sp,
+                                         Provenance *provenance,
                                          bool track /*= true*/,
                              std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
@@ -8688,14 +8708,15 @@ namespace Legion {
       // Very important that these freezes occur before we initialize
       // this operation because they can launch creation operations to
       // make the future maps
-      point_arguments = launcher.argument_map.impl->freeze(parent_ctx);
+      point_arguments = 
+        launcher.argument_map.impl->freeze(parent_ctx, provenance);
       const size_t num_point_futures = launcher.point_futures.size();
       if (num_point_futures > 0)
       {
         point_futures.resize(num_point_futures);
         for (unsigned idx = 0; idx < num_point_futures; idx++)
           point_futures[idx] = 
-            launcher.point_futures[idx].impl->freeze(parent_ctx);
+            launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
@@ -8723,7 +8744,7 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, provenance);
       if (outputs != NULL)
       {
         if (launcher.predicate != Predicate::TRUE_PRED)
@@ -8775,6 +8796,7 @@ namespace Legion {
     Future IndexTask::initialize_task(InnerContext *ctx,
                                       const IndexTaskLauncher &launcher,
                                       IndexSpace launch_sp,
+                                      Provenance *provenance,
                                       ReductionOpID redop_id, 
                                       bool deterministic,
                                       bool track /*= true*/,
@@ -8783,7 +8805,7 @@ namespace Legion {
     {
       if (launcher.elide_future_return)
       {
-        initialize_task(ctx, launcher, launch_sp, track, outputs);
+        initialize_task(ctx, launcher, launch_sp, provenance, track, outputs);
         return Future();
       }
       parent_ctx = ctx;
@@ -8812,14 +8834,15 @@ namespace Legion {
       // Very important that these freezes occur before we initialize
       // this operation because they can launch creation operations to
       // make the future maps
-      point_arguments = launcher.argument_map.impl->freeze(parent_ctx);
+      point_arguments = 
+        launcher.argument_map.impl->freeze(parent_ctx, provenance);
       const size_t num_point_futures = launcher.point_futures.size();
       if (num_point_futures > 0)
       {
         point_futures.resize(num_point_futures);
         for (unsigned idx = 0; idx < num_point_futures; idx++)
           point_futures[idx] = 
-            launcher.point_futures[idx].impl->freeze(parent_ctx);
+            launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
@@ -8856,7 +8879,7 @@ namespace Legion {
                       "(ID %lld) is not foldable.",
                       redop, get_task_name(), get_unique_id())
       initialize_base_task(ctx, track, launcher.static_dependences,
-                           launcher.predicate, task_id);
+                           launcher.predicate, task_id, provenance);
       if (outputs != NULL)
       {
         if (launcher.predicate != Predicate::TRUE_PRED)
@@ -8879,7 +8902,7 @@ namespace Legion {
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(parent_ctx, runtime,
           true/*register*/, runtime->get_available_distributed_id(), 
-          runtime->address_space, get_completion_event(),
+          runtime->address_space, get_completion_event(), provenance,
           (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
       if (runtime->legion_spy_enabled && track)
@@ -9013,6 +9036,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       size_t num_tasks = runtime->forest->get_domain_volume(launch_space);
 #endif
+      Provenance *provenance = get_provenance();
       output_region_options.resize(outputs.size());
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
@@ -9098,18 +9122,18 @@ namespace Legion {
 
           // Create a deferred index space
           IndexSpace index_space =
-            parent_ctx->create_unbound_index_space(type_tag);
+            parent_ctx->create_unbound_index_space(type_tag, provenance);
 
           // Create a pending partition using the launch domain as the color space
           IndexPartition pid = parent_ctx->create_pending_partition(
               index_space, color_space,
-              LEGION_DISJOINT_COMPLETE_KIND,
-              LEGION_AUTO_GENERATE_ID, true/*trust partitioning*/);
+              LEGION_DISJOINT_COMPLETE_KIND, LEGION_AUTO_GENERATE_ID, 
+              provenance, true/*trust partitioning*/);
 
           // Create an output region and a partition
           LogicalRegion region = parent_ctx->create_logical_region(
-              runtime->forest, index_space, req.field_space, 
-              false/*local region*/, true/*output region*/);
+              index_space, req.field_space, false/*local region*/,
+              provenance, true/*output region*/);
 
           LogicalPartition partition =
             runtime->forest->get_logical_partition(region, pid);
@@ -9758,7 +9782,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
@@ -9915,8 +9939,9 @@ namespace Legion {
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, this->launch_space,
-        runtime,runtime->get_available_distributed_id(),runtime->address_space);
+      return new FutureMapImpl(ctx, this, this->launch_space, runtime,
+          runtime->get_available_distributed_id(), runtime->address_space,
+          get_provenance());
     }
 
     //--------------------------------------------------------------------------
@@ -11069,10 +11094,13 @@ namespace Legion {
         if (predicate_false_size > 0)
           rez.serialize(predicate_false_result, predicate_false_size);
       }
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
         points[idx]->pack_task(rez, target);
-      }
       // If we don't have any points, we have to pack up the argument map
       // and any trace info that we need for doing remote tracing
       if (points.empty())
@@ -11135,8 +11163,14 @@ namespace Legion {
       {
         RtEvent ctx_ready;
         parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
-        if (ctx_ready.exists())
-          ready_events.insert(ctx_ready);
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        {
+          // Need to wait if the profiler is going to want to check this
+          if (runtime->profiler != NULL)
+            ctx_ready.wait();
+          else
+            ready_events.insert(ctx_ready);
+        }
       }
       else
         parent_ctx = index_owner->parent_ctx;
@@ -11163,6 +11197,9 @@ namespace Legion {
           derez.deserialize(predicate_false_result, predicate_false_size);
         }
       }
+      // Unpack the provenance before unpacking any point tasks so
+      // that they can pick it up as well
+      set_provenance(Provenance::deserialize(derez));
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = runtime->get_available_point_task(); 
@@ -11206,6 +11243,8 @@ namespace Legion {
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_operation(this);
       // Return true to add this to the ready queue
       return true;
     }
@@ -11276,7 +11315,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(); 
       result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
@@ -11399,7 +11438,8 @@ namespace Legion {
 #endif
         LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->get_context_uid(), &mutator, context_index, point);
+            parent_ctx->get_context_uid(), &mutator, context_index, point,
+            get_provenance());
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -11449,7 +11489,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task();
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
-                                   Predicate::TRUE_PRED, this->task_id);
+          Predicate::TRUE_PRED, this->task_id, get_provenance());
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
@@ -11706,7 +11746,8 @@ namespace Legion {
 #endif
       WrapperReferenceMutator mutator(applied_conditions);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->get_context_uid(), &mutator, context_index, point);
+        parent_ctx->get_context_uid(), &mutator, context_index, point,
+        get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 
@@ -12024,16 +12065,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SliceTask::receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regs,
-              std::vector<LogicalRegion> &deleted_regs,
+              std::vector<DeletedRegion> &deleted_regs,
               std::set<std::pair<FieldSpace,FieldID> > &created_fids,
-              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::vector<DeletedField> &deleted_fids,
               std::map<FieldSpace,unsigned> &created_fs,
               std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
-              std::vector<FieldSpace> &deleted_fs,
+              std::vector<DeletedFieldSpace> &deleted_fs,
               std::map<IndexSpace,unsigned> &created_is,
-              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::vector<DeletedIndexSpace> &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
-              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {

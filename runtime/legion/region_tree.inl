@@ -1244,7 +1244,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
                          DistributedID did, RtEvent initialized, 
-                         std::set<RtEvent> *applied,
+                         Provenance *provenance, std::set<RtEvent> *applied,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -1255,12 +1255,12 @@ namespace Legion {
       if (is_index_space_tight)
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id,
+                          provenance, realm_index_space_ready, new_expr_id,
                           collective_mapping, applied, true/*add root ref*/);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
-                          realm_index_space_ready, new_expr_id,
+                          provenance, realm_index_space_ready, new_expr_id,
                           collective_mapping, applied, true/*add root ref*/);
     }
 
@@ -1976,7 +1976,8 @@ namespace Legion {
         // effectively new "atom" index spaces for Legion Spy's analysis
         const IndexSpaceID fake_space_id = 
           forest->runtime->get_unique_index_space_id();
-        LegionSpy::log_top_index_space(fake_space_id);
+        LegionSpy::log_top_index_space(fake_space_id,
+            forest->runtime->address_space, NULL/*provenance*/);
         LegionSpy::log_index_space_expr(fake_space_id, this->expr_id);
         bool all_empty = true;
         for (unsigned idx = 0; idx < num_rects; idx++)
@@ -2147,9 +2148,9 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
-        CollectiveMapping *mapping, bool is_root)
+        Provenance *prov, CollectiveMapping *mapping, bool is_root)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, mapping, is_root), linearization_ready(false)
+          dep, prov, mapping, is_root), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2479,7 +2480,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
                          DistributedID did, RtEvent initialized, 
-                         std::set<RtEvent> *applied,
+                         Provenance *provenance, std::set<RtEvent> *applied,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -2493,8 +2494,8 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                               NULL/*parent*/, 0/*color*/, did, initialized,
-                              ready, new_expr_id, collective_mapping, applied,
-                              true/*add root reference*/);
+                              provenance, ready, new_expr_id,collective_mapping,
+                              applied, true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5989,7 +5990,8 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpace IndexSpaceNodeT<DIM,T>::create_shard_space(
        ShardingFunction *func, ShardID shard, IndexSpace shard_space,
-       const Domain &shard_domain, const std::vector<DomainPoint> &shard_points)
+       const Domain &shard_domain, const std::vector<DomainPoint> &shard_points,
+       Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space;
@@ -6037,7 +6039,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> realm_is(index_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
       return context->runtime->find_or_create_index_slice_space(domain, 
-                                                handle.get_type_tag());
+                                    handle.get_type_tag(), provenance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7328,9 +7330,10 @@ namespace Legion {
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, CollectiveMapping *map,
-                                        ShardMapping *shard_map)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
+                                        ShardMapping *shard_map, 
+                                        Provenance *prov)
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did,
+          partition_ready, pend, init, map, shard_map, prov), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7345,9 +7348,10 @@ namespace Legion {
                                         int comp, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, CollectiveMapping *map,
-                                        ShardMapping *shard_map)
+                                        ShardMapping *shard_map,
+                                        Provenance *prov)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                    partition_ready, pend, init, map, shard_map), kd_root(NULL),
+          partition_ready, pend, init, map, shard_map, prov), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {

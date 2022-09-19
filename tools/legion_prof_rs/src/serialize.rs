@@ -103,7 +103,7 @@ pub enum Record {
     PhysicalInstDimOrderDesc { op_id: OpID, inst_id: InstID, dim: u32, dim_kind: u32 },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
-    OperationInstance { op_id: OpID, kind: u32 },
+    OperationInstance { op_id: OpID, parent_id: OpID, kind: u32, provenance: String },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
@@ -593,8 +593,10 @@ fn parse_task_variant(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 }
 fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
+    let (input, parent_id) = parse_op_id(input)?;
     let (input, kind) = le_u32(input)?;
-    Ok((input, Record::OperationInstance { op_id, kind }))
+    let (input, provenance) = parse_string(input)?;
+    Ok((input, Record::OperationInstance { op_id, parent_id, kind, provenance }))
 }
 fn parse_multi_task(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
