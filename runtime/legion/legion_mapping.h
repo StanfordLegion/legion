@@ -2296,46 +2296,58 @@ namespace Legion {
       //------------------------------------------------------------------------
       IndexSpace create_index_space(MapperContext ctx, 
                                     const Domain &bounds,
-                                    TypeTag type_tag = 0) const;
+                                    TypeTag type_tag = 0,
+                                    const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-                                            Rect<DIM,COORD_T> bounds) const;
+                                           Rect<DIM,COORD_T> bounds,
+                                           const char *provenance = NULL) const;
 
       IndexSpace create_index_space(MapperContext ctx, 
-                                  const std::vector<DomainPoint> &points) const;
+                                    const std::vector<DomainPoint> &points,
+                                    const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-                    const std::vector<Point<DIM,COORD_T> > &points) const;
+                    const std::vector<Point<DIM,COORD_T> > &points,
+                    const char *provenance = NULL) const;
 
       IndexSpace create_index_space(MapperContext ctx,
-                                    const std::vector<Domain> &rects) const;
+                                    const std::vector<Domain> &rects,
+                                    const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-                      const std::vector<Rect<DIM,COORD_T> > &rects) const;
+                      const std::vector<Rect<DIM,COORD_T> > &rects,
+                      const char *provenance = NULL) const;
 
       IndexSpace union_index_spaces(MapperContext ctx,
-                      const std::vector<IndexSpace> &sources) const;
+                      const std::vector<IndexSpace> &sources,
+                      const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> union_index_spaces(MapperContext ctx,
-                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources,
+                const char *provenance = NULL) const;
 
       IndexSpace intersect_index_spaces(MapperContext ctx,
-                      const std::vector<IndexSpace> &sources) const;
+                      const std::vector<IndexSpace> &sources,
+                      const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> intersect_index_spaces(MapperContext ctx,
-                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources,
+                const char *provenance = NULL) const;
 
       IndexSpace subtract_index_spaces(MapperContext ctx,
-                        IndexSpace left, IndexSpace right) const;
+                        IndexSpace left, IndexSpace right,
+                        const char *provenance = NULL) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> subtract_index_spaces(MapperContext ctx,
-          IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right) const;
+          IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right,
+          const char *provenance = NULL) const;
     public:
       //------------------------------------------------------------------------
       // Convenience methods for introspecting index spaces

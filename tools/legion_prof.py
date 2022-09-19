@@ -18,6 +18,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from collections import OrderedDict
+
 import tempfile
 import legion_spy
 import argparse
@@ -186,17 +188,24 @@ def get_prof_uid():
     return prof_uid_ctr
 
 def data_tsv_str(level, level_ready, ready, start, end, color, opacity, title,
-                  initiation, _in, out, children, parents, prof_uid):
+                  initiation, _in, out, children, parents, prof_uid, op_id=None):
     # replace None with ''
     def xstr(s):
         return str(s or '')
+    if (op_id == None):
+        str_op_id = ""
+    else:
+        str_op_id = str(op_id)
+    # if initiation == None:
+    #     print(op_id, initiation)
     return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
            xstr('%.3f' % ready if ready else ready) + "\t" + \
            xstr('%.3f' % start if start else start) + "\t" + \
            xstr('%.3f' % end if end else end) + "\t" + \
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
-           xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\n"
+           xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
+           str_op_id + "\n"
 
 def slugify(filename):
     # convert spaces to underscores
@@ -1344,7 +1353,8 @@ class Base(object):
 class Operation(Base):
     __slots__ = [
         'op_id', 'kind_num', 'kind', 'is_task', 'is_meta', 'is_multi',
-        'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner', 'proc'
+        'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner', 'proc',
+        'parent_id', 'provenance'
     ]
     def __init__(self, op_id):
         Base.__init__(self)
@@ -1361,6 +1371,8 @@ class Operation(Base):
         self.color = None
         self.owner = None
         self.proc = None
+        self.parent_id = -1
+        self.provenance = None
 
     def assign_color(self, color_map):
         assert self.color is None
@@ -1430,7 +1442,7 @@ class HasWaiters(object):
         return active_time
 
     def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
-                 level, level_ready):
+                 level, level_ready, op_id=None):
         title = repr(self)
         initiation = str(self.initiation)
         color = self.get_color()
@@ -1460,7 +1472,8 @@ class HasWaiters(object):
                                     out = out,
                                     children = children,
                                     parents = parents,
-                                    prof_uid = self.prof_uid)
+                                    prof_uid = self.prof_uid,
+                                    op_id = op_id)
                 # only write once
                 _in = ""
                 out = ""
@@ -1479,7 +1492,8 @@ class HasWaiters(object):
                                     out = "",
                                     children = "",
                                     parents = "",
-                                    prof_uid = self.prof_uid)
+                                    prof_uid = self.prof_uid,
+                                    op_id = op_id)
                 ready = data_tsv_str(level = cur_level,
                                      level_ready = l_ready,
                                      ready = wait_interval.ready,
@@ -1493,7 +1507,8 @@ class HasWaiters(object):
                                      out = "",
                                      children = "",
                                      parents = "",
-                                    prof_uid = self.prof_uid)
+                                     prof_uid = self.prof_uid,
+                                     op_id = op_id)
 
                 tsv_file.write(init)
                 tsv_file.write(wait)
@@ -1513,7 +1528,8 @@ class HasWaiters(object):
                                    out = "",
                                    children = "",
                                    parents = "",
-                                    prof_uid = self.prof_uid)
+                                   prof_uid = self.prof_uid,
+                                   op_id = op_id)
 
                 tsv_file.write(end)
         else:
@@ -1534,7 +1550,8 @@ class HasWaiters(object):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = op_id)
 
             tsv_file.write(line)
 
@@ -1548,8 +1565,12 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
 
         self.base_op = op
         self.variant = variant
-        self.initiation = ''
+        self.initiation = ""
         self.is_task = True
+        # make sure set the parent_id and provenance as we create a new task instance to replace the original operation
+        self.parent_id = op.parent_id
+        if op.provenance is not None:
+            self.provenance = op.provenance
 
     def assign_color(self, color):
         assert self.color is None
@@ -1561,10 +1582,13 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
                  level, level_ready):
+        # update the initiation
+        self.initiation = self.parent_id
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
-                                   level_ready)
+                                   level_ready,
+                                   self.op_id)
 
     def get_color(self):
         assert self.color is not None
@@ -1591,6 +1615,8 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
 
     def __repr__(self):
         assert self.variant is not None
+        # if self.provenance is not None:
+        #   print(self.variant, self.op_id, self.provenance)
         return str(self.variant)+' '+self.get_info()
 
 class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
@@ -1677,7 +1703,8 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
                                 out = None,
                                 children = None,
                                 parents = None,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = self.proftask_id)
         tsv_file.write(tsv_line)
 
     def __repr__(self):
@@ -2806,11 +2833,20 @@ class State(object):
             self.variants[key].name = name
         self.variants[key].set_task_kind(task_kind)
 
-    def log_operation(self, op_id, kind):
+    def log_operation(self, op_id, parent_id, kind, provenance=None):
         op = self.find_op(op_id)
+        #if op_id == 1:
+        op.parent_id = parent_id
         assert kind in self.op_kinds
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
+        # the provenance is passed as "" by binary serializer
+        #   when it is not set
+        if provenance == "":
+            provenance = None
+        op.provenance = provenance
+        #TODO:WEI
+        # print(op.op_id, op.parent_id, op.provenance)
 
     def log_multi(self, op_id, task_id):
         op = self.find_op(op_id)
@@ -2969,6 +3005,7 @@ class State(object):
             assert start is not None
             assert stop is not None
             task = Task(variant, task, create, ready, start, stop) 
+            # print(task.op_id, variant, task.provenance)
             variant.ops[op_id] = task
             self.operations[op_id] = task
             # update prof_uid map
@@ -3856,6 +3893,13 @@ class State(object):
             critical_path = map(lambda p: get_path_obj(p), critical_path.path)
         return critical_path
 
+    def check_operation_parent_id(self):
+        self.operations = OrderedDict(sorted(self.operations.items()))
+        for op_id, operation in iteritems(self.operations):
+            if operation.parent_id not in self.operations.keys():
+                print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
+                operation.parent_id = 0
+
     def simplify_critical_path(self, critical_path):
         simplified_critical_path = set()
         if len(critical_path) > 0:
@@ -3909,7 +3953,7 @@ class State(object):
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\n"
+        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\top_id\n"
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
@@ -3925,17 +3969,20 @@ class State(object):
         #     json.dump(op_dependencies, dep_json_file)
 
         ops_file = open(ops_file_name, "w")
-        ops_file.write("op_id\tdesc\tproc\tlevel\n")
+        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\n")
         for op_id, operation in sorted(iteritems(self.operations)):
             if operation.is_trimmed():
                 continue
             proc = ""
             level = ""
+            provenance = ""
             if (operation.proc is not None):
                 proc = repr(operation.proc)
                 level = str(operation.level+1)
-            ops_file.write("%d\t%s\t%s\t%s\n" % \
-                            (op_id, str(operation), proc, level))
+            if (operation.provenance is not None):
+                provenance = operation.provenance
+            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
+                            (op_id, operation.parent_id, str(operation), proc, level, provenance))
         ops_file.close()
 
         if show_procs:
@@ -4163,6 +4210,9 @@ def main():
 
     # Check the message latencies
     state.check_message_latencies(args.message_threshold, args.message_percentage)
+
+    # sort operations and check parent_id
+    state.check_operation_parent_id()
 
     if print_stats:
         state.print_stats(verbose)

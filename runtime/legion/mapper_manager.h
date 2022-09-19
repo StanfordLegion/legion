@@ -456,13 +456,15 @@ namespace Legion {
                             const bool filter_acquired_instances = false);
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
-                                    TypeTag type_tag);
+                                    TypeTag type_tag, const char *provenance);
       IndexSpace union_index_spaces(MappingCallInfo *info, 
-                                    const std::vector<IndexSpace> &sources);
+                                    const std::vector<IndexSpace> &sources,
+                                    const char *provenance);
       IndexSpace intersect_index_spaces(MappingCallInfo *info,
-                                        const std::vector<IndexSpace> &sources);
-      IndexSpace subtract_index_spaces(MappingCallInfo *info,
-                                       IndexSpace left, IndexSpace right);
+                                        const std::vector<IndexSpace> &sources,
+                                        const char *provenance);
+      IndexSpace subtract_index_spaces(MappingCallInfo *info, IndexSpace left,
+                                       IndexSpace right,const char *provenance);
       bool is_index_space_empty(MappingCallInfo *info, IndexSpace handle);
       bool index_spaces_overlap(MappingCallInfo *info, 
                                 IndexSpace one, IndexSpace two);

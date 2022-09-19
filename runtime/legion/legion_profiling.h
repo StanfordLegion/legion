@@ -107,7 +107,9 @@ namespace Legion {
       struct OperationInstance {
       public:
         UniqueID op_id;
+        UniqueID parent_id;
         unsigned kind;
+        const char *provenance;
       };
       struct MultiTask {
       public:

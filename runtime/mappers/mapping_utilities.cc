@@ -1156,6 +1156,20 @@ namespace Legion {
       //------------------------------------------------------------------------
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
+                            LogicalRegion lr)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "(" << lr.get_tree_id() << ",("
+           << lr.get_index_space().get_id() << ","
+           << lr.get_index_space().get_tree_id() << "),"
+           << lr.get_field_space().get_id() << ")";
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
                             IndexSpace is)
       //------------------------------------------------------------------------
       {
@@ -1240,7 +1254,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         std::stringstream ss;
-        ss << "PhysicalInstance";
+        ss << "Instance";
         if (inst.is_virtual_instance()) {
           ss << "(VIRTUAL)";
           return ss.str();
@@ -1252,7 +1266,9 @@ namespace Legion {
         if (inst.is_external_instance()) {
           ss << "EXTERNAL,";
         }
-        ss << "memory=" << inst.get_location();
+        ss << "region=(" << inst.get_tree_id() << ",*,"
+           << inst.get_field_space().get_id() << ")";
+        ss << ",memory=" << inst.get_location();
         ss << ",domain=" << to_string(runtime, ctx, inst.get_instance_domain());
         std::set<FieldID> fields;
         inst.get_fields(fields);
@@ -1272,7 +1288,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         std::stringstream ss;
-        ss << "RegionRequirement";
+        ss << "Requirement";
         ss << "[" << req_idx << "]";
         ss << "(privilege=" << to_string(req.privilege);
         if (req.is_restricted()) {
@@ -1281,21 +1297,12 @@ namespace Legion {
         if (req.prop != LEGION_EXCLUSIVE) {
           ss << ",prop=" << to_string(req.prop);
         }
-        RegionTreeID tree;
-        IndexSpace is;
-        FieldSpace fs;
-        if (req.region.exists()) {
-          tree = req.region.get_tree_id();
-          is = req.region.get_index_space();
-          fs = req.region.get_field_space();
-        } else {
-          assert(req.partition.exists());
-          tree = req.partition.get_tree_id();
-          is = runtime->get_parent_index_space(
-              ctx, req.partition.get_index_partition());
-          fs = req.partition.get_field_space();
-        }
-        ss << ",tree=" << tree;
+        LogicalRegion lr =
+          req.region.exists() ? req.region
+          : runtime->get_parent_logical_region(ctx, req.partition);
+        IndexSpace is = lr.get_index_space();
+        FieldSpace fs = lr.get_field_space();
+        ss << ",region=" << to_string(runtime, ctx, lr);
         ss << ",domain=" << to_string(runtime, ctx, is);
         ss << ",fields=" << to_string(runtime, ctx, fs, req.privilege_fields);
         ss << ")";

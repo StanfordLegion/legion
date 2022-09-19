@@ -54,12 +54,9 @@ namespace Realm {
       void release(Event wait_on = Event::NO_EVENT) const;
 
       // Create a new reservation, destroy an existing reservation 
-      static Reservation create_reservation(size_t _data_size = 0);
+      static Reservation create_reservation();
 
       void destroy_reservation(Event wait_on = Event::NO_EVENT);
-
-      size_t data_size(void) const;
-      void *data_ptr(void) const;
     };
 
     inline std::ostream& operator<<(std::ostream& os, Reservation r) { return os << std::hex << r.id << std::dec; }

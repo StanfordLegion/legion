@@ -1035,16 +1035,22 @@ namespace Realm {
 	
 	log_inst.info() << "allocation failed: inst=" << me;
 
+        // mark metadata valid before we return any profiling responses
+        NodeSet early_reqs;
+        metadata.inst_offset = (size_t)-2;
+        metadata.mark_valid(early_reqs);
+        if(!early_reqs.empty())
+          send_metadata(early_reqs);
+
 	// poison the completion event, if it exists
 	Event ready_event = Event::NO_EVENT;
 	{
 	  AutoLock<> al(mutex);
 	  ready_event = metadata.ready_event;
 	  metadata.ready_event = Event::NO_EVENT;
-	  metadata.inst_offset = (size_t)-2;
 
-	  // adding measurements is not thread safe w.r.t. a deferral
-	  //  message, so do it with lock held
+          // adding measurements is not thread safe w.r.t. a deferral
+          //  message, so do it with lock held
 	  if(measurements.wants_measurement<InstanceStatus>()) {
 	    InstanceStatus stat;
 	    stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
@@ -1086,14 +1092,6 @@ namespace Realm {
           //  code path instead
           measurements.clear();
 	}
-
-        // this looks weird, but we have to temporarily mark the metadata
-        //  valid in case any other nodes have already requested a copy - we'll
-        //  immediately turn around and invalidate it
-        NodeSet early_reqs;
-        metadata.mark_valid(early_reqs);
-        if(!early_reqs.empty())
-          send_metadata(early_reqs);
 
 	if(ready_event.exists())
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/, work_until);

@@ -66,15 +66,18 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
-      : ctx(c), tid(t), last_memoized(0),
-        physical_op_count(0), blocking_call_observed(false), 
+    LegionTrace::LegionTrace(InnerContext *c, TraceID t, 
+                             bool logical_only, Provenance *p)
+      : ctx(c), tid(t), begin_provenance(p), end_provenance(NULL),
+        last_memoized(0), physical_op_count(0), blocking_call_observed(false), 
         has_intermediate_ops(false), fixed(false)
     //--------------------------------------------------------------------------
     {
       state.store(LOGICAL_ONLY);
       physical_trace = logical_only ? NULL : 
         new PhysicalTrace(c->owner_task->runtime, this);
+      if (begin_provenance != NULL)
+        begin_provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -83,16 +86,24 @@ namespace Legion {
     {
       if (physical_trace != NULL)
         delete physical_trace;
+      if ((begin_provenance != NULL) && begin_provenance->remove_reference())
+        delete begin_provenance;
+      if ((end_provenance != NULL) && end_provenance->remove_reference())
+        delete end_provenance;
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::fix_trace(void)
+    void LegionTrace::fix_trace(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!fixed);
+      assert(end_provenance == NULL);
 #endif
       fixed = true;
+      end_provenance = provenance;
+      if (end_provenance != NULL)
+        end_provenance->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -229,7 +240,8 @@ namespace Legion {
         else
         {
           physical_trace->clear_cached_template();
-          current_template->issue_summary_operations(ctx, invalidator);
+          current_template->issue_summary_operations(ctx, invalidator, 
+                                                     end_provenance);
           has_intermediate_ops = false;
         }
       }
@@ -243,8 +255,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     StaticTrace::StaticTrace(TraceID t, InnerContext *c, bool logical_only,
-                             const std::set<RegionTreeID> *trees)
-      : LegionTrace(c, t, logical_only)
+                             Provenance *p, const std::set<RegionTreeID> *trees)
+      : LegionTrace(c, t, logical_only, p)
     //--------------------------------------------------------------------------
     {
       if (trees != NULL)
@@ -253,7 +265,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     StaticTrace::StaticTrace(const StaticTrace &rhs)
-      : LegionTrace(NULL, 0, true)
+      : LegionTrace(NULL, 0, true, NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -564,15 +576,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, InnerContext *c, bool logical_only)
-      : LegionTrace(c, t, logical_only), tracing(true)
+    DynamicTrace::DynamicTrace(TraceID t, InnerContext *c, bool logical_only,
+                               Provenance *p)
+      : LegionTrace(c, t, logical_only, p), tracing(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicTrace::DynamicTrace(const DynamicTrace &rhs)
-      : LegionTrace(NULL, 0, true)
+      : LegionTrace(NULL, 0, true, NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1213,10 +1226,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block,
-                                            bool remove_trace_ref)
+                                  bool remove_trace_ref, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1362,10 +1375,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block)
+    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block,
+                                              Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1577,10 +1591,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace)
+    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace,
+                                          Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1744,10 +1759,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace)
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace,
+                                        Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1823,10 +1839,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TraceSummaryOp::initialize_summary(InnerContext *ctx,
                                             PhysicalTemplate *tpl,
-                                            Operation *invalidator)
+                                            Operation *invalidator,
+                                            Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
       fence_kind = MAPPING_FENCE;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
@@ -4188,11 +4205,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::issue_summary_operations(
-                                  InnerContext* context, Operation *invalidator)
+          InnerContext* context, Operation *invalidator, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       TraceSummaryOp *op = trace->runtime->get_available_summary_op();
-      op->initialize_summary(context, this, invalidator);
+      op->initialize_summary(context, this, invalidator, provenance);
 #ifdef LEGION_SPY
       LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
                                         invalidator->get_unique_op_id());
@@ -8585,7 +8602,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::issue_summary_operations(
-                                  InnerContext *context, Operation *invalidator)
+          InnerContext *context, Operation *invalidator, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8595,7 +8612,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context); 
 #endif
       ReplTraceSummaryOp *op = trace->runtime->get_available_repl_summary_op();
-      op->initialize_summary(repl_ctx, this, invalidator);
+      op->initialize_summary(repl_ctx, this, invalidator, provenance);
 #ifdef LEGION_SPY
       LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
                                         invalidator->get_unique_op_id());

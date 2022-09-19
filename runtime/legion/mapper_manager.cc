@@ -2741,19 +2741,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::create_index_space(MappingCallInfo *ctx,
                                                  const Domain &domain,
-                                                 TypeTag type_tag)
+                                                 TypeTag type_tag,
+                                                 const char *prov)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      IndexSpace result = 
-        runtime->find_or_create_index_slice_space(domain, type_tag);
+      Provenance *provenance = NULL;
+      if (prov != NULL)
+      {
+        provenance = new Provenance(prov);
+        provenance->add_reference();
+      }
+      const IndexSpace result(runtime->get_unique_index_space_id(),
+                    runtime->get_unique_index_tree_id(), type_tag);
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_index_space(result, &domain, did, provenance);
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
       resume_mapper_call(ctx);
       return result; 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::union_index_spaces(MappingCallInfo *ctx,
-                                         const std::vector<IndexSpace> &sources)
+                 const std::vector<IndexSpace> &sources, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (sources.empty())
@@ -2775,16 +2786,18 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_union_space(result, did, sources);
+      AutoProvenance prov(provenance);
+      runtime->forest->create_union_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(),
+                    runtime->address_space, provenance);
       resume_mapper_call(ctx);
       return result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::intersect_index_spaces(MappingCallInfo *ctx,
-                                         const std::vector<IndexSpace> &sources)
+                 const std::vector<IndexSpace> &sources, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (sources.empty())
@@ -2806,16 +2819,18 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_intersection_space(result, did, sources);
+      AutoProvenance prov(provenance);
+      runtime->forest->create_intersection_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(),
+                    runtime->address_space, provenance);
       resume_mapper_call(ctx);
       return result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::subtract_index_spaces(MappingCallInfo *ctx,
-                                              IndexSpace left, IndexSpace right)
+                      IndexSpace left, IndexSpace right, const char *provenance)
     //--------------------------------------------------------------------------
     {
       if (!left.exists())
@@ -2828,9 +2843,12 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
           runtime->get_unique_index_tree_id(), left.get_type_tag());
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_difference_space(result, did, left, right);
+      AutoProvenance prov(provenance);
+      runtime->forest->create_difference_space(result, did, prov,
+                                               left, right);
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.get_id());
+        LegionSpy::log_top_index_space(result.get_id(),
+                    runtime->address_space, provenance);
       resume_mapper_call(ctx);
       return result;
     }
