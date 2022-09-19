@@ -881,7 +881,7 @@
 // C API. If you are writing C++ code, use the namespaced versions.
 
 typedef enum legion_error_t {
-  NO_ERROR = 0,
+  LEGION_NO_ERROR = 0,
   ERROR_RESERVED_REDOP_ID = 1,
   ERROR_DUPLICATE_REDOP_ID = 2,
   ERROR_RESERVED_TYPE_HANDLE = 3,

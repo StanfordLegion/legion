@@ -21339,7 +21339,7 @@ namespace Legion {
       }
 
       // Made it here, then there is no error
-      return NO_ERROR;
+      return LEGION_NO_ERROR;
     }
 
     //--------------------------------------------------------------------------

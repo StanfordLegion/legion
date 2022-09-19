@@ -1825,7 +1825,7 @@ namespace Legion {
         LegionErrorType et = parent_ctx->check_privilege(indexes[idx]);
         switch (et)
         {
-          case NO_ERROR:
+          case LEGION_NO_ERROR:
             break;
           case ERROR_BAD_PARENT_INDEX:
             {
@@ -1875,16 +1875,16 @@ namespace Legion {
         int bad_index = -1;
         LegionErrorType et = runtime->verify_requirement(regions[idx], 
                                                          bad_field); 
-        if ((et == NO_ERROR) && !is_index_space && 
+        if ((et == LEGION_NO_ERROR) && !is_index_space && 
             ((regions[idx].handle_type == LEGION_PARTITION_PROJECTION) || 
              (regions[idx].handle_type == LEGION_REGION_PROJECTION)))
           et = ERROR_BAD_PROJECTION_USE;
         // If that worked, then check the privileges with the parent context
-        if (et == NO_ERROR)
+        if (et == LEGION_NO_ERROR)
           et = parent_ctx->check_privilege(regions[idx], bad_field, bad_index);
         switch (et)
         {
-          case NO_ERROR:
+          case LEGION_NO_ERROR:
             break;
           case ERROR_INVALID_REGION_HANDLE:
             {
