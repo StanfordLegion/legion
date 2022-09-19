@@ -13540,6 +13540,8 @@ namespace Legion {
           finder.filter(overlap);
           if (!finder->second)
           {
+            if (finder->first->remove_nested_valid_ref(did))
+              delete finder->first;
             eit->second.erase(finder);
             if (eit->second.empty())
               to_delete.push_back(eit->first);
