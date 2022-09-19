@@ -3449,20 +3449,20 @@ class LogicalRegion(object):
                 state = self.get_verification_state(depth, field, point)
                 op.record_current_version(point, field, tree, state.version_number)
 
-    def perform_fill_verification(self, depth, field, op, req, point_set=None):
+    def perform_fill_verification(self, depth, field, op, req, perform_checks, point_set=None):
         if point_set is None:
             # First get the point set
-            return self.perform_fill_verification(depth, field, op, req,
+            return self.perform_fill_verification(depth, field, op, req, perform_checks,
                                                   self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
-            return self.parent.parent.perform_fill_verification(depth, field, op, 
-                                                                req, point_set)
+            return self.parent.parent.perform_fill_verification(depth, field, op, req,
+                                                                perform_checks, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                if not state.perform_fill_verification(op, req):
+                if not state.perform_fill_verification(op, req, perform_checks):
                     return False
             return True
 
@@ -5207,6 +5207,16 @@ class DataflowTraverser(object):
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dst_fields:
                         self.run(copy, src_key)
+            if op.realm_fills:
+                for fill in op.realm_fills:
+                    eq_privileges = fill.get_equivalence_privileges()
+                    if src_key not in eq_privileges:
+                        continue
+                    # Only look at these if the destination is correct
+                    if self.target in fill.dsts and \
+                            self.dst_tree == fill.dst_tree_id and \
+                            self.dst_field in fill.fields:
+                        self.run(fill, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
             self.run(op, src_key)
@@ -5250,12 +5260,19 @@ class EquivalenceSet(object):
         if restricted:
             self.restricted_inst = inst
 
-    def perform_fill_verification(self, op, req):
+    def perform_fill_verification(self, op, req, perform_checks):
         # Fills clear everything out so we are just done
         self.reset()
         self.pending_fill = True
         assert op.kind == FILL_OP_KIND
         self.fill_op = op
+        # If this instance is restricted then we need to perform the fill eagerly
+        if self.restricted_inst is not None:
+            error_str = "region requirement "+str(req.index)+" of "+str(op)
+            if not self.issue_update_copies(self.restricted_inst, op, req,
+                                perform_checks, error_str, restricted=True):
+                return False
+            self.valid_instances.add(self.restricted_inst)
         return True
 
     def add_restriction(self, op, req, inst):
@@ -7783,7 +7800,7 @@ class Operation(object):
         mappings = self.find_mapping(index)
         depth = self.context.find_enclosing_context_depth(req, mappings)
         for field in req.fields:
-            if not req.logical_node.perform_fill_verification(depth, field, self, req):
+            if not req.logical_node.perform_fill_verification(depth, field, self, req, perform_checks):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
@@ -12464,6 +12481,10 @@ class State(object):
         # Check to see if we have any unknown operations
         for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
+                # Ignore provenances for slice tasks we might have recorded
+                if op.uid in self.slice_index or op.uid in self.slice_slice:
+                    assert op.provenance is not None
+                    continue
                 print('WARNING: operation %d has unknown operation kind!' % op.uid)
                 if self.assert_on_warning:
                     assert False
