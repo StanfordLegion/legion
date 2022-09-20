@@ -2430,12 +2430,9 @@ namespace Legion {
                            const bool cached_set);
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
-        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
         RtEvent continuation_pre;
-        do {
-          continuation_pre.id = *ptr;
-        } while (!__sync_bool_compare_and_swap(ptr,
-                  continuation_pre.id, deferral_event.id));
+        continuation_pre.id =
+          next_deferral_precondition.exchange(deferral_event.id);
         return continuation_pre;
       }
     public:
@@ -2496,7 +2493,7 @@ namespace Legion {
       // and when analyses are done on remote nodes for migration
       RtUserEvent waiting_event;
       // An event to order to deferral tasks
-      volatile RtEvent next_deferral_precondition;
+      std::atomic<Realm::Event::id_t>                next_deferral_precondition;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
