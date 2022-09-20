@@ -8392,8 +8392,8 @@ namespace Legion {
           owner, reg_now), set_expr(expr),
         index_space_node(node), logical_owner_space(logical),
         eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE), 
-        subset_exprs(NULL), migration_index(0), sample_count(0), 
-        pending_analyses(0)
+        next_deferral_precondition(0), subset_exprs(NULL), migration_index(0),
+        sample_count(0), pending_analyses(0)
     //--------------------------------------------------------------------------
     {
       set_expr->add_nested_expression_reference(did);
