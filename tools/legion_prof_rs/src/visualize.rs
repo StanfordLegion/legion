@@ -478,6 +478,11 @@ impl Chan {
                 format!("{}", self.depparts[idx].part_op)
             }
         };
+        let ready_timestamp = match point.entry {
+            ChanEntry::Copy(idx) => time_range.ready,
+            ChanEntry::Fill(_) => None,
+            ChanEntry::DepPart(idx) => None,
+        };
 
         let initiation = match point.entry {
             ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
@@ -492,7 +497,7 @@ impl Chan {
         f.serialize(DataRecord {
             level,
             level_ready: None,
-            ready: None,
+            ready: ready_timestamp,
             start: time_range.start.unwrap(),
             end: time_range.stop.unwrap(),
             color: &color,
