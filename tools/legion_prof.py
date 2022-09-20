@@ -3460,7 +3460,6 @@ class State(object):
     @typecheck
     def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: Union[str, None]=None) -> None:
         op = self.find_op(op_id)
-        #if op_id == 1:
         op.parent_id = parent_id
         assert kind in self.op_kinds
         op.kind_num = kind
@@ -3677,8 +3676,7 @@ class State(object):
             assert ready is not None
             assert start is not None
             assert stop is not None
-            task = Task(variant, task, create, ready, start, stop) 
-            # print(task.op_id, variant, task.provenance)
+            task = Task(variant, task, create, ready, start, stop)
             variant.ops[op_id] = task
             self.operations[op_id] = task
             # update prof_uid map
@@ -4117,7 +4115,6 @@ class State(object):
                 return potential_dir
             i += 1
 
-    # TODO: fix it
     @typeassert(timepoints=list, owners=list, count=int)
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
                                    owners: Union[List[Processor], List[Memory], List[Channel]], 
@@ -4688,11 +4685,13 @@ class State(object):
             simplified_critical_path.add(p.get_unique_tuple())
         return list(simplified_critical_path)
 
-    def check_operation_parent_id(self) -> None:
+    @typecheck
+    def check_operation_parent_id(self, verbose: bool) -> None:
         self.operations = OrderedDict(sorted(self.operations.items()))
         for op_id, operation in self.operations.items():
             if operation.parent_id not in self.operations.keys():
-                print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
+                if verbose:
+                    print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
                 operation.parent_id = 0
 
     @typecheck
@@ -5063,7 +5062,7 @@ def main() -> None:
     state.check_message_latencies(args.message_threshold, args.message_percentage)
 
     # sort operations and check parent_id
-    state.check_operation_parent_id()
+    state.check_operation_parent_id(verbose)
 
     if print_stats:
         state.print_stats(verbose)
