@@ -587,11 +587,11 @@ impl MemProcAffinity {
     }
     fn update_best_aff(&mut self, proc_id: ProcID, b: u32, l: u32) {
         if b > self.bandwidth {
-           self.best_aff_proc = proc_id;
-           self.bandwidth = b;
-           self.latency = l;
-       }
-   }
+            self.best_aff_proc = proc_id;
+            self.bandwidth = b;
+            self.latency = l;
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -2276,7 +2276,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*mem_id)
                 .or_insert_with(|| Mem::new(*mem_id, kind, *capacity));
         }
-        Record::ProcMDesc { proc_id, mem_id, bandwidth, latency} => {
+        Record::ProcMDesc {
+            proc_id,
+            mem_id,
+            bandwidth,
+            latency,
+        } => {
             state
                 .mem_proc_affinity
                 .entry(*mem_id)

@@ -394,7 +394,15 @@ fn parse_mem_proc_affinity_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], R
     let (input, mem_id) = parse_mem_id(input)?;
     let (input, bandwidth) = le_u32(input)?;
     let (input, latency) = le_u32(input)?;
-    Ok((input, Record::ProcMDesc { proc_id, mem_id, bandwidth, latency,}))
+    Ok((
+        input,
+        Record::ProcMDesc {
+            proc_id,
+            mem_id,
+            bandwidth,
+            latency,
+        },
+    ))
 }
 fn parse_index_space_point_desc(input: &[u8], max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ispace_id) = parse_ispace_id(input)?;
