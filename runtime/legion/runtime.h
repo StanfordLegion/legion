@@ -949,25 +949,12 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
-      bool find_satisfying_instance(LayoutConstraints *constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire, 
-                                    bool tight_region_bounds, bool remote);
       void find_satisfying_instances(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_region_bounds, 
                                     bool remote);
-      void find_satisfying_instances(LayoutConstraints *constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds, 
-                                    bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire, 
-                                    bool tight_region_bounds, bool remote);
-      bool find_valid_instance(     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
