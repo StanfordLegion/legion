@@ -15,6 +15,8 @@
 # limitations under the License.
 #
 
+# mypy: ignore-errors
+
 # TODO LIST
 # Support predication for physical analysis
 

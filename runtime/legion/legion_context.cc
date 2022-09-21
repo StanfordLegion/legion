@@ -1814,7 +1814,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
       if (req.verified)
-        return NO_ERROR;
+        return LEGION_NO_ERROR;
       // Find the parent index space
       for (std::vector<IndexSpaceRequirement>::const_iterator it = 
             owner_task->indexes.begin(); it != owner_task->indexes.end(); it++)
@@ -1832,7 +1832,7 @@ namespace Legion {
           {
             return ERROR_BAD_INDEX_PRIVILEGES;  
           }
-          return NO_ERROR;
+          return LEGION_NO_ERROR;
         }
       }
       // If we didn't find it here, we have to check the added 
@@ -1845,7 +1845,7 @@ namespace Legion {
           return ERROR_BAD_INDEX_PATH;
         // No need to check privileges here since it is a created space
         // which means that the parent has all privileges.
-        return NO_ERROR;
+        return LEGION_NO_ERROR;
       }
       return ERROR_BAD_PARENT_INDEX;
     }
@@ -1862,7 +1862,7 @@ namespace Legion {
       assert(bad_index < 0);
 #endif
       if (req.flags & LEGION_VERIFIED_FLAG)
-        return NO_ERROR;
+        return LEGION_NO_ERROR;
       // Copy privilege fields for check
       std::set<FieldID> privilege_fields(req.privilege_fields);
       // Try our original region requirements first
@@ -1872,7 +1872,7 @@ namespace Legion {
           check_privilege_internal(req, regions[idx], privilege_fields, 
                                    bad_field, idx, bad_index, skip_privilege);
         // No error so we are done
-        if (et == NO_ERROR)
+        if (et == LEGION_NO_ERROR)
           return et;
         // Something other than bad parent region is a real error
         if (et != ERROR_BAD_PARENT_REGION)
@@ -1890,7 +1890,7 @@ namespace Legion {
           check_privilege_internal(req, created_req, privilege_fields, 
                       bad_field, it->first, bad_index, skip_privilege);
         // No error so we are done
-        if (et == NO_ERROR)
+        if (et == LEGION_NO_ERROR)
           return et;
         // Something other than bad parent region is a real error
         if (et != ERROR_BAD_PARENT_REGION)
@@ -1901,7 +1901,7 @@ namespace Legion {
         {
           // Still have to check the parent region is right
           if (req.parent == created_req.region)
-            return NO_ERROR;
+            return LEGION_NO_ERROR;
         }
         // Otherwise we just keep going
       }
@@ -1923,7 +1923,7 @@ namespace Legion {
         return ERROR_BAD_PARENT_REGION;
       // Otherwise we have privileges on these fields for all regions
       // so we are good on privileges
-      return NO_ERROR;
+      return LEGION_NO_ERROR;
     } 
 
     //--------------------------------------------------------------------------
@@ -1990,7 +1990,7 @@ namespace Legion {
         return ERROR_BAD_PARENT_REGION;
       }
         // If we make it here then we are good
-      return NO_ERROR;
+      return LEGION_NO_ERROR;
     }
 
     //--------------------------------------------------------------------------

@@ -138,10 +138,13 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
         '-o', result_dir,
     ] + logfiles
     if verbose: print('Running', ' '.join(cmd))
+    cmd_env = dict(os.environ.items())
+    cmd_env["USE_TYPE_CHECK"] = "1"
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT)
+        stderr=None if verbose else subprocess.STDOUT,
+        env=cmd_env)
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:

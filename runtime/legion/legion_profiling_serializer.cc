@@ -377,6 +377,7 @@ namespace Legion {
          << "op_id:UniqueID:"      << sizeof(UniqueID)    << delim
          << "inst_id:InstID:"      << sizeof(InstID)      << delim
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
+         << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "destroy:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
@@ -984,6 +985,8 @@ namespace Legion {
                 sizeof(inst_timeline_info.inst_id));
       lp_fwrite(f, (char*)&(inst_timeline_info.create),  
                 sizeof(inst_timeline_info.create));
+      lp_fwrite(f, (char*)&(inst_timeline_info.ready),  
+                sizeof(inst_timeline_info.ready));
       lp_fwrite(f, (char*)&(inst_timeline_info.destroy), 
                 sizeof(inst_timeline_info.destroy));
     }
@@ -1773,9 +1776,10 @@ namespace Legion {
                  const LegionProfInstance::InstTimelineInfo& inst_timeline_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu",
+      log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu %llu",
          inst_timeline_info.op_id, inst_timeline_info.inst_id,
-         inst_timeline_info.create, inst_timeline_info.destroy);
+         inst_timeline_info.create, inst_timeline_info.ready,
+         inst_timeline_info.destroy);
     }
 
     //--------------------------------------------------------------------------
