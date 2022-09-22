@@ -2204,6 +2204,10 @@ local function emit_debuginfo(node)
   end
 end
 
+local function get_provenance(node)
+  return node.span.source .. ":" .. node.span.start.line
+end
+
 function codegen.expr_internal(cx, node)
   return node.value
 end
@@ -3812,6 +3816,7 @@ function codegen.expr_call(cx, node)
         var [launcher] = c.legion_task_launcher_create(
           [fn.value:get_task_id()], [task_args],
           [predicate_symbol], [mapper], [tag])
+        c.legion_task_launcher_set_provenance([launcher], [get_provenance(node)])
         [args_setup]
       end
     else
@@ -4750,6 +4755,7 @@ function codegen.expr_region(cx, node)
       -- because this is guarranteed to be the first use of the region
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.WRITE_DISCARD, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      c.legion_inline_launcher_set_provenance(il, [get_provenance(node)])
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
@@ -6693,6 +6699,7 @@ local function expr_copy_setup_region(
     [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
+    c.legion_copy_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
 
   local region_src_i, region_dst_i
@@ -7087,6 +7094,7 @@ local function expr_acquire_setup_region(
     var [launcher] = c.legion_acquire_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
+    c.legion_acquire_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
   for j, dst_copy_field in ipairs(dst_copy_fields) do
     local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
@@ -7212,6 +7220,7 @@ local function expr_release_setup_region(
     var [launcher] = c.legion_release_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
+    c.legion_release_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
   for j, dst_copy_field in ipairs(dst_copy_fields) do
     local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
@@ -7973,6 +7982,7 @@ function codegen.expr_import_region(cx, node)
       [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      c.legion_inline_launcher_set_provenance(il, [get_provenance(node)])
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
@@ -9162,6 +9172,7 @@ function codegen.stat_must_epoch(cx, node)
     var [tag] = 0
     [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
+    c.legion_must_epoch_launcher_set_provenance([must_epoch], [get_provenance(node)])
     var [must_epoch_point] = 0
     [cleanup_after(cx, codegen.block(cx, node.block))]
     var [future_map] = c.legion_must_epoch_launcher_execute(
@@ -9507,6 +9518,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
       [predicate_symbol], false, [mapper], [tag])
+    c.legion_index_launcher_set_provenance([launcher], [get_provenance(node)])
     [task_args_loop_setup]
   end
 
