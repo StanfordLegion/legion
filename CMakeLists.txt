@@ -904,6 +904,7 @@ install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
 install(
   FILES
     ${PROJECT_SOURCE_DIR}/tools/legion_prof.py
+    ${PROJECT_SOURCE_DIR}/tools/legion_util.py
     ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
   DESTINATION
     ${CMAKE_INSTALL_BINDIR}
