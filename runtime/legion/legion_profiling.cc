@@ -363,7 +363,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned offset = phy_inst_usage.size();
-      phy_inst_usage.resize(fields.size());
+      phy_inst_usage.resize(offset + fields.size());
       for (unsigned idx = 0; idx < fields.size(); idx++)
       {
         PhysicalInstanceUsage &usage = phy_inst_usage[offset+idx];
