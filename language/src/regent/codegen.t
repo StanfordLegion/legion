@@ -9747,10 +9747,14 @@ function codegen.stat_var(cx, node)
   cx:add_cleanup_item(make_cleanup_item(cx, lhs, lhs_type))
 
   local function is_partitioning_expr(node)
-    if node:is(ast.typed.expr.Partition) or node:is(ast.typed.expr.PartitionEqual) or
-       node:is(ast.typed.expr.PartitionByField) or node:is(ast.typed.expr.Image) or
-       node:is(ast.typed.expr.Preimage) or
-       (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type)) then
+    if node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.PartitionByRestriction) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
+      (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type)) or
+    then
       return true
     else
       return false
