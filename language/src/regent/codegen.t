@@ -6667,7 +6667,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types, dept
 end
 
 local function expr_copy_setup_region(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6802,7 +6802,7 @@ local function count_nested_list_size(value, value_type)
 end
 
 local function expr_copy_setup_list_one_to_many(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6830,7 +6830,7 @@ local function expr_copy_setup_list_one_to_many(
         [c_actions]
         [update_actions]
         [expr_copy_setup_region(
-           cx, src_value, src_type, src_container_type, src_fields,
+           cx, node, src_value, src_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds,
            depth + 1, op, launcher)]
@@ -6838,7 +6838,7 @@ local function expr_copy_setup_list_one_to_many(
     end
   else
     return expr_copy_setup_region(
-      cx, src_value, src_type, src_container_type, src_fields,
+      cx, node, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds,
       depth, op, launcher)
@@ -6846,7 +6846,7 @@ local function expr_copy_setup_list_one_to_many(
 end
 
 local function expr_copy_setup_list_one_to_one(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6885,7 +6885,7 @@ local function expr_copy_setup_list_one_to_one(
     end
   else
     return expr_copy_setup_list_one_to_many(
-      cx, src_value, src_type, src_container_type, src_fields,
+      cx, node, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds,
       depth, op, launcher)
@@ -6912,7 +6912,7 @@ function codegen.expr_copy(cx, node)
   actions:insert(
     quote
       [expr_copy_setup_list_one_to_one(
-         cx, src.value, src_type, src_type, node.src.fields,
+         cx, node, src.value, src_type, src_type, node.src.fields,
          dst.value, dst_type, dst_type, node.dst.fields,
          conditions:map(function(condition) return condition.value end),
          node.conditions:map(
