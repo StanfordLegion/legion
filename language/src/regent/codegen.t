@@ -6877,7 +6877,7 @@ local function expr_copy_setup_list_one_to_one(
         [c_actions]
         [update_actions]
         [expr_copy_setup_list_one_to_one(
-           cx, src_element, src_element_type, src_container_type, src_fields,
+           cx, node, src_element, src_element_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds,
            depth + 1, op, launcher)]
@@ -7077,7 +7077,7 @@ local function expr_acquire_extract_phase_barriers(index, values, value_types)
 end
 
 local function expr_acquire_setup_region(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
@@ -7113,7 +7113,7 @@ local function expr_acquire_setup_region(
 end
 
 local function expr_acquire_setup_list(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
@@ -7126,13 +7126,13 @@ local function expr_acquire_setup_list(
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
         [expr_acquire_setup_list(
-           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           cx, node, dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds)]
       end
     end
   else
     return expr_acquire_setup_region(
-      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      cx, node, dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds)
   end
 end
@@ -7152,7 +7152,7 @@ function codegen.expr_acquire(cx, node)
     [emit_debuginfo(node)]
 
     [expr_acquire_setup_list(
-       cx, region.value, region_type, region_type, node.region.fields,
+       cx, node, region.value, region_type, region_type, node.region.fields,
        conditions:map(function(condition) return condition.value end),
        node.conditions:map(
          function(condition)
@@ -7203,7 +7203,7 @@ local function expr_release_extract_phase_barriers(index, values, value_types)
 end
 
 local function expr_release_setup_region(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
@@ -7239,7 +7239,7 @@ local function expr_release_setup_region(
 end
 
 local function expr_release_setup_list(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
@@ -7252,13 +7252,13 @@ local function expr_release_setup_list(
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
         [expr_release_setup_list(
-           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           cx, node, dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds)]
       end
     end
   else
     return expr_release_setup_region(
-      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      cx, node, dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds)
   end
 end
@@ -7278,7 +7278,7 @@ function codegen.expr_release(cx, node)
     [emit_debuginfo(node)]
 
     [expr_release_setup_list(
-       cx, region.value, region_type, region_type, node.region.fields,
+       cx, node, region.value, region_type, region_type, node.region.fields,
        conditions:map(function(condition) return condition.value end),
        node.conditions:map(
          function(condition)
