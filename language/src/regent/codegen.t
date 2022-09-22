@@ -9753,7 +9753,7 @@ function codegen.stat_var(cx, node)
       node:is(ast.typed.expr.PartitionByRestriction) or
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
-      (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type)) or
+      (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type))
     then
       return true
     else
