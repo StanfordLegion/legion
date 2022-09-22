@@ -1474,7 +1474,7 @@ namespace Legion {
                                          bool postmapping /*=false*/) const
     //--------------------------------------------------------------------------
     {
-      if (!runtime->legion_spy_enabled || (runtime->profiler == NULL))
+      if (!runtime->legion_spy_enabled && (runtime->profiler == NULL))
         return;
       FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
         runtime->forest->get_node(req.region.get_field_space()) : 
