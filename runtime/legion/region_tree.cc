@@ -3295,41 +3295,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::log_mapping_decision(const UniqueID uid, 
-                                                TaskContext *context,
-                                                const unsigned index,
-                                                const RegionRequirement &req,
-                                                const InstanceSet &targets,
-                                                bool postmapping)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(runtime->legion_spy_enabled); 
-#endif
-      FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
-        get_node(req.region.get_field_space()) : 
-        get_node(req.partition.get_field_space());
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        const InstanceRef &inst = targets[idx];
-        const FieldMask &valid_mask = inst.get_valid_fields();
-        InstanceManager *manager = inst.get_manager();
-        std::vector<FieldID> valid_fields;
-        node->get_field_set(valid_mask, context, valid_fields);
-        for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
-              it != valid_fields.end(); it++)
-        {
-          if (postmapping)
-            LegionSpy::log_post_mapping_decision(uid, index, *it,
-                                                 manager->get_unique_event());
-          else
-            LegionSpy::log_mapping_decision(uid, index, *it,
-                                            manager->get_unique_event());
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(Operation *op,
                                 std::map<PhysicalManager*,unsigned> &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)

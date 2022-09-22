@@ -233,6 +233,13 @@ namespace Legion {
         unsigned dim;
         DimensionKind k;
       };
+      struct PhysicalInstanceUsage {
+      public:
+        IDType inst_id;
+        UniqueID op_id;
+        unsigned index;
+        unsigned field;
+      };
       struct IndexSpaceSizeDesc {
       public:
         UniqueID id;
@@ -409,6 +416,10 @@ namespace Legion {
                                                 IDType inst_id,
                                                 unsigned dim,
                                                 DimensionKind k);
+      void register_physical_instance_use(UniqueID op_id,
+                                          IDType inst_id,
+                                          unsigned index,
+                                          const std::vector<FieldID> &fields);
       void register_index_space_size(UniqueID id,
                                      unsigned long long
                                      dense_size,
@@ -483,6 +494,7 @@ namespace Legion {
       std::deque<PhysicalInstRegionDesc> phy_inst_rdesc;
       std::deque<PhysicalInstLayoutDesc> phy_inst_layout_rdesc;
       std::deque<PhysicalInstDimOrderDesc> phy_inst_dim_order_rdesc;
+      std::deque<PhysicalInstanceUsage> phy_inst_usage;
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
@@ -619,6 +631,9 @@ namespace Legion {
       void record_physical_instance_layout(UniqueID op_id,
                                            IDType inst_id, FieldSpace fs,
                                            const LayoutConstraints *lc);
+      void record_physical_instance_use(UniqueID op_id, IDType inst_id,
+                                        unsigned index,
+                                        const std::vector<FieldID> &fields);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);

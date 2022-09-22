@@ -1468,6 +1468,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::log_mapping_decision(unsigned index, 
+                                         const RegionRequirement &req,
+                                         const InstanceSet &targets,
+                                         bool postmapping /*=false*/) const
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->legion_spy_enabled || (runtime->profiler == NULL))
+        return;
+      FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
+        runtime->forest->get_node(req.region.get_field_space()) : 
+        runtime->forest->get_node(req.partition.get_field_space());
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &inst = targets[idx];
+        const FieldMask &valid_mask = inst.get_valid_fields();
+        std::vector<FieldID> valid_fields;
+        node->get_field_set(valid_mask, parent_ctx, valid_fields);
+        InstanceManager *manager = inst.get_manager();
+        if (runtime->legion_spy_enabled)
+        {
+          for (std::vector<FieldID>::const_iterator it =
+                valid_fields.begin(); it != valid_fields.end(); it++)
+          {
+            if (postmapping)
+              LegionSpy::log_post_mapping_decision(unique_op_id, index, *it,
+                                                   manager->get_unique_event());
+            else
+              LegionSpy::log_mapping_decision(unique_op_id, index, *it,
+                                              manager->get_unique_event());
+          }
+        }
+        if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
+          runtime->profiler->record_physical_instance_use(unique_op_id,
+              manager->get_instance(DomainPoint()).id, index, valid_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::log_virtual_mapping(unsigned index,
+                                        const RegionRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->legion_spy_enabled)
+        return;
+      for (std::set<FieldID>::const_iterator it =
+            req.privilege_fields.begin(); it != 
+            req.privilege_fields.end(); it++)
+        LegionSpy::log_mapping_decision(unique_op_id, index, *it,
+                                        ApEvent::NO_AP_EVENT/*inst event*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::pack_remote_operation(Serializer &rez,AddressSpaceID target,
                                         std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -3121,16 +3173,12 @@ namespace Legion {
       }
       else if (!mapped_instances.empty())
         map_complete_event = mapped_instances[0].get_ready_event();
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              mapped_instances);
+      log_mapping_decision(0/*idx*/, requirement, mapped_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
 #endif
-      }
       if (!effects_done.exists())
         effects_done = termination_event; 
       if (!atomic_locks.empty() || !arrive_barriers.empty())
@@ -5058,10 +5106,7 @@ namespace Legion {
                                       output.src_instances[idx],
                                       src_targets,
                                       IS_REDUCE(dst_requirements[idx]));
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                idx, src_requirements[idx],
-                                                src_targets);
+        log_mapping_decision(idx, src_requirements[idx], src_targets);
         const size_t dst_idx = src_requirements.size() + idx;
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -5071,9 +5116,7 @@ namespace Legion {
           dst_requirements[idx].privilege = LEGION_READ_WRITE;
         perform_conversion<DST_REQ>(idx, dst_requirements[idx],
                                     output.dst_instances[idx], dst_targets);
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-              dst_idx, dst_requirements[idx], dst_targets);
+        log_mapping_decision(dst_idx, dst_requirements[idx], dst_targets);
         // Do any exchanges needed for collective cooperation
         const bool src_indirect = (idx < src_indirect_requirements.size());
         const bool dst_indirect = (idx < dst_indirect_requirements.size());
@@ -5213,9 +5256,8 @@ namespace Legion {
                                        record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
-          if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                gather_idx, src_indirect_requirements[idx], gather_targets);
+          log_mapping_decision(gather_idx, src_indirect_requirements[idx],
+                               gather_targets);
         }
         if (idx < dst_indirect_requirements.size())
         { 
@@ -5249,9 +5291,8 @@ namespace Legion {
                                       record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
-          if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                scatter_idx, dst_indirect_requirements[idx], scatter_targets);
+          log_mapping_decision(scatter_idx, dst_indirect_requirements[idx],
+                               scatter_targets);
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
@@ -9701,16 +9742,12 @@ namespace Legion {
             Runtime::merge_events(&trace_info, close_preconditions));
       else
         Runtime::trigger_event(NULL, close_event);
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                                              0/*idx*/, requirement,
-                                              target_instances);
+      log_mapping_decision(0/*idx*/, requirement, target_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, close_event, 
                                         completion_event);
 #endif
-      }
       // No need to apply our mapping because we are done!
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -9971,11 +10008,7 @@ namespace Legion {
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),
                                            parent_idx);
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,
-                                          ApEvent::NO_AP_EVENT/*inst event*/);
+        log_virtual_mapping(0/*idx*/, requirement); 
       }
     }
     
@@ -10438,11 +10471,9 @@ namespace Legion {
       if (init_precondition.exists())
         acquire_complete = Runtime::merge_events(&trace_info, 
                                    acquire_complete, init_precondition);
+      log_mapping_decision(0/*idx*/, requirement, restricted_instances);
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              restricted_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         completion_event);
@@ -11333,16 +11364,12 @@ namespace Legion {
       if (init_precondition.exists())
         release_complete = Runtime::merge_events(&trace_info,
                             release_complete, init_precondition);
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              restricted_instances);
+      log_mapping_decision(0/*idx*/, requirement, restricted_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         completion_event);
 #endif
-      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -14901,10 +14928,7 @@ namespace Legion {
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       const bool record_valid = invoke_mapper(mapped_instances);
-      if (runtime->legion_spy_enabled)
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              mapped_instances);
+      log_mapping_decision(0/*idx*/, requirement, mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -18039,6 +18063,7 @@ namespace Legion {
       }
       if (mapping)
         external_instances[0].set_ready_event(attach_event);
+      log_mapping_decision(0/*idx*/, requirement, external_instances);
       // This operation is ready once the file is attached
       region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
@@ -18046,6 +18071,11 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        completion_event);
+#endif
       if (!request_early_complete(attach_event))
         complete_execution(Runtime::protect_event(attach_event));
       else
@@ -18198,25 +18228,6 @@ namespace Legion {
           }
         default:
           assert(false);
-      }
-      if (runtime->legion_spy_enabled)
-      {
-        // We always need a unique ready event for Legion Spy
-        if (!ready_event.exists())
-        {
-          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename_ready);
-          ready_event = rename_ready;
-        }
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
-                                          *it, ready_event);
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        completion_event);
-#endif
       }
       return result;
     }
@@ -19494,15 +19505,12 @@ namespace Legion {
           Runtime::merge_events(&trace_info, detach_event, effects_done);
       else if (effects_done.exists())
         detach_event = effects_done;
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references);
+      log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, detach_event,
                                         completion_event);
 #endif
-      }
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();

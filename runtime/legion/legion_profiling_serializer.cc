@@ -205,6 +205,14 @@ namespace Legion {
          << "dim_kind:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "PhysicalInstanceUsage {"
+         << "id:" << PHYSICAL_INST_USAGE_ID                   << delim
+         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
+         << "index:unsigned:"           << sizeof(unsigned)   << delim
+         << "field:unsigned:"           << sizeof(unsigned)
+         << "}" << std::endl;
+
       ss << "TaskKind {" 
          << "id:" << TASK_KIND_ID                 << delim
          << "task_id:TaskID:"   << sizeof(TaskID) << delim
@@ -659,6 +667,7 @@ namespace Legion {
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.k),
                 sizeof(unsigned));
     }
+
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                 const LegionProfInstance::PhysicalInstLayoutDesc 
@@ -679,6 +688,19 @@ namespace Legion {
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.alignment),
                 sizeof(unsigned));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                         const LegionProfInstance::PhysicalInstanceUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PHYSICAL_INST_LAYOUT_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(usage.inst_id), sizeof(InstID));
+      lp_fwrite(f, (char*)&(usage.op_id) ,sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(usage.index), sizeof(unsigned));
+      lp_fwrite(f, (char*)&(usage.field), sizeof(unsigned));
     }
 
     //--------------------------------------------------------------------------
@@ -1506,6 +1528,15 @@ namespace Legion {
                      phy_instance_layout_rdesc.eqk,
                      phy_instance_layout_rdesc.alignment
                      );
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                         const LegionProfInstance::PhysicalInstanceUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Physical Inst Usage " IDFMT " %llu %u %u",
+                      usage.inst_id, usage.op_id, usage.index, usage.field);
     }
 
     //--------------------------------------------------------------------------
