@@ -1389,7 +1389,7 @@ class Operation(ProcOperation):
                 return self.kind+' Operation '+self.get_info()
 
 class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
-    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasDependencies._abstract_slots  + ['base_op']
+    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasDependencies._abstract_slots  + ['base_op', 'instances']
 
     @typecheck
     def __init__(self, 
@@ -1413,6 +1413,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.parent_id = op.parent_id
         if op.provenance is not None:
             self.provenance = op.provenance
+        self.instances: List[Tuple["Instance", int, int]]= []
 
     @typecheck
     def assign_color(self, color: Dict[int, str]) -> None:
@@ -1469,6 +1470,13 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     @typecheck
     def mapper_time(self) -> float:
         return 0.0
+
+    @typecheck
+    def add_inst(self, inst: "Instance", index_id: int, field_id: int) -> None:
+        self.instances.append(tuple((inst, index_id, field_id)))
+        if self.provenance is None:
+            self.provenance = ""
+        self.provenance = self.provenance + " " + str(inst)
 
     @typecheck
     def __repr__(self) -> str:
@@ -3137,6 +3145,7 @@ class State(object):
             "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
+            "PhysicalInstanceUsage": self.log_physical_inst_usage,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
             "MaxDimDesc": self.log_max_dim,
             "CopyInstInfo": self.log_copy_inst_info
@@ -3148,47 +3157,56 @@ class State(object):
     def log_max_dim(self, max_dim: int) -> None:
         self.max_dim = max_dim
 
+    # IndexSpacePointDesc
     @typecheck
     def log_index_space_point_desc(self, unique_id: int, 
                                    dim: int, rem: List[int]
     ) -> None:
         index_space = self.create_index_space_point(unique_id, dim, rem)
 
+    # IndexSpaceRectDesc
     @typecheck
     def log_index_space_rect_desc(self, unique_id: int, 
                                   dim: int, rem: List[int]
     ) -> None:
         index_space = self.create_index_space_rect(unique_id, dim, rem)
 
+    # IndexSpaceEmptyDesc
     @typecheck
     def log_index_space_empty_desc(self, unique_id: int) -> None:
         index_space = self.create_index_space_empty(unique_id)
 
+    # IndexSpaceDesc
     @typecheck
     def log_index_space_desc(self, unique_id: int, name: str) -> None:
         index_space = self.find_index_space(unique_id)
         index_space.set_name(name)
 
+    # LogicalRegionDesc
     @typecheck
     def log_logical_region_desc(self, ispace_id: int, fspace_id: int, 
                                 tree_id: int, name: str
     ) -> None:
         logical_region = self.create_logical_region(ispace_id, fspace_id, tree_id, name)
 
+    # FieldSpaceDesc
     @typecheck
     def log_field_space_desc(self, unique_id: int, name: str) -> None:
         field_space = self.create_field_space(unique_id, name)
 
+    # FieldDesc
     @typecheck
     def log_field_desc(self, unique_id: int, field_id: int, 
                        size: int, name: str
     ) -> None:
         field = self.create_field(unique_id, field_id, size, name)
 
+    # PartDesc
     @typecheck
     def log_index_part_desc(self, unique_id: int, name: str) -> None:
         part = self.create_partition(unique_id, name)
 
+    # IndexPartitionDesc
     @typecheck
     def log_index_partition_desc(self, parent_id: int, 
                                  unique_id: int, 
@@ -3199,12 +3217,14 @@ class State(object):
         part.disjoint = disjoint
         part.point = point0
 
+    # IndexSubSpaceDesc
     @typecheck
     def log_index_subspace_desc(self, parent_id: int, unique_id: int) -> None:
         index_space = self.find_index_space(unique_id)
         index_part_parent = self.find_partition(parent_id)
         index_space.set_parent(index_part_parent)
 
+    # PhysicalInstRegionDesc
     @typecheck
     def log_physical_inst_region_desc(self, op_id: int, inst_id: int, 
                                       ispace_id: int, fspace_id: int, 
@@ -3220,6 +3240,7 @@ class State(object):
             inst.align_desc[fspace] = []
         inst.tree_id = tree_id
 
+    # IndexSpaceSizeDesc
     @typecheck
     def log_index_space_size_desc(self, unique_id: int, 
                                   dense_size: int, sparse_size: int, 
@@ -3229,6 +3250,7 @@ class State(object):
         index_space = self.find_index_space(unique_id)
         index_space.set_size(dense_size, sparse_size, is_sparse)
 
+    # PhysicalInstDimOrderDesc
     @typecheck
     def log_physical_inst_layout_dim_desc(self, op_id: int, inst_id: int, 
                                           dim: int, dim_kind: int
@@ -3237,6 +3259,7 @@ class State(object):
         inst = self.create_instance(inst_id, op)
         inst.dim_order_desc.insert(dim, dim_kind)
 
+    # PhysicalInstLayoutDesc
     @typecheck
     def log_physical_inst_layout_desc(self, op_id: int, inst_id: int, 
                                       field_id: int, fspace_id: int,
@@ -3253,6 +3276,18 @@ class State(object):
         inst.fields[fspace].append(field)
         align_elem = Align(field_id, eqk, align_desc, bool(has_align))
         inst.align_desc[fspace].append(align_elem)
+
+    # PhysicalInstanceUsage
+    @typecheck
+    def log_physical_inst_usage(self, inst_id: int, op_id: int, 
+                                index_id: int, field_id: int
+    ) -> None:
+        op = self.find_op(op_id)
+        assert isinstance(op, Task)
+        instance = self.find_instance_by_inst_id(inst_id)
+        op.add_inst(instance, index_id, field_id)
+        assert instance is not None
+        print("log inst usage", inst_id, op_id, index_id, field_id, instance)
 
     # TaskInfo
     @typecheck
@@ -3885,6 +3920,13 @@ class State(object):
         if key not in self.instances:
             return None
         return self.instances[key]
+
+    @typecheck
+    def find_instance_by_inst_id(self, inst_id: int) -> Union[Instance, None]:
+        for key, inst in self.instances.items():
+            if inst_id == key[0]:
+                return inst
+        return None
 
     @typecheck
     def create_user_marker(self, name: str) -> UserMarker:
@@ -4769,6 +4811,8 @@ class State(object):
                 provenance = operation.provenance
             ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
                             (op_id, operation.parent_id, str(operation), proc_str, level, provenance))
+            if isinstance(operation, Task):
+                print(operation, operation.instances)
         ops_file.close()
 
         if show_procs:

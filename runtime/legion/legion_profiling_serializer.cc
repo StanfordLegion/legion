@@ -209,8 +209,8 @@ namespace Legion {
          << "id:" << PHYSICAL_INST_USAGE_ID                   << delim
          << "inst_id:InstID:"           << sizeof(InstID)     << delim
          << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
-         << "index:unsigned:"           << sizeof(unsigned)   << delim
-         << "field:unsigned:"           << sizeof(unsigned)
+         << "index_id:unsigned:"        << sizeof(unsigned)   << delim
+         << "field_id:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "TaskKind {" 
@@ -703,7 +703,7 @@ namespace Legion {
                          const LegionProfInstance::PhysicalInstanceUsage &usage)
     //--------------------------------------------------------------------------
     {
-      int ID = PHYSICAL_INST_LAYOUT_ID;
+      int ID = PHYSICAL_INST_USAGE_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(usage.inst_id), sizeof(InstID));
       lp_fwrite(f, (char*)&(usage.op_id) ,sizeof(UniqueID));
