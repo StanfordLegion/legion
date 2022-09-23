@@ -2729,7 +2729,10 @@ class IndexSpace(object):
 
     def __str__(self):
         if self.name is None:
-            return "Index Space %s" % self.uid
+            if self.parent is None:
+                return "Index Space %s" % self.uid
+            else:
+                return "Index Subspace %s" % self.uid
         else:
           return '%s (%s)' % (self.name, self.uid)
 
@@ -2737,7 +2740,11 @@ class IndexSpace(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+        name = str(self)
+        provenance = self.get_provenance()
+        if provenance is not None:
+            name = name + " [" + provenance + "]"
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def check_partition_properties(self):
         # Check all the partitions
@@ -2822,25 +2829,7 @@ class IndexSpace(object):
             return self.provenance
 
     def print_graph(self, printer):
-        provenance = self.get_provenance()
-        if provenance is not None and len(provenance) == 0:
-            provenance = None
-        if self.name is not None:
-            if provenance is not None:
-                label = '%s [%s] (ID: %s)' % (self.name, provenance, self.uid)
-            else:
-                label = '%s (ID: %s)' % (self.name, self.uid)
-        else:
-            if self.parent is None:
-                if provenance is not None:
-                    label = 'Index Space %s [%s]' % (self.uid, provenance)
-                else:
-                    label = 'Index Space %s' % self.uid
-            else:
-                if provenance is not None:
-                    label = 'Subspace %s [%s]' % (self.uid, provenance)
-                else:
-                    label = 'Subspace %s' % self.uid
+        label = self.html_safe_name
         if self.parent is not None:
             color = None
             for c, child in iteritems(self.parent.children):
@@ -2937,6 +2926,13 @@ class IndexPartition(object):
             return '%s (%s)' % (self.name, self.uid)
 
     __repr__ = __str__
+
+    @property
+    def html_safe_name(self):
+        name = str(self)
+        if self.provenance is not None:
+            name = name + ' [' + self.provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def check_partition_properties(self):
         # Check for dominance of children by parent
@@ -3070,19 +3066,7 @@ class IndexPartition(object):
                 ' [style=dotted,color=black,penwidth=2];')
 
     def print_graph(self, printer):
-        provenance = self.provenance
-        if provenance is not None and len(provenance) == 0:
-            provenance = None
-        if self.name is not None:
-            if provenance is not None:
-                label = self.name + ' [' + provenance + '] (ID: ' + str(self.uid) + ')'
-            else:
-                label = self.name + ' (ID: ' + str(self.uid) + ')'
-        else:
-            if provenance is not None:
-                label = 'Index Partition '+str(self.uid) + ' [' + provenance + ']'
-            else:
-                label = 'Index Partition '+str(self.uid)
+        label = self.html_safe_name
         color = None
         for c,child in iteritems(self.parent.children):
             if child == self:
@@ -3128,7 +3112,10 @@ class Field(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+        name = str(self)
+        if self.provenance is not None:
+            name = name + ' [' + self.provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     __repr__ = __str__
 
@@ -3161,20 +3148,15 @@ class FieldSpace(object):
 
     __repr__ = __str__
 
+    @property
+    def html_safe_name(self):
+        name = str(self)
+        if self.provenance is not None:
+            name = name + ' [' + self.provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+
     def print_graph(self, printer):
-        provenance = self.provenance
-        if provenance is not None and len(provenance) == 0:
-            provenance = None
-        if self.name is not None:
-            if provenance is not None:
-                label = self.name + ' [' + provenance + '] (ID: '+str(self.uid) + ')'
-            else:
-                label = self.name + ' (ID: '+str(self.uid) + ')'
-        else:
-            if provenance is not None:
-                lavel = str(self) + ' [' + provenance + ']'
-            else:
-                label = str(self)
+        label = self.html_safe_name
         if self.owner is not None:
             label += '\nOwner Node: ' + str(self.owner)
         printer.println(self.node_name+' [label="'+label+
@@ -3246,7 +3228,10 @@ class LogicalRegion(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+        name = str(self)
+        if self.provenance is not None:
+            name = name + ' [' + self.provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def __str__(self):
         if self.name is None:
@@ -5696,17 +5681,10 @@ class Operation(object):
         return self.provenance
 
     def __str__(self):
-        provenance = self.get_provenance()
-        if provenance is None:
-            if self.name is None:
-                return OpNames[self.kind] + " " + str(self.uid)
-            else:
-                return self.name
+        if self.name is None:
+            return OpNames[self.kind] + " " + str(self.uid)
         else:
-            if self.name is None:
-                return OpNames[self.kind] + " [" + provenance + "] " + str(self.uid)
-            else:
-                return self.name + " [" + provenance + "]"
+            return self.name
 
     __repr__ = __str__
 
@@ -7573,7 +7551,11 @@ class Operation(object):
 
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+        name = str(self)
+        provenance = self.get_provenance()
+        if provenance is not None:
+            name = name + ' [' + provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def print_base_node(self, printer, dataflow):
         title = self.html_safe_name+' (UID: '+str(self.uid)+')'
@@ -7880,9 +7862,18 @@ class Task(object):
 
     __repr__ = __str__
 
+    def get_provenance(self):
+        if self.op is None:
+            return None
+        return op.get_provenance()
+
     @property
     def html_safe_name(self):
-        return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
+        name = str(self)
+        provenance = self.get_provenance()
+        if provenance is not None:
+            name = name + ' [' + provenance + ']'
+        return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
     def add_operation(self, operation, index):
         assert operation.context_index is None
@@ -11707,6 +11698,10 @@ class State(object):
         # Check to see if we have any unknown operations
         for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
+                # Ignore provenances for slice tasks we might have recorded
+                if op.uid in self.slice_index or op.uid in self.slice_slice:
+                    assert op.provenance is not None
+                    continue
                 print('WARNING: operation %d has unknown operation kind!' % op.uid)
                 if self.assert_on_warning:
                     assert False
