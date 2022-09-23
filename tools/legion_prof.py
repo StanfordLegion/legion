@@ -1380,7 +1380,7 @@ class Operation(ProcOperation):
 
     # add instance by instance_id
     @typeassert(instances=dict)
-    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
         for idx, inst in enumerate(self.instances):
             instance_obj = None
             for key, instance in instances.items():
@@ -1960,19 +1960,22 @@ class CopyInstInfo(object):
 
     # add instance by instance_id
     @typeassert(instances=dict)
-    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
-        counter = 0
+    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        src_flag = False
+        dst_flag = False
         for key, instance in instances.items():
             if  self.src_inst_id == key[0]:
                 self.src_instance = instance
-                counter += 1
+                src_flag = True
             if  self.dst_inst_id == key[0]:
                 self.dst_instance = instance
-                counter += 1
-            if counter == 2:
+                dst_flag = True
+            if src_flag and dst_flag:
                 break
-        if counter != 2:
-            print(hex(self.src_inst_id), self.src_inst_id, hex(self.dst_inst_id), self.dst_inst_id)
+        if src_flag == False:
+            assert 0, "Copy can not find src_inst:" + str(hex(self.src_inst_id))
+        if dst_flag == False:
+            assert 0, "Copy can not find dst_inst:" + str(hex(self.dst_inst_id))
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2024,25 +2027,19 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         return val
 
     @typeassert(instances=dict)
-    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
         for node in self.copy_info:
-            node.attach_instance(instances)
+            node.link_instance(instances)
 
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
         instances_list = []
         for node in self.copy_info:
-            if node.src_instance is not None:
-                instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
-            else:
-                instances_list.append(str(hex(node.src_inst_id)))
-                print("Copy NOT found src inst:", hex(node.src_inst_id))
-            if node.dst_instance is not None:
-                instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
-            else:
-                instances_list.append(str(hex(node.dst_inst_id)))
-                print("Copy NOT found dst inst:", hex(node.dst_inst_id))
+            assert node.src_instance is not None
+            instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
+            assert node.dst_instance is not None
+            instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
         instances = "|".join(instances_list)
         return instances
 
@@ -2101,16 +2098,16 @@ class FillInstInfo(object):
 
     # add instance by instance_id
     @typeassert(instances=dict)
-    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
-        counter = 0
+    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        dst_flag = False
         for key, instance in instances.items():
             if  self.dst_inst_id == key[0]:
                 self.dst_instance = instance
-                counter += 1
-            if counter == 1:
+                dst_flag = True
+            if dst_flag:
                 break
-        if counter != 1:
-            print(hex(self.dst_inst_id), self.dst_inst_id)
+        if dst_flag == False:
+           assert 0, "Fill can not find dst_inst:" + str(hex(self.dst_inst_id))
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2149,20 +2146,17 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         return val
 
     @typeassert(instances=dict)
-    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
         for node in self.fill_info:
-            node.attach_instance(instances)
+            node.link_instance(instances)
 
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
         instances_list = []
         for node in self.fill_info:
-            if node.dst_instance is not None:
-                instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
-            else:
-                instances_list.append(str(hex(node.dst_inst_id)))
-                print("Fill NOT found dst inst:", hex(node.dst_inst_id))
+            assert node.dst_instance is not None
+            instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
         instances = "|".join(instances_list)
         return instances
 
@@ -2631,11 +2625,11 @@ class Processor(object):
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
     @typecheck
-    def add_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+    def link_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
         for point in self.time_points:
             if point.first:
                 if isinstance(point.thing, Operation):
-                    point.thing.attach_instance(instances)
+                    point.thing.link_instance(instances)
 
     @typecheck
     def emit_tsv(self, tsv_file: io.TextIOWrapper, base_level: int) -> int:
@@ -3073,11 +3067,11 @@ class Channel(object):
                 free_levels.add(point.thing.level)
 
     @typecheck
-    def add_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+    def link_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
         for point in self.time_points:
             if point.first:
                 if isinstance(point.thing, (Copy, Fill)):
-                    point.thing.attach_instance(instances)
+                    point.thing.link_instance(instances)
 
     @typecheck
     def emit_tsv(self, 
@@ -3576,8 +3570,6 @@ class State(object):
     ) -> None:
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
-        # WW: remove
-        print("log inst create:", hex(inst_id), op)
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
         if inst.stop is None:
@@ -4030,8 +4022,8 @@ class State(object):
             self.fields[key] = field
         else:
             field = self.fields[key]
-            field.size = size;
-            field.name = name;
+            field.size = size
+            field.name = name
         return field
 
     @typecheck
@@ -5024,7 +5016,7 @@ class State(object):
                                                  transitive_map)
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
-                    proc.add_instances(self.instances)
+                    proc.link_instances(self.instances)
                     with open(proc_tsv_file_name, "w") as proc_tsv_file:
                         proc_tsv_file.write(data_tsv_header)
                         proc_level = proc.emit_tsv(proc_tsv_file, 0)
@@ -5040,7 +5032,7 @@ class State(object):
         if show_channels:
             for c,chan in sorted(self.channels.items(), key=lambda x: x[1]):
                 if len(chan.copies) > 0:
-                    chan.add_instances(self.instances)
+                    chan.link_instances(self.instances)
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
