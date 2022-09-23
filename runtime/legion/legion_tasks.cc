@@ -3672,7 +3672,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::replay_map_task_output(void)
+    ApEvent SingleTask::replay_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3699,6 +3699,7 @@ namespace Legion {
       if (!single_task_termination.exists())
         single_task_termination = Runtime::create_ap_user_event(NULL);
       set_origin_mapped(true); // it's like this was origin mapped
+      return single_task_termination;
     }
 
     //--------------------------------------------------------------------------
@@ -4214,6 +4215,10 @@ namespace Legion {
       // our trace info and do the initialization
       const TraceInfo trace_info = is_remote() ?
         TraceInfo(this, remote_trace_recorder) : TraceInfo(this);
+      // If we'r recording then record the replay map task
+      if (is_recording())
+        trace_info.record_replay_mapping(single_task_termination,
+            TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND));
       ApEvent init_precondition = compute_init_precondition(trace_info);
       region_preconditions.resize(regions.size());
       // After we've got our results, apply the state to the region tree
@@ -10615,6 +10620,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
+      tpl->register_operation(this);
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)

@@ -1240,7 +1240,7 @@ namespace Legion {
       virtual AddressSpaceID get_origin_space(void) const = 0;
       virtual PhysicalTemplate* get_template(void) const = 0;
       virtual ApEvent get_memo_completion(void) = 0;
-      virtual void replay_mapping_output(void) = 0;
+      virtual ApEvent replay_mapping(void) = 0;
       virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
@@ -1295,7 +1295,8 @@ namespace Legion {
         { assert(false); }
       virtual ApEvent get_memo_completion(void)
         { return this->get_completion_event(); }
-      virtual void replay_mapping_output(void) { /*do nothing*/ }
+      virtual ApEvent replay_mapping(void) 
+        { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const TraceInfo &info);

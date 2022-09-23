@@ -216,6 +216,8 @@ namespace Legion {
     public:
       virtual void record_completion_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                           const TraceLocalID &tlid, bool register_memo) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid) = 0;
@@ -332,6 +334,7 @@ namespace Legion {
     public:
       enum RemoteTraceKind {
         REMOTE_TRACE_RECORD_COMPLETION_EVENT,
+        REMOTE_TRACE_RECORD_REPLAY_MAPPING,
         REMOTE_TRACE_REQUEST_TERM_EVENT,
         REMOTE_TRACE_CREATE_USER_EVENT,
         REMOTE_TRACE_TRIGGER_EVENT,
@@ -366,6 +369,8 @@ namespace Legion {
     public:
       virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
                                            const TraceLocalID &tlid);
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                           const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &hs, 
                                                const TraceLocalID &tlid);
@@ -499,7 +504,13 @@ namespace Legion {
       TraceInfo(PhysicalTraceRecorder *rec,
                 const TraceLocalID &tlid);
     public:
-      inline void request_term_event(ApUserEvent &term_event)
+      inline void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                                        bool register_memo) const
+        {
+          base_sanity_check();
+          rec->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+        }
+      inline void request_term_event(ApUserEvent &term_event) const
         {
           base_sanity_check();
           rec->request_term_event(term_event);

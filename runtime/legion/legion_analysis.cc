@@ -427,6 +427,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_replay_mapping(ApEvent lhs,
+                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent applied = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_RECORD_REPLAY_MAPPING);
+          rez.serialize(applied);
+          rez.serialize(lhs);
+          rez.serialize(op_kind);
+          tlid.serialize(rez);
+          rez.serialize<bool>(register_memo);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        AutoLock a_lock(applied_lock);
+        applied_events.insert(applied);
+      }
+      else
+        remote_tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::request_term_event(ApUserEvent &term_event)
     //--------------------------------------------------------------------------
     {
@@ -1139,6 +1166,22 @@ namespace Legion {
             TraceLocalID tlid;
             tlid.deserialize(derez);
             tpl->record_completion_event(lhs, op_kind, tlid);
+            Runtime::trigger_event(applied);
+            break;
+          }
+        case REMOTE_TRACE_RECORD_REPLAY_MAPPING:
+          {
+            RtUserEvent applied;
+            derez.deserialize(applied);
+            ApEvent lhs;
+            derez.deserialize(lhs);
+            unsigned op_kind;
+            derez.deserialize(op_kind);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
+            bool register_memo;
+            derez.deserialize<bool>(register_memo);
+            tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
             Runtime::trigger_event(applied);
             break;
           }

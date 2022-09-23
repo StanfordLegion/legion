@@ -1804,6 +1804,7 @@ namespace Legion {
     class ShardedPhysicalTemplate;
     class Instruction;
     class GetTermEvent;
+    class ReplayMapping;
     class CreateApUserEvent;
     class TriggerEvent;
     class MergeEvent;

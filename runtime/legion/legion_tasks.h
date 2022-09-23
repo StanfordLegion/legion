@@ -426,7 +426,6 @@ namespace Legion {
                                    const LayoutConstraintSet &constraints);
       void finalize_output_regions(void);
     public:
-      void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
       void set_shard_manager(ShardManager *manager);
     protected: // mapper helper call
@@ -502,7 +501,7 @@ namespace Legion {
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
-      virtual void replay_mapping_output(void) { replay_map_task_output(); }
+      virtual ApEvent replay_mapping(void);
       virtual void find_completion_effects(std::set<ApEvent> &effects);
     public:
       void handle_remote_profiling_response(Deserializer &derez);

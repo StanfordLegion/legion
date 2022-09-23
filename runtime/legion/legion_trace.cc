@@ -3959,7 +3959,7 @@ namespace Legion {
                                                std::set<ApEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      AutoLock tpl_lock(template_lock);
+      // No need for a lock here, the mapping fence protects us
 #ifdef DEBUG_LEGION
       assert(!events.empty());
       assert(events.size() == instructions.size());
@@ -3967,11 +3967,7 @@ namespace Legion {
       // Scan backwards until we find the previous execution fence (if any)
       for (unsigned idx = events.size() - 1; idx > 0; idx--)
       {
-        // Skip any barrier events from remote shards, they will be picked
-        // up by their own shards and mixed into the fences appropriately
-        const InstructionKind kind = instructions[idx]->get_kind(); 
-        if ((kind != BARRIER_ADVANCE) && (kind != BARRIER_ARRIVAL))
-          preconditions.insert(events[idx]);
+        preconditions.insert(events[idx]);
         if (instructions[idx] == last_fence)
           return;
       }
@@ -4765,6 +4761,7 @@ namespace Legion {
               break;
             }
           case GET_TERM_EVENT:
+          case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -4883,7 +4880,8 @@ namespace Legion {
       {
         unsigned slice_index = -1U;
         if (!round_robin_for_tasks && 
-            (it->second.second == Operation::TASK_OP_KIND))
+            (it->second.second == Operation::TASK_OP_KIND) &&
+            (it->first.index_point.get_dim() > 0))
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION
@@ -5164,6 +5162,7 @@ namespace Legion {
       initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
 
       std::map<TraceLocalID, GetTermEvent*> term_insts;
+      std::map<TraceLocalID, ReplayMapping*> replay_insts;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -5172,10 +5171,14 @@ namespace Legion {
           // Pass these instructions as their events will be added later
           case GET_TERM_EVENT :
             {
-#ifdef DEBUG_LEGION
-              assert(inst->as_get_term_event() != NULL);
-#endif
-              term_insts[inst->owner] = inst->as_get_term_event();
+              GetTermEvent *term = inst->as_get_term_event();
+              term_insts[term->owner] = term; 
+              break;
+            }
+          case REPLAY_MAPPING:
+            {
+              ReplayMapping *replay = inst->as_replay_mapping();
+              replay_insts[inst->owner] = replay;
               break;
             }
           case CREATE_AP_USER_EVENT :
@@ -5272,23 +5275,42 @@ namespace Legion {
           case COMPLETE_REPLAY :
             {
               CompleteReplay *replay = inst->as_complete_replay();
-#ifdef DEBUG_LEGION
-              assert(term_insts.find(replay->owner) != term_insts.end());
-#endif
-              GetTermEvent *term = term_insts[replay->owner];
-              unsigned lhs = term->lhs;
-#ifdef DEBUG_LEGION
-              assert(lhs != -1U);
-#endif
-              if (replay->post > 0)
+              // Check to see if we can find a replay instruction to match 
+              std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
+                replay_insts.find(replay->owner);
+              if (replay_finder != replay_insts.end())
               {
-                if (replay->pre > 0)
+                incoming[replay_finder->second->lhs].push_back(replay->pre);
+                outgoing[replay->pre].push_back(replay_finder->second->lhs);
+                if ((replay->post != 0) && 
+                    (replay_finder->second->lhs != replay->post))
                 {
-                  incoming[replay->post].push_back(replay->pre);
-                  outgoing[replay->pre].push_back(replay->post);
+                  incoming[replay->post].push_back(replay_finder->second->lhs);
+                  outgoing[replay_finder->second->lhs].push_back(replay->post);
                 }
-                incoming[lhs].push_back(replay->post);
-                outgoing[replay->post].push_back(lhs);
+                replay_insts.erase(replay_finder);
+              }
+              else if ((replay->post != 0) && (replay->pre != replay->post))
+              {
+                incoming[replay->post].push_back(replay->pre);
+                outgoing[replay->pre].push_back(replay->post);
+              }
+              // Lastly check to see if we can find a term inst to match
+              std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
+                term_insts.find(replay->owner);
+              if (term_finder != term_insts.end())
+              {
+                if (replay->post != 0)
+                {
+                  incoming[term_finder->second->lhs].push_back(replay->post);
+                  outgoing[replay->post].push_back(term_finder->second->lhs);
+                }
+                else
+                {
+                  incoming[term_finder->second->lhs].push_back(replay->pre);
+                  outgoing[replay->pre].push_back(term_finder->second->lhs);
+                }
+                term_insts.erase(term_finder);
               }
               break;
             }
@@ -5297,6 +5319,21 @@ namespace Legion {
               assert(false);
               break;
             }
+        }
+      }
+#ifdef DEBUG_LEGION
+      // should have seen a complete replay instruction for every replay mapping
+      assert(replay_insts.empty());
+#endif
+      if (!term_insts.empty())
+      {
+        // Any term instructions that don't match with a complete replay
+        // need to be recorded as sources for the BFS
+        for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
+              term_insts.begin(); it != term_insts.end(); it++)
+        {
+          inv_topo_order[it->second->lhs] = topo_order.size();
+          topo_order.push_back(it->second->lhs);
         }
       }
 
@@ -5324,6 +5361,10 @@ namespace Legion {
         }
         ++idx;
       }
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < incoming.size(); idx++)
+        assert(remaining_edges[idx] == 0);
+#endif
 
       // Third, construct a chain decomposition
       unsigned num_chains = 0;
@@ -5405,10 +5446,8 @@ namespace Legion {
         std::vector<std::vector<unsigned> > *in_reduced_copy = 
           new std::vector<std::vector<unsigned> >();
         in_reduced_copy->swap(incoming_reduced);
-        // Write them to the members
+        // Write them to the members (in this order)
         pending_inv_topo_order.store(inv_topo_order_copy);
-        // Need memory fence so writes happen in this order
-        __sync_synchronize();
         pending_transitive_reduction.store(in_reduced_copy);
       }
       else
@@ -5558,6 +5597,12 @@ namespace Legion {
             {
               GetTermEvent *term = inst->as_get_term_event();
               lhs = term->lhs;
+              break;
+            }
+          case REPLAY_MAPPING:
+            {
+              ReplayMapping *replay = inst->as_replay_mapping();
+              lhs = replay->lhs;
               break;
             }
           case CREATE_AP_USER_EVENT:
@@ -5716,9 +5761,9 @@ namespace Legion {
       {
         Instruction *inst = instructions[idx];
         InstructionKind kind = inst->get_kind();
-        // We only eliminate two kinds of instructions:
+        // We only eliminate two kinds of instructions currently:
         // GetTermEvent and SetOpSyncEvent
-        used[idx] = kind != SET_OP_SYNC_EVENT;
+        used[idx] = (kind != SET_OP_SYNC_EVENT) && (kind != GET_TERM_EVENT);
         switch (kind)
         {
           case MERGE_EVENT:
@@ -5812,6 +5857,7 @@ namespace Legion {
               break;
             }
           case GET_TERM_EVENT:
+          case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -6097,6 +6143,21 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       record_memo_entry(tlid, lhs_, op_kind);
       insert_instruction(new GetTermEvent(*this, lhs_, tlid, fence));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_replay_mapping(ApEvent lhs,
+                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      unsigned lhs_ = convert_event(lhs);
+      if (register_memo)
+        record_memo_entry(tlid, lhs_, op_kind);
+      insert_instruction(new ReplayMapping(*this, lhs_, tlid));
     }
 
     //--------------------------------------------------------------------------
@@ -8922,7 +8983,6 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      operations[owner]->replay_mapping_output();
       events[lhs] = operations[owner]->get_memo_completion();
     }
 
@@ -8937,6 +8997,51 @@ namespace Legion {
 #endif
       ss << "events[" << lhs << "] = operations[" << owner
          << "].get_completion_event()    (op kind: "
+         << Operation::op_names[finder->second.second]
+         << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplayMapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplayMapping::ReplayMapping(PhysicalTemplate& tpl, unsigned l,
+                                 const TraceLocalID& r)
+      : Instruction(tpl, r), lhs(l)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < tpl.events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapping::execute(std::vector<ApEvent> &events,
+                                std::map<unsigned,ApUserEvent> &user_events,
+                                std::map<TraceLocalID,Memoizable*> &operations,
+                                const bool recurrent_replay)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      events[lhs] = operations[owner]->replay_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    std::string ReplayMapping::to_string(const MemoEntries &memo_entries)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      MemoEntries::const_iterator finder = memo_entries.find(owner);
+#ifdef DEBUG_LEGION
+      assert(finder != memo_entries.end());
+#endif
+      ss << "events[" << lhs << "] = operations[" << owner
+         << "].replay_mapping()    (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();

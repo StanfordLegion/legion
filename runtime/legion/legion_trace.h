@@ -976,6 +976,8 @@ namespace Legion {
     public:
       virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
                                            const TraceLocalID &tlid);
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                          const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
@@ -1232,6 +1234,7 @@ namespace Legion {
       friend class Instruction;
 #ifdef DEBUG_LEGION
       friend class GetTermEvent;
+      friend class ReplayMapping;
       friend class CreateApUserEvent;
       friend class TriggerEvent;
       friend class MergeEvent;
@@ -1491,6 +1494,7 @@ namespace Legion {
     enum InstructionKind
     {
       GET_TERM_EVENT = 0,
+      REPLAY_MAPPING,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,
@@ -1522,6 +1526,7 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void) = 0;
       virtual GetTermEvent* as_get_term_event(void) { return NULL; }
+      virtual ReplayMapping* as_replay_mapping(void) { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void) { return NULL; }
       virtual TriggerEvent* as_trigger_event(void) { return NULL; }
       virtual MergeEvent* as_merge_event(void) { return NULL; }
@@ -1557,6 +1562,31 @@ namespace Legion {
       virtual InstructionKind get_kind(void)
         { return GET_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      friend class ShardedPhysicalTemplate;
+      unsigned lhs;
+    };
+
+    /**
+     * \class ReplayMapping
+     * This instruction has the following semantics:
+     *   events[lhs] = operations[owner].replay_mapping()
+     */
+    class ReplayMapping : public Instruction {
+    public:
+      ReplayMapping(PhysicalTemplate& tpl, unsigned lhs,
+                    const TraceLocalID& rhs);
+      virtual void execute(std::vector<ApEvent> &events,
+                           std::map<unsigned,ApUserEvent> &user_events,
+                           std::map<TraceLocalID,Memoizable*> &operations,
+                           const bool recurrent_replay);
+      virtual std::string to_string(const MemoEntries &memo_entires);
+
+      virtual InstructionKind get_kind(void)
+        { return REPLAY_MAPPING; }
+      virtual ReplayMapping* as_replay_mapping(void)
         { return this; }
     private:
       friend class PhysicalTemplate;
