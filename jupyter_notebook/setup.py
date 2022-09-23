@@ -18,6 +18,7 @@ class my_build_py(build_py):
 
 setup(name='legion_jupyter',
       version='0.1',
+      zip_safe= False,
       py_modules=[
           'install_jupyter',
           'legion_kernel_nocr',
