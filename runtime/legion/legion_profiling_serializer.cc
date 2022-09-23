@@ -972,7 +972,7 @@ namespace Legion {
                                   const LegionProfInstance::FillInfo& fill_info)
     //--------------------------------------------------------------------------
     {
-      int ID = COPY_INST_INFO_ID;
+      int ID = FILL_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(fill_info.op_id),     sizeof(fill_info.op_id));
       lp_fwrite(f, (char*)&(copy_inst.dst_inst_id),sizeof(copy_inst.dst_inst_id));
