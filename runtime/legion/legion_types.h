@@ -253,6 +253,7 @@ namespace Legion {
     class ProfilingRequestSet;
     class Mapper;
     class MapperRuntime;
+    class AutoLock;
     class DefaultMapper;
     class ShimMapper;
     class TestMapper;
@@ -2185,11 +2186,9 @@ namespace Legion {
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
-    // These type imports are experimental to facilitate coordination and
+    // This type import is experimental to facilitate coordination and
     // synchronization between different mappers and may be revoked later
     // as we develop new abstractions for mappers to interact
-    typedef Internal::AutoLock AutoLock;
-    typedef Internal::AutoTryLock AutoTryLock;
     typedef Internal::LocalLock LocalLock;
   };
 
@@ -2608,6 +2607,7 @@ namespace Legion {
       // These are only accessible via AutoLock
       friend class AutoLock;
       friend class AutoTryLock;
+      friend class Mapping::AutoLock;
       inline RtEvent lock(void)   { return RtEvent(wrlock()); }
       inline RtEvent wrlock(void) { return RtEvent(reservation.wrlock()); }
       inline RtEvent rdlock(void) { return RtEvent(reservation.rdlock()); }
@@ -2660,7 +2660,7 @@ namespace Legion {
         Internal::local_lock_list = this;
       }
     protected:
-      // Helper constructor for AutoTryLock
+      // Helper constructor for AutoTryLock and Mapping::AutoLock
       inline AutoLock(int mode, bool excl, LocalLock &r)
         : local_lock(r), previous(Internal::local_lock_list), 
           exclusive(excl), held(false)
@@ -2671,6 +2671,7 @@ namespace Legion {
 #endif
       }
     public:
+      AutoLock(AutoLock &&rhs) = delete;
       AutoLock(const AutoLock &rhs) = delete;
       inline ~AutoLock(void)
       {
@@ -2686,6 +2687,7 @@ namespace Legion {
           assert(Internal::local_lock_list == previous);
       }
     public:
+      AutoLock& operator=(AutoLock &&rhs) = delete;
       AutoLock& operator=(const AutoLock &rhs) = delete;
     public:
       inline void release(void) 

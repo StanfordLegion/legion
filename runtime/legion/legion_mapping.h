@@ -2508,6 +2508,28 @@ namespace Legion {
       }
     }; 
 
+    /**
+     * \class AutoLock
+     * This class allows mappers to use their own fast reservation
+     * synchronization primitives instead of relying on the mapper
+     * synchronization model to perform all the synchronization.
+     * (This is still an experimental feature and subject to change)
+     */
+    class AutoLock : public Internal::AutoLock {
+    public:
+      AutoLock(MapperContext ctx, LocalLock &r, int mode = 0, bool excl = true);
+      AutoLock(AutoLock &&rhs) = delete;
+      AutoLock(const AutoLock &rhs) = delete;
+      ~AutoLock(void) { };
+    public:
+      AutoLock& operator=(AutoLock &&rhs) = delete;
+      AutoLock& operator=(const AutoLock &rhs) = delete;
+    public:
+      void reacquire(void);
+    protected:
+      const MapperContext ctx;
+    };
+
   }; // namespace Mapping
 }; // namespace Legion
 
