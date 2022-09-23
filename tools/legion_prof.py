@@ -1391,7 +1391,7 @@ class Operation(ProcOperation):
             self.instances[idx] = (inst[0], inst[1], inst[2], instance_obj)
 
     @typecheck
-    def dump_instances(self) -> Union[str, None]:
+    def _dump_instances(self) -> Union[str, None]:
         if len(self.instances) > 0:
             tmp = (str(hex(inst[0])) + "(" + str(inst[3].prof_uid) + ")" for inst in self.instances) #type: ignore
             instances = "|".join(tmp)
@@ -1469,7 +1469,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     ) -> None:
         # update the initiation
         self.initiation = str(self.parent_id)
-        instances = self.dump_instances()
+        instances = self._dump_instances()
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
@@ -1937,7 +1937,7 @@ class ChanOperation(Base):
         cur_level = self.chan.max_live_copies+1 - self.level
         return (str(self.chan), self.prof_uid)
 
-class CopyInfo(object):
+class CopyInstInfo(object):
     __slots__ = [
         'src_inst_id', 'dst_inst_id', 'fevent', 'num_fields', 'request_type', 'num_hops',
         'src_instance', 'dst_instance'
@@ -1973,10 +1973,6 @@ class CopyInfo(object):
                 break
         if counter != 2:
             print(hex(self.src_inst_id), self.src_inst_id, hex(self.dst_inst_id), self.dst_inst_id)
-            # for inst in instances:
-            #     print(str(hex(inst[0])))
-            # assert 0
-        # assert counter == 2
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2007,10 +2003,10 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.size = size
         self.fevent = fevent
         self.num_requests = num_requests
-        self.copy_info: List[CopyInfo] = list()
+        self.copy_info: List[CopyInstInfo] = list()
 
-    @typeassert(entry=CopyInfo)
-    def add_copy_info(self, entry: CopyInfo) -> None:
+    @typecheck
+    def add_copy_info(self, entry: CopyInstInfo) -> None:
         self.copy_info.append(entry)
 
     @typecheck
@@ -2020,7 +2016,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
+        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
         cnt = 0
         for node in self.copy_info:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2033,7 +2029,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
             node.attach_instance(instances)
 
     @typecheck
-    def dump_insts(self) -> str:
+    def _dump_instances(self) -> str:
         instances = ""
         instances_list = []
         for node in self.copy_info:
@@ -2041,12 +2037,12 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                 instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
             else:
                 instances_list.append(str(hex(node.src_inst_id)))
-                print("NOT found src inst:", hex(node.src_inst_id))
+                print("Copy NOT found src inst:", hex(node.src_inst_id))
             if node.dst_instance is not None:
                 instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
             else:
                 instances_list.append(str(hex(node.dst_inst_id)))
-                print("NOT found dst inst:", hex(node.dst_inst_id))
+                print("Copy NOT found dst inst:", hex(node.dst_inst_id))
         instances = "|".join(instances_list)
         return instances
 
@@ -2068,7 +2064,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
-        instances = self.dump_insts()
+        instances = self._dump_instances()
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2088,8 +2084,44 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                                 instances = instances)
         tsv_file.write(tsv_line)
 
+class FillInstInfo(object):
+    __slots__ = [
+        'dst_inst_id', 'fevent', 'num_fields', 'dst_instance'
+        ]
+
+    @typecheck
+    def __init__(self, 
+                 dst_inst_id: int, 
+                 fevent: int, num_fields: int
+    ) -> None:
+        self.dst_inst_id = dst_inst_id
+        self.fevent = fevent
+        self.num_fields = num_fields
+        self.dst_instance: Optional["Instance"] = None
+
+    # add instance by instance_id
+    @typeassert(instances=dict)
+    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        counter = 0
+        for key, instance in instances.items():
+            if  self.dst_inst_id == key[0]:
+                self.dst_instance = instance
+                counter += 1
+            if counter == 1:
+                break
+        if counter != 1:
+            print(hex(self.dst_inst_id), self.dst_inst_id)
+
+    @typecheck
+    def get_short_text(self) -> str:
+        return 'dst_inst=%s, fields=%s' % (hex(self.dst_inst_id), self.num_fields)
+
+    @typecheck
+    def __repr__(self) -> str:
+        return self.get_short_text()
+
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'fill_info']
 
     # FIXME: fix for python 3.8
     @typeassert(initiation_op=Operation,
@@ -2102,9 +2134,37 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, create, ready, start, stop)
         self.dst = dst
+        self.fill_info: List[FillInstInfo] = list()
+
+    @typecheck
+    def add_fill_info(self, entry: FillInstInfo) -> None:
+        self.fill_info.append(entry)
 
     def __repr__(self) -> str:
-        return 'Fill'
+        val = 'Fill: num reqs=' + str(len(self.fill_info))
+        cnt = 0
+        for node in self.fill_info:
+            val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
+            cnt = cnt+1
+        return val
+
+    @typeassert(instances=dict)
+    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        for node in self.fill_info:
+            node.attach_instance(instances)
+
+    @typecheck
+    def _dump_instances(self) -> str:
+        instances = ""
+        instances_list = []
+        for node in self.fill_info:
+            if node.dst_instance is not None:
+                instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            else:
+                instances_list.append(str(hex(node.dst_inst_id)))
+                print("Fill NOT found dst inst:", hex(node.dst_inst_id))
+        instances = "|".join(instances_list)
+        return instances
 
     @typecheck
     def emit_tsv(self, 
@@ -2120,6 +2180,7 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        instances = self._dump_instances()
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2136,7 +2197,7 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
                                 parents = parents,
                                 prof_uid = self.prof_uid,
                                 op_id = None, 
-                                instances = None)
+                                instances = instances)
         tsv_file.write(tsv_line)
 
 class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
@@ -3015,7 +3076,7 @@ class Channel(object):
     def add_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
         for point in self.time_points:
             if point.first:
-                if isinstance(point.thing, Copy):
+                if isinstance(point.thing, (Copy, Fill)):
                     point.thing.attach_instance(instances)
 
     @typecheck
@@ -3182,7 +3243,8 @@ class State(object):
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
-        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map'
+        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
+        'fill_map'
     ]
     def __init__(self) -> None:
         self.max_dim = 3
@@ -3211,6 +3273,7 @@ class State(object):
         self.field_spaces: Dict[int, FieldSpace] = {}
         self.fields: Dict[Tuple[int, int], Field] = {}
         self.copy_map: Dict[int, Copy] = {}
+        self.fill_map: Dict[int, Fill] = {}
         self.has_spy_data = False
         self.spy_state: Optional[legion_spy.State] = None
         self.callbacks = {
@@ -3231,7 +3294,9 @@ class State(object):
             "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
             "CopyInfo": self.log_copy_info,
+            "CopyInstInfo": self.log_copy_inst_info,
             "FillInfo": self.log_fill_info,
+            "FillInstInfo": self.log_fill_inst_info,
             "InstCreateInfo": self.log_inst_create,
             "InstUsageInfo": self.log_inst_usage,
             "InstTimelineInfo": self.log_inst_timeline,
@@ -3255,8 +3320,7 @@ class State(object):
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "PhysicalInstanceUsage": self.log_physical_inst_usage,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "MaxDimDesc": self.log_max_dim,
-            "CopyInstInfo": self.log_copy_inst_info
+            "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
 
@@ -3474,19 +3538,36 @@ class State(object):
         entry = self.create_copy_inst_info(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
         cpy.add_copy_info(entry)
 
+    @typecheck
+    def add_fill_map(self, fevent: int, fill: Fill) -> None:
+        key = fevent
+        if key not in self.fill_map:
+            self.fill_map[key] = fill
+
     # FillInfo
     @typecheck
     def log_fill_info(self, op_id: int, dst: int, 
                       create: float, ready: float, 
-                      start: float, stop: float
+                      start: float, stop: float,
+                      fevent: int, num_requests: int
     ) -> None:
         op = self.find_op(op_id)
         dst = self.find_memory(dst)
         fill = self.create_fill(dst, op, create, ready, start, stop)
+        self.add_fill_map(fevent,fill)
         if stop > self.last_time:
             self.last_time = stop
         channel = self.find_channel(None, dst)
         channel.add_copy(fill)
+
+    # FillInstInfo
+    @typecheck
+    def log_fill_inst_info(self, op_id: int, dst_inst: int, 
+                           fevent: int, num_fields: int
+    ) -> None:
+        fill = self.find_fill(fevent)
+        entry = self.create_fill_inst_info(dst_inst, fevent, num_fields)
+        fill.add_fill_info(entry)
 
     # InstCreateInfo
     @typecheck
@@ -3495,6 +3576,7 @@ class State(object):
     ) -> None:
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
+        # WW: remove
         print("log inst create:", hex(inst_id), op)
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
@@ -3807,6 +3889,13 @@ class State(object):
         return self.copy_map[key]
 
     @typecheck
+    def find_fill(self,fevent: int) -> Fill:
+        key = fevent
+        if key not in self.fill_map:
+            assert False
+        return self.fill_map[key]
+
+    @typecheck
     def find_task(self, op_id: int, variant: Variant, 
                   create: float =None, ready: float =None, 
                   start: float =None, stop: float =None
@@ -3984,8 +4073,8 @@ class State(object):
     def create_copy_inst_info(self, src_inst: int, dst_inst: int, 
                               fevent: int, num_fields: int, 
                               request_type: int, num_hops: int
-    ) -> CopyInfo:
-        copyinfo =  CopyInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
+    ) -> CopyInstInfo:
+        copyinfo =  CopyInstInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
         return copyinfo
 
     @typecheck
@@ -3997,6 +4086,13 @@ class State(object):
         # update prof_uid map
         self.prof_uid_map[fill.prof_uid] = fill
         return fill
+
+    @typecheck
+    def create_fill_inst_info(self, dst_inst: int, 
+                              fevent: int, num_fields: int
+    ) -> FillInstInfo:
+        fillinfo =  FillInstInfo(dst_inst, fevent, num_fields)
+        return fillinfo
 
     @typecheck
     def create_deppart(self, part_op: int, op: Operation, 
@@ -4897,7 +4993,7 @@ class State(object):
         #     json.dump(op_dependencies, dep_json_file)
 
         ops_file = open(ops_file_name, "w")
-        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\tinstances\n")
+        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\n")
         for op_id, operation in sorted(self.operations.items()):
             if operation.is_trimmed():
                 continue
@@ -4910,12 +5006,8 @@ class State(object):
                 level = str(operation.level+1)
             if operation.provenance is not None:
                 provenance = operation.provenance
-            if len(operation.instances) > 0:
-                instances = " ".join(str(hex(inst[0])) for inst in operation.instances)
-            else:
-                instances = ""
-            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\t%s\n" % \
-                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance, instances))
+            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
+                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance))
         ops_file.close()
 
         if show_procs:
