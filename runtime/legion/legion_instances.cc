@@ -3771,7 +3771,7 @@ namespace Legion {
                                                      creator_id,
                                                      instance.id,
                                                      layout->owner->handle,
-                                                     layout->constraints);
+                                                     *layout->constraints);
       }
       return result;
     }

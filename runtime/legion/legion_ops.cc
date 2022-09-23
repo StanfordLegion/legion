@@ -18229,6 +18229,16 @@ namespace Legion {
         default:
           assert(false);
       }
+      if (runtime->profiler != NULL)
+      {
+        runtime->profiler->record_physical_instance_region(unique_op_id,
+            result.id, requirement.region);
+        runtime->profiler->record_physical_instance_fields(unique_op_id,
+            result.id, requirement.region.field_space, 
+            requirement.instance_fields);
+        runtime->profiler->record_physical_instance_layout(unique_op_id,
+            result.id, requirement.region.field_space, constraints);
+      }
       return result;
     }
 

@@ -630,7 +630,7 @@ namespace Legion {
                                   FieldSpace fs, std::vector<FieldID>& fields);
       void record_physical_instance_layout(UniqueID op_id,
                                            IDType inst_id, FieldSpace fs,
-                                           const LayoutConstraints *lc);
+                                           const LayoutConstraintSet &lc);
       void record_physical_instance_use(UniqueID op_id, IDType inst_id,
                                         unsigned index,
                                         const std::vector<FieldID> &fields);

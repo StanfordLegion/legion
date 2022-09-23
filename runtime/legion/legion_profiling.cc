@@ -1798,7 +1798,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfiler::record_physical_instance_layout(UniqueID op_id,
                                                 IDType inst_id, FieldSpace fs,
-                                               const LayoutConstraints *lc)
+                                                const LayoutConstraintSet &lc)
     //--------------------------------------------------------------------------
     {
       // get fields_constraints
@@ -1808,13 +1808,13 @@ namespace Legion {
 
       std::map<FieldID, AlignmentConstraint> align_map;
       const std::vector<AlignmentConstraint> &alignment_constraints =
-        lc->alignment_constraints;
+        lc.alignment_constraints;
       for (std::vector<AlignmentConstraint>::const_iterator it =
              alignment_constraints.begin(); it !=
              alignment_constraints.end(); it++) {
         align_map[it->fid] = *it;
       }
-      const std::vector<FieldID> &fields = lc->field_constraint.field_set;
+      const std::vector<FieldID> &fields = lc.field_constraint.field_set;
       for (std::vector<FieldID>::const_iterator it =
              fields.begin(); it != fields.end(); it++) {
         std::map<FieldID, AlignmentConstraint>::const_iterator align =
@@ -1833,7 +1833,7 @@ namespace Legion {
                                                  eqk);
       }
       const std::vector<DimensionKind> &dim_ordering_constr =
-        lc->ordering_constraint.ordering;
+        lc.ordering_constraint.ordering;
       unsigned dim=0;
       for (std::vector<DimensionKind>::const_iterator it =
              dim_ordering_constr.begin();
