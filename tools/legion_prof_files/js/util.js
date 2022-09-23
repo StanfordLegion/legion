@@ -199,6 +199,7 @@ function redoData(proc) {
 		    level_to_set = d.level;
 		var d_ready = {
                     id: d.id+items[level].length+1, // unique id
+		    op_id: d.op_id,
                     level: level_to_set,
 		    level_ready: d.level,
                     ready: d.ready,
@@ -324,7 +325,8 @@ function filterAndMergeBlocks(state) {
                 in: [],
                 out: [],
                 children: [],
-                parents: []
+                parents: [],
+		instances: d.instances
               });
               i += (count - 1);
             } else {
@@ -343,7 +345,8 @@ function filterAndMergeBlocks(state) {
                 in: d.in,
                 out: d.out,
                 children: d.children,
-                parents: d.parents
+                parents: d.parents,
+		instances: d.instances
               }
               state.dataToDraw.push(elem);
               if (isMemory) {
@@ -367,7 +370,8 @@ function filterAndMergeBlocks(state) {
               in: d.in,
               out: d.out,
               children: d.children,
-              parents: d.parents
+              parents: d.parents,
+	      instances: d.instances
             }
             state.dataToDraw.push(elem);
             if (isMemory) {

@@ -410,6 +410,9 @@ function getMouseOver() {
     var provenance = "";
     var initiation_provenance = "";
     // Insert texts in reverse order
+    if ((d.instances != undefined) && d.instances != "") {
+      descTexts.push("Instances: " + d.instances);
+    } 
     if (d.op_id != -1) {
         provenance = state.operations[d.op_id].provenance;
     }
@@ -2335,7 +2338,8 @@ function load_proc_timeline(proc) {
                 parents: parents,
                 prof_uid: d.prof_uid,
                 op_id: op_id,
-                proc: proc
+                proc: proc,
+		instances: d.instances
             };
         }
     },

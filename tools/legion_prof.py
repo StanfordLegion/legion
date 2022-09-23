@@ -206,7 +206,8 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
                  children: Union[str, None], 
                  parents: Union[str, None], 
                  prof_uid: int,
-                 op_id: Union[int, None] = None
+                 op_id: Union[int, None],
+                 instances: Union[str, None]
     ) -> str:
     # replace None with ''
     def xstr(s: Union[None, float, int, str]) -> str:
@@ -224,7 +225,7 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
-           str_op_id + "\n"
+           str_op_id + "\t" + xstr(instances) + "\n"
 
 @typecheck
 def slugify(filename: str) -> str:
@@ -1156,7 +1157,8 @@ class HasWaiters(ABC):
                  max_levels_ready: int,
                  level: int, 
                  level_ready: int,
-                 op_id: Union[int, None] = None
+                 op_id: Union[int, None],
+                 instances: Union[str, None]
     ) -> None:
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
@@ -1190,7 +1192,8 @@ class HasWaiters(ABC):
                                     children = children,
                                     parents = parents,
                                     prof_uid = self.prof_uid,
-                                    op_id = op_id)
+                                    op_id = op_id,
+                                    instances = instances)
                 # only write once
                 _in = ""
                 out = ""
@@ -1210,7 +1213,9 @@ class HasWaiters(ABC):
                                     children = "",
                                     parents = "",
                                     prof_uid = self.prof_uid,
-                                    op_id = op_id)
+                                    op_id = op_id,
+                                    instances = instances)
+
                 ready = data_tsv_str(level = cur_level,
                                      level_ready = l_ready,
                                      ready = wait_interval.ready,
@@ -1225,7 +1230,8 @@ class HasWaiters(ABC):
                                      children = "",
                                      parents = "",
                                      prof_uid = self.prof_uid,
-                                     op_id = op_id)
+                                     op_id = op_id,
+                                     instances = instances)
 
                 tsv_file.write(init)
                 tsv_file.write(wait)
@@ -1246,7 +1252,8 @@ class HasWaiters(ABC):
                                    children = "",
                                    parents = "",
                                    prof_uid = self.prof_uid,
-                                   op_id = op_id)
+                                   op_id = op_id,
+                                   instances = instances)
 
                 tsv_file.write(end)
         else:
@@ -1268,7 +1275,8 @@ class HasWaiters(ABC):
                                 children = children,
                                 parents = parents,
                                 prof_uid = self.prof_uid,
-                                op_id = op_id)
+                                op_id = op_id,
+                                instances = instances)
 
             tsv_file.write(line)
 
@@ -1312,7 +1320,7 @@ class Operation(ProcOperation):
     __slots__ = [
         'op_id', 'kind_num', 'kind', 'is_task', 'is_meta', 'is_multi',
         'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner',
-        'parent_id', 'provenance'
+        'parent_id', 'provenance', 'instances'
     ]
 
     @typecheck
@@ -1332,6 +1340,7 @@ class Operation(ProcOperation):
         self.owner = None
         self.parent_id = -1
         self.provenance = None
+        self.instances: List[Tuple[int, int, int, Union[None, Instance]]] = [] # inst_id, index_id, field_id and Instance
 
     @typecheck
     def assign_color(self, color_map: Dict[int, str]) -> None:
@@ -1366,6 +1375,31 @@ class Operation(ProcOperation):
         return False
 
     @typecheck
+    def add_instance_id(self, inst_id: int, index_id: int, field_id: int) -> None:
+        self.instances.append((inst_id, index_id, field_id, None))
+
+    # add instance by instance_id
+    @typeassert(instances=dict)
+    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        for idx, inst in enumerate(self.instances):
+            instance_obj = None
+            for key, instance in instances.items():
+                if inst[0] == key[0]:
+                    instance_obj = instance
+                    break
+            assert instance_obj is not None
+            self.instances[idx] = (inst[0], inst[1], inst[2], instance_obj)
+
+    @typecheck
+    def dump_instances(self) -> Union[str, None]:
+        if len(self.instances) > 0:
+            tmp = (str(hex(inst[0])) + "(" + str(inst[3].prof_uid) + ")" for inst in self.instances) #type: ignore
+            instances = "|".join(tmp)
+        else:
+            instances = None
+        return instances
+
+    @typecheck
     def __repr__(self) -> str:
         if self.is_task:
             assert self.variant is not None
@@ -1389,7 +1423,7 @@ class Operation(ProcOperation):
                 return self.kind+' Operation '+self.get_info()
 
 class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
-    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasDependencies._abstract_slots  + ['base_op', 'instances']
+    __slots__ = HasWaiters._abstract_slots + TimeRange._abstract_slots + HasDependencies._abstract_slots  + ['base_op']
 
     @typecheck
     def __init__(self, 
@@ -1413,7 +1447,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.parent_id = op.parent_id
         if op.provenance is not None:
             self.provenance = op.provenance
-        self.instances: List[Tuple["Instance", int, int]]= []
+        self.instances = op.instances
 
     @typecheck
     def assign_color(self, color: Dict[int, str]) -> None:
@@ -1435,11 +1469,13 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     ) -> None:
         # update the initiation
         self.initiation = str(self.parent_id)
+        instances = self.dump_instances()
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
                                    level_ready,
-                                   self.op_id)
+                                   self.op_id,
+                                   instances)
 
     @typecheck
     def get_color(self) -> str:
@@ -1470,13 +1506,6 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     @typecheck
     def mapper_time(self) -> float:
         return 0.0
-
-    @typecheck
-    def add_inst(self, inst: "Instance", index_id: int, field_id: int) -> None:
-        self.instances.append(tuple((inst, index_id, field_id)))
-        if self.provenance is None:
-            self.provenance = ""
-        self.provenance = self.provenance + " " + str(inst)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1540,7 +1569,7 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
-                                   level_ready)
+                                   level_ready, None, None)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1612,7 +1641,8 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                                 children = None,
                                 parents = None,
                                 prof_uid = self.prof_uid,
-                                op_id = self.proftask_id)
+                                op_id = self.proftask_id,
+                                instances = None)
         tsv_file.write(tsv_line)
 
     @typecheck
@@ -1697,7 +1727,9 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None,
+                                instances = None)
 
         tsv_file.write(tsv_line)
 
@@ -1792,7 +1824,9 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
                                 out = None,
                                 children = None,
                                 parents = None,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
 
         tsv_file.write(tsv_line)
 
@@ -1874,7 +1908,9 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
                                 out = None,
                                 children = None,
                                 parents = None,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
         tsv_file.write(tsv_line)
 
     @typecheck
@@ -1903,25 +1939,48 @@ class ChanOperation(Base):
 
 class CopyInfo(object):
     __slots__ = [
-        'src_inst', 'dst_inst', 'fevent', 'num_fields', 'request_type', 'num_hops'
+        'src_inst_id', 'dst_inst_id', 'fevent', 'num_fields', 'request_type', 'num_hops',
+        'src_instance', 'dst_instance'
         ]
 
     @typecheck
     def __init__(self, 
-                 src_inst: int, dst_inst: int, 
+                 src_inst_id: int, dst_inst_id: int, 
                  fevent: int, num_fields: int, 
                  request_type: int, num_hops: int
     ) -> None:
-        self.src_inst = src_inst
-        self.dst_inst = dst_inst
+        self.src_inst_id = src_inst_id
+        self.dst_inst_id = dst_inst_id
         self.fevent = fevent
         self.num_fields = num_fields
         self.request_type = request_type
         self.num_hops = num_hops
+        self.src_instance: Optional["Instance"] = None
+        self.dst_instance: Optional["Instance"] = None
+
+    # add instance by instance_id
+    @typeassert(instances=dict)
+    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        counter = 0
+        for key, instance in instances.items():
+            if  self.src_inst_id == key[0]:
+                self.src_instance = instance
+                counter += 1
+            if  self.dst_inst_id == key[0]:
+                self.dst_instance = instance
+                counter += 1
+            if counter == 2:
+                break
+        if counter != 2:
+            print(hex(self.src_inst_id), self.src_inst_id, hex(self.dst_inst_id), self.dst_inst_id)
+            # for inst in instances:
+            #     print(str(hex(inst[0])))
+            # assert 0
+        # assert counter == 2
 
     @typecheck
     def get_short_text(self) -> str:
-        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_inst), hex(self.dst_inst), self.num_fields, request[self.request_type], self.num_hops)
+        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_inst_id), hex(self.dst_inst_id), self.num_fields, request[self.request_type], self.num_hops)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1968,6 +2027,29 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
             cnt = cnt+1
         return val
 
+    @typeassert(instances=dict)
+    def attach_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+        for node in self.copy_info:
+            node.attach_instance(instances)
+
+    @typecheck
+    def dump_insts(self) -> str:
+        instances = ""
+        instances_list = []
+        for node in self.copy_info:
+            if node.src_instance is not None:
+                instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
+            else:
+                instances_list.append(str(hex(node.src_inst_id)))
+                print("NOT found src inst:", hex(node.src_inst_id))
+            if node.dst_instance is not None:
+                instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            else:
+                instances_list.append(str(hex(node.dst_inst_id)))
+                print("NOT found dst inst:", hex(node.dst_inst_id))
+        instances = "|".join(instances_list)
+        return instances
+
     @typecheck
     def emit_tsv(self,
                  tsv_file:io.TextIOWrapper, 
@@ -1986,6 +2068,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        instances = self.dump_insts()
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2000,7 +2083,9 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = instances)
         tsv_file.write(tsv_line)
 
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
@@ -2049,7 +2134,9 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
         tsv_file.write(tsv_line)
 
 class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
@@ -2098,7 +2185,9 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
         tsv_file.write(tsv_line)
 
 # Operations rendering on Memories
@@ -2179,8 +2268,11 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                     out = out,
                                     children = children,
                                     parents = parents,
-                                    prof_uid = self.prof_uid)
+                                    prof_uid = self.prof_uid,
+                                    op_id = None,
+                                    instances = None)
             tsv_file.write(tsv_line)
+
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
                                 ready = None,
@@ -2194,7 +2286,9 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None,
+                                instances = None)
         tsv_file.write(tsv_line)
 
     @typecheck
@@ -2474,6 +2568,13 @@ class Processor(object):
         for point in self.time_points:
             if point.first:
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
+
+    @typecheck
+    def add_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+        for point in self.time_points:
+            if point.first:
+                if isinstance(point.thing, Operation):
+                    point.thing.attach_instance(instances)
 
     @typecheck
     def emit_tsv(self, tsv_file: io.TextIOWrapper, base_level: int) -> int:
@@ -2911,6 +3012,13 @@ class Channel(object):
                 free_levels.add(point.thing.level)
 
     @typecheck
+    def add_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+        for point in self.time_points:
+            if point.first:
+                if isinstance(point.thing, Copy):
+                    point.thing.attach_instance(instances)
+
+    @typecheck
     def emit_tsv(self, 
                  tsv_file:io.TextIOWrapper, 
                  base_level: int) -> int:
@@ -3283,11 +3391,9 @@ class State(object):
                                 index_id: int, field_id: int
     ) -> None:
         op = self.find_op(op_id)
-        assert isinstance(op, Task)
-        instance = self.find_instance_by_inst_id(inst_id)
-        op.add_inst(instance, index_id, field_id)
-        assert instance is not None
-        print("log inst usage", inst_id, op_id, index_id, field_id, instance)
+        op.add_instance_id(inst_id, index_id, field_id)
+        # assert instance is not None
+        # print("log inst usage", hex(inst_id), op_id, index_id, field_id)
 
     # TaskInfo
     @typecheck
@@ -3389,6 +3495,7 @@ class State(object):
     ) -> None:
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
+        print("log inst create:", hex(inst_id), op)
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
         if inst.stop is None:
@@ -3914,19 +4021,13 @@ class State(object):
             inst = self.instances[key]
         return inst
 
+    # Not used?
     @typecheck
     def find_instance(self, inst_id: int, op_id: int) -> Union[Instance, None]:
         key = (inst_id, op_id)
         if key not in self.instances:
             return None
         return self.instances[key]
-
-    @typecheck
-    def find_instance_by_inst_id(self, inst_id: int) -> Union[Instance, None]:
-        for key, inst in self.instances.items():
-            if inst_id == key[0]:
-                return inst
-        return None
 
     @typecheck
     def create_user_marker(self, name: str) -> UserMarker:
@@ -4780,7 +4881,7 @@ class State(object):
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\top_id\n"
+        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\top_id\tinstances\n"
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
@@ -4796,23 +4897,25 @@ class State(object):
         #     json.dump(op_dependencies, dep_json_file)
 
         ops_file = open(ops_file_name, "w")
-        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\n")
+        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\tinstances\n")
         for op_id, operation in sorted(self.operations.items()):
             if operation.is_trimmed():
                 continue
             proc_str = ""
             level = ""
             provenance = ""
-            if (operation.proc is not None):
+            if operation.proc is not None:
                 proc_str = repr(operation.proc)
                 assert operation.level is not None
                 level = str(operation.level+1)
-            if (operation.provenance is not None):
+            if operation.provenance is not None:
                 provenance = operation.provenance
-            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
-                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance))
-            if isinstance(operation, Task):
-                print(operation, operation.instances)
+            if len(operation.instances) > 0:
+                instances = " ".join(str(hex(inst[0])) for inst in operation.instances)
+            else:
+                instances = ""
+            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\t%s\n" % \
+                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance, instances))
         ops_file.close()
 
         if show_procs:
@@ -4829,6 +4932,7 @@ class State(object):
                                                  transitive_map)
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
+                    proc.add_instances(self.instances)
                     with open(proc_tsv_file_name, "w") as proc_tsv_file:
                         proc_tsv_file.write(data_tsv_header)
                         proc_level = proc.emit_tsv(proc_tsv_file, 0)
@@ -4844,6 +4948,7 @@ class State(object):
         if show_channels:
             for c,chan in sorted(self.channels.items(), key=lambda x: x[1]):
                 if len(chan.copies) > 0:
+                    chan.add_instances(self.instances)
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
