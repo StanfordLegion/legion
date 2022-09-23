@@ -21,30 +21,35 @@ from __future__ import print_function
 import inspect
 import re
 import struct
-import legion_spy
 import gzip
 import io
 import sys
+from abc import ABC
+from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any
 
-# Helper methods for python 2/3 foolishness
-def iteritems(obj):
-    return obj.items() if sys.version_info > (3,) else obj.iteritems()
+import legion_spy
+from legion_util import typeassert, typecheck
+from legion_prof import State
 
-long_type = int if sys.version_info > (3,) else eval("long")
+long_type = int
 
-binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)") \
-        if sys.version_info > (3,) else \
-                        re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
+binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
+
 max_dim_val = 0
-def getFileObj(filename, compressed=False, buffer_size=32768):
+
+#TODO: fix return type
+@typeassert(filename=str, compressed=bool, buffer_size=int)
+def getFileObj(filename: str, compressed: bool =False, buffer_size: int =32768) -> Any: # type: ignore
     if compressed:
-        return io.BufferedReader(gzip.open(filename, mode='rb'), buffer_size=buffer_size)
+        return io.BufferedReader(gzip.open(filename, mode='rb'), buffer_size=buffer_size) #type: ignore
     else:
         return open(filename, mode='rb', buffering=buffer_size)
 
-class LegionDeserializer(object):
+class LegionDeserializer(ABC):
     """This is a generic class for our deserializer"""
-    def __init__(self, state, callbacks):
+    __slots__ = ["state", "callbacks"]
+
+    def __init__(self, state: State, callbacks: Dict[str, Callable]):
         """The constructor for the initializer.
 
         @param[state]:     The state object for our callbacks
@@ -53,25 +58,28 @@ class LegionDeserializer(object):
                            for 
         """
         self.state = state
-        self.callbacks = callbacks
+        self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
 
-    def deserialize(self, filename):
+    def deserialize(self, filename: str) -> None:
         """ The generic deserialize method
 
         @param[filename]: The path to the binary file we want to deserialize
         """
         raise NotImplementedError
 
-def read_time(string):
-    return long_type(string) // 1000
+@typecheck
+def read_time(string: str) -> float:
+    return long_type(string) / 1000
 
-def read_max_dim(string):
+@typecheck
+def read_max_dim(string: str) -> int:
     global max_dim_val
     max_dim_val = int(string)
     return int(string)
 
 decimal_pat = re.compile("\-?[0-9]+")
-def read_array(string):
+@typecheck
+def read_array(string: str) -> List:
     values = decimal_pat.findall(string)
     return values
 
@@ -121,7 +129,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "InstCreateInfo": re.compile(prefix + r'Prof Inst Create (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+)'),
         "InstUsageInfo": re.compile(prefix + r'Prof Inst Usage (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<size>[0-9]+)'),
-        "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)'),
+        "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<destroy>[0-9]+)'),
         "PartitionInfo": re.compile(prefix + r'Prof Partition Timeline (?P<op_id>[0-9]+) (?P<part_op>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
@@ -193,48 +201,51 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "provenance": lambda x: x
     }
 
-    def __init__(self, state, callbacks):
+    def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
         LegionDeserializer.__init__(self, state, callbacks)
         assert len(callbacks) == len(LegionProfASCIIDeserializer.patterns)
         callbacks_valid = True
-        for callback_name, callback in iteritems(callbacks):
+        for callback_name, callback in callbacks.items():
             cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
                         callable(callback)
             callbacks_valid = callbacks_valid and cur_valid
         assert callbacks_valid
 
-    def parse_regex_matches(self, m):
+    # @typeassert(m=re.Match)
+    def parse_regex_matches(self, m) -> Dict[str, Any]: # type: ignore
         kwargs = m.groupdict()
 
-        for key, arg in iteritems(kwargs):
+        for key, arg in kwargs.items():
             kwargs[key] = LegionProfASCIIDeserializer.parse_callbacks[key](arg)
         return kwargs
 
-    def search_for_spy_data(self, filename):
+    @typecheck
+    def search_for_spy_data(self, filename: str) -> None:
         with open(filename, 'rb') as log:
-            for line in log:
-                line = line.decode('utf-8')
+            for line_bytes in log:
+                line = line_bytes.decode('utf-8')
                 if legion_spy.config_pat.match(line) or \
                    legion_spy.detailed_config_pat.match(line):
                    self.state.has_spy_data = True
                    break
 
-    def parse(self, filename, verbose):
+    @typecheck
+    def parse(self, filename: str, verbose: bool) -> int:
         skipped = 0
         with open(filename, 'rb') as log:
             matches = 0
             # Keep track of the first and last times
             first_time = 0
             last_time = 0
-            for line in log:
-                line = line.decode('utf-8')
+            for line_bytes in log:
+                line = line_bytes.decode('utf-8')
                 if not self.state.has_spy_data and \
                     (legion_spy.config_pat.match(line) or \
                      legion_spy.detailed_config_pat.match(line)):
                     self.state.has_spy_data = True
                 matched = False
 
-                for prof_event, pattern in iteritems(LegionProfASCIIDeserializer.patterns):
+                for prof_event, pattern in LegionProfASCIIDeserializer.patterns.items():
                     m = pattern.match(line)
                     if m is not None:
                         callback = self.callbacks[prof_event]
@@ -257,8 +268,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
     preamble_regex = re.compile(r'(?P<name>\w+) {id:(?P<id>\d+)(?P<params>.*)}')
     params_regex = re.compile(r', (?P<param_name>[^:]+):(?P<param_type>[^:]+):(?P<param_bytes>-?\d+)')
 
-    preamble_data = {}
-    name_to_id = {}
+    preamble_data: Dict[int, List[Tuple[str, Callable]]] = {}
+    name_to_id: Dict[str, int] = {}
 
     # XXX: Make sure these are consistent with legion_profiling.h and legion_types.h!
     fmt_dict = {
@@ -285,14 +296,16 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "DepPartOpKind":      "i", # int (really an enum so this depends)
     }
 
-    def __init__(self, state, callbacks):
+    def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
         LegionDeserializer.__init__(self, state, callbacks)
         self.callbacks_translated = False
 
     @staticmethod
-    def create_type_reader(num_bytes, param_type):
+    @typecheck
+    def create_type_reader(num_bytes: int, param_type: str
+    ) -> Callable[[io.BufferedReader], Union[str, List]]:
         if param_type == "string":
-            def string_reader(log):
+            def string_reader(log: io.BufferedReader) -> str:
                 string = ""
                 char = log.read(1).decode('utf-8')
                 while ord(char) != 0:
@@ -302,7 +315,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             return string_reader
         if param_type == "point":
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
-            def point_reader(log):
+            def point_reader(log: io.BufferedReader) -> List:
                 global max_dim_val
                 values = []
                 for index in range(max_dim_val):
@@ -313,7 +326,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             return point_reader
         if param_type == "array":
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
-            def array_reader(log):
+            def array_reader(log: io.BufferedReader) -> List:
                 global max_dim_val
                 values = []
                 for index in range(max_dim_val*2):
@@ -324,7 +337,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             return array_reader
         else:
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
-            def reader(log):
+            def reader(log: io.BufferedReader) -> str:
                 global max_dim_val
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
@@ -335,7 +348,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 return val
             return reader
 
-    def parse_preamble(self, log):
+    @typecheck
+    def parse_preamble(self, log: io.BufferedReader) -> None:
         log.readline() # filetype
         while(True):
             line = log.readline().decode('utf-8')
@@ -365,26 +379,26 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             LegionProfBinaryDeserializer.preamble_data[_id] = param_data
             LegionProfBinaryDeserializer.name_to_id[name] = _id
 
-
         # change the callbacks to be by id
         if not self.callbacks_translated:
             new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
-                               for name, callback in iteritems(self.callbacks)
+                               for name, callback in self.callbacks.items()
                                if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
             self.callbacks_translated = True
 
 
         # callbacks_valid = True
-        # for callback_name, callback in iteritems(callbacks):
+        # for callback_name, callback in callbacks.items():
         #     cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
         #                 callable(callback)
         #     callbacks_valid = callbacks_valid and cur_valid
         # assert callbacks_valid
 
-    def parse(self, filename, verbose):
+    @typecheck
+    def parse(self, filename: str, verbose: bool) -> int:
         print("parsing " + str(filename))
-        def parse_file(log):
+        def parse_file(log: io.BufferedReader) -> int:
             matches = 0
             self.parse_preamble(log)
             _id_raw = log.read(4)
@@ -408,8 +422,9 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             with getFileObj(filename,compressed=False) as log:
                 return parse_file(log)
 
-def GetFileTypeInfo(filename):
-    def parse_file(log):
+@typecheck
+def GetFileTypeInfo(filename: str) -> Tuple[str, Union[bytes, None]]:
+    def parse_file(log: io.BufferedReader) -> Tuple[str, Union[bytes, None]]:
         filetype = None
         version = None
         line = log.readline().rstrip()

@@ -478,6 +478,11 @@ impl Chan {
                 format!("{}", self.depparts[idx].part_op)
             }
         };
+        let ready_timestamp = match point.entry {
+            ChanEntry::Copy(idx) => time_range.ready,
+            ChanEntry::Fill(_) => None,
+            ChanEntry::DepPart(idx) => None,
+        };
 
         let initiation = match point.entry {
             ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
@@ -492,7 +497,7 @@ impl Chan {
         f.serialize(DataRecord {
             level,
             level_ready: None,
-            ready: None,
+            ready: ready_timestamp,
             start: time_range.start.unwrap(),
             end: time_range.stop.unwrap(),
             color: &color,
@@ -837,6 +842,24 @@ impl Mem {
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
+
+        f.serialize(DataRecord {
+            level,
+            level_ready: None,
+            ready: None,
+            start: time_range.create.unwrap(),
+            end: time_range.ready.unwrap(),
+            color: &color,
+            opacity: 0.45,
+            title: &format!("{} (deferred)", &name),
+            initiation: Some(initiation.0),
+            in_: "",
+            out: "",
+            children: "",
+            parents: "",
+            prof_uid: base.prof_uid.0,
+            op_id: None,
+        })?;
 
         f.serialize(DataRecord {
             level,

@@ -511,6 +511,8 @@ impl Mem {
     }
 
     fn sort_time_range(&mut self) {
+        let mut time_points_level = Vec::new();
+        
         for (key, inst) in &self.insts {
             self.time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
@@ -523,14 +525,29 @@ impl Mem {
                 *key,
                 false,
                 (),
-            ))
+            ));
+
+            time_points_level.push(MemPoint::new(
+                inst.time_range.create.unwrap(),
+                *key,
+                true,
+                (),
+            ));
+            time_points_level.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                (),
+            ));
         }
         self.time_points
+            .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        time_points_level
             .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &self.time_points {
+        for point in &time_points_level {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
@@ -570,11 +587,11 @@ impl MemProcAffinity {
     }
     fn update_best_aff(&mut self, proc_id: ProcID, b: u32, l: u32) {
         if b > self.bandwidth {
-           self.best_aff_proc = proc_id;
-           self.bandwidth = b;
-           self.latency = l;
-       }
-   }
+            self.best_aff_proc = proc_id;
+            self.bandwidth = b;
+            self.latency = l;
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1075,8 +1092,8 @@ impl Inst {
         self.size = Some(size);
         self
     }
-    fn set_start_stop(&mut self, start: Timestamp, stop: Timestamp) -> &mut Self {
-        self.time_range = TimeRange::new_start(start, stop);
+    fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
+        self.time_range = TimeRange::new_full(start, ready, ready, stop);
         self
     }
     fn set_start(&mut self, start: Timestamp) -> &mut Self {
@@ -2259,7 +2276,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*mem_id)
                 .or_insert_with(|| Mem::new(*mem_id, kind, *capacity));
         }
-        Record::ProcMDesc { proc_id, mem_id, bandwidth, latency} => {
+        Record::ProcMDesc {
+            proc_id,
+            mem_id,
+            bandwidth,
+            latency,
+        } => {
             state
                 .mem_proc_affinity
                 .entry(*mem_id)
@@ -2595,11 +2617,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             op_id,
             inst_id,
             create,
+            ready,
             destroy,
         } => {
             state
                 .create_inst(*inst_id, *op_id, insts)
-                .set_start_stop(*create, *destroy);
+                .set_start_stop(*create, *ready, *destroy);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {

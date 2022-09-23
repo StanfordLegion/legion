@@ -12920,10 +12920,10 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             assert(current_stage == -1);
-            assert(shadow_instance == NULL);
 #endif
             // Have to make a copy in this case
-            create_shadow_instance();
+            if (shadow_instance == NULL)
+              create_shadow_instance();
             shadow_ready = shadow_instance->copy_from(instance, op,
                           instance_ready, false/*check src ready*/);
             instance_ready = shadow_ready;

@@ -5631,11 +5631,11 @@ namespace Legion {
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
       // If that worked, then check the privileges with the parent context
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
@@ -8133,7 +8133,7 @@ namespace Legion {
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
       // If that worked, then check the privileges with the parent context
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       const char *req_kind = (idx < src_requirements.size()) ? "source" : 
         (idx < (src_requirements.size() + 
@@ -8142,7 +8142,7 @@ namespace Legion {
                 src_indirect_requirements.size())) ? "gather" : "scatter";
       switch (et)
       {
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
@@ -14386,12 +14386,12 @@ namespace Legion {
       // If that worked, check the privileges, but only check the
       // data and not the actual privilege values since we're
       // using psuedo-read-write-exclusive
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, 
                                          bad_index, true/*skip*/);
       switch (et)
       {
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
@@ -15328,14 +15328,14 @@ namespace Legion {
       // If that worked, check the privileges, but only check the
       // data and not the actual privilege values since we're
       // using psuedo-read-write-exclusive
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, 
                                          bad_index, true/*skip*/);
       switch (et)
       {
           // There is no such thing as bad privileges for release operations
           // because we control what they are doing
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
         case ERROR_INVALID_REGION_HANDLE:
@@ -19921,11 +19921,11 @@ namespace Legion {
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
       // If that worked, then check the privileges with the parent context
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
@@ -20973,11 +20973,11 @@ namespace Legion {
       FieldID bad_field = LEGION_AUTO_GENERATE_ID;
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
@@ -22690,13 +22690,13 @@ namespace Legion {
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
       // If that worked, then check the privileges with the parent context
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
         // Note there is no such things as bad privileges for
         // acquires and releases because they are controlled by the runtime
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
         case ERROR_INVALID_REGION_HANDLE:
@@ -23262,13 +23262,13 @@ namespace Legion {
       int bad_index = -1;
       LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
       // If that worked, then check the privileges with the parent context
-      if (et == NO_ERROR)
+      if (et == LEGION_NO_ERROR)
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
         // Note there is no such things as bad privileges for
         // acquires and releases because they are controlled by the runtime
-        case NO_ERROR:
+        case LEGION_NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
         case ERROR_INVALID_REGION_HANDLE:

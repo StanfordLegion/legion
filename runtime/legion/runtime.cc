@@ -8594,7 +8594,7 @@ namespace Legion {
       if (!is_owner)
       {
         // See if we can find it locally
-        if (find_valid_instance(constraints, regions, result, acquire,
+        if (find_valid_instance(*constraints, regions, result, acquire,
                                 tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to request creation
@@ -8666,7 +8666,7 @@ namespace Legion {
         // an instance that has already been makde that satisfies 
         // our layout constraints
         // Try to find an instance first and then make one
-        bool success = find_satisfying_instance(constraints, regions,
+        bool success = find_satisfying_instance(*constraints, regions,
                         result, acquire, tight_region_bounds, remote);
         if (!success)
         {
@@ -8769,7 +8769,7 @@ namespace Legion {
       if (!is_owner)
       {
         // See if we can find a persistent instance
-        if (find_valid_instance(constraints, regions, result, acquire,
+        if (find_valid_instance(*constraints, regions, result, acquire,
                                 tight_region_bounds, remote))
           return true;
         Serializer rez;
@@ -8818,7 +8818,7 @@ namespace Legion {
       else
       {
         // Try to find an instance
-        return find_satisfying_instance(constraints, regions, result, acquire,
+        return find_satisfying_instance(*constraints, regions, result, acquire,
                                         tight_region_bounds, remote);
       }
     }
@@ -8949,7 +8949,7 @@ namespace Legion {
         }
       }
       else
-        find_satisfying_instances(constraints, regions, results, acquire,
+        find_satisfying_instances(*constraints, regions, results, acquire,
                                   tight_region_bounds, remote);
     }
 
@@ -9584,10 +9584,10 @@ namespace Legion {
                                 bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      if (regions.empty())
-        return false;
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id(); 
+      const RegionTreeID tree_id =
+        regions.empty() ? 0 : regions[0].get_tree_id(); 
+      if (tree_id != 0)
       {
         // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
@@ -9602,104 +9602,77 @@ namespace Legion {
           candidates.push_back(it->first);
         }
       }
-      // If we have any candidates check their constraints
-      bool found = false;
-      if (!candidates.empty())
+      else
       {
-        std::set<IndexSpaceExpression*> region_exprs;
-        RegionTreeForest *forest = runtime->forest;
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              regions.begin(); it != regions.end(); it++)
+        // Just get all the instances since we don't care about regions
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator rit =
+              current_instances.begin(); rit != current_instances.end(); rit++)
         {
-          // If the region tree IDs don't match that is bad
-          if (tree_id != it->get_tree_id())
-            return false;
-          RegionNode *node = forest->get_node(*it);
-          region_exprs.insert(node->row_source);
-        }
-        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints, NULL))
+          for (TreeInstances::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
           {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/))
-              continue;
-            // If we make it here, we succeeded
-            result = MappingInstance(*it);
-            found = true;
-            break;
+            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+            candidates.push_back(it->first);
           }
         }
-        release_candidate_references(candidates);
-      }
-      return found;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MemoryManager::find_satisfying_instance(LayoutConstraints *constraints,
-                                      const std::vector<LogicalRegion> &regions,
-                                      MappingInstance &result, bool acquire, 
-                                      bool tight_region_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      if (regions.empty())
-        return false;
-      std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id();
-      {
-        // Hold the lock while searching here
-        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
-          current_instances.find(tree_id);
-        if (finder == current_instances.end())
-          return false;
-        for (TreeInstances::const_iterator it = 
-              finder->second.begin(); it != finder->second.end(); it++)
-        {
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.push_back(it->first);
-        }
       }
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
-        std::set<IndexSpaceExpression*> region_exprs;
-        RegionTreeForest *forest = runtime->forest;
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              regions.begin(); it != regions.end(); it++)
+        if (tree_id != 0)
         {
-          // If the region tree IDs don't match that is bad
-          if (tree_id != it->get_tree_id())
-            return false;
-          RegionNode *node = forest->get_node(*it);
-          region_exprs.insert(node->row_source);
-        }
-        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints, NULL))
+          std::set<IndexSpaceExpression*> region_exprs;
+          RegionTreeForest *forest = runtime->forest;
+          for (std::vector<LogicalRegion>::const_iterator it = 
+                regions.begin(); it != regions.end(); it++)
           {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/))
+            // If the region tree IDs don't match that is bad
+            if (tree_id != it->get_tree_id())
+              return false;
+            RegionNode *node = forest->get_node(*it);
+            region_exprs.insert(node->row_source);
+          }
+          IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+            *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
+          for (std::deque<PhysicalManager*>::const_iterator it =
+                candidates.begin(); it != candidates.end(); it++)
+          {
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
               continue;
-            // If we make it here, we succeeded
-            result = MappingInstance(*it);
-            found = true;
-            break;
+            if ((*it)->entails(constraints, NULL))
+            {
+              // Check to see if we need to acquire
+              // If we fail to acquire then keep going
+              if (acquire && !(*it)->acquire_instance(
+                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+                continue;
+              // If we make it here, we succeeded
+              result = MappingInstance(*it);
+              found = true;
+              break;
+            }
+          }
+        }
+        else
+        {
+          // No region constraints, just check the base constraints
+          for (std::deque<PhysicalManager*>::const_iterator it =
+                candidates.begin(); it != candidates.end(); it++)
+          {
+            if ((*it)->entails(constraints, NULL))
+            {
+              // Check to see if we need to acquire
+              // If we fail to acquire then keep going
+              if (acquire && !(*it)->acquire_instance(
+                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+                continue;
+              // If we make it here, we succeeded
+              result = MappingInstance(*it);
+              found = true;
+              break;
+            }
           }
         }
         release_candidate_references(candidates);
@@ -9715,10 +9688,10 @@ namespace Legion {
                             bool acquire, bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      if (regions.empty())
-        return;
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id(); 
+      const RegionTreeID tree_id =
+        regions.empty() ? 0 : regions[0].get_tree_id(); 
+      if (tree_id != 0)
       {
         // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
@@ -9733,98 +9706,72 @@ namespace Legion {
           candidates.push_back(it->first);
         }
       }
-      // If we have any candidates check their constraints
-      if (!candidates.empty())
+      else
       {
-        std::set<IndexSpaceExpression*> region_exprs;
-        RegionTreeForest *forest = runtime->forest;
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              regions.begin(); it != regions.end(); it++)
+        // Just get all the instances since we don't care about regions
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator rit =
+              current_instances.begin(); rit != current_instances.end(); rit++)
         {
-          // If the region tree IDs don't match that is bad
-          if (tree_id != it->get_tree_id())
-            return;
-          RegionNode *node = forest->get_node(*it);
-          region_exprs.insert(node->row_source);
-        }
-        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints, NULL))
+          for (TreeInstances::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
           {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/))
-              continue;
-            // If we make it here, we succeeded
-            results.push_back(MappingInstance(*it));
+            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+            candidates.push_back(it->first);
           }
         }
-        release_candidate_references(candidates);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::find_satisfying_instances(
-                            LayoutConstraints *constraints,
-                            const std::vector<LogicalRegion> &regions,
-                            std::vector<MappingInstance> &results, 
-                            bool acquire, bool tight_region_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      if (regions.empty())
-        return;
-      std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id();
-      {
-        // Hold the lock while searching here
-        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
-          current_instances.find(tree_id);
-        if (finder == current_instances.end())
-          return;
-        for (TreeInstances::const_iterator it = 
-              finder->second.begin(); it != finder->second.end(); it++)
-        {
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.push_back(it->first);
-        }
       }
       // If we have any candidates check their constraints
       if (!candidates.empty())
       {
-        std::set<IndexSpaceExpression*> region_exprs;
-        RegionTreeForest *forest = runtime->forest;
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              regions.begin(); it != regions.end(); it++)
+        if (tree_id != 0)
         {
-          // If the region tree IDs don't match that is bad
-          if (tree_id != it->get_tree_id())
-            return;
-          RegionNode *node = forest->get_node(*it);
-          region_exprs.insert(node->row_source);
-        }
-        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints, NULL))
+          std::set<IndexSpaceExpression*> region_exprs;
+          RegionTreeForest *forest = runtime->forest;
+          for (std::vector<LogicalRegion>::const_iterator it = 
+                regions.begin(); it != regions.end(); it++)
           {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/))
+            // If the region tree IDs don't match that is bad
+            if (tree_id != it->get_tree_id())
+              return;
+            RegionNode *node = forest->get_node(*it);
+            region_exprs.insert(node->row_source);
+          }
+          IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+            *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
+          for (std::deque<PhysicalManager*>::const_iterator it = 
+                candidates.begin(); it != candidates.end(); it++)
+          {
+            if (!(*it)->meets_expression(space_expr, tight_region_bounds))
               continue;
-            // If we make it here, we succeeded
-            results.push_back(MappingInstance(*it));
+            if ((*it)->entails(constraints, NULL))
+            {
+              // Check to see if we need to acquire
+              // If we fail to acquire then keep going
+              if (acquire && !(*it)->acquire_instance(
+                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+                continue;
+              // If we make it here, we succeeded
+              results.push_back(MappingInstance(*it));
+            }
+          }
+        }
+        else
+        {
+          // No regions to care about here, just check constraints
+          for (std::deque<PhysicalManager*>::const_iterator it = 
+                candidates.begin(); it != candidates.end(); it++)
+          {
+            if ((*it)->entails(constraints, NULL))
+            {
+              // Check to see if we need to acquire
+              // If we fail to acquire then keep going
+              if (acquire && !(*it)->acquire_instance(
+                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+                continue;
+              // If we make it here, we succeeded
+              results.push_back(MappingInstance(*it));
+            }
           }
         }
         release_candidate_references(candidates);
@@ -9897,72 +9844,6 @@ namespace Legion {
       return found;
     }
     
-    //--------------------------------------------------------------------------
-    bool MemoryManager::find_valid_instance(
-                                     LayoutConstraints *constraints,
-                                     const std::vector<LogicalRegion> &regions,
-                                     MappingInstance &result, bool acquire, 
-                                     bool tight_region_bounds, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      if (regions.empty())
-        return false;
-      std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id();
-      {
-        // Hold the lock while searching here
-        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
-          current_instances.find(tree_id);
-        if (finder == current_instances.end())
-          return false;
-        for (TreeInstances::const_iterator it =
-              finder->second.begin(); it != finder->second.end(); it++)
-        {
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          candidates.push_back(it->first);
-        }
-      }
-      // If we have any candidates check their constraints
-      bool found = false;
-      if (!candidates.empty())
-      {
-        std::set<IndexSpaceExpression*> region_exprs;
-        RegionTreeForest *forest = runtime->forest;
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              regions.begin(); it != regions.end(); it++)
-        {
-          // If the region tree IDs don't match that is bad
-          if (tree_id != it->get_tree_id())
-            return false;
-          RegionNode *node = forest->get_node(*it);
-          region_exprs.insert(node->row_source);
-        }
-        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints, NULL))
-          {
-            // Check to see if we need to acquire
-            // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/))
-              continue;
-            // If we make it here, we succeeded
-            result = MappingInstance(*it);
-            found = true;
-            break;
-          }
-        }
-        release_candidate_references(candidates);
-      }
-      return found;
-    }
-
     //--------------------------------------------------------------------------
     void MemoryManager::release_candidate_references(
                            const std::deque<PhysicalManager*> &candidates) const
@@ -29278,7 +29159,7 @@ namespace Legion {
       }
 
       // Made it here, then there is no error
-      return NO_ERROR;
+      return LEGION_NO_ERROR;
     }
 
     //--------------------------------------------------------------------------

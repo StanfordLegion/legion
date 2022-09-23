@@ -2223,8 +2223,6 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return false;
-      if (regions.empty())
-        return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
@@ -2254,8 +2252,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
-        return false;
-      if (regions.empty())
         return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instance", regions);
@@ -2287,8 +2283,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
-        return;
-      if (regions.empty())
         return;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instances", regions);
@@ -2322,8 +2316,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
-        return;
-      if (regions.empty())
         return;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instances", regions);

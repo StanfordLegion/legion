@@ -2894,7 +2894,7 @@ namespace Legion {
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
         RtEvent continuation_pre;
-        continuation_pre.id = 
+        continuation_pre.id =
           next_deferral_precondition.exchange(deferral_event.id);
         return continuation_pre;
       }
