@@ -278,6 +278,11 @@ namespace Legion {
         LgEvent provenance;
 #endif
       };
+      struct FillInstInfo {
+      public:
+        InstID dst_inst_id;
+        unsigned num_fields;
+      };
       struct FillInfo {
       public:
         UniqueID op_id;
@@ -285,7 +290,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
         unsigned num_requests;
-        std::deque<CopyInstInfo> requests;
+        std::deque<FillInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif

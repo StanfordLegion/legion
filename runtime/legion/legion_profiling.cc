@@ -695,19 +695,17 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < info.num_requests; ++idx)
         {
-          info.requests.emplace_back(CopyInstInfo());
-          CopyInstInfo& inst_info = info.requests.back();
+          info.requests.emplace_back(FillInstInfo());
+          FillInstInfo& inst_info = info.requests.back();
           inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
           inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
-          inst_info.request_type = cpinfo.inst_info[idx].request_type;
-          inst_info.num_hops = cpinfo.inst_info[idx].num_hops;
         }
       }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
 #endif
       const size_t diff = sizeof(FillInfo) +
-        info.num_requests * sizeof(CopyInstInfo);
+        info.num_requests * sizeof(FillInstInfo);
       owner->update_footprint(diff, this);
     }
 
@@ -1076,7 +1074,7 @@ namespace Legion {
             it != fill_infos.end(); it++)
       {
         serializer->serialize(*it);
-        for (std::deque<CopyInstInfo>::const_iterator cit =
+        for (std::deque<FillInstInfo>::const_iterator cit =
               it->requests.begin(); cit != it->requests.end(); cit++)
         {
           serializer->serialize(*cit, *it);
@@ -1454,10 +1452,10 @@ namespace Legion {
       {
         FillInfo &front = fill_infos.front();
         serializer->serialize(front);
-        for (std::deque<CopyInstInfo>::const_iterator cit =
+        for (std::deque<FillInstInfo>::const_iterator cit =
                front.requests.begin(); cit != front.requests.end(); cit++)
           serializer->serialize(*cit, front);
-        diff += sizeof(front) + front.requests.size() * sizeof(CopyInstInfo);
+        diff += sizeof(front) + front.requests.size() * sizeof(FillInstInfo);
         fill_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)

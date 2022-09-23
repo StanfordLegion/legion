@@ -92,7 +92,7 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInstInfo&,
                              const LegionProfInstance::CopyInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::CopyInstInfo&,
+      virtual void serialize(const LegionProfInstance::FillInstInfo&,
                              const LegionProfInstance::FillInfo&) = 0;
       virtual void serialize(const LegionProfInstance::ProcDesc&) = 0;
       virtual void serialize(const LegionProfInstance::MemDesc&) = 0;
@@ -156,7 +156,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::CopyInstInfo&,
                      const LegionProfInstance::CopyInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&,
+      void serialize(const LegionProfInstance::FillInstInfo&,
                      const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
@@ -216,6 +216,7 @@ namespace Legion {
         INDEX_SPACE_SIZE_ID,
         INDEX_INST_INFO_ID,
         COPY_INST_INFO_ID,
+        FILL_INST_INFO_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -274,7 +275,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::CopyInstInfo&,
                      const LegionProfInstance::CopyInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&,
+      void serialize(const LegionProfInstance::FillInstInfo&,
                      const LegionProfInstance::FillInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
