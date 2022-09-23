@@ -922,7 +922,7 @@ namespace Legion {
 #endif
     }
 
-        //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                                   const LegionProfInstance::CopyInstInfo &copy_inst,
                                   const LegionProfInstance::CopyInfo& copy_info)
@@ -956,6 +956,23 @@ namespace Legion {
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(fill_info.provenance),sizeof(fill_info.provenance));
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                  const LegionProfInstance::CopyInstInfo &copy_inst,
+                                  const LegionProfInstance::FillInfo& fill_info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = COPY_INST_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(fill_info.op_id),     sizeof(fill_info.op_id));
+      lp_fwrite(f, (char*)&(copy_inst.src_inst_id),sizeof(copy_inst.src_inst_id));
+      lp_fwrite(f, (char*)&(copy_inst.dst_inst_id),sizeof(copy_inst.dst_inst_id));
+      lp_fwrite(f, (char*)&(fill_info.fevent),sizeof(fill_info.fevent.id));
+      lp_fwrite(f, (char*)&(copy_inst.num_fields),sizeof(copy_inst.num_fields));
+      lp_fwrite(f, (char*)&(copy_inst.request_type),sizeof(copy_inst.request_type));
+      lp_fwrite(f, (char*)&(copy_inst.num_hops),sizeof(copy_inst.num_hops));
     }
 
     //--------------------------------------------------------------------------
@@ -1774,6 +1791,17 @@ namespace Legion {
          " %llu %llu %llu %llu", fill_info.op_id, fill_info.dst, 
          fill_info.create, fill_info.ready, fill_info.start, fill_info.stop);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                          const LegionProfInstance::CopyInstInfo& copy_inst,
+                          const LegionProfInstance::FillInfo& fill_info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Copy Inst Info %llu " IDFMT " " IDFMT " " IDFMT " %u %u %u",
+                     fill_info.op_id, copy_inst.src_inst_id, copy_inst.dst_inst_id,
+                     fill_info.fevent.id, copy_inst.num_fields, copy_inst.request_type, copy_inst.num_hops);
     }
 
     //--------------------------------------------------------------------------

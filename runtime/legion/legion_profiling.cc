@@ -619,8 +619,6 @@ namespace Legion {
       response.get_measurement<
         Realm::ProfilingMeasurements::OperationTimeline>(timeline);
 
-
-
 #ifdef DEBUG_LEGION
       assert(timeline.is_valid());
 #endif
@@ -640,18 +638,18 @@ namespace Legion {
         info.fevent = LgEvent(fevent.finish_event);
       info.num_requests = cpinfo.inst_info.size();
       if (info.num_requests > 0)
+      {
+        for (unsigned idx = 0; idx < info.num_requests; ++idx)
         {
-          for (unsigned idx = 0; idx < info.num_requests; ++idx)
-            {
-              info.requests.emplace_back(CopyInstInfo());
-              CopyInstInfo& inst_info = info.requests.back();
-              inst_info.src_inst_id = cpinfo.inst_info[idx].src_inst_id.id;
-              inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
-              inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
-              inst_info.request_type = cpinfo.inst_info[idx].request_type;
-              inst_info.num_hops = cpinfo.inst_info[idx].num_hops;
-            }
+          info.requests.emplace_back(CopyInstInfo());
+          CopyInstInfo& inst_info = info.requests.back();
+          inst_info.src_inst_id = cpinfo.inst_info[idx].src_inst_id.id;
+          inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
+          inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
+          inst_info.request_type = cpinfo.inst_info[idx].request_type;
+          inst_info.num_hops = cpinfo.inst_info[idx].num_hops;
         }
+      }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
 #endif
@@ -670,6 +668,10 @@ namespace Legion {
       assert(response.has_measurement<
           Realm::ProfilingMeasurements::OperationTimeline>());
 #endif
+      Realm::ProfilingMeasurements::OperationCopyInfo cpinfo;
+      response.get_measurement<
+        Realm::ProfilingMeasurements::OperationCopyInfo>(cpinfo);
+
       Realm::ProfilingMeasurements::OperationTimeline timeline;
       response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimeline>(timeline);
@@ -685,10 +687,28 @@ namespace Legion {
       info.start = timeline.start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline.complete_time;
+      Realm::ProfilingMeasurements::OperationFinishEvent fevent;
+      if (response.get_measurement(fevent))
+        info.fevent = LgEvent(fevent.finish_event);
+      info.num_requests = cpinfo.inst_info.size();
+      if (info.num_requests > 0)
+      {
+        for (unsigned idx = 0; idx < info.num_requests; ++idx)
+        {
+          info.requests.emplace_back(CopyInstInfo());
+          CopyInstInfo& inst_info = info.requests.back();
+          inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
+          inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
+          inst_info.request_type = cpinfo.inst_info[idx].request_type;
+          inst_info.num_hops = cpinfo.inst_info[idx].num_hops;
+        }
+      }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
 #endif
-      owner->update_footprint(sizeof(FillInfo), this);
+      const size_t diff = sizeof(FillInfo) +
+        info.num_requests * sizeof(CopyInstInfo);
+      owner->update_footprint(diff, this);
     }
 
     //--------------------------------------------------------------------------
@@ -1056,6 +1076,11 @@ namespace Legion {
             it != fill_infos.end(); it++)
       {
         serializer->serialize(*it);
+        for (std::deque<CopyInstInfo>::const_iterator cit =
+              it->requests.begin(); cit != it->requests.end(); cit++)
+        {
+          serializer->serialize(*cit, *it);
+        }
       }
       for (std::deque<InstCreateInfo>::const_iterator it = 
             inst_create_infos.begin(); it != inst_create_infos.end(); it++)
@@ -1429,7 +1454,10 @@ namespace Legion {
       {
         FillInfo &front = fill_infos.front();
         serializer->serialize(front);
-        diff += sizeof(front);
+        for (std::deque<CopyInstInfo>::const_iterator cit =
+               front.requests.begin(); cit != front.requests.end(); cit++)
+          serializer->serialize(*cit, front);
+        diff += sizeof(front) + front.requests.size() * sizeof(CopyInstInfo);
         fill_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
@@ -2035,6 +2063,10 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationCopyInfo>();
+      req.add_measurement<
+        Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
 
     //--------------------------------------------------------------------------
@@ -2195,6 +2227,10 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationCopyInfo>();
+      req.add_measurement<
+        Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
 
     //--------------------------------------------------------------------------

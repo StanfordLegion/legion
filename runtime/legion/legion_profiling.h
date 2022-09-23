@@ -283,6 +283,9 @@ namespace Legion {
         UniqueID op_id;
         MemID dst;
         timestamp_t create, ready, start, stop;
+        LgEvent fevent;
+        unsigned num_requests;
+        std::deque<CopyInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
