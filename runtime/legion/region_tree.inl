@@ -196,8 +196,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
@@ -244,10 +243,10 @@ namespace Legion {
         }
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.copy(realm_src_fields, 
-              realm_dst_fields, requests, pred_pre, redop, reduction_fold));
+              realm_dst_fields, requests, pred_pre));
 #else
         result = Runtime::ignorefaults(space.copy(src_fields, dst_fields, 
-                                requests, pred_pre, redop, reduction_fold));
+                                requests, pred_pre));
 #endif
       }
       else
@@ -260,10 +259,10 @@ namespace Legion {
                                           true/*exclusive*/, copy_pre);
 #ifdef LEGION_SPY
         result = ApEvent(space.copy(realm_src_fields, realm_dst_fields, 
-                          requests, copy_pre, redop, reduction_fold));
+                          requests, copy_pre));
 #else
         result = ApEvent(space.copy(src_fields, dst_fields, requests, 
-                          copy_pre, redop, reduction_fold));
+                          copy_pre));
 #endif
       }
       // Release any reservations
@@ -276,7 +275,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                         precondition, pred_guard, redop, reduction_fold);
+                         precondition, pred_guard);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -293,7 +292,8 @@ namespace Legion {
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                   src_fields[idx].inst_event,
                                   dst_fields[idx].field_id,
-                                  dst_fields[idx].inst_event, redop);
+                                  dst_fields[idx].inst_event,
+				  dst_fields[idx].redop_id);
 #endif
       return result;
     }
@@ -1340,8 +1340,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1353,21 +1352,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, redop, reduction_fold);
+            pred_guard);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold);
+                space_ready, pred_guard);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold);
+                precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -4977,8 +4976,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4990,21 +4988,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, redop, reduction_fold);
+            pred_guard);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold);
+                space_ready, pred_guard);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold);
+                precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------

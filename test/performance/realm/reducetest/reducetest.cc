@@ -460,10 +460,10 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
   dst[0].inst = hbargs->inst;
   dst[0].field_id = 0;
   dst[0].size = sizeof(BucketType);
+  dst[0].set_redop(REDOP_BUCKET_ADD, false /*!fold*/);
   Event done = hbargs->region.copy(src, dst, 
 				   ProfilingRequestSet(),
-				   Event::NO_EVENT,
-				   REDOP_BUCKET_ADD, false /*!fold*/);
+				   Event::NO_EVENT);
 
   redinst.destroy(done);
 

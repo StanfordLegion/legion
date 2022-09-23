@@ -2067,14 +2067,17 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(copy_mask, dst_fields);
       source_manager->compute_copy_offsets(copy_mask, src_fields);
+      if (reduction_op_id > 0) {
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(reduction_op_id, false/*fold*/);
+      }
       const std::vector<Reservation> no_reservations{};
       const ApEvent result = copy_expression->issue_copy(trace_info, dst_fields,
                                          src_fields, no_reservations,
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
 #endif
-                                         precondition, predicate_guard,
-                                         reduction_op_id, false/*fold*/); 
+                                         precondition, predicate_guard); 
       if (trace_info.recording)
         trace_info.record_copy_views(result, copy_expression,
               *tracing_srcs, *tracing_dsts, effects_applied);
