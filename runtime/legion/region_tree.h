@@ -2264,11 +2264,13 @@ namespace Legion {
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    legion_file_mode_t file_mode,
                                    ApEvent &ready_event) = 0;
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
@@ -2493,11 +2495,13 @@ namespace Legion {
       virtual size_t get_coordinate_size(bool range) const;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    legion_file_mode_t file_mode, 
                                    ApEvent &ready_event);
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,

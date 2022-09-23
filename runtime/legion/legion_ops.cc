@@ -18125,6 +18125,9 @@ namespace Legion {
     {
       PhysicalInstance result = PhysicalInstance::NO_INST;
       instance_footprint = footprint;
+      Realm::ProfilingRequestSet requests;
+      if (runtime->profiler != NULL)
+        runtime->profiler->add_inst_request(requests, this);
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -18136,8 +18139,8 @@ namespace Legion {
             {
 	      field_ids[idx] = *it;
             }
-            result = node->create_file_instance(file_name, field_ids, sizes, 
-                                                file_mode, ready_event);
+            result = node->create_file_instance(file_name, requests, field_ids,
+                                                sizes, file_mode, ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
             constraints.field_constraint = 
@@ -18163,7 +18166,7 @@ namespace Legion {
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_hdf5_instance(file_name,
+            result = node->create_hdf5_instance(file_name, requests,
                                       field_ids, sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
@@ -18213,9 +18216,7 @@ namespace Legion {
                   unique_op_id, parent_ctx->get_task_name(),
                   parent_ctx->get_unique_id(), mem_names[memory.kind()],
                   memory.id);
-            }
-            // No profiling for these kinds of instances currently
-            Realm::ProfilingRequestSet requests;
+            } 
             ready_event = ApEvent(PhysicalInstance::create_external_instance(
                                           result, memory, ilg, res, requests));
             constraints = layout_constraint_set;

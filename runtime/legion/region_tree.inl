@@ -4836,11 +4836,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     PhysicalInstance IndexSpaceNodeT<DIM,T>::create_file_instance(
-                                         const char *file_name,
-                                         const std::vector<Realm::FieldID> &field_ids,
-                                         const std::vector<size_t> &field_sizes,
-                                         legion_file_mode_t file_mode,
-                                         ApEvent &ready_event)
+                                   const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
+                                   const std::vector<Realm::FieldID> &field_ids,
+                                   const std::vector<size_t> &field_sizes,
+                                   legion_file_mode_t file_mode,
+                                   ApEvent &ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -4856,8 +4857,6 @@ namespace Legion {
 							       ilc, dim_order);
 
       Realm::ExternalFileResource res(file_name, file_mode);
-      // No profiling for these kinds of instances currently
-      Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
       ready_event = ApEvent(PhysicalInstance::create_external_instance(result, 
           res.suggested_memory(), ilg, res, requests));
@@ -4868,6 +4867,7 @@ namespace Legion {
     template<int DIM, typename T>
     PhysicalInstance IndexSpaceNodeT<DIM,T>::create_hdf5_instance(
                                     const char *file_name,
+                                    const Realm::ProfilingRequestSet &requests,
 				    const std::vector<Realm::FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<const char*> &field_files,
@@ -4884,7 +4884,6 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
-      Realm::ProfilingRequestSet requests;
       PhysicalInstance result = PhysicalInstance::NO_INST;
 
 #ifdef LEGION_USE_HDF5
