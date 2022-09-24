@@ -13,8 +13,8 @@ use rayon::prelude::*;
 
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
-    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry,
-    ProcEntryRef, ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
+    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
+    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -113,107 +113,82 @@ impl Proc {
         state: &State,
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
-        let (base, time_range, waiters) = (entry.base(), entry.time_range(), entry.waiters());
-        let name = match entry {
-            ProcEntryRef::Task(op_id, task) => {
-                let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
-                let variant_name = &state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .name;
+        let (op_id, initiation_op) = (entry.op, entry.initiation_op);
+        let (base, time_range, waiters) = (&entry.base, &entry.time_range, &entry.waiters);
+        let name = match entry.kind {
+            ProcEntryKind::Task(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
                 match task_name {
                     Some(task_name) => {
                         if task_name != variant_name {
-                            format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.unwrap().0)
                         } else {
-                            format!("{} <{}>", task_name, op_id.0)
+                            format!("{} <{}>", task_name, op_id.unwrap().0)
                         }
                     }
                     None => variant_name.clone(),
                 }
             }
-            ProcEntryRef::MetaTask((_, variant_id, _), _) => {
+            ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntryRef::MapperCall((op_id, _), call) => {
-                if op_id.0 > 0 {
-                    format!(
-                        "Mapper Call {} for {}",
-                        state.mapper_call_kinds.get(&call.kind).unwrap().name,
-                        op_id.0
-                    )
+            ProcEntryKind::MapperCall(kind) => {
+                let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
+                if let Some(initiation_op_id) = initiation_op {
+                    format!("Mapper Call {} for {}", name, initiation_op_id.0)
                 } else {
-                    format!(
-                        "Mapper Call {}",
-                        state.mapper_call_kinds.get(&call.kind).unwrap().name
-                    )
+                    format!("Mapper Call {}", name)
                 }
             }
-            ProcEntryRef::RuntimeCall(_, call) => state
-                .runtime_call_kinds
-                .get(&call.kind)
-                .unwrap()
-                .name
-                .clone(),
-            ProcEntryRef::ProfTask(_, task) => format!("ProfTask <{:?}>", task.op_id.0),
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+            }
+            ProcEntryKind::ProfTask => format!("ProfTask <{:?}>", initiation_op.unwrap().0),
         };
 
-        let color = match entry {
-            ProcEntryRef::Task(_, task) => state
+        let color = match entry.kind {
+            ProcEntryKind::Task(task_id, variant_id) => state
                 .variants
-                .get(&(task.task_id, task.variant_id))
+                .get(&(task_id, variant_id))
                 .unwrap()
                 .color
                 .unwrap(),
-            ProcEntryRef::MetaTask((_, variant_id, _), _) => {
+            ProcEntryKind::MetaTask(variant_id) => {
                 state.meta_variants.get(&variant_id).unwrap().color.unwrap()
             }
-            ProcEntryRef::MapperCall(_, call) => state
-                .mapper_call_kinds
-                .get(&call.kind)
-                .unwrap()
-                .color
-                .unwrap(),
-            ProcEntryRef::RuntimeCall(_, call) => state
-                .runtime_call_kinds
-                .get(&call.kind)
-                .unwrap()
-                .color
-                .unwrap(),
-            ProcEntryRef::ProfTask(_, _) => {
-                // proftask color is hardcoded to
-                // self.color = '#FFC0CB'  # Pink
+            ProcEntryKind::MapperCall(kind) => {
+                state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
                 Color(0xFFC0CB)
             }
         };
         let color = format!("#{:06x}", color);
 
-        let initiation = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let op = state.operations.get(&op_id);
+        // FIXME: This is ugly, we should really be moving this over to ProcEntry so this can be uniform
+        let initiation = match entry.kind {
+            ProcEntryKind::Task(_, _) => {
+                let op = state.operations.get(&op_id.unwrap());
                 Some(op.unwrap().parent_id.0)
             }
-            ProcEntry::MetaTask(op_id, _, _) => Some(op_id.0),
-            ProcEntry::MapperCall(op_id, _) => {
-                let dep = op_id.0;
-                if dep > 0 {
-                    Some(dep)
-                } else {
-                    None
-                }
-            }
-            ProcEntry::RuntimeCall(_) => None,
-            ProcEntry::ProfTask(_) => None,
+            ProcEntryKind::MetaTask(_) => Some(initiation_op.unwrap().0),
+            ProcEntryKind::MapperCall(_) => initiation_op.map(|op_id| op_id.0),
+            ProcEntryKind::RuntimeCall(_) => None,
+            ProcEntryKind::ProfTask => None,
         };
 
-        let op_id = match point.entry {
-            ProcEntry::Task(op_id) => Some(op_id.0),
-            ProcEntry::MetaTask(_, _, _) => None,
-            ProcEntry::MapperCall(_, _) => None,
-            ProcEntry::RuntimeCall(_) => None,
-            ProcEntry::ProfTask(idx) => Some(self.prof_tasks[idx].op_id.0),
+        // FIXME: Does ProfTask really need to use initiation_op here?
+        let op_id = match entry.kind {
+            ProcEntryKind::Task(_, _) => Some(op_id.unwrap().0),
+            ProcEntryKind::MetaTask(_) => None,
+            ProcEntryKind::MapperCall(_) => None,
+            ProcEntryKind::RuntimeCall(_) => None,
+            ProcEntryKind::ProfTask => Some(initiation_op.unwrap().0),
         };
 
         let render_op = |prof_uid: &ProfUID| {
@@ -946,22 +921,27 @@ impl Mem {
 
 impl State {
     fn get_op_color(&self, op_id: OpID) -> Color {
-        self.find_task(op_id).map_or_else(
-            || {
-                self.find_op(op_id).map_or(Color(0x000000), |op| {
-                    op.kind.map_or(Color(0x000000), |kind| {
-                        self.op_kinds.get(&kind).unwrap().color.unwrap()
-                    })
-                })
-            },
-            |task| {
-                self.variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .color
-                    .unwrap()
-            },
-        )
+        if let Some(task) = self.find_task(op_id) {
+            match task.kind {
+                ProcEntryKind::Task(task_id, variant_id) => {
+                    return self
+                        .variants
+                        .get(&(task_id, variant_id))
+                        .unwrap()
+                        .color
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if let Some(op) = self.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return self.op_kinds.get(&kind).unwrap().color.unwrap();
+            }
+        }
+
+        return Color(0x000000);
     }
 
     fn has_multiple_nodes(&self) -> bool {
@@ -1588,13 +1568,13 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
                 let proc_record = proc_records.get(&proc_id).unwrap();
-                let task = proc.tasks.get(&op_id).unwrap();
-                let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
-                let variant_name = &state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .name;
+                let task = proc.find_task(*op_id).unwrap();
+                let (task_id, variant_id) = match task.kind {
+                    ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
+                    _ => unreachable!(),
+                };
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
                 let desc = match task_name {
                     Some(task_name) => {
                         if task_name == variant_name {
