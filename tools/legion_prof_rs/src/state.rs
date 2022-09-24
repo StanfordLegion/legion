@@ -1471,7 +1471,7 @@ impl OpKind {
 #[derive(Debug)]
 pub struct Operation {
     pub base: Base,
-    pub parent_id: OpID,
+    pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
     // owner: Option<OpID>,
@@ -1481,7 +1481,7 @@ impl Operation {
     fn new(base: Base) -> Self {
         Operation {
             base,
-            parent_id: OpID(0),
+            parent_id: None,
             kind: None,
             provenance: None,
             // owner: None,
@@ -1489,9 +1489,9 @@ impl Operation {
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
         if parent_id == OpID(std::u64::MAX) {
-            self.parent_id = OpID(0)
+            self.parent_id = None;
         } else {
-            self.parent_id = parent_id;
+            self.parent_id = Some(parent_id);
         }
         self
     }
@@ -1784,14 +1784,14 @@ impl State {
         variant_id: VariantID,
         time_range: TimeRange,
     ) -> &mut ProcEntry {
-        self.create_op(op_id);
+        let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
         let proc = self.procs.get_mut(&proc_id).unwrap();
         proc.create_proc_entry(
             Base::new(alloc),
             Some(op_id),
-            None,
+            parent_id,
             ProcEntryKind::Task(task_id, variant_id),
             time_range,
             &mut self.op_prof_uid,
@@ -2690,6 +2690,9 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
                 .set_provenance(provenance);
+            if let Some(task) = state.find_task_mut(*op_id) {
+                task.initiation_op = Some(*parent_id);
+            }
         }
         Record::MultiTask { op_id, task_id } => {
             state.create_op(*op_id);

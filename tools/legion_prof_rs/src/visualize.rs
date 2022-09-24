@@ -170,25 +170,16 @@ impl Proc {
         };
         let color = format!("#{:06x}", color);
 
-        // FIXME: This is ugly, we should really be moving this over to ProcEntry so this can be uniform
         let initiation = match entry.kind {
-            ProcEntryKind::Task(_, _) => {
-                let op = state.operations.get(&op_id.unwrap());
-                Some(op.unwrap().parent_id.0)
-            }
-            ProcEntryKind::MetaTask(_) => Some(initiation_op.unwrap().0),
-            ProcEntryKind::MapperCall(_) => initiation_op.map(|op_id| op_id.0),
-            ProcEntryKind::RuntimeCall(_) => None,
+            // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
+            _ => Some(initiation_op.map_or(0, |op_id| op_id.0)),
         };
 
-        // FIXME: Does ProfTask really need to use initiation_op here?
         let op_id = match entry.kind {
-            ProcEntryKind::Task(_, _) => Some(op_id.unwrap().0),
-            ProcEntryKind::MetaTask(_) => None,
-            ProcEntryKind::MapperCall(_) => None,
-            ProcEntryKind::RuntimeCall(_) => None,
+            // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => Some(initiation_op.unwrap().0),
+            _ => op_id.map(|id| id.0),
         };
 
         let render_op = |prof_uid: &ProfUID| {
@@ -1588,7 +1579,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id.map_or(0, |x| x.0),
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
@@ -1605,7 +1596,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id.map_or(0, |x| x.0),
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
@@ -1619,7 +1610,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id.map_or(0, |x| x.0),
                     desc: &desc,
                     proc: None,
                     level: None,
