@@ -1038,6 +1038,8 @@ namespace Legion {
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ReturnedInstanceInfo> returned_instances;
+      std::map<FieldID,size_t> field_sizes;
+      std::map<FieldID,IndividualManager*> managers;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;
