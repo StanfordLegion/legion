@@ -12,9 +12,9 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpaceID, Inst,
-    Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
-    ProcKind, ProcPoint, State, TimePoint, Timestamp, Operation,
+    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
+    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry,
+    ProcEntryRef, ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -49,6 +49,9 @@ impl Serialize for Count {
         serializer.serialize_bytes(&buf[..len])
     }
 }
+
+#[derive(Serialize, Copy, Clone)]
+struct DependencyRecord(u64, u64, u64);
 
 #[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
@@ -109,10 +112,10 @@ impl Proc {
         point: &ProcPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (base, time_range, waiters) = self.entry(point.entry);
-        let name = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
+        let entry = self.entry(point.entry);
+        let (base, time_range, waiters) = (entry.base(), entry.time_range(), entry.waiters());
+        let name = match entry {
+            ProcEntryRef::Task(op_id, task) => {
                 let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
                 let variant_name = &state
                     .variants
@@ -130,71 +133,55 @@ impl Proc {
                     None => variant_name.clone(),
                 }
             }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                state
-                    .meta_variants
-                    .get(&task.variant_id)
-                    .unwrap()
-                    .name
-                    .clone()
+            ProcEntryRef::MetaTask((_, variant_id, _), _) => {
+                state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntry::MapperCall(idx) => {
-                let mapper_call = &self.mapper_calls[idx];
-                if mapper_call.deps.op_id.0 > 0 {
+            ProcEntryRef::MapperCall((op_id, _), call) => {
+                if op_id.0 > 0 {
                     format!(
                         "Mapper Call {} for {}",
-                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name,
-                        mapper_call.deps.op_id.0
+                        state.mapper_call_kinds.get(&call.kind).unwrap().name,
+                        op_id.0
                     )
                 } else {
                     format!(
                         "Mapper Call {}",
-                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name
+                        state.mapper_call_kinds.get(&call.kind).unwrap().name
                     )
                 }
             }
-            ProcEntry::RuntimeCall(idx) => state
+            ProcEntryRef::RuntimeCall(_, call) => state
                 .runtime_call_kinds
-                .get(&self.runtime_calls[idx].kind)
+                .get(&call.kind)
                 .unwrap()
                 .name
                 .clone(),
-            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id.0),
+            ProcEntryRef::ProfTask(_, task) => format!("ProfTask <{:?}>", task.op_id.0),
         };
 
-        let color = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
-                state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .color
-                    .unwrap()
+        let color = match entry {
+            ProcEntryRef::Task(_, task) => state
+                .variants
+                .get(&(task.task_id, task.variant_id))
+                .unwrap()
+                .color
+                .unwrap(),
+            ProcEntryRef::MetaTask((_, variant_id, _), _) => {
+                state.meta_variants.get(&variant_id).unwrap().color.unwrap()
             }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                state
-                    .meta_variants
-                    .get(&task.variant_id)
-                    .unwrap()
-                    .color
-                    .unwrap()
-            }
-            ProcEntry::MapperCall(idx) => state
+            ProcEntryRef::MapperCall(_, call) => state
                 .mapper_call_kinds
-                .get(&self.mapper_calls[idx].kind)
+                .get(&call.kind)
                 .unwrap()
                 .color
                 .unwrap(),
-            ProcEntry::RuntimeCall(idx) => state
+            ProcEntryRef::RuntimeCall(_, call) => state
                 .runtime_call_kinds
-                .get(&self.runtime_calls[idx].kind)
+                .get(&call.kind)
                 .unwrap()
                 .color
                 .unwrap(),
-            ProcEntry::ProfTask(_) => {
+            ProcEntryRef::ProfTask(_, _) => {
                 // proftask color is hardcoded to
                 // self.color = '#FFC0CB'  # Pink
                 // FIXME don't hardcode this here
@@ -208,12 +195,9 @@ impl Proc {
                 let op = state.operations.get(&op_id);
                 Some(op.unwrap().parent_id.0)
             }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                Some(task.deps.op_id.0)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let dep = self.mapper_calls[idx].deps.op_id.0;
+            ProcEntry::MetaTask(op_id, _, _) => Some(op_id.0),
+            ProcEntry::MapperCall(op_id, _) => {
+                let dep = op_id.0;
                 if dep > 0 {
                     Some(dep)
                 } else {
@@ -225,17 +209,43 @@ impl Proc {
         };
 
         let op_id = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
-                Some(task.op_id.0)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => None,
-            ProcEntry::MapperCall(idx) => None,
+            ProcEntry::Task(op_id) => Some(op_id.0),
+            ProcEntry::MetaTask(_, _, _) => None,
+            ProcEntry::MapperCall(_, _) => None,
             ProcEntry::RuntimeCall(_) => None,
-            ProcEntry::ProfTask(idx) => {
-                Some(self.prof_tasks[idx].op_id.0)
-            }
+            ProcEntry::ProfTask(idx) => Some(self.prof_tasks[idx].op_id.0),
         };
+
+        let render_op = |prof_uid: &ProfUID| {
+            state.prof_uid_proc.get(prof_uid).map(|proc_id| {
+                DependencyRecord(proc_id.node_id().0, proc_id.proc_in_node(), prof_uid.0)
+            })
+        };
+
+        let deps = state.spy_op_deps.get(&base.prof_uid);
+
+        let mut in_ = String::new();
+        let mut out = String::new();
+        let mut parent = String::new();
+        let mut children = String::new();
+        if let Some(deps) = deps {
+            let deps_in: Vec<_> = deps.in_.iter().filter_map(render_op).collect();
+            let deps_out: Vec<_> = deps.out.iter().filter_map(render_op).collect();
+            let deps_parent: Vec<_> = deps.parent.iter().filter_map(render_op).collect();
+            let deps_children: Vec<_> = deps.children.iter().filter_map(render_op).collect();
+            if !deps_in.is_empty() {
+                in_ = serde_json::to_string(&deps_in)?;
+            }
+            if !deps_out.is_empty() {
+                out = serde_json::to_string(&deps_out)?;
+            }
+            if !deps_parent.is_empty() {
+                parent = serde_json::to_string(&deps_parent)?;
+            }
+            if !deps_children.is_empty() {
+                children = serde_json::to_string(&deps_children)?;
+            }
+        }
 
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
@@ -267,8 +277,18 @@ impl Proc {
                     end: wait.start,
                     opacity: 1.0,
                     title: &name,
+                    // Somehow, these are coming through backwards...
+                    in_: &out, //&in_,
+                    out: &in_, //&out,
+                    children: &children,
+                    parents: &parent,
                     ..default
                 })?;
+                // Only write dependencies once
+                in_ = String::new();
+                out = String::new();
+                parent = String::new();
+                children = String::new();
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
                     ready: Some(wait.start),
@@ -302,6 +322,11 @@ impl Proc {
                 ready: Some(time_range.ready.unwrap_or(start)),
                 start: start,
                 end: time_range.stop.unwrap(),
+                // Somehow, these are coming through backwards...
+                in_: &out, //&in_,
+                out: &in_, //&out,
+                children: &children,
+                parents: &parent,
                 ..default
             })?;
         }
@@ -455,10 +480,10 @@ impl Chan {
         point: &ChanPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (base, time_range, _) = self.entry(point.entry);
-        let name = match point.entry {
-            ChanEntry::Copy(idx) => {
-                let copy = &self.copies[idx];
+        let entry = self.entry(point.entry);
+        let (base, time_range) = (entry.base(), entry.time_range());
+        let name = match entry {
+            ChanEntryRef::Copy(_, copy) => {
                 let nreqs = copy.copy_info.len();
                 if nreqs > 0 {
                     format!(
@@ -471,23 +496,19 @@ impl Chan {
                     format!("size={}, num reqs={}", SizePretty(copy.size), nreqs)
                 }
             }
-            ChanEntry::Fill(_) => {
-                format!("Fill")
-            }
-            ChanEntry::DepPart(idx) => {
-                format!("{}", self.depparts[idx].part_op)
-            }
+            ChanEntryRef::Fill(_, _) => format!("Fill"),
+            ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
-            ChanEntry::Copy(idx) => time_range.ready,
-            ChanEntry::Fill(_) => None,
-            ChanEntry::DepPart(idx) => None,
+            ChanEntry::Copy(_, _) => time_range.ready,
+            ChanEntry::Fill(_, _) => None,
+            ChanEntry::DepPart(_, _) => None,
         };
 
         let initiation = match point.entry {
-            ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
-            ChanEntry::Fill(idx) => self.fills[idx].deps.op_id,
-            ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
+            ChanEntry::Copy(op_id, _) => op_id,
+            ChanEntry::Fill(op_id, _) => op_id,
+            ChanEntry::DepPart(op_id, _) => op_id,
         };
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
@@ -833,11 +854,12 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
+        let (_, op_id) = point.entry;
         let inst = self.insts.get(&point.entry).unwrap();
-        let (base, time_range, deps) = (&inst.base, &inst.time_range, &inst.deps);
+        let (base, time_range) = (&inst.base, &inst.time_range);
         let name = format!("{}", InstPretty(inst, state));
 
-        let initiation = deps.op_id;
+        let initiation = op_id;
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
