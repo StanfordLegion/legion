@@ -379,7 +379,7 @@ class HasDependencies(Dependencies):
     def __init__(self) -> None:
         Dependencies.__init__(self)
         self.initiation_op = None
-        self.initiation = ''
+        self.initiation: Optional[int] = None
     
     @typeassert(op_dependencies=dict, transitive_map=dict)
     def add_initiation_dependencies(self, 
@@ -1164,7 +1164,7 @@ class HasWaiters(ABC):
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
         title = repr(self)
-        initiation = str(self.initiation)
+        initiation = self.initiation
         color = self.get_color()
 
         def by_prof_uid(k: List[int]) -> int: return k[2]
@@ -1334,7 +1334,7 @@ class Operation(ProcOperation):
         self.task_kind = None
         self.color: Optional[str] = None
         self.owner = None
-        self.parent_id = -1
+        self.parent_id: Optional[int] = None
         self.provenance = None
 
     @typecheck
@@ -1411,7 +1411,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
 
         self.base_op = op
         self.variant = variant
-        self.initiation = ""
+        self.initiation = None
         self.is_task = True
         # make sure set the parent_id and provenance as we create a new task instance to replace the original operation
         self.parent_id = op.parent_id
@@ -1437,7 +1437,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
                  level_ready: int
     ) -> None:
         # update the initiation
-        self.initiation = str(self.parent_id)
+        self.initiation = self.parent_id
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
@@ -4696,7 +4696,7 @@ class State(object):
             if operation.parent_id not in self.operations.keys():
                 if verbose:
                     print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
-                operation.parent_id = 0
+                operation.parent_id = None
 
     @typecheck
     def emit_interactive_visualization(self, 
@@ -4771,8 +4771,12 @@ class State(object):
                 level = str(operation.level+1)
             if (operation.provenance is not None):
                 provenance = operation.provenance
-            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
-                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance))
+            if operation.parent_id is None:
+                parent_id = ""
+            else:
+                parent_id = str(operation.parent_id)
+            ops_file.write("%d\t%s\t%s\t%s\t%s\t%s\n" % \
+                            (op_id, parent_id, str(operation), proc_str, level, provenance))
         ops_file.close()
 
         if show_procs:
