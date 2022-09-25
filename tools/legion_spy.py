@@ -7865,7 +7865,7 @@ class Task(object):
     def get_provenance(self):
         if self.op is None:
             return None
-        return op.get_provenance()
+        return self.op.get_provenance()
 
     @property
     def html_safe_name(self):
