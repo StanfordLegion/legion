@@ -159,8 +159,6 @@ public:
     // Do the base call, and then make all instances collective instances
     DefaultMapper::default_policy_select_constraints(ctx, constraints,
                                                      target_memory, req);
-    // Now make this a collective instance
-    constraints.specialized_constraint.collective = true;
   }
 };
 
