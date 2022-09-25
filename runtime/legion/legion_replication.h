@@ -2487,12 +2487,10 @@ namespace Legion {
     public:
       ReplTraceOp& operator=(const ReplTraceOp &rhs);
     public:
-      virtual void execute_dependence_analysis(void);
+      virtual bool is_tracing_fence(void) const override { return true; }
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
       virtual void sync_compute_frontiers(RtEvent precondition);
-    protected:
-      LegionTrace *local_trace;
     };
     
     /**

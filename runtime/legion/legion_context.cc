@@ -8578,9 +8578,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t InnerContext::register_new_child_operation(Operation *op,
-                      const std::vector<StaticDependence> *dependences)
+        RtUserEvent &resolved, const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
+      // TODO: set the resolved event for any speculative executions occurring
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, dependences);
@@ -9272,7 +9273,7 @@ namespace Legion {
             // We can only do this optimization safely if we're not 
             // recording a physical trace, otherwise the physical
             // trace needs to see this dependence
-            Memoizable *memo = op->get_memoizable();
+            MemoizableOp *memo = op->get_memoizable();
             if ((memo == NULL) || !memo->is_recording())
               current_execution_fence_event = ApEvent::NO_AP_EVENT;
           }
@@ -12183,7 +12184,7 @@ namespace Legion {
       {
         // See if the predicate speculates false, if so return false
         // and then we are done.
-        if (!child->get_predicate_value(executing_processor))
+        if (!child->get_predicate_value())
           return true;
       }
       // Find the mapped physical regions associated with each of the
@@ -24682,7 +24683,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t LeafContext::register_new_child_operation(Operation *op,
-                    const std::vector<StaticDependence> *dependences)
+        RtUserEvent &resolved, const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

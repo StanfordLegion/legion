@@ -3941,7 +3941,10 @@ namespace Legion {
     public:
       template<typename T>
       inline T* get_available(LocalLock &local_lock, std::deque<T*> &queue);
-
+      template<typename T, typename WRAP>
+      inline T* get_available(LocalLock &local_lock, std::deque<T*> &queue);
+      template<typename T>
+      inline void free_available(std::deque<T*> &queue);
       template<bool CAN_BE_DELETED, typename T>
       inline void release_operation(std::deque<T*> &queue, T* operation);
     public:
@@ -4828,7 +4831,13 @@ namespace Legion {
       }
       // Couldn't find one so make one
       if (result == NULL)
-        result = new T(this);
+      {
+#ifdef LEGION_TRACE_ALLOCATION
+        HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+        void *ptr = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+        result = new(ptr) T(this);
+      }
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -4837,12 +4846,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, typename WRAP>
+    inline T* Runtime::get_available(LocalLock &local_lock, 
+                                     std::deque<T*> &queue)
+    //--------------------------------------------------------------------------
+    {
+      static_assert(sizeof(T) == sizeof(WRAP), "wrapper sizes should match");
+      T *result = NULL;
+      {
+        AutoLock l_lock(local_lock);
+        if (!queue.empty())
+        {
+          result = queue.front();
+          queue.pop_front();
+        }
+      }
+      // Couldn't find one so make one
+      if (result == NULL)
+      {
+#ifdef LEGION_TRACE_ALLOCATION
+        HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+        void *ptr = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+        result = new(ptr) WRAP(this);
+      }
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void Runtime::free_available(std::deque<T*> &queue)
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::deque<T*>::const_iterator it = 
+            queue.begin(); it != queue.end(); it++)
+      {
+#ifdef LEGION_TRACE_ALLOCATION
+        HandleAllocation<T,HasAllocType<T>::value>::trace_free();
+#endif
+        delete (*it);
+      }
+      queue.clear();
+    }
+
+    //--------------------------------------------------------------------------
     template<bool CAN_BE_DELETED, typename T>
     inline void Runtime::release_operation(std::deque<T*> &queue, T* operation)
     //--------------------------------------------------------------------------
     {
       if (CAN_BE_DELETED && (queue.size() == LEGION_MAX_RECYCLABLE_OBJECTS))
+      {
+#ifdef LEGION_TRACE_ALLOCATION
+        HandleAllocation<T,HasAllocType<T>::value>::trace_free();
+#endif
         delete (operation);
+      }
       else
         queue.push_front(operation);
     }

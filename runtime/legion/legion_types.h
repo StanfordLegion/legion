@@ -1715,8 +1715,8 @@ namespace Legion {
     // legion_ops.h
     class Provenance;
     class Operation;
-    class SpeculativeOp;
-    class Memoizable;
+    class MemoizableOp;
+    class PredicatedOp;
     class MapOp;
     class CopyOp;
     class IndexCopyOp;
@@ -2036,7 +2036,7 @@ namespace Legion {
     friend class Internal::ProcessorManager;                \
     friend class Internal::MemoryManager;                   \
     friend class Internal::Operation;                       \
-    friend class Internal::SpeculativeOp;                   \
+    friend class Internal::PredicatedOp;                    \
     friend class Internal::MapOp;                           \
     friend class Internal::CopyOp;                          \
     friend class Internal::IndexCopyOp;                     \

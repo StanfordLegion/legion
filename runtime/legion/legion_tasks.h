@@ -81,7 +81,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.
      */
-    class TaskOp : public ExternalTask, public MemoizableOp<SpeculativeOp> {
+    class TaskOp : public ExternalTask, public PredicatedOp {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
@@ -182,7 +182,7 @@ namespace Legion {
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
-      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual bool query_speculate(void);
       virtual void resolve_true(bool speculated, bool launched);
       virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
@@ -196,7 +196,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
-      virtual ApEvent compute_sync_precondition(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo &info) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                             get_acquired_instances_ref(void);
     public:
@@ -288,10 +288,6 @@ namespace Legion {
       bool request_valid_instances;
       bool elide_future_return;
       bool replicate;
-    protected:
-      // For managing predication
-      PredEvent true_guard;
-      PredEvent false_guard;
     private:
       mutable bool is_local;
       mutable bool local_cached;
@@ -752,8 +748,7 @@ namespace Legion {
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs);
     public:
-      virtual bool has_prepipeline_stage(void) const
-        { return need_prepipeline_stage; }
+      virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -1170,8 +1165,7 @@ namespace Legion {
                                  const SizeMap& output_sizes) const;
       virtual void finalize_output_regions(void);
     public:
-      virtual bool has_prepipeline_stage(void) const
-        { return need_prepipeline_stage; }
+      virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);

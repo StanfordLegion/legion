@@ -1795,7 +1795,7 @@ namespace Legion {
     {
       if (op == NULL)
         return NULL;
-      Memoizable *memo = op->get_memoizable();
+      MemoizableOp *memo = op->get_memoizable();
       if (memo == NULL)
         return NULL;
       return memo->get_template();
@@ -1807,7 +1807,7 @@ namespace Legion {
     {
       if (op == NULL)
         return TraceLocalID();
-      Memoizable *memo = op->get_memoizable();
+      MemoizableOp *memo = op->get_memoizable();
       if (memo == NULL)
         return TraceLocalID();
       return memo->get_trace_local_id();
@@ -15763,8 +15763,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!analysis.add_restriction); // shouldn't be doing this
 #endif
-        // We have a predicate so collapse everything to all the valid
-        // instances and then do predicate fills to all those instances
+        // TODO: this should be a predicated fill operation
+        // Two options:
+        // 1. Generate a phi view so we can still use the base instances
+        //    just with extra predicated fills done to them
+        // 2. We can eagerly issue fills to all the valid instances for
+        //    this expression masked by the predicate value
         assert(false);
       }
       else

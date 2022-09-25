@@ -514,7 +514,8 @@ namespace Legion {
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
       virtual size_t register_new_child_operation(Operation *op,
-               const std::vector<StaticDependence> *dependences) = 0;
+                                                  RtUserEvent &resolved, 
+                      const std::vector<StaticDependence> *dependences) = 0;
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
@@ -1651,6 +1652,7 @@ namespace Legion {
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
       virtual size_t register_new_child_operation(Operation *op,
+                                                  RtUserEvent &resolved,
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
@@ -3783,6 +3785,7 @@ namespace Legion {
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
       virtual size_t register_new_child_operation(Operation *op,
+                                                  RtUserEvent &resolved,
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);

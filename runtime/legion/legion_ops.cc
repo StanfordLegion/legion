@@ -1135,7 +1135,7 @@ namespace Legion {
       track_parent = false;
       parent_ctx = NULL;
       mapped_event = Runtime::create_rt_user_event();
-      resolved_event = Runtime::create_rt_user_event();
+      resolved_event = RtUserEvent::NO_RT_USER_EVENT;
       if (runtime->resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
       execution_fence_event = ApEvent::NO_AP_EVENT;
@@ -1147,7 +1147,6 @@ namespace Legion {
       provenance = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
-      assert(resolved_event.exists());
       if (runtime->resilient_mode)
         assert(commit_event.exists());
 #endif 
@@ -1292,13 +1291,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace_local_id(size_t id)
-    //--------------------------------------------------------------------------
-    {
-      trace_local_id = id;
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::set_must_epoch(MustEpochOp *epoch, bool do_registration)
     //--------------------------------------------------------------------------
     {
@@ -1423,8 +1415,12 @@ namespace Legion {
       parent_ctx = ctx;
       track_parent = track;
       if (track_parent)
-        context_index = 
-          parent_ctx->register_new_child_operation(this, dependences);
+        context_index = parent_ctx->register_new_child_operation(this,
+                                          resolved_event, dependences);
+      // If we don't have a resolved event then we can consider
+      // speculation already resolved
+      if (!resolved_event.exists())
+        resolved = true;
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
       provenance = prov;
@@ -1579,6 +1575,8 @@ namespace Legion {
     void Operation::trigger_resolution(void)
     //--------------------------------------------------------------------------
     {
+      // Shoudl resolve speculation in derived classes
+      assert(false);
       resolve_speculation();
     } 
 
@@ -1840,13 +1838,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent Operation::compute_init_precondition(const TraceInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      return execution_fence_event;
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::compute_task_tree_coordinates(TaskTreeCoordinates &coords)
     //--------------------------------------------------------------------------
     {
@@ -1931,8 +1922,9 @@ namespace Legion {
       // Now see if we are ready to complete this operation
       if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
-        RtEvent trigger_pre = 
-          Runtime::merge_events(mapped_event, resolved_event);
+        RtEvent trigger_pre = mapped_event;
+        if (resolved_event.exists())
+          trigger_pre = Runtime::merge_events(mapped_event, resolved_event);
         if (trigger_pre.exists() && !trigger_pre.has_triggered())
           parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
         else
@@ -1948,6 +1940,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!resolved);
+      assert(resolved_event.exists());
 #endif
       resolved = true;
       Runtime::trigger_event(resolved_event, wait_on);
@@ -2218,10 +2211,9 @@ namespace Legion {
       mapping_tracker = new MappingDependenceTracker();
       // Register ourselves with our trace if there is one
       // This will also add any necessary dependences
-      if (trace != NULL)
-        trace->register_operation(this, gen);
+      if ((trace != NULL) && !is_tracing_fence())
+        trace_local_id = trace->register_operation(this, gen);
       parent_ctx->invalidate_trace_cache(trace, this);
-
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_implicit_dependences(this);
     }
@@ -2236,7 +2228,12 @@ namespace Legion {
       // Cannot touch anything not on our stack after this call
       MappingDependenceTracker *tracker = mapping_tracker;
       mapping_tracker = NULL;
-      tracker->issue_stage_triggers(this, runtime, must_epoch);
+      // TODO: this is a hack until we can properly move tracing 
+      // into the mapping stage from the dependence analysis stage
+      MemoizableOp *memo = get_memoizable();
+      // Skip all the triggers for things that are replaying
+      if ((memo == NULL) || !memo->is_replaying())
+        tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
     }
 
@@ -2409,7 +2406,6 @@ namespace Legion {
           {
             outgoing[op] = op_gen;
             tracker->add_mapping_dependence(mapped_event);
-            tracker->add_resolution_dependence(resolved_event);
             // Record that we have a commit dependence on the
             // registering operation
             if (runtime->resilient_mode)
@@ -2773,7 +2769,6 @@ namespace Legion {
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
     {
-      bool resolve_now = true;
       bool trigger_now = false;
       RtEvent map_precondition;
       if (!mapping_dependences.empty())
@@ -2788,18 +2783,6 @@ namespace Legion {
       else if (!map_precondition.has_triggered())
         must_epoch->add_mapping_dependence(map_precondition);
 
-      if (!resolution_dependences.empty())
-      {
-        RtEvent resolve_precondition = 
-          Runtime::merge_events(resolution_dependences);
-        if (!resolve_precondition.has_triggered())
-        {
-          op->get_context()->add_to_resolution_queue(op, resolve_precondition);
-          resolve_now = false;
-        }
-      }
-      if (resolve_now)
-        op->trigger_resolution();
       if (trigger_now)
         op->trigger_ready();
     }
@@ -2820,32 +2803,6 @@ namespace Legion {
         }
       }
       return true;
-    }
-
-    ///////////////////////////////////////////////////////////// 
-    // Memoizable
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    Memoizable::DeferRecordCompleteReplay::DeferRecordCompleteReplay(
-        Memoizable *m, ApEvent pre, const TraceInfo &info, UniqueID provenance)
-        : LgTaskArgs<DeferRecordCompleteReplay>(provenance),
-          memo(m), precondition(pre), trace_info(new TraceInfo(info)),
-          done(Runtime::create_rt_user_event())
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Memoizable::handle_record_complete_replay(const void *args) 
-    //--------------------------------------------------------------------------
-    {
-      const DeferRecordCompleteReplay *dargs = 
-        (const DeferRecordCompleteReplay*)args;
-      Runtime::trigger_event(dargs->done,
-          dargs->memo->record_complete_replay(*(dargs->trace_info),
-            RtEvent::NO_RT_EVENT, dargs->precondition));
-      delete dargs->trace_info;
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -4663,37 +4620,137 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Speculative Operation 
+    // Memoizable Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SpeculativeOp::SpeculativeOp(Runtime *rt)
+    MemoizableOp::MemoizableOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::activate_speculative(void)
+    MemoizableOp::~MemoizableOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::activate_memoizable(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      speculation_state = PENDING_ANALYSIS_STATE;
+      tpl = NULL;
+      memo_state = NO_MEMO;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::invoke_memoize_operation(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+      assert(!runtime->no_tracing);
+      assert(!runtime->no_physical_tracing);
+#endif
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.trace_id = trace->get_trace_id();
+      output.memoize = false;
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      Mappable *mappable = get_mappable();
+#ifdef DEBUG_LEGION
+      assert(mappable != NULL);
+#endif
+      mapper->invoke_memoize_operation(mappable, &input, &output);
+      if (output.memoize)
+        memo_state = MEMO_REQ;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoizableOp::record_complete_replay(
+               const TraceInfo &trace_info, RtEvent ready, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_recording())
+        return ready;
+      // Defer this until the precondition is ready
+      if (ready.exists() && !ready.has_triggered())
+      {
+        DeferRecordCompleteReplay args(this, precondition, trace_info, 
+            this->get_unique_op_id());
+        this->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_WORK_PRIORITY, ready);
+        return args.done;
+      }
+      std::set<ApEvent> effects;
+      this->find_completion_effects(effects);
+      ApEvent postcondition;
+      if (!effects.empty())
+        postcondition = Runtime::merge_events(&trace_info, effects);
+      std::set<RtEvent> applied;
+      trace_info.record_complete_replay(precondition, postcondition, applied);
+      if (!applied.empty())
+        return Runtime::merge_events(applied);
+      return RtEvent::NO_RT_EVENT; 
+    }
+
+    //--------------------------------------------------------------------------
+    MemoizableOp::DeferRecordCompleteReplay::DeferRecordCompleteReplay(
+       MemoizableOp *m, ApEvent pre, const TraceInfo &info, UniqueID provenance)
+        : LgTaskArgs<DeferRecordCompleteReplay>(provenance),
+          memo(m), precondition(pre), trace_info(new TraceInfo(info)),
+          done(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void MemoizableOp::handle_record_complete_replay(const void *args) 
+    //--------------------------------------------------------------------------
+    {
+      const DeferRecordCompleteReplay *dargs = 
+        (const DeferRecordCompleteReplay*)args;
+      Runtime::trigger_event(dargs->done,
+          dargs->memo->record_complete_replay(*(dargs->trace_info),
+            RtEvent::NO_RT_EVENT, dargs->precondition));
+      delete dargs->trace_info;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Predicated Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PredicatedOp::PredicatedOp(Runtime *rt)
+      : MemoizableOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicatedOp::activate_predication(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_memoizable();
+      predication_state = PENDING_ANALYSIS_STATE;
       predicate = NULL;
-      speculate_mapping_only = false;
-      received_trigger_resolution = false;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
       predicate_waiter = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::deactivate_speculative(void)
+    void PredicatedOp::deactivate_predication(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
+    void PredicatedOp::initialize_predication(InnerContext *ctx, bool track,
         unsigned regions, const std::vector<StaticDependence> *dependences,
         const Predicate &p, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -4701,17 +4758,17 @@ namespace Legion {
       initialize_operation(ctx, track, regions, provenance, dependences);
       if (p == Predicate::TRUE_PRED)
       {
-        speculation_state = RESOLVE_TRUE_STATE;
+        predication_state = RESOLVE_TRUE_STATE;
         predicate = NULL;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        speculation_state = RESOLVE_FALSE_STATE;
+        predication_state = RESOLVE_FALSE_STATE;
         predicate = NULL;
       }
       else
       {
-        speculation_state = PENDING_ANALYSIS_STATE;
+        predication_state = PENDING_ANALYSIS_STATE;
         predicate = p.impl;
         predicate->add_predicate_reference();
         if (runtime->legion_spy_enabled)
@@ -4721,26 +4778,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::register_predicate_dependence(void)
-    //--------------------------------------------------------------------------
-    {
-      if (predicate != NULL)
-      {
-        register_dependence(predicate, predicate->get_generation()); 
-        // Now we can remove our predicate reference
-        predicate->remove_predicate_reference();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool SpeculativeOp::is_predicated_op(void) const
+    bool PredicatedOp::is_predicated_op(void) const
     //--------------------------------------------------------------------------
     {
       return (predicate != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool SpeculativeOp::get_predicate_value(Processor proc)
+    bool PredicatedOp::get_predicate_value(void)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_event = RtEvent::NO_RT_EVENT;
@@ -4748,9 +4793,9 @@ namespace Legion {
       bool result = false; 
       {
         AutoLock o_lock(op_lock);
-        if (speculation_state == RESOLVE_TRUE_STATE)
+        if (predication_state == RESOLVE_TRUE_STATE)
           result = true;
-        else if (speculation_state == RESOLVE_FALSE_STATE)
+        else if (predication_state == RESOLVE_FALSE_STATE)
           result = false;
         else
         {
@@ -4766,10 +4811,10 @@ namespace Legion {
         wait_event.wait();
         // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_LEGION
-        assert((speculation_state == RESOLVE_TRUE_STATE) ||
-               (speculation_state == RESOLVE_FALSE_STATE));
+        assert((predication_state == RESOLVE_TRUE_STATE) ||
+               (predication_state == RESOLVE_FALSE_STATE));
 #endif
-        if (speculation_state == RESOLVE_TRUE_STATE)
+        if (predication_state == RESOLVE_TRUE_STATE)
           result = true;
         else
           result = false;
@@ -4778,230 +4823,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::execute_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out
-      if (predicate == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert((speculation_state == RESOLVE_TRUE_STATE) ||
-               (speculation_state == RESOLVE_FALSE_STATE));
-#endif
-        if (speculation_state == RESOLVE_FALSE_STATE)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_predicated_false_op(unique_op_id);
-          resolve_false(false/*speculated*/, false/*launched*/);
-        }
-        else
-        {
-          resolve_true(false/*speculated*/, false/*launched*/);
-          Operation::execute_dependence_analysis();
-        }
-        return;
-      }
-      // Register ourselves as a waiter on the predicate value
-      // If the predicate hasn't resolved yet, then we can ask the
-      // mapper if it would like us to speculate on the value.
-      // Then take the lock and set up our state.
-      bool value, speculated = false;
-      bool valid = predicate->register_waiter(this, get_generation(), value);
-      // We don't support speculation for legion spy validation runs
-      // as it doesn't really understand the event graphs that get
-      // generated because of the predication events
-#ifndef LEGION_SPY
-      if (!valid)
-        speculated = query_speculate(value, speculate_mapping_only);
-#endif
-      // Now hold the lock and figure out what we should do
-      bool continue_true = false;
-      bool continue_false = false;
-      bool launch_speculation = false;
-      RtEvent wait_on;
-      {
-        AutoLock o_lock(op_lock);
-        switch (speculation_state)
-        {
-          case PENDING_ANALYSIS_STATE:
-            {
-              if (valid)
-              {
-                if (value)
-                {
-                  speculation_state = RESOLVE_TRUE_STATE;
-                  continue_true = true;
-                }
-                else
-                {
-                  speculation_state = RESOLVE_FALSE_STATE;
-                  continue_false = true;
-                }
-              }
-              else if (speculated)
-              {
-                // Always launch in the speculated state
-                launch_speculation = true;
-                if (value)
-                  speculation_state = SPECULATE_TRUE_STATE;
-                else
-                  speculation_state = SPECULATE_FALSE_STATE;
-              }
-              // Otherwise just stay in pending analysis state
-              // and wait for the result of the predicate
-              else
-              {
-                if (!predicate_waiter.exists())
-                  predicate_waiter = Runtime::create_rt_user_event();
-                wait_on = predicate_waiter;
-              }
-              break;
-            }
-          case RESOLVE_TRUE_STATE:
-            {
-              // Someone else has already resolved us to true so
-              // we are good to go
-              continue_true = true;
-              break;
-            }
-          case RESOLVE_FALSE_STATE:
-            {
-              // Someone else has already resolved us to false so
-              // do the opposite thing
-              continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // shouldn't be in the other states
-        }
-      }
-      // Handle the waiting case if necessary
-      if (wait_on.exists())
-      {
-        wait_on.wait();
-        // Now retake the lock and see if anything changed
-        AutoLock o_lock(op_lock);
-        switch (speculation_state)
-        {
-          case RESOLVE_TRUE_STATE:
-            {
-              continue_true = true;
-              break;
-            }
-          case RESOLVE_FALSE_STATE:
-            {
-              continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // should not be in any other states
-        }
-      }
-      // At most one of these should be true
-#ifdef DEBUG_LEGION
-      assert(!continue_true || !continue_false);
-#endif
-      if (continue_true)
-        resolve_true(speculated, false/*launched*/);
-      else if (continue_false)
-      {
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_predicated_false_op(unique_op_id);
-        // Can remove our predicate reference since we don't need it anymore
-        predicate->remove_predicate_reference();
-        resolve_false(speculated, false/*launched*/);
-      }
-#ifdef DEBUG_LEGION
-      else
-        assert(launch_speculation);
-#endif
-      if (continue_true || launch_speculation)
-        Operation::execute_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void SpeculativeOp::trigger_resolution(void)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out
-      if (predicate == NULL)
-      {
-        resolve_speculation();
-        return;
-      }
-      bool need_trigger;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(!received_trigger_resolution);
-#endif
-        received_trigger_resolution = true;
-        need_trigger = (speculation_state == RESOLVE_TRUE_STATE) ||
-                        (speculation_state == RESOLVE_FALSE_STATE);
-      }
-      if (need_trigger)
-        resolve_speculation();
-    }
-
-    //--------------------------------------------------------------------------
-    void SpeculativeOp::notify_predicate_value(GenerationID pred_gen,bool value)
+    void PredicatedOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
       bool continue_true = false;
       bool continue_false = false;
-      bool need_trigger = false;
-      bool need_resolve = false;
+      bool trigger_waiter = false;
+      bool retrigger = false;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
         assert(pred_gen == get_generation());
 #endif
-        need_trigger = predicate_waiter.exists();
-        need_resolve = received_trigger_resolution;
-        switch (speculation_state)
+        trigger_waiter = predicate_waiter.exists();
+        switch (predication_state)
         {
           case PENDING_ANALYSIS_STATE:
             {
-              if (value)
-                speculation_state = RESOLVE_TRUE_STATE;
-              else
-                speculation_state = RESOLVE_FALSE_STATE;
+              // Nothing to do but record the new state
               break;
             }
-          case SPECULATE_TRUE_STATE:
+          case WAITING_MAPPING_STATE:
             {
-              if (value) // We guessed right
-              {
-                speculation_state = RESOLVE_TRUE_STATE;
-                continue_true = true;
-              }
-              else
-              {
-                // We guessed wrong
-                speculation_state = RESOLVE_FALSE_STATE;
-                continue_false = true;
-              }
+              // Send this back through the normal path
+              retrigger = true;
               break;
             }
-          case SPECULATE_FALSE_STATE:
+          case SPECULATIVE_MAPPING_STATE:
             {
               if (value)
-              {
-                speculation_state = RESOLVE_TRUE_STATE;
                 continue_true = true;
-              }
               else
-              {
-                speculation_state = RESOLVE_FALSE_STATE;
                 continue_false = true;
-              }
               break;
             }
           default:
-            assert(false); // shouldn't be in any of the other states
+            assert(false); // should not be in any resolved states
         }
+        if (value)
+          predication_state = RESOLVE_TRUE_STATE;
+        else
+          predication_state = RESOLVE_FALSE_STATE;
       }
-      if (need_trigger)
+      if (trigger_waiter)
         Runtime::trigger_event(predicate_waiter);
       if (continue_true)
         resolve_true(true/*speculated*/, true/*launched*/);
@@ -5011,8 +4875,8 @@ namespace Legion {
           LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(true/*speculated*/, true/*launched*/);
       }
-      if (need_resolve)
-        resolve_speculation();
+      if (retrigger)
+        trigger_ready();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6254,7 +6118,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
-      : ExternalCopy(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalCopy(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -6262,7 +6126,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(const CopyOp &rhs)
-      : ExternalCopy(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalCopy(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6290,12 +6154,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate, provenance);
-      initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -6812,21 +6675,19 @@ namespace Legion {
     void CopyOp::activate_copy(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative();
-      activate_memoizable();
+      activate_predication();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
-      predication_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void CopyOp::deactivate_copy(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      deactivate_predication();
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
@@ -7103,14 +6964,12 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       src_versions.resize(src_requirements.size());
       dst_versions.resize(dst_requirements.size());
     }
 
     //--------------------------------------------------------------------------
-    bool CopyOp::query_speculate(bool &value, bool &mapping_only)
+    bool CopyOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -7122,16 +6981,8 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_copy_speculate(this, &output);
-      if (!output.speculate)
+      if (!output.speculate || !output.speculate_mapping_only)
         return false;
-      value = output.speculative_value;
-      mapping_only = output.speculate_mapping_only;
-      // Make our predicate guard
-#ifdef DEBUG_LEGION
-      assert(!predication_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      predication_guard = predicate->get_true_guard();
       // If we're speculating then we make all the destination
       // privileges that are write-discard read-write instead so
       // that we get the earlier version of the data in case we
@@ -7168,7 +7019,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -7365,7 +7215,7 @@ namespace Legion {
         dst_indirect_records.resize(dst_indirect_requirements.size());
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent init_precondition = compute_init_precondition(trace_info);
+      ApEvent init_precondition = compute_sync_precondition(trace_info);
       // Register the source and destination regions
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -7640,7 +7490,7 @@ namespace Legion {
                                   init_precondition, src_ready, dst_ready,
                                   gather_ready,scatter_ready,local_precondition,
                                   local_postcondition, collective_precondition,
-                                  collective_postcondition, predication_guard,
+                                  collective_postcondition, true_guard,
                                   deferred_applied, deferred_src, deferred_dst,
                                   deferred_gather, deferred_scatter,
                                   output.compute_preimages);
@@ -7653,7 +7503,7 @@ namespace Legion {
                               gather_ready, scatter_ready, local_precondition,
                               local_postcondition, collective_precondition,
                               collective_postcondition,
-                              predication_guard, src_targets, dst_targets, 
+                              true_guard, src_targets, dst_targets, 
                               gather_targets.empty() ? NULL : &gather_targets,
                               scatter_targets.empty() ? NULL : &scatter_targets,
                               physical_trace_info, map_applied_conditions,
@@ -8385,18 +8235,15 @@ namespace Legion {
     void CopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::compute_sync_precondition(void) const
+    ApEvent CopyOp::compute_sync_precondition(const TraceInfo &info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -8966,7 +8813,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
@@ -9502,8 +9349,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_index_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -9515,7 +9360,6 @@ namespace Legion {
         (*it)->trigger_replay();
       complete_mapping();
       complete_execution();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -10176,7 +10020,8 @@ namespace Legion {
       scatter_parent_indexes    = owner->scatter_parent_indexes;
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
-      predication_guard         = owner->predication_guard;
+      true_guard                = owner->true_guard;
+      false_guard               = owner->false_guard;
       src_versions              = owner->src_versions;
       dst_versions              = owner->dst_versions;
       gather_versions           = owner->gather_versions;
@@ -10295,8 +10140,6 @@ namespace Legion {
           }
         }
       }
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -10580,14 +10423,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(Runtime *rt)
-      : MemoizableOp<Operation>(rt)
+      : MemoizableOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(const FenceOp &rhs)
-      : MemoizableOp<Operation>(NULL)
+      : MemoizableOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10615,7 +10458,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, track, 0/*regions*/, provenance);
-      initialize_memoizable();
       fence_kind = kind;
       if (need_future)
       {
@@ -10645,7 +10487,6 @@ namespace Legion {
     void FenceOp::activate_fence(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
       activate_memoizable();
     }
 
@@ -10792,7 +10633,6 @@ namespace Legion {
       else
         complete_execution();
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -13801,14 +13641,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(Runtime *rt)
-      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalAcquire(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(const AcquireOp &rhs)
-      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalAcquire(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -13836,8 +13676,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_memoizable();
-      initialize_speculation(ctx, true/*track*/,
+      initialize_predication(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate, provenance);
@@ -13917,8 +13756,7 @@ namespace Legion {
     void AcquireOp::activate_acquire(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative(); 
-      activate_memoizable();
+      activate_predication(); 
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -13939,7 +13777,7 @@ namespace Legion {
     void AcquireOp::deactivate_acquire(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();  
+      deactivate_predication();  
       restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -14027,8 +13865,6 @@ namespace Legion {
     {  
       if (runtime->check_privileges)
         check_acquire_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
@@ -14040,7 +13876,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireOp::query_speculate(bool &value, bool &mapping_only)
+    bool AcquireOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -14052,13 +13888,10 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_acquire_speculate(this, &output);
-      if (output.speculate)
-      {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
+      if (output.speculate && output.speculate_mapping_only)
         return true;
-      }
-      return false;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -14081,7 +13914,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -14115,7 +13947,7 @@ namespace Legion {
       InstanceSet restricted_instances;
       if (restricted_region.impl != NULL)
         restricted_region.impl->get_references(restricted_instances);
-      const ApEvent init_precondition = compute_init_precondition(trace_info);
+      const ApEvent init_precondition = compute_sync_precondition(trace_info);
       ApUserEvent acquire_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent acquire_complete = 
         runtime->forest->acquire_restrictions(requirement, version_info,
@@ -14296,18 +14128,15 @@ namespace Legion {
     void AcquireOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_acquire_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent AcquireOp::compute_sync_precondition(void) const
+    ApEvent AcquireOp::compute_sync_precondition(const TraceInfo &info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -14714,14 +14543,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(Runtime *rt)
-      : ExternalRelease(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalRelease(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(const ReleaseOp &rhs)
-      : ExternalRelease(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalRelease(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14749,8 +14578,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_memoizable();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate, provenance);
@@ -14829,8 +14657,7 @@ namespace Legion {
     void ReleaseOp::activate_release(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative(); 
-      activate_memoizable();
+      activate_predication(); 
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -14851,7 +14678,7 @@ namespace Legion {
     void ReleaseOp::deactivate_release(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      deactivate_predication();
       restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -14939,8 +14766,6 @@ namespace Legion {
     {  
       if (runtime->check_privileges)
         check_release_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -14956,7 +14781,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseOp::query_speculate(bool &value, bool &mapping_only)
+    bool ReleaseOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -14968,13 +14793,10 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_release_speculate(this, &output);
-      if (output.speculate)
-      {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
+      if (output.speculate && output.speculate_mapping_only)
         return true;
-      }
-      return false;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -14997,7 +14819,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -15032,7 +14853,7 @@ namespace Legion {
       InstanceSet restricted_instances;
       if (restricted_region.impl != NULL)
         restricted_region.impl->get_references(restricted_instances); 
-      const ApEvent init_precondition = compute_init_precondition(trace_info); 
+      const ApEvent init_precondition = compute_sync_precondition(trace_info); 
       ApUserEvent release_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent release_complete = 
         runtime->forest->release_restrictions(requirement, version_info,
@@ -15238,18 +15059,15 @@ namespace Legion {
     void ReleaseOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_release_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReleaseOp::compute_sync_precondition(void) const
+    ApEvent ReleaseOp::compute_sync_precondition(const TraceInfo &info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -15591,14 +15409,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
-      : MemoizableOp<Operation>(rt)
+      : MemoizableOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(const DynamicCollectiveOp &rhs)
-      : MemoizableOp<Operation>(NULL)
+      : MemoizableOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -15627,7 +15445,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), 
@@ -15652,14 +15469,12 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       trigger_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
     void DynamicCollectiveOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
       activate_memoizable();
     }
 
@@ -20162,8 +19977,6 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -20476,7 +20289,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(Runtime *rt)
-      : MemoizableOp<SpeculativeOp>(rt), ExternalFill()
+      : PredicatedOp(rt), ExternalFill()
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -20484,7 +20297,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(const FillOp &rhs)
-      : MemoizableOp<SpeculativeOp>(NULL), ExternalFill()
+      : PredicatedOp(NULL), ExternalFill()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20513,9 +20326,8 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
+      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
                              launcher.predicate, provenance);
-      initialize_memoizable();
       requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
                                       LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -20559,20 +20371,17 @@ namespace Legion {
     void FillOp::activate_fill(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative();
-      activate_memoizable();
+      activate_predication();
       value = NULL;
       value_size = 0;
       fill_view = NULL;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void FillOp::deactivate_fill(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      deactivate_predication();
       privilege_path.clear();
       version_info.clear();
       if (value != NULL) 
@@ -20725,8 +20534,6 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_fill_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -20743,14 +20550,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillOp::query_speculate(bool &value, bool &mapping_only)
+    bool FillOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       // Always speculate on fill ops, but mapping only since
       // we know that there is an easy way to defer them
-#if 1
-      value = true;
-      mapping_only = true;
 #ifdef DEBUG_LEGION
       assert(!true_guard.exists());
       assert(!false_guard.exists());
@@ -20758,9 +20562,6 @@ namespace Legion {
       // Make the copy across precondition guard 
       predicate->get_predicate_guards(true_guard, false_guard);
       return true;
-#else
-      return false;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20787,7 +20588,6 @@ namespace Legion {
               Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -20825,7 +20625,7 @@ namespace Legion {
         assert(fill_view == NULL);
 #endif
         // This is NULL for now until we implement tracing for fills
-        ApEvent init_precondition = compute_init_precondition(trace_info);
+        ApEvent init_precondition = compute_sync_precondition(trace_info);
         // Ask the enclosing context to find or create the fill view
 #ifdef DEBUG_LEGION
         InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
@@ -20904,7 +20704,7 @@ namespace Legion {
       void *result = malloc(result_size);
       memcpy(result, buffer, result_size);
       // This is NULL for now until we implement tracing for fills
-      ApEvent init_precondition = compute_init_precondition(trace_info);
+      ApEvent init_precondition = compute_sync_precondition(trace_info);
       // Ask the enclosing context to find or create the fill view
 #ifdef DEBUG_LEGION
       InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
@@ -21133,7 +20933,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FillOp::compute_sync_precondition(void) const
+    ApEvent FillOp::compute_sync_precondition(const TraceInfo &info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -21169,14 +20969,11 @@ namespace Legion {
     void FillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -21254,7 +21051,7 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
+      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
                              launcher.predicate, provenance);
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
@@ -21426,8 +21223,6 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
@@ -21501,7 +21296,6 @@ namespace Legion {
         (*it)->trigger_replay();
       complete_mapping();
       complete_execution();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -21896,8 +21690,6 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -23660,7 +23452,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Resolve our speculation then do the base case
-      resolve_speculation();
       AttachOp::trigger_ready();
     }
 
@@ -24457,7 +24248,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Resolve our speculation then do the base case
-      resolve_speculation();
       DetachOp::trigger_ready();
     }
 

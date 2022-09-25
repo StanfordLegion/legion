@@ -1641,7 +1641,7 @@ namespace Legion {
 #endif
       complete_mapping(mapped_precondition);
       if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -1703,7 +1703,7 @@ namespace Legion {
       // the future result, can skip this though if we're part of a must epoch
       // We should also skip this if we were predicated false
       if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()) 
+          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists())
           && (owner_shard == repl_ctx->owner_shard->shard_id))
       {
 #ifdef DEBUG_LEGION
@@ -2108,7 +2108,7 @@ namespace Legion {
       assert(redop != 0);
 #endif
       // Set the future if we actually ran the task or we speculated
-      if ((speculation_state == RESOLVE_FALSE_STATE) && !false_guard.exists())
+      if ((predication_state == RESOLVE_FALSE_STATE) && !false_guard.exists())
         return;
       if (serdez_redop_fns != NULL)
       {
@@ -2185,7 +2185,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((output_size_collective != NULL) &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
       {
         // Make a copy of the output sizes before we perform all-gather
         local_output_sizes = all_output_sizes;
@@ -3800,9 +3800,6 @@ namespace Legion {
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-          log_copy_requirements();
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
@@ -4166,9 +4163,6 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-          log_index_copy_requirements();
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
@@ -8738,23 +8732,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTraceOp::execute_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapping_tracker == NULL);
-#endif
-      // Make a dependence tracker
-      mapping_tracker = new MappingDependenceTracker();
-      // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_implicit_dependences(this);
-      parent_ctx->invalidate_trace_cache(local_trace, this);
-
-      trigger_dependence_analysis();
-      end_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplTraceOp::sync_for_replayable_check(void)
     //--------------------------------------------------------------------------
     {
@@ -8821,12 +8798,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
@@ -8881,13 +8852,13 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(trace == NULL);
-      assert(local_trace != NULL);
+      assert(trace != NULL);
 #endif
       // Indicate that we are done capturing this trace
-      local_trace->end_trace_capture();
-      if (local_trace->is_recording())
+      trace->end_trace_capture();
+      if (trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
@@ -8912,7 +8883,7 @@ namespace Legion {
       }
       // Register this fence with all previous users in the parent's context
       ReplFenceOp::trigger_dependence_analysis();
-      parent_ctx->record_previous_trace(local_trace);
+      parent_ctx->record_previous_trace(trace);
     }
 
     //--------------------------------------------------------------------------
@@ -8935,11 +8906,11 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (is_recording)
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
         assert(current_template != NULL);
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
@@ -8962,10 +8933,10 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         // Reset the local trace
-        local_trace->initialize_tracing_state();
+        trace->initialize_tracing_state();
       }
-      if (remove_trace_reference && local_trace->remove_reference())
-        delete local_trace;
+      if (remove_trace_reference && trace->remove_reference())
+        delete trace;
       ReplFenceOp::trigger_mapping();
     }
 
@@ -9054,9 +9025,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
       tracing = false;
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
@@ -9111,34 +9079,30 @@ namespace Legion {
     void ReplTraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace == NULL);
-      assert(local_trace != NULL);
-#endif
 #ifdef LEGION_SPY
-      if (local_trace->is_replaying())
+      if (trace->is_replaying())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        local_trace->perform_logging(
+        trace->perform_logging(
          physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
       }
 #endif
-      local_trace->end_trace_execution(this);
-      parent_ctx->record_previous_trace(local_trace);
+      trace->end_trace_execution(this);
+      parent_ctx->record_previous_trace(trace);
 
-      if (local_trace->is_replaying())
+      if (trace->is_replaying())
       {
         if (has_blocking_call)
           REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Physical tracing violation! Trace %d in task %s (UID %lld) "
             "encountered a blocking API call that was unseen when it was "
             "recorded. It is required that traces do not change their "
-            "behavior.", local_trace->get_trace_id(),
+            "behavior.", trace->get_trace_id(),
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
@@ -9147,7 +9111,7 @@ namespace Legion {
         assert(current_template != NULL);
 #endif
 #ifdef LEGION_SPY
-        local_trace->perform_logging(
+        trace->perform_logging(
             current_template->get_fence_uid(), unique_op_id);
 #endif
         // Get our fence barriers
@@ -9159,13 +9123,13 @@ namespace Legion {
         physical_trace->chain_replays(this);
         physical_trace->record_previous_template_completion(
                                       get_completion_event());
-        local_trace->initialize_tracing_state();
+        trace->initialize_tracing_state();
         replayed = true;
         return;
       }
-      else if (local_trace->is_recording())
+      else if (trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
@@ -9190,9 +9154,9 @@ namespace Legion {
       } 
 
       // If this is a static trace, then we remove our reference when we're done
-      if (local_trace->is_static_trace())
+      if (trace->is_static_trace())
       {
-        StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
+        StaticTrace *static_trace = static_cast<StaticTrace*>(trace);
         if (static_trace->remove_reference())
           delete static_trace;
       }
@@ -9231,11 +9195,11 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (is_recording)
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
         assert(current_template != NULL);
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, 
@@ -9257,7 +9221,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
-        local_trace->initialize_tracing_state();
+        trace->initialize_tracing_state();
       }
       else if (replayed)
       { 
@@ -9360,14 +9324,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::initialize_replay(ReplicateContext *ctx, 
-                                     LegionTrace *trace, Provenance *provenance)
+                                        LegionTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      local_trace = trace;
+      trace = tr;
       for (int idx = 0; idx < TRACE_SELECTION_ROUNDS; idx++)
         trace_selection_collective_ids[idx] = 
           ctx->get_next_collective_index(COLLECTIVE_LOC_87);
@@ -9406,18 +9367,14 @@ namespace Legion {
     void ReplTraceReplayOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace == NULL);
-      assert(local_trace != NULL);
-#endif
       initialize_fence_barriers();
-      PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+      PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
       assert(physical_trace != NULL); 
 #endif
       bool recurrent = true;
       bool fence_registered = false;
-      bool is_recording = local_trace->is_recording();
+      bool is_recording = trace->is_recording();
       if ((physical_trace->get_current_template() == NULL) || is_recording)
       {
         recurrent = false;
@@ -9429,7 +9386,7 @@ namespace Legion {
             mapped_event.wait();
         }
 #ifdef DEBUG_LEGION
-        assert(!(local_trace->is_recording() || local_trace->is_replaying()));
+        assert(!(trace->is_recording() || trace->is_replaying()));
         ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
         assert(repl_ctx != NULL);
 #else
@@ -9524,20 +9481,20 @@ namespace Legion {
         // If there were no intermediate dependences then we can just
         // record a dependence on the previous fence
         const ApEvent fence_completion = (recurrent &&
-          !local_trace->has_intermediate_operations()) ?
+          !trace->has_intermediate_operations()) ?
             physical_trace->get_previous_template_completion()
                     : get_completion_event();
-        if (recurrent && local_trace->has_intermediate_operations())
+        if (recurrent && trace->has_intermediate_operations())
         {
           parent_ctx->perform_fence_analysis(this, execution_preconditions,
                                        true/*mapping*/, true/*execution*/);
-          local_trace->reset_intermediate_operations();
+          trace->reset_intermediate_operations();
         }
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());
         physical_trace->initialize_template(fence_completion, recurrent);
-        local_trace->set_state_replay();
+        trace->set_state_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
 #endif
@@ -9600,15 +9557,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::initialize_begin(ReplicateContext *ctx, 
-                                     LegionTrace *trace, Provenance *provenance)
+                                        LegionTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      local_trace = trace;
-      trace = NULL;
+      trace = tr;
       tracing = false;
     }
 

@@ -16853,482 +16853,74 @@ namespace Legion {
         delete it->second;
       }
       proc_managers.clear(); 
-      for (std::deque<IndividualTask*>::const_iterator it = 
-            available_individual_tasks.begin(); 
-            it != available_individual_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_individual_tasks.clear();
-      for (std::deque<PointTask*>::const_iterator it = 
-            available_point_tasks.begin(); it != 
-            available_point_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_point_tasks.clear();
-      for (std::deque<IndexTask*>::const_iterator it = 
-            available_index_tasks.begin(); it != 
-            available_index_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_index_tasks.clear();
-      for (std::deque<SliceTask*>::const_iterator it = 
-            available_slice_tasks.begin(); it != 
-            available_slice_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_slice_tasks.clear();
-      for (std::deque<MapOp*>::const_iterator it = 
-            available_map_ops.begin(); it != 
-            available_map_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_map_ops.clear();
-      for (std::deque<CopyOp*>::const_iterator it = 
-            available_copy_ops.begin(); it != 
-            available_copy_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_copy_ops.clear();
-      for (std::deque<FenceOp*>::const_iterator it = 
-            available_fence_ops.begin(); it != 
-            available_fence_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_fence_ops.clear();
-      for (std::deque<FrameOp*>::const_iterator it = 
-            available_frame_ops.begin(); it !=
-            available_frame_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_frame_ops.clear();
-      for (std::deque<CreationOp*>::const_iterator it = 
-            available_creation_ops.begin(); it != 
-            available_creation_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_creation_ops.clear();
-      for (std::deque<DeletionOp*>::const_iterator it = 
-            available_deletion_ops.begin(); it != 
-            available_deletion_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_deletion_ops.clear();
-      for (std::deque<MergeCloseOp*>::const_iterator it = 
-            available_merge_close_ops.begin(); it !=
-            available_merge_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_merge_close_ops.clear();
-      for (std::deque<PostCloseOp*>::const_iterator it = 
-            available_post_close_ops.begin(); it !=
-            available_post_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_post_close_ops.clear();
-      for (std::deque<VirtualCloseOp*>::const_iterator it = 
-            available_virtual_close_ops.begin(); it !=
-            available_virtual_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_virtual_close_ops.clear();
-      for (std::deque<RefinementOp*>::const_iterator it =
-            available_refinement_ops.begin(); it !=
-            available_refinement_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_refinement_ops.clear();
-      for (std::deque<AdvisementOp*>::const_iterator it =
-            available_advisement_ops.begin(); it !=
-            available_advisement_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_advisement_ops.clear();
-      for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
-            available_dynamic_collective_ops.begin(); it !=
-            available_dynamic_collective_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_dynamic_collective_ops.clear();
-      for (std::deque<FuturePredOp*>::const_iterator it = 
-            available_future_pred_ops.begin(); it !=
-            available_future_pred_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_future_pred_ops.clear();
-      for (std::deque<NotPredOp*>::const_iterator it = 
-            available_not_pred_ops.begin(); it !=
-            available_not_pred_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_not_pred_ops.clear();
-      for (std::deque<AndPredOp*>::const_iterator it = 
-            available_and_pred_ops.begin(); it !=
-            available_and_pred_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_and_pred_ops.clear();
-      for (std::deque<OrPredOp*>::const_iterator it = 
-            available_or_pred_ops.begin(); it !=
-            available_or_pred_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_or_pred_ops.clear();
-      for (std::deque<AcquireOp*>::const_iterator it = 
-            available_acquire_ops.begin(); it !=
-            available_acquire_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_acquire_ops.clear();
-      for (std::deque<ReleaseOp*>::const_iterator it = 
-            available_release_ops.begin(); it !=
-            available_release_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_release_ops.clear();
-      for (std::deque<TraceCaptureOp*>::const_iterator it = 
-            available_capture_ops.begin(); it !=
-            available_capture_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_capture_ops.clear();
-      for (std::deque<TraceCompleteOp*>::const_iterator it = 
-            available_trace_ops.begin(); it !=
-            available_trace_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_trace_ops.clear();
-      for (std::deque<TraceReplayOp*>::const_iterator it = 
-            available_replay_ops.begin(); it !=
-            available_replay_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_replay_ops.clear();
-      for (std::deque<TraceBeginOp*>::const_iterator it = 
-            available_begin_ops.begin(); it !=
-            available_begin_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_begin_ops.clear();
-      for (std::deque<TraceSummaryOp*>::const_iterator it = 
-            available_summary_ops.begin(); it !=
-            available_summary_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_summary_ops.clear();
-      for (std::deque<MustEpochOp*>::const_iterator it = 
-            available_epoch_ops.begin(); it !=
-            available_epoch_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_epoch_ops.clear();
-      for (std::deque<PendingPartitionOp*>::const_iterator it = 
-            available_pending_partition_ops.begin(); it !=
-            available_pending_partition_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_pending_partition_ops.clear();
-      for (std::deque<DependentPartitionOp*>::const_iterator it = 
-            available_dependent_partition_ops.begin(); it !=
-            available_dependent_partition_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_dependent_partition_ops.clear();
-      for (std::deque<FillOp*>::const_iterator it = 
-            available_fill_ops.begin(); it !=
-            available_fill_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_fill_ops.clear();
-      for (std::deque<AttachOp*>::const_iterator it = 
-            available_attach_ops.begin(); it !=
-            available_attach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_attach_ops.clear();
-      for (std::deque<IndexAttachOp*>::const_iterator it = 
-            available_index_attach_ops.begin(); it !=
-            available_index_attach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_index_attach_ops.clear();
-      for (std::deque<PointAttachOp*>::const_iterator it = 
-            available_point_attach_ops.begin(); it !=
-            available_point_attach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_point_attach_ops.clear();
-      for (std::deque<DetachOp*>::const_iterator it = 
-            available_detach_ops.begin(); it !=
-            available_detach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_detach_ops.clear();
-      for (std::deque<IndexDetachOp*>::const_iterator it = 
-            available_index_detach_ops.begin(); it !=
-            available_index_detach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_index_detach_ops.clear();
-      for (std::deque<PointDetachOp*>::const_iterator it = 
-            available_point_detach_ops.begin(); it !=
-            available_point_detach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_point_detach_ops.clear();
-      for (std::deque<TimingOp*>::const_iterator it = 
-            available_timing_ops.begin(); it != 
-            available_timing_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_timing_ops.clear();
-      for (std::deque<TunableOp*>::const_iterator it =
-            available_tunable_ops.begin(); it !=
-            available_tunable_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_tunable_ops.clear();
-      for (std::deque<AllReduceOp*>::const_iterator it = 
-            available_all_reduce_ops.begin(); it !=
-            available_all_reduce_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_all_reduce_ops.clear();
-      for (std::deque<ReplIndividualTask*>::const_iterator it = 
-            available_repl_individual_tasks.begin(); it !=
-            available_repl_individual_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_individual_tasks.clear();
-      for (std::deque<ReplIndexTask*>::const_iterator it = 
-            available_repl_index_tasks.begin(); it !=
-            available_repl_index_tasks.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_index_tasks.clear();
-      for (std::deque<ReplMergeCloseOp*>::const_iterator it = 
-            available_repl_merge_close_ops.begin(); it !=
-            available_repl_merge_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_merge_close_ops.clear();
-      for (std::deque<ReplRefinementOp*>::const_iterator it =
-            available_repl_refinement_ops.begin(); it !=
-            available_repl_refinement_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_refinement_ops.clear();
-      for (std::deque<ReplFillOp*>::const_iterator it = 
-            available_repl_fill_ops.begin(); it !=
-            available_repl_fill_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_fill_ops.clear();
-      for (std::deque<ReplIndexFillOp*>::const_iterator it = 
-            available_repl_index_fill_ops.begin(); it !=
-            available_repl_index_fill_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_index_fill_ops.clear();
-      for (std::deque<ReplCopyOp*>::const_iterator it = 
-            available_repl_copy_ops.begin(); it !=
-            available_repl_copy_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_copy_ops.clear();
-      for (std::deque<ReplIndexCopyOp*>::const_iterator it = 
-            available_repl_index_copy_ops.begin(); it !=
-            available_repl_index_copy_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_index_copy_ops.clear();
-      for (std::deque<ReplDeletionOp*>::const_iterator it = 
-            available_repl_deletion_ops.begin(); it !=
-            available_repl_deletion_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_deletion_ops.clear();
-      for (std::deque<ReplPendingPartitionOp*>::const_iterator it = 
-            available_repl_pending_partition_ops.begin(); it !=
-            available_repl_pending_partition_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_pending_partition_ops.clear();
-      for (std::deque<ReplDependentPartitionOp*>::const_iterator it = 
-            available_repl_dependent_partition_ops.begin(); it !=
-            available_repl_dependent_partition_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_dependent_partition_ops.clear();
-      for (std::deque<ReplMustEpochOp*>::const_iterator it = 
-            available_repl_must_epoch_ops.begin(); it !=
-            available_repl_must_epoch_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_must_epoch_ops.clear();
-      for (std::deque<ReplTimingOp*>::const_iterator it = 
-            available_repl_timing_ops.begin(); it !=
-            available_repl_timing_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_timing_ops.clear();
-      for (std::deque<ReplTunableOp*>::const_iterator it = 
-            available_repl_tunable_ops.begin(); it !=
-            available_repl_tunable_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_tunable_ops.clear();
-      for (std::deque<ReplAllReduceOp*>::const_iterator it = 
-            available_repl_all_reduce_ops.begin(); it !=
-            available_repl_all_reduce_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_all_reduce_ops.clear();
-      for (std::deque<ReplFenceOp*>::const_iterator it = 
-            available_repl_fence_ops.begin(); it !=
-            available_repl_fence_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_fence_ops.clear();
-      for (std::deque<ReplMapOp*>::const_iterator it = 
-            available_repl_map_ops.begin(); it != 
-            available_repl_map_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_map_ops.clear();
-      for (std::deque<ReplAttachOp*>::const_iterator it = 
-            available_repl_attach_ops.begin(); it !=
-            available_repl_attach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_attach_ops.clear();
-      for (std::deque<ReplIndexAttachOp*>::const_iterator it = 
-            available_repl_index_attach_ops.begin(); it !=
-            available_repl_index_attach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_index_attach_ops.clear();
-      for (std::deque<ReplDetachOp*>::const_iterator it = 
-            available_repl_detach_ops.begin(); it !=
-            available_repl_detach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_detach_ops.clear();
-      for (std::deque<ReplIndexDetachOp*>::const_iterator it = 
-            available_repl_index_detach_ops.begin(); it !=
-            available_repl_index_detach_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_index_detach_ops.clear();
-      for (std::deque<ReplAcquireOp*>::const_iterator it =
-            available_repl_acquire_ops.begin(); it !=
-            available_repl_acquire_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_acquire_ops.clear();
-      for (std::deque<ReplReleaseOp*>::const_iterator it =
-            available_repl_release_ops.begin(); it !=
-            available_repl_release_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_release_ops.clear();
-      for (std::deque<ReplTraceCaptureOp*>::const_iterator it = 
-            available_repl_capture_ops.begin(); it !=
-            available_repl_capture_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_capture_ops.clear();
-      for (std::deque<ReplTraceCompleteOp*>::const_iterator it = 
-            available_repl_trace_ops.begin(); it !=
-            available_repl_trace_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_trace_ops.clear();
-      for (std::deque<ReplTraceReplayOp*>::const_iterator it = 
-            available_repl_replay_ops.begin(); it !=
-            available_repl_replay_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_replay_ops.clear();
-      for (std::deque<ReplTraceBeginOp*>::const_iterator it = 
-            available_repl_begin_ops.begin(); it !=
-            available_repl_begin_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_begin_ops.clear();
-      for (std::deque<ReplTraceSummaryOp*>::const_iterator it = 
-            available_repl_summary_ops.begin(); it !=
-            available_repl_summary_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_repl_summary_ops.clear();
+      free_available(available_individual_tasks);
+      free_available(available_point_tasks);
+      free_available(available_index_tasks);
+      free_available(available_slice_tasks);
+      free_available(available_map_ops);
+      free_available(available_copy_ops);
+      free_available(available_fence_ops);
+      free_available(available_frame_ops);
+      free_available(available_creation_ops);
+      free_available(available_deletion_ops);
+      free_available(available_merge_close_ops);
+      free_available(available_post_close_ops);
+      free_available(available_virtual_close_ops);
+      free_available(available_refinement_ops);
+      free_available(available_advisement_ops);
+      free_available(available_dynamic_collective_ops);
+      free_available(available_future_pred_ops);
+      free_available(available_not_pred_ops);
+      free_available(available_and_pred_ops);
+      free_available(available_or_pred_ops);
+      free_available(available_acquire_ops);
+      free_available(available_release_ops);
+      free_available(available_capture_ops);
+      free_available(available_trace_ops);
+      free_available(available_replay_ops);
+      free_available(available_begin_ops);
+      free_available(available_summary_ops);
+      free_available(available_epoch_ops);
+      free_available(available_pending_partition_ops);
+      free_available(available_dependent_partition_ops);
+      free_available(available_fill_ops);
+      free_available(available_attach_ops);
+      free_available(available_index_attach_ops);
+      free_available(available_point_attach_ops);
+      free_available(available_detach_ops);
+      free_available(available_index_detach_ops);
+      free_available(available_point_detach_ops);
+      free_available(available_timing_ops);
+      free_available(available_tunable_ops);
+      free_available(available_all_reduce_ops);
+      free_available(available_repl_individual_tasks);
+      free_available(available_repl_index_tasks);
+      free_available(available_repl_merge_close_ops);
+      free_available(available_repl_refinement_ops);
+      free_available(available_repl_fill_ops);
+      free_available(available_repl_index_fill_ops);
+      free_available(available_repl_copy_ops);
+      free_available(available_repl_index_copy_ops);
+      free_available(available_repl_deletion_ops);
+      free_available(available_repl_pending_partition_ops);
+      free_available(available_repl_dependent_partition_ops);
+      free_available(available_repl_must_epoch_ops);
+      free_available(available_repl_timing_ops);
+      free_available(available_repl_tunable_ops);
+      free_available(available_repl_all_reduce_ops);
+      free_available(available_repl_fence_ops);
+      free_available(available_repl_map_ops);
+      free_available(available_repl_attach_ops);
+      free_available(available_repl_index_attach_ops);
+      free_available(available_repl_detach_ops);
+      free_available(available_repl_index_detach_ops);
+      free_available(available_repl_acquire_ops);
+      free_available(available_repl_release_ops);
+      free_available(available_repl_capture_ops);
+      free_available(available_repl_trace_ops);
+      free_available(available_repl_replay_ops);
+      free_available(available_repl_begin_ops);
+      free_available(available_repl_summary_ops);
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -27323,7 +26915,8 @@ namespace Legion {
     IndividualTask* Runtime::get_available_individual_task(void)
     //--------------------------------------------------------------------------
     {
-      IndividualTask *result = get_available(individual_task_lock, 
+      IndividualTask *result = get_available<IndividualTask,
+                     Predicated<IndividualTask> >(individual_task_lock, 
                                          available_individual_tasks);
 #ifdef DEBUG_LEGION
       AutoLock i_lock(individual_task_lock);
@@ -27336,8 +26929,8 @@ namespace Legion {
     PointTask* Runtime::get_available_point_task(void)
     //--------------------------------------------------------------------------
     {
-      PointTask *result = get_available(point_task_lock, 
-                                        available_point_tasks);
+      PointTask *result = get_available<PointTask,Memoizable<PointTask> >(
+                                    point_task_lock, available_point_tasks);
 #ifdef DEBUG_LEGION
       AutoLock p_lock(point_task_lock);
       out_point_tasks.insert(result);
@@ -27349,8 +26942,8 @@ namespace Legion {
     IndexTask* Runtime::get_available_index_task(void)
     //--------------------------------------------------------------------------
     {
-      IndexTask *result = get_available(index_task_lock, 
-                                       available_index_tasks);
+      IndexTask *result = get_available<IndexTask,Predicated<IndexTask> >(
+                                    index_task_lock, available_index_tasks);
 #ifdef DEBUG_LEGION
       AutoLock i_lock(index_task_lock);
       out_index_tasks.insert(result);
@@ -27362,8 +26955,8 @@ namespace Legion {
     SliceTask* Runtime::get_available_slice_task(void)
     //--------------------------------------------------------------------------
     {
-      SliceTask *result = get_available(slice_task_lock,
-                                       available_slice_tasks);
+      SliceTask *result = get_available<SliceTask,Memoizable<SliceTask> >(
+                                    slice_task_lock, available_slice_tasks);
 #ifdef DEBUG_LEGION
       AutoLock s_lock(slice_task_lock);
       out_slice_tasks.insert(result);
@@ -27382,28 +26975,32 @@ namespace Legion {
     CopyOp* Runtime::get_available_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(copy_op_lock, available_copy_ops);
+      return get_available<CopyOp,Predicated<CopyOp> >(
+                        copy_op_lock, available_copy_ops);
     }
 
     //--------------------------------------------------------------------------
     IndexCopyOp* Runtime::get_available_index_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(copy_op_lock, available_index_copy_ops);
+      return get_available<IndexCopyOp,Predicated<IndexCopyOp> >(
+                            copy_op_lock, available_index_copy_ops);
     }
 
     //--------------------------------------------------------------------------
     PointCopyOp* Runtime::get_available_point_copy_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(copy_op_lock, available_point_copy_ops);
+      return get_available<PointCopyOp,Memoizable<PointCopyOp> >(
+                    copy_op_lock, available_point_copy_ops);
     }
 
     //--------------------------------------------------------------------------
     FenceOp* Runtime::get_available_fence_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(fence_op_lock, available_fence_ops);
+      return get_available<FenceOp,Memoizable<FenceOp> >(
+                      fence_op_lock, available_fence_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27466,7 +27063,8 @@ namespace Legion {
     DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(dynamic_collective_op_lock, 
+      return get_available<DynamicCollectiveOp,
+             Memoizable<DynamicCollectiveOp> >(dynamic_collective_op_lock, 
                            available_dynamic_collective_ops);
     }
 
@@ -27502,14 +27100,16 @@ namespace Legion {
     AcquireOp* Runtime::get_available_acquire_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(acquire_op_lock, available_acquire_ops);
+      return get_available<AcquireOp,Predicated<AcquireOp> >(
+                        acquire_op_lock, available_acquire_ops);
     }
 
     //--------------------------------------------------------------------------
     ReleaseOp* Runtime::get_available_release_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(release_op_lock, available_release_ops);
+      return get_available<ReleaseOp,Predicated<ReleaseOp> >(
+                        release_op_lock, available_release_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27587,21 +27187,24 @@ namespace Legion {
     FillOp* Runtime::get_available_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(fill_op_lock, available_fill_ops);
+      return get_available<FillOp,Predicated<FillOp> >(
+                        fill_op_lock, available_fill_ops);
     }
 
     //--------------------------------------------------------------------------
     IndexFillOp* Runtime::get_available_index_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(fill_op_lock, available_index_fill_ops);
+      return get_available<IndexFillOp,Predicated<IndexFillOp> >( 
+                      fill_op_lock, available_index_fill_ops);
     }
 
     //--------------------------------------------------------------------------
     PointFillOp* Runtime::get_available_point_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(fill_op_lock, available_point_fill_ops);
+      return get_available<PointFillOp,Memoizable<PointFillOp> >(
+                          fill_op_lock, available_point_fill_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27671,15 +27274,16 @@ namespace Legion {
     ReplIndividualTask* Runtime::get_available_repl_individual_task(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(individual_task_lock, 
-                           available_repl_individual_tasks);
+      return get_available<ReplIndividualTask,Predicated<ReplIndividualTask> >(
+                         individual_task_lock, available_repl_individual_tasks);
     }
 
     //--------------------------------------------------------------------------
     ReplIndexTask* Runtime::get_available_repl_index_task(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(index_task_lock, available_repl_index_tasks);
+      return get_available<ReplIndexTask,Predicated<ReplIndexTask> >(
+                          index_task_lock, available_repl_index_tasks);
     }
 
     //--------------------------------------------------------------------------
@@ -27700,28 +27304,32 @@ namespace Legion {
     ReplFillOp* Runtime::get_available_repl_fill_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(fill_op_lock, available_repl_fill_ops);
+      return get_available<ReplFillOp,Predicated<ReplFillOp> >(
+                          fill_op_lock, available_repl_fill_ops);
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp* Runtime::get_available_repl_index_fill_op(void) 
     //--------------------------------------------------------------------------
     {
-      return get_available(fill_op_lock, available_repl_index_fill_ops);
+      return get_available<ReplIndexFillOp,Predicated<ReplIndexFillOp> >(
+                              fill_op_lock, available_repl_index_fill_ops);
     }
 
     //--------------------------------------------------------------------------
     ReplCopyOp* Runtime::get_available_repl_copy_op(void) 
     //--------------------------------------------------------------------------
     {
-      return get_available(copy_op_lock, available_repl_copy_ops);
+      return get_available<ReplCopyOp,Predicated<ReplCopyOp> >(  
+                          copy_op_lock, available_repl_copy_ops);
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp* Runtime::get_available_repl_index_copy_op(void) 
     //--------------------------------------------------------------------------
     {
-      return get_available(copy_op_lock, available_repl_index_copy_ops);
+      return get_available<ReplIndexCopyOp,Predicated<ReplIndexCopyOp> >(
+                              copy_op_lock, available_repl_index_copy_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27781,7 +27389,8 @@ namespace Legion {
     ReplFenceOp* Runtime::get_available_repl_fence_op(void) 
     //--------------------------------------------------------------------------
     {
-      return get_available(fence_op_lock, available_repl_fence_ops);
+      return get_available<ReplFenceOp,Memoizable<ReplFenceOp> >(
+                        fence_op_lock, available_repl_fence_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27823,14 +27432,16 @@ namespace Legion {
     ReplAcquireOp* Runtime::get_available_repl_acquire_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(acquire_op_lock, available_repl_acquire_ops);
+      return get_available<ReplAcquireOp,Predicated<ReplAcquireOp> >(
+                            acquire_op_lock, available_repl_acquire_ops);
     }
 
     //--------------------------------------------------------------------------
     ReplReleaseOp* Runtime::get_available_repl_release_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(release_op_lock, available_repl_release_ops);
+      return get_available<ReplReleaseOp,Predicated<ReplReleaseOp> >(
+                          release_op_lock, available_repl_release_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -32525,7 +32136,7 @@ namespace Legion {
           }
         case LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID:
           {
-            Memoizable::handle_record_complete_replay(args);
+            MemoizableOp::handle_record_complete_replay(args);
             break;
           }
         case LG_YIELD_TASK_ID:

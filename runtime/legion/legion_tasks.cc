@@ -217,7 +217,7 @@ namespace Legion {
   
     //--------------------------------------------------------------------------
     TaskOp::TaskOp(Runtime *rt)
-      : ExternalTask(), MemoizableOp<SpeculativeOp>(rt), 
+      : ExternalTask(), PredicatedOp(rt), 
         logical_regions(TaskRequirements(*this))
     //--------------------------------------------------------------------------
     {
@@ -341,8 +341,7 @@ namespace Legion {
     void TaskOp::activate_task(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative();
-      activate_memoizable();
+      activate_predication();
       complete_received = false;
       commit_received = false;
       children_complete = false;
@@ -352,9 +351,7 @@ namespace Legion {
       map_origin = false;
       request_valid_instances = false;
       elide_future_return = false;
-      replicate = false;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      replicate = false; 
       local_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
@@ -369,7 +366,7 @@ namespace Legion {
     void TaskOp::deactivate_task(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      deactivate_predication();
       indexes.clear();
       regions.clear();
       output_regions.clear();
@@ -646,8 +643,7 @@ namespace Legion {
                 const Predicate &p, Processor::TaskFuncID tid, Provenance *prov)
     //--------------------------------------------------------------------------
     {
-      initialize_speculation(ctx, track, get_region_count(),dependences,p,prov);
-      initialize_memoizable();
+      initialize_predication(ctx, track, get_region_count(),dependences,p,prov);
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
@@ -835,7 +831,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool TaskOp::query_speculate(bool &value, bool &mapping_only)
+    bool TaskOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)  
@@ -844,19 +840,8 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_task_speculate(this, &output);
-      if (output.speculate)
+      if (output.speculate && output.speculate_mapping_only)
       {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
-        if (!mapping_only)
-        {
-          REPORT_LEGION_ERROR(ERROR_MAPPER_REQUESTED_EXECUTION,
-                         "Mapper requested execution speculation for task %s "
-                         "(UID %lld). Full execution speculation is a planned "
-                         "feature but is not currently supported.",
-                         get_task_name(), get_unique_id());
-          assert(false);
-        }
 #ifdef DEBUG_LEGION
         assert(!true_guard.exists());
         assert(!false_guard.exists());
@@ -871,8 +856,10 @@ namespace Legion {
           if (HAS_WRITE_DISCARD(req))
             req.privilege &= ~LEGION_DISCARD_MASK;
         }
+        return true;
       }
-      return output.speculate;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -960,7 +947,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent TaskOp::compute_sync_precondition(void) const
+    ApEvent TaskOp::compute_sync_precondition(const TraceInfo &info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -4219,7 +4206,7 @@ namespace Legion {
       if (is_recording())
         trace_info.record_replay_mapping(single_task_termination,
             TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND));
-      ApEvent init_precondition = compute_init_precondition(trace_info);
+      ApEvent init_precondition = compute_sync_precondition(trace_info);
       region_preconditions.resize(regions.size());
       // After we've got our results, apply the state to the region tree
       size_t region_count = get_region_count();
@@ -5999,9 +5986,6 @@ namespace Legion {
       {
         this->top_level_task = true;
         this->implicit_top_level_task = implicit_top_level;
-        // Top-level tasks never do dependence analysis, so we
-        // need to complete those stages now
-        resolve_speculation();
       }
       if (runtime->legion_spy_enabled)
       {
@@ -6161,8 +6145,6 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                   wait_barriers, arrive_barriers, must_epoch);
-      // Also have to register any dependences on our predicate
-      register_predicate_dependence();
       version_infos.resize(logical_regions.size());
     }
 
@@ -6255,7 +6237,6 @@ namespace Legion {
       // Then clean up this task instance
       complete_mapping();
       complete_execution();
-      resolve_speculation();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
@@ -6379,8 +6360,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask::perform_inlining(variant, parent_regions);
-      // We also need to resolve speculation which PointTasks do not
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -6763,8 +6742,6 @@ namespace Legion {
       // we get cleaned up after the resolve speculation call
       if (runtime->legion_spy_enabled)
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
-      // If we're remote, we've already resolved speculation for now
-      resolve_speculation();
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
       // Return true to add ourselves to the ready queue
@@ -6918,7 +6895,6 @@ namespace Legion {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
       }
       SingleTask::trigger_replay();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -6958,6 +6934,7 @@ namespace Legion {
         assert(region_preconditions.empty());
 #endif
         region_preconditions.resize(regions.size(), instance_ready_event);
+        execution_fence_event = instance_ready_event;
         update_no_access_regions();
         launch_task();
       }
@@ -7048,8 +7025,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, POINT_ACTIVATE_CALL);
       activate_single();
-      // Point tasks never have to resolve speculation
-      resolve_speculation();
       orig_task = this;
       slice_owner = NULL;
     }
@@ -7664,6 +7639,7 @@ namespace Legion {
           slice_owner->record_point_mapped(RtEvent::NO_RT_EVENT,
                       completion_postcondition, acquired_instances);
         region_preconditions.resize(regions.size(), instance_ready_event);
+        execution_fence_event = instance_ready_event;
         update_no_access_regions();
         launch_task();
       }
@@ -8271,8 +8247,6 @@ namespace Legion {
       // replicated task
       if (is_leaf())
         shard_manager->handle_post_mapped(true/*local*/, RtEvent::NO_RT_EVENT);
-      // Speculation can always be resolved here
-      resolve_speculation();
       // Then launch the task for execution
       launch_task();
     }
@@ -9400,8 +9374,6 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                   wait_barriers, arrive_barriers, must_epoch);
-      // Also have to register any dependences on our predicate
-      register_predicate_dependence();
       version_infos.resize(logical_regions.size());
     }
 
@@ -9600,7 +9572,6 @@ namespace Legion {
       // Then clean up this task execution
       complete_mapping();
       complete_execution(execution_condition);
-      resolve_speculation();
       trigger_children_complete();
       trigger_children_committed();
     }
@@ -9811,7 +9782,7 @@ namespace Legion {
       if (redop != 0)
       {
         // Set the future if we actually ran the task or we speculated
-        if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
+        if ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists())
         {
 #ifdef DEBUG_LEGION
           assert(!reduction_instances.empty());
@@ -9993,8 +9964,6 @@ namespace Legion {
                 current_proc, false/*recurse*/, false/*stealable*/);
       slice->enumerate_points(true/*inlining*/);
       slice->perform_inlining(variant, parent_regions);
-      // Record that we had our speculation resolved too
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -10658,7 +10627,6 @@ namespace Legion {
       for (std::list<SliceTask*>::const_iterator it = 
             slices.begin(); it != slices.end(); it++)
         (*it)->trigger_replay();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -11009,8 +10977,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_ACTIVATE_CALL);
       activate_multi();
-      // Slice tasks never have to resolve speculation
-      resolve_speculation();
       num_unmapped_points = 0;
       num_uncomplete_points = 0;
       num_uncommitted_points = 0;
