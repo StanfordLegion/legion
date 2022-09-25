@@ -2157,8 +2157,8 @@ namespace Legion {
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return RtEvent::NO_RT_EVENT;
-      InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
+      InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       assert(ctx.exists());
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 

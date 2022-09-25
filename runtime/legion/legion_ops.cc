@@ -2002,15 +2002,16 @@ namespace Legion {
       // Operations with regions and tasks do their own logging
       const OpKind op_kind = get_operation_kind();
       if ((op_kind != TASK_OP_KIND) && (op_kind != MAP_OP_KIND) &&
-          (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND))
+          (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND) &&
+          (op_kind != DEPENDENT_PARTITION_OP_KIND))
       {
         ApEvent effects_done;
         if (!completion_effects.empty())
           effects_done = Runtime::merge_events(NULL, completion_effects);
         if (completion_event.exists())
           Runtime::trigger_event(NULL, completion_event, effects_done);
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        effects_done);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        completion_event);
       }
       else
 #endif
@@ -18651,6 +18652,10 @@ namespace Legion {
           map_applied_conditions.insert((*it)->get_mapped_event());
           (*it)->launch();
         }
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        ApEvent::NO_AP_EVENT);
+#endif
         // We are mapped when all our points are mapped
         finalize_mapping();
       }
@@ -18716,6 +18721,9 @@ namespace Legion {
                                instances_ready, mapped_instances, trace_info);
       Runtime::trigger_event(&trace_info, part_done, done_event);
       record_completion_effect(part_done);
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, done_event, part_done);
+#endif
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       finalize_mapping(); 

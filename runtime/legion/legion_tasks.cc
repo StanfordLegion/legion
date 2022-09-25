@@ -6889,11 +6889,6 @@ namespace Legion {
     void IndividualTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-      }
       SingleTask::trigger_replay();
     }
 
@@ -10590,12 +10585,6 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      if (runtime->legion_spy_enabled)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
-      }
       // If we're going to be doing an output reduction do that now
       if (redop > 0)
       {
