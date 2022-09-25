@@ -113,7 +113,7 @@ impl Proc {
         state: &State,
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
-        let (op_id, initiation_op) = (entry.op, entry.initiation_op);
+        let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
         let (base, time_range, waiters) = (&entry.base, &entry.time_range, &entry.waiters);
         let name = match entry.kind {
             ProcEntryKind::Task(task_id, variant_id) => {
@@ -173,6 +173,8 @@ impl Proc {
         let initiation = match entry.kind {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
+            // And another special case, because for MapperCalls only, we skip zero (!!)
+            ProcEntryKind::MapperCall(_) => initiation_op.map(|op_id| op_id.0),
             _ => Some(initiation_op.map_or(0, |op_id| op_id.0)),
         };
 

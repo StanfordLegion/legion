@@ -222,12 +222,9 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub entries: BTreeMap<ProfUID, ProcEntry>,
-    pub tasks: BTreeMap<OpID, ProfUID>,
-    pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
-    pub mapper_calls: BTreeMap<OpID, Vec<ProfUID>>,
-    pub runtime_calls: Vec<ProfUID>,
-    pub prof_tasks: Vec<ProfUID>,
+    entries: BTreeMap<ProfUID, ProcEntry>,
+    tasks: BTreeMap<OpID, ProfUID>,
+    meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     pub max_levels: u32,
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
@@ -242,9 +239,6 @@ impl Proc {
             entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
-            mapper_calls: BTreeMap::new(),
-            runtime_calls: Vec::new(),
-            prof_tasks: Vec::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
@@ -276,18 +270,8 @@ impl Proc {
                     .or_insert_with(|| Vec::new())
                     .push(base.prof_uid);
             }
-            ProcEntryKind::MapperCall(_) => {
-                self.mapper_calls
-                    .entry(initiation_op.unwrap())
-                    .or_insert_with(|| Vec::new())
-                    .push(base.prof_uid);
-            }
-            ProcEntryKind::RuntimeCall(_) => {
-                self.runtime_calls.push(base.prof_uid);
-            }
-            ProcEntryKind::ProfTask => {
-                self.prof_tasks.push(base.prof_uid);
-            }
+            // If we don't need to look up later... don't bother building the index
+            _ => {}
         }
         self.entries
             .entry(base.prof_uid)
@@ -1156,7 +1140,7 @@ pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct MapperCallKind {
-    kind: MapperCallKindID,
+    pub kind: MapperCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
@@ -1180,7 +1164,7 @@ pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct RuntimeCallKind {
-    kind: RuntimeCallKindID,
+    pub kind: RuntimeCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
@@ -1204,7 +1188,7 @@ pub struct TaskID(pub u32);
 
 #[derive(Debug)]
 pub struct TaskKind {
-    task_id: TaskID,
+    pub task_id: TaskID,
     pub name: Option<String>,
 }
 
@@ -1408,7 +1392,7 @@ pub enum ProcEntryKind {
 #[derive(Debug)]
 pub struct ProcEntry {
     pub base: Base,
-    pub op: Option<OpID>,
+    pub op_id: Option<OpID>,
     pub initiation_op: Option<OpID>,
     pub kind: ProcEntryKind,
     pub time_range: TimeRange,
@@ -1418,14 +1402,14 @@ pub struct ProcEntry {
 impl ProcEntry {
     fn new(
         base: Base,
-        op: Option<OpID>,
+        op_id: Option<OpID>,
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
     ) -> Self {
         ProcEntry {
             base,
-            op,
+            op_id,
             initiation_op,
             kind,
             time_range,
@@ -2263,63 +2247,39 @@ impl State {
             Self::compute_op_children(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_children);
         }
 
-        // Now add the implicit dependencies on meta tasks
+        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
         for proc in self.procs.values() {
-            for ((op_id, _), meta_tasks) in &proc.meta_tasks {
-                if let Some(task_stop) = proc.find_task(*op_id).map(|task| task.time_range.stop) {
-                    let task_uid = self.op_prof_uid.get(op_id).unwrap();
-                    for meta_uid in meta_tasks {
-                        let meta_task = proc.entry(*meta_uid);
-                        let before = meta_task.time_range.stop < task_stop;
-
-                        let task_deps = self
-                            .spy_op_deps
-                            .entry(*task_uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            task_deps.in_.insert(*meta_uid);
-                        } else {
-                            task_deps.out.insert(*meta_uid);
-                        }
-
-                        let meta_deps = self
-                            .spy_op_deps
-                            .entry(meta_task.base.prof_uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            meta_deps.out.insert(*task_uid);
-                        } else {
-                            meta_deps.in_.insert(*task_uid);
-                        }
-                    }
+            for (uid, entry) in &proc.entries {
+                if let ProcEntryKind::ProfTask = entry.kind {
+                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
+                    // has an op_id not an initiation_op, so we have to work
+                    // around that here
+                    continue;
                 }
-            }
-
-            for (op_id, mapper_calls) in &proc.mapper_calls {
-                if let Some(task_stop) = proc.find_task(*op_id).map(|task| task.time_range.stop) {
-                    let task_uid = self.op_prof_uid.get(op_id).unwrap();
-                    for call_uid in mapper_calls {
-                        let mapper_call = proc.entry(*call_uid);
-                        let before = mapper_call.time_range.stop < task_stop;
+                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
+                    if let Some(task) = self.find_task(initiation_op) {
+                        let task_stop = task.time_range.stop;
+                        let task_uid = task.base.prof_uid;
+                        let before = entry.time_range.stop < task_stop;
 
                         let task_deps = self
                             .spy_op_deps
-                            .entry(*task_uid)
+                            .entry(task_uid)
                             .or_insert_with(|| Dependencies::new());
                         if before {
-                            task_deps.in_.insert(*call_uid);
+                            task_deps.in_.insert(*uid);
                         } else {
-                            task_deps.out.insert(*call_uid);
+                            task_deps.out.insert(*uid);
                         }
 
-                        let meta_deps = self
+                        let entry_deps = self
                             .spy_op_deps
-                            .entry(mapper_call.base.prof_uid)
+                            .entry(*uid)
                             .or_insert_with(|| Dependencies::new());
                         if before {
-                            meta_deps.out.insert(*task_uid);
+                            entry_deps.out.insert(task_uid);
                         } else {
-                            meta_deps.in_.insert(*task_uid);
+                            entry_deps.in_.insert(task_uid);
                         }
                     }
                 }
