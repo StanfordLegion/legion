@@ -2742,7 +2742,7 @@ class IndexSpace(object):
     def html_safe_name(self):
         name = str(self)
         provenance = self.get_provenance()
-        if provenance is not None:
+        if provenance is not None and len(provenance) > 0:
             name = name + " [" + provenance + "]"
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -2930,7 +2930,7 @@ class IndexPartition(object):
     @property
     def html_safe_name(self):
         name = str(self)
-        if self.provenance is not None:
+        if self.provenance is not None and len(self.provenance) > 0:
             name = name + ' [' + self.provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -3113,7 +3113,7 @@ class Field(object):
     @property
     def html_safe_name(self):
         name = str(self)
-        if self.provenance is not None:
+        if self.provenance is not None and len(self.provenance) > 0:
             name = name + ' [' + self.provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -3151,7 +3151,7 @@ class FieldSpace(object):
     @property
     def html_safe_name(self):
         name = str(self)
-        if self.provenance is not None:
+        if self.provenance is not None and len(self.provenance) > 0:
             name = name + ' [' + self.provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -3229,7 +3229,7 @@ class LogicalRegion(object):
     @property
     def html_safe_name(self):
         name = str(self)
-        if self.provenance is not None:
+        if self.provenance is not None and len(self.provenance) > 0:
             name = name + ' [' + self.provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -7553,7 +7553,7 @@ class Operation(object):
     def html_safe_name(self):
         name = str(self)
         provenance = self.get_provenance()
-        if provenance is not None:
+        if provenance is not None and len(provenance) > 0:
             name = name + ' [' + provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
@@ -7871,7 +7871,7 @@ class Task(object):
     def html_safe_name(self):
         name = str(self)
         provenance = self.get_provenance()
-        if provenance is not None:
+        if provenance is not None and len(provenance) > 0:
             name = name + ' [' + provenance + ']'
         return name.replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
