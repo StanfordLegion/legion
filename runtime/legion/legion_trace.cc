@@ -133,10 +133,12 @@ namespace Legion {
     {
       if (is_replaying())
       {
-#ifdef LEGION_SPY
-        for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
-              it = operations.begin(); it != operations.end(); it++)
+        // Remove mapping fences on the frontiers which haven't been removed yet
+        for (std::set<std::pair<Operation*,GenerationID> >::const_iterator it =
+              frontiers.begin(); it != frontiers.end(); it++)
           it->first->remove_mapping_reference(it->second);
+        frontiers.clear();
+#ifdef LEGION_SPY
         current_uids.clear();
 #endif
         operations.clear();
