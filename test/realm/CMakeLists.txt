@@ -49,6 +49,7 @@ list(APPEND REALM_TESTS
   realm_reinit
   sparse_construct
   extres_alias
+  reservations
   )
 
 if(Legion_USE_CUDA)
