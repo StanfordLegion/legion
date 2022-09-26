@@ -114,8 +114,7 @@ impl<'de> Deserialize<'de> for Point {
                 // Legion always logs up to MAX_DIM, but anything
                 // beyond the dynamic value of dim should be zero.
                 while let Some(element) = v.next_element::<i64>()? {
-                    // FIXME: Elliott: https://github.com/StanfordLegion/legion/issues/1333
-                    // assert!(element == 0);
+                    assert!(element == 0);
                 }
                 Ok(Point(result))
             }
