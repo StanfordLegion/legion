@@ -371,9 +371,16 @@ def legion_python_main(raw_args, user_data, proc):
     elif args[start] == '-m':
         if len(args) > (start+1):
             mod_name = args[start+1]
+            mod_dir = mod_name.split(".")
+            if len(mod_dir) > 1:
+                prefix_path = os.path.join(*mod_dir[:-1])
+                mod_name = mod_dir[-1]
+            else:
+                prefix_path = ""
             filename = mod_name + '.py'
             found = False
             for path in sys.path:
+                path = os.path.join(path, prefix_path)
                 for root,dirs,files in os.walk(path):
                     if mod_name in dirs:
                         main_py = os.path.join(root, mod_name, '__main__.py')
