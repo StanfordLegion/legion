@@ -2513,7 +2513,11 @@ namespace Legion {
             unsafe_mapper(false),
             safe_mapper(false),
             disable_independence_tests(false),
+#ifdef LEGION_SPY
+            legion_spy_enabled(true),
+#else
             legion_spy_enabled(false),
+#endif
             enable_test_mapper(false),
             slow_config_ok(false),
 #ifdef DEBUG_LEGION

@@ -16529,11 +16529,7 @@ namespace Legion {
         unsafe_mapper(!config.safe_mapper),
 #endif
         disable_independence_tests(config.disable_independence_tests),
-#ifdef LEGION_SPY
-        legion_spy_enabled(true),
-#else
         legion_spy_enabled(config.legion_spy_enabled),
-#endif
         supply_default_mapper(default_mapper),
         enable_test_mapper(config.enable_test_mapper),
         legion_ldb_enabled(!config.ldb_file.empty()),
