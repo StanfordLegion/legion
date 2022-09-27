@@ -1073,7 +1073,7 @@ clang12_cxx11_32bit_debug_legion:
 clang12_cxx11_32bit_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_32bit_normal, *legion]
+    <<: [*clang12, *terra12, *release, *cxx11_32bit_normal, *legion, *short]
 # * External tests
 clang12_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]
