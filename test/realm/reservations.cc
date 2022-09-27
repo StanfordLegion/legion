@@ -204,7 +204,7 @@ static void top_level_task(const void *args, size_t arglen,
     for (size_t i = 0; i < chain_params.num_reservations; i++) {
       size_t value = values[i];
       if (value != params.tasks_per_processor * procs.count()) {
-        log_app.error("%s(%d): Value[%lu]=%lu", __FILE__, __LINE__, i, value);
+        log_app.error("%s(%d): Value[%llu]=%llu", __FILE__, __LINE__, (unsigned long long)i, (unsigned long long)value);
         assert(value == params.tasks_per_processor * procs.count());
       }
     }
@@ -232,7 +232,7 @@ static void top_level_task(const void *args, size_t arglen,
     for (size_t i = 0; i < random_params.num_reservations; i++) {
       size_t value = values[i];
       if (value != 2 * params.tasks_per_processor * procs.count()) {
-        log_app.error("%s(%d): Value[%lu]=%lu", __FILE__, __LINE__, i, value);
+        log_app.error("%s(%d): Value[%llu]=%llu", __FILE__, __LINE__, (unsigned long long)i, (unsigned long long)value);
         assert(value == 2 * params.tasks_per_processor * procs.count());
       }
     }
