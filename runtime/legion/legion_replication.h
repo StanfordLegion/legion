@@ -1189,52 +1189,6 @@ namespace Legion {
     };
 
     /**
-     * \class IndexAttachCoregions
-     * Exchange the information about coregions between the different
-     * shards to ensure that only a single point will perform the 
-     * mapping if multiple points map to the same region
-     */
-    class IndexAttachCoregions : public AllGatherCollective<false> {
-    public:
-      struct PendingPoint {
-      public:
-        PendingPoint(void)
-          : region(LogicalRegion::NO_REGION),
-            instances(NULL), perform(NULL) { }
-        PendingPoint(LogicalRegion r, InstanceSet &s, bool &p)
-          : region(r), instances(&s), perform(&p) { }
-      public:
-        LogicalRegion region;
-        InstanceSet *instances;
-        bool *perform;
-      };
-      struct RegionPoints {
-      public:
-        std::set<ShardID> shards;
-        std::set<DistributedID> managers;
-      };
-    public:
-      IndexAttachCoregions(ReplicateContext *ctx,
-                           CollectiveIndexLocation loc, size_t points);
-      IndexAttachCoregions(const IndexAttachCoregions &rhs);
-      virtual ~IndexAttachCoregions(void);
-    public:
-      IndexAttachCoregions& operator=(const IndexAttachCoregions &rhs);
-    public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
-      virtual void unpack_collective_stage(Deserializer &derez, int stage);
-      virtual RtEvent post_complete_exchange(void);
-    public:
-      bool record_point(PointAttachOp *point, LogicalRegion region,
-                        InstanceSet &instances, bool &perform);
-    public:
-      const size_t total_points;
-    protected:
-      std::map<PointAttachOp*,PendingPoint> pending_points;
-      std::map<LogicalRegion,RegionPoints> region_points;
-    };
-
-    /**
      * \class ImplicitShardingFunctor
      * Support the computation of an implicit sharding function for 
      * the creation of replicated future maps
@@ -2268,6 +2222,8 @@ namespace Legion {
               std::vector<PhysicalManager*> &source_instances);
       virtual bool supports_collective_instances(void) const { return true; }
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     protected:
       CollectiveID mapping_check, sources_check;
       IndexSpace shard_space;
@@ -2349,14 +2305,11 @@ namespace Legion {
       virtual void check_point_requirements(
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local);
-      virtual RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
-          InstanceSet &instances, bool &perform);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
       IndexAttachExchange *collective;
       ShardingFunction *sharding_function;
-      IndexAttachCoregions *attach_coregions_collective;
     };
 
     /**

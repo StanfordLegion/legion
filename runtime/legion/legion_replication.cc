@@ -7310,6 +7310,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplMapOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(!collective_map_barrier.exists());
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      mapping = &repl_ctx->shard_manager->get_collective_mapping();
+      mapping->add_reference();
+      first_local = is_first_local_shard;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -8068,7 +8087,6 @@ namespace Legion {
       activate_index_attach();
       collective = NULL;
       sharding_function = NULL;
-      attach_coregions_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -8078,8 +8096,6 @@ namespace Legion {
       deactivate_index_attach();
       if (collective != NULL)
         delete collective;
-      if (attach_coregions_collective != NULL)
-        delete attach_coregions_collective;
       runtime->free_repl_index_attach_op(this);
     }
 
@@ -8089,15 +8105,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(collective == NULL);
-      assert(attach_coregions_collective == NULL);
 #endif
       collective = new IndexAttachExchange(ctx, COLLECTIVE_LOC_25);
       std::vector<IndexSpace> spaces(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         spaces[idx] = points[idx]->get_requirement().region.get_index_space();
       collective->exchange_spaces(spaces);
-      attach_coregions_collective = 
-        new IndexAttachCoregions(ctx, COLLECTIVE_LOC_103, points.size());
     }
 
     //--------------------------------------------------------------------------
@@ -8201,21 +8214,6 @@ namespace Legion {
       AllReduceCollective<ProdReduction<bool> > all_direct_children(repl_ctx,
        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_27, true/*logical*/));
       return all_direct_children.sync_all_reduce(local);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ReplIndexAttachOp::find_coregions(PointAttachOp *point,
-                    LogicalRegion region, InstanceSet &instances, bool &perform)
-    //--------------------------------------------------------------------------
-    {
-      // Record all the data structures that we need to update
-      // No need for the lock here since we know we're exclusive
-      // On the last call, we can launch the collective operation
-      if (attach_coregions_collective->record_point(point, region, 
-                                                    instances, perform))
-        attach_coregions_collective->perform_collective_async();
-      // When the collective is done then all the points will have been updated 
-      return attach_coregions_collective->perform_collective_wait(false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -16438,239 +16436,6 @@ namespace Legion {
         spaces.insert(spaces.end(), it->second.begin(), it->second.end());
       }
       return local_size;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Index Attach Coregions
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    IndexAttachCoregions::IndexAttachCoregions(ReplicateContext *ctx,
-                                     CollectiveIndexLocation loc, size_t points)
-      : AllGatherCollective<false>(loc, ctx), total_points(points)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAttachCoregions::IndexAttachCoregions(const IndexAttachCoregions &rhs)
-      : AllGatherCollective<false>(rhs), total_points(rhs.total_points)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAttachCoregions::~IndexAttachCoregions(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    IndexAttachCoregions& IndexAttachCoregions::operator=(
-                                                const IndexAttachCoregions &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAttachCoregions::pack_collective_stage(Serializer &rez,
-                                                     int stage)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<size_t>(region_points.size());
-      for (std::map<LogicalRegion,RegionPoints>::const_iterator rit =
-            region_points.begin(); rit != region_points.end(); rit++)
-      {
-        rez.serialize(rit->first);
-        rez.serialize<size_t>(rit->second.shards.size());
-        for (std::set<ShardID>::const_iterator it =
-              rit->second.shards.begin(); it !=
-              rit->second.shards.end(); it++)
-          rez.serialize(*it);
-        rez.serialize<size_t>(rit->second.managers.size());
-        for (std::set<DistributedID>::const_iterator it =
-              rit->second.managers.begin(); it != 
-              rit->second.managers.end(); it++)
-          rez.serialize(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAttachCoregions::unpack_collective_stage(Deserializer &derez,
-                                                       int stage)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_points;
-      derez.deserialize(num_points);
-      for (unsigned idx1 = 0; idx1 < num_points; idx1++)
-      {
-        LogicalRegion region;
-        derez.deserialize(region);
-        RegionPoints &region_point = region_points[region];
-        size_t num_events;
-        derez.deserialize(num_events);
-        for (unsigned idx2 = 0; idx2 < num_events; idx2++)
-        {
-          ShardID shard;
-          derez.deserialize(shard);
-          region_point.shards.insert(shard);
-        }
-        size_t num_managers;
-        derez.deserialize(num_managers);
-        for (unsigned idx2 = 0; idx2 < num_managers; idx2++)
-        {
-          DistributedID did;
-          derez.deserialize(did);
-          region_point.managers.insert(did);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent IndexAttachCoregions::post_complete_exchange(void)
-    //--------------------------------------------------------------------------
-    {
-      // First go through all the regions and figure out which shard
-      // is the owner for each region
-      std::map<LogicalRegion,ShardID> owner_shards;
-      // Track how many regions each shard owns so we can try to balance
-      // things out when we need to break ties
-      std::map<ShardID,unsigned> shard_counts;
-      for (std::map<LogicalRegion,RegionPoints>::const_iterator rit =
-            region_points.begin(); rit != region_points.end(); rit++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!rit->second.shards.empty());
-#endif
-        ShardID owner;
-        if (rit->second.shards.size() > 1)
-        {
-          // Pick the shard with the fewest owned regions
-          unsigned min = UINT_MAX;
-          for (std::set<ShardID>::const_iterator it = 
-                rit->second.shards.begin(); it !=
-                rit->second.shards.end(); it++)
-          {
-            std::map<ShardID,unsigned>::const_iterator finder = 
-              shard_counts.find(*it);
-            if (finder == shard_counts.end())
-            {
-              // No counts so always wins
-              owner = finder->first;
-              break;
-            }
-            if (finder->second < min)
-            {
-              min = finder->second;
-              owner = finder->first;
-            }
-          }
-        }
-        else
-          // Easy case, just a single shard for this region
-          owner = *(rit->second.shards.begin());
-        std::map<ShardID,unsigned>::iterator finder = shard_counts.find(owner);
-        if (finder == shard_counts.end())
-          shard_counts[owner] = 1;
-        else
-          finder->second++;
-        owner_shards[rit->first] = owner; 
-      }
-      // Now that we have the owner shard for each region (and this is the
-      // same result across all the shards), we can now fill in the results
-      // for each of our local points
-      std::set<LogicalRegion> local_regions;
-      std::set<RtEvent> ready_events;
-      for (std::map<PointAttachOp*,PendingPoint>::const_iterator it =
-            pending_points.begin(); it != pending_points.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(owner_shards.find(it->second.region) != owner_shards.end());
-#endif
-        // Check to see if we are the owner shard for this region
-        const ShardID owner = owner_shards[it->second.region];
-#ifdef DEBUG_LEGION
-        assert(region_points.find(it->second.region) != region_points.end());
-#endif
-        RegionPoints &region_point = region_points[it->second.region];
-#ifdef DEBUG_LEGION
-        assert(region_point.shards.find(local_shard) !=
-                region_point.shards.end());
-#endif
-        // No matter what we're going to store the event here
-        *(it->second.perform) = (owner == local_shard);
-        if (owner == local_shard)
-        {
-          // If we're the owner, see if we're the first point for this
-          // region, if so that will be the one to perform the operation
-          if (local_regions.find(it->second.region) == local_regions.end())
-          {
-            // First one so materialize all the managers and store them
-            // in the instance set
-#ifdef DEBUG_LEGION
-            assert(it->second.instances->size() == 1);
-#endif
-            it->second.instances->resize(
-                region_point.managers.size() + 1);
-            unsigned index = 1;
-            // All managers share the same mask
-            const FieldMask &mask = 
-              (*it->second.instances)[0].get_valid_fields();
-            Runtime *runtime = context->runtime;
-            for (std::set<DistributedID>::const_iterator mit =
-                  region_point.managers.begin(); mit != 
-                  region_point.managers.end(); mit++)
-            {
-              RtEvent ready;
-              PhysicalManager *manager = 
-                runtime->find_or_request_instance_manager(*mit, ready);
-              (*it->second.instances)[index++] =
-                InstanceRef(manager, mask);
-              if (ready.exists())
-                ready_events.insert(ready);
-            }
-            local_regions.insert(it->second.region);
-          }
-        }
-      }
-      if (!ready_events.empty())
-        return Runtime::merge_events(ready_events);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexAttachCoregions::record_point(PointAttachOp *point,
-                    LogicalRegion region, InstanceSet &instances, bool &perform)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(pending_points.find(point) == pending_points.end());
-      assert(pending_points.size() < total_points);
-#endif
-      pending_points[point] = PendingPoint(region, instances, perform);
-      std::map<LogicalRegion,RegionPoints>::iterator finder =
-        region_points.find(region);
-      if (finder == region_points.end())
-      {
-        finder =
-          region_points.insert(std::make_pair(region,RegionPoints())).first;
-        finder->second.shards.insert(local_shard);
-      }
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-      {
-        PhysicalManager *manager = instances[idx].get_physical_manager();
-#ifdef DEBUG_LEGION
-        assert(finder->second.managers.find(manager->did) ==
-                finder->second.managers.end());
-#endif
-        finder->second.managers.insert(manager->did);
-      }
-      return (pending_points.size() == total_points);
     }
 
     /////////////////////////////////////////////////////////////

@@ -1125,6 +1125,8 @@ namespace Legion {
                          DistributedID collective_did, RtEvent ready);
         CollectiveResult(std::vector<DistributedID> &&dids,
                          DistributedID collective_did, RtEvent ready);
+        // No-collective instance result
+        CollectiveResult(DistributedID instance_did);
       public:
         bool matches(const std::vector<DistributedID> &dids) const;
       public:

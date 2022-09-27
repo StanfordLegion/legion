@@ -10877,6 +10877,7 @@ namespace Legion {
         }
         if (!found)
         {
+          collective.results.emplace_back(std::make_pair(source, result));
           for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
                 it = insts.begin(); it != insts.end(); it++)
           {
@@ -10950,6 +10951,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext::CollectiveResult::CollectiveResult(DistributedID inst_did)
+      : collective_did(0), individual_dids(1, inst_did)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     bool InnerContext::CollectiveResult::matches(
                                    const std::vector<DistributedID> &dids) const
     //--------------------------------------------------------------------------
@@ -10981,6 +10989,9 @@ namespace Legion {
                     const std::vector<DistributedID> &instances, bool need_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instances.size() > 1);
+#endif
       if (need_lock)
       {
         AutoLock c_lock(collective_lock);
@@ -11006,9 +11017,10 @@ namespace Legion {
       CollectiveMapping *mapping = 
         new CollectiveMapping(spaces, runtime->legion_collective_radix);
       mapping->add_reference();
-      const DistributedID collective_did = 
-        mapping->contains(runtime->address_space) ? runtime->address_space :
-        mapping->find_nearest(runtime->address_space);
+      DistributedID collective_did = mapping->contains(runtime->address_space) ?
+        runtime->get_available_distributed_id() :
+        runtime->get_remote_distributed_id(
+            mapping->find_nearest(runtime->address_space));
       const RtEvent ready = create_collective_view(
           get_context_uid(), collective_did, mapping, instances);
       CollectiveResult *result = 
@@ -11042,12 +11054,28 @@ namespace Legion {
           for (LegionList<FieldSet<DistributedID> >::const_iterator it =
                 field_sets.begin(); it != field_sets.end(); it++)
           {
-            const std::vector<DistributedID> instances(it->elements.begin(),
-                                                       it->elements.end());
-            CollectiveResult *result =
-              find_or_create_collective_view(tid, instances,false/*need lock*/);
-            if (results.insert(result, it->set_mask))
-              result->add_reference();
+#ifdef DEBUG_LEGION
+            assert(!it->elements.empty());
+#endif
+            if (it->elements.size() > 1)
+            {
+              const std::vector<DistributedID> instances(it->elements.begin(),
+                                                         it->elements.end());
+              CollectiveResult *result = find_or_create_collective_view(tid,
+                                              instances, false/*need lock*/);
+              if (results.insert(result, it->set_mask))
+                result->add_reference();
+            }
+            else
+            {
+              // If there is just one instance then we send back a 
+              // collective did of zero to indicate to just use the 
+              // normal single view
+              CollectiveResult *result = 
+                new CollectiveResult(*it->elements.begin());
+              if (results.insert(result, it->set_mask))
+                result->add_reference();
+            }
           }
         }
       }
@@ -11087,7 +11115,7 @@ namespace Legion {
       // Next figure out which targets to send the results to
       std::vector<AddressSpaceID> targets;
       const AddressSpaceID owner = results.begin()->first;
-      if (!mapping->contains(runtime->address_space))
+      if (mapping->contains(runtime->address_space))
         mapping->get_children(owner, runtime->address_space, targets); 
       else
         targets.push_back(owner);
@@ -11165,6 +11193,8 @@ namespace Legion {
             delete result;
           first = false;
           result_it++;
+          if (result_it == results.end())
+            break;
         }
       }
       if (mapping->remove_reference())
@@ -11206,32 +11236,58 @@ namespace Legion {
           if (vit->first->ready_event.exists() &&
               !vit->first->ready_event.has_triggered())
             vit->first->ready_event.wait();
-          RtEvent ready;
-          CollectiveView *view = static_cast<CollectiveView*>(
-              runtime->find_or_request_logical_view(
-                vit->first->collective_did, ready));
-          if (ready.exists())
-            ready_events.push_back(ready);
-          result_views[idx].insert(view, overlap);
-          // Now count how many local arrivals we have for 
-          // instances on the same address space
-          size_t local_arrivals = 0;
-          const AddressSpaceID inst_space = 
-            runtime->determine_owner(inst_did);
-          for (std::vector<DistributedID>::const_iterator it =
-                vit->first->individual_dids.begin(); it !=
-                vit->first->individual_dids.end(); it++)
+          if (vit->first->collective_did > 0)
           {
-            if (inst_space != runtime->determine_owner(*it))
-              continue;
-            std::map<DistributedID,size_t>::const_iterator
-              count_finder = counts.find(*it);
-            if (count_finder == counts.end())
-              local_arrivals += count_finder->second;
-            else
-              local_arrivals++;
+            RtEvent ready;
+            CollectiveView *view = static_cast<CollectiveView*>(
+                runtime->find_or_request_logical_view(
+                  vit->first->collective_did, ready));
+            if (ready.exists())
+              ready_events.push_back(ready);
+            result_views[idx].insert(view, overlap);
+            // Now count how many local arrivals we have for 
+            // instances on the same address space
+            size_t local_arrivals = 0;
+            const AddressSpaceID inst_space = 
+              runtime->determine_owner(inst_did);
+            for (std::vector<DistributedID>::const_iterator it =
+                  vit->first->individual_dids.begin(); it !=
+                  vit->first->individual_dids.end(); it++)
+            {
+              if (inst_space != runtime->determine_owner(*it))
+                continue;
+              std::map<DistributedID,size_t>::const_iterator
+                count_finder = counts.find(*it);
+              if (count_finder != counts.end())
+                local_arrivals += count_finder->second;
+              else
+                local_arrivals++;
+            }
+            collective_arrivals[view] = local_arrivals;
           }
-          collective_arrivals[view] = local_arrivals;
+          else
+          {
+            // No collective instance matches here so we can just
+            // get the normal view for the instance
+#ifdef DEBUG_LEGION
+            assert(vit->first->individual_dids.size() == 1);
+#endif
+            // Manager should still be here
+            DistributedID inst_did = vit->first->individual_dids.back();
+            PhysicalManager *manager = static_cast<PhysicalManager*>(
+                runtime->find_distributed_collectable(inst_did));
+            std::vector<PhysicalManager*> instances(1, manager);
+            std::vector<IndividualView*> views;
+            owner->convert_individual_views(instances, views);
+            IndividualView *view = views.back();
+            result_views[idx].insert(view, overlap);
+            std::map<DistributedID,size_t>::const_iterator
+              count_finder = counts.find(inst_did);
+            if (count_finder != counts.end())
+              collective_arrivals[view] = count_finder->second;
+            else
+              collective_arrivals[view] = 1;
+          }
         }
 #ifdef DEBUG_LEGION
         // Should have seen all the fields at this point

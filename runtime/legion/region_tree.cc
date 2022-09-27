@@ -3141,7 +3141,7 @@ namespace Legion {
                                const VersionInfo &version_info,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
-                               const bool restricted) 
+                               const bool restricted)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -3185,7 +3185,8 @@ namespace Legion {
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
                                 region, trace_info, true/*remove restriction*/);
       analysis->add_reference();
-      const RtEvent views_ready = analysis->convert_views(req.region,instances);
+      const RtEvent views_ready =
+        analysis->convert_views(req.region, instances);
       // Don't start the analysis until the views are ready and the filter
       // precondition has been met
       const RtEvent traversal_precondition = 

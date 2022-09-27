@@ -5236,7 +5236,6 @@ namespace Legion {
       }
       else
         region.impl->get_references(mapped_instances);
-      const bool check_collective = (parent_ctx->get_replication_id() > 0);
       // Then we can register our mapped instances
       ApEvent map_complete_event =
         runtime->forest->physical_perform_updates_and_registration(
@@ -5252,7 +5251,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                check_collective,
+                                                false/*no dynamic rendezvous*/,
                                                 record_valid);
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
@@ -22059,7 +22058,6 @@ namespace Legion {
       file_name = NULL;
       footprint = 0;
       restricted = true;
-      perform_attach = true;
     }
 
     //--------------------------------------------------------------------------
@@ -22136,7 +22134,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion AttachOp::create_external_instance(void)
+    void AttachOp::create_external_instance(void)
     //--------------------------------------------------------------------------
     {
       external_instances.resize(1);
@@ -22160,7 +22158,6 @@ namespace Legion {
         default:
           assert(false);
       }
-      return requirement.region;
     }
 
     //--------------------------------------------------------------------------
@@ -22214,10 +22211,6 @@ namespace Legion {
       const RtEvent attached = manager->attach_external_instance();
       if (attached.exists())
         preconditions.insert(attached);
-      // Perform an exchange looking for any coregions for point AttachOps
-      const RtEvent exchanged = check_for_coregions();
-      if (exchanged.exists())
-        preconditions.insert(exchanged);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -22225,29 +22218,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent AttachOp::check_for_coregions(void)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do here for individual attach ops
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
       const PhysicalTraceInfo trace_info(this, 0/*idx*/);
-      // Check to see if we're going to be the ones performing the attach
-      // If someone else has already done the attach for us then the 
-      // attached event will be non-trivial
-      if (perform_attach)
-        runtime->forest->attach_external(this, 0/*idx*/,
-                                         requirement,
-                                         external_instances,
-                                         version_info,
-                                         trace_info,
-                                         map_applied_conditions,
-                                         restricted);
+      runtime->forest->attach_external(this, 0/*idx*/,
+                                       requirement,
+                                       external_instances,
+                                       version_info,
+                                       trace_info,
+                                       map_applied_conditions,
+                                       restricted);
       // This operation is ready once the instance is attached
       region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
@@ -22710,7 +22691,6 @@ namespace Legion {
             points.begin(); it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
-      coregions.clear();
       map_applied_conditions.clear();
     }
 
@@ -22898,13 +22878,8 @@ namespace Legion {
       }
       initialize_privilege_path(privilege_path, requirement);
       // Have each of the point tasks create their external instances
-      // Keep track of which points share the same logical region
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        PointAttachOp *point = points[idx];
-        LogicalRegion region = point->create_external_instance();
-        coregions[region].push_back(point);
-      }
+        points[idx]->create_external_instance();
     }
 
     //--------------------------------------------------------------------------
@@ -22955,42 +22930,6 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
       complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent IndexAttachOp::find_coregions(PointAttachOp *point,
-                       LogicalRegion reg, InstanceSet &instances, bool &perform)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here since we know this is being done
-      // sequentially by IndexAttachOp::trigger_ready
-      std::map<LogicalRegion,std::vector<PointAttachOp*> >::iterator
-        finder = coregions.find(reg);
-#ifdef DEBUG_LEGION
-      assert(finder != coregions.end());
-      assert(!finder->second.empty());
-#endif
-      if (finder->second.size() == 1)
-      {
-        // No co-regions in this case
-        coregions.erase(finder);
-        return RtEvent::NO_RT_EVENT;
-      }
-      // See if we're the first one
-      if (finder->second.front() == point)
-      {
-        // We're the first one
-        // Get the instances from all the other points
-        const size_t offset = instances.size();
-        instances.resize(offset + finder->second.size());
-        for (unsigned idx = 0; idx < finder->second.size(); idx++)
-          instances[offset+idx] = finder->second[idx]->external_instances[0];
-        perform = true;
-      }
-      else
-        perform = false;
-      // Will only have non-trival events here with control replication
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -23287,6 +23226,13 @@ namespace Legion {
                                         requirement.privilege_fields);
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexAttachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return launch_space->get_volume();
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Attach Op 
     /////////////////////////////////////////////////////////////
@@ -23448,14 +23394,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PointAttachOp::check_for_coregions(void)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_coregions(this, requirement.region, 
-                        external_instances, perform_attach);
-    }
-
-    //--------------------------------------------------------------------------
     void PointAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -23493,6 +23431,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointAttachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointAttachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      return true;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -23728,7 +23681,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                true/*check collectives*/,
+                                                false/*check collective*/,
                                                 false/*record valid*/,
                                                 false/*check initialized*/);
         if (analysis->remove_reference())
@@ -24173,6 +24126,13 @@ namespace Legion {
                                         requirement.privilege_fields);
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexDetachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return launch_space->get_volume();
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Detach Op 
     /////////////////////////////////////////////////////////////
@@ -24297,6 +24257,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointDetachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDetachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      return true;
     }
 
     ///////////////////////////////////////////////////////////// 

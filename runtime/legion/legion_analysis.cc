@@ -15843,7 +15843,7 @@ namespace Legion {
           FieldMaskSet<LogicalView>::const_iterator it = views.begin();
           LogicalView *log_view = it->first;
           assert(log_view->is_instance_view());
-          assert(it->second == overwrite_mask);
+          assert(!(overwrite_mask - it->second));
 #else
           LogicalView *log_view = views.begin()->first;
 #endif
