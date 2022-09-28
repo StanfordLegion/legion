@@ -4,7 +4,8 @@ use rayon::prelude::*;
 
 use legion_prof::analyze::print_statistics;
 use legion_prof::serialize::deserialize;
-use legion_prof::state::{State, Timestamp};
+use legion_prof::spy;
+use legion_prof::state::{Records, State, Timestamp};
 use legion_prof::trace_viewer::emit_trace;
 use legion_prof::visualize::emit_interactive_visualization;
 
@@ -89,17 +90,35 @@ fn main() -> io::Result<()> {
 
     let mut state = State::default();
     let filenames: Vec<_> = filenames.collect();
-    let records: Result<Vec<_>, _> = filenames
+    let records: Result<Vec<Records>, _> = filenames
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename)
+            deserialize(filename).map_or_else(
+                |_| spy::serialize::deserialize(filename).map(Records::Spy),
+                |r| Ok(Records::Prof(r)),
+            )
         })
         .collect();
     for record in records? {
-        println!("Matched {} objects", record.len());
-        state.process_records(&record);
+        match record {
+            Records::Prof(r) => {
+                println!("Matched {} objects", r.len());
+                state.process_records(&r);
+            }
+            Records::Spy(r) => {
+                println!("Matched {} objects", r.len());
+                state.process_spy_records(&r);
+            }
+        }
     }
+
+    if !state.has_prof_data {
+        println!("Nothing to do");
+        return Ok(());
+    }
+
+    state.postprocess_spy_records();
 
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");

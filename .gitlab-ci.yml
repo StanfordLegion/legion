@@ -117,6 +117,7 @@ variables:
 
 .spy: &spy
   USE_SPY: "1"
+  BASH_ENV: "/root/.cargo/env" # make sure Cargo environment gets loaded
 
 .checks: &checks
   BOUNDS_CHECKS: "1"
