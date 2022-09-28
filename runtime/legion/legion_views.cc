@@ -176,7 +176,8 @@ namespace Legion {
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
                                              term_event, collect_event, 
-                                             target, local_collective_arrivals,
+                                             target, NULL/*no mapping*/,
+                                             local_collective_arrivals,
                                              registered_events, applied_events,
                                              trace_info, source);
       if (ready_event.exists())
@@ -2682,6 +2683,7 @@ namespace Legion {
                                        ApEvent term_event,
                                        RtEvent collect_event,
                                        PhysicalManager *target,
+                                       CollectiveMapping *analysis_mapping,
                                        size_t local_collective_arrivals,
                                        std::vector<RtEvent> &registered_events,
                                        std::set<RtEvent> &applied_events,
@@ -2689,22 +2691,22 @@ namespace Legion {
                                        const bool symbolic)
     //--------------------------------------------------------------------------
     {
-      // Somewhat strangely we can still get calls to this method in cases
-      // with control replication for things like acquire/release on individual
-      // managers that represent file instances. In this case we'll just have
-      // a single node perform the view analysis and then we broadcast out the
-      // resulting event out to all the participants. 
+      // This case occurs when all the points mapping to the same logical
+      // region also map to the same physical instance. Most commonly this
+      // will occur with control replication doing attach operations on 
+      // file instances, but can occur outside of control replication as 
+      // well, especially in intra-node cases
 #ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
+      assert(local_collective_arrivals > 0);
+      assert((analysis_mapping != NULL) || (local_collective_arrivals > 1));
 #endif
       // First we need to decide which node is going to be the owner node
       // We'll prefer it to be the logical view owner since that is where
       // the event will be produced, otherwise, we'll just pick whichever
       // is closest to the logical view node
-      const AddressSpaceID origin = 
-        collective_mapping->contains(logical_owner) ? logical_owner : 
-        collective_mapping->find_nearest(logical_owner);
+      const AddressSpaceID origin = (analysis_mapping == NULL) ? local_space : 
+        analysis_mapping->contains(logical_owner) ? logical_owner : 
+        analysis_mapping->find_nearest(logical_owner);
       ApUserEvent result;
       RtUserEvent applied, registered;
       std::vector<ApEvent> term_events;
@@ -2724,8 +2726,8 @@ namespace Legion {
           UserRendezvous &rendezvous = finder->second;
           rendezvous.remaining_local_arrivals = local_collective_arrivals;
           rendezvous.local_initialized = true;
-          rendezvous.remaining_remote_arrivals =
-            collective_mapping->count_children(origin, local_space);
+          rendezvous.remaining_remote_arrivals = (analysis_mapping == NULL) ? 0
+            : analysis_mapping->count_children(origin, local_space);
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
           rendezvous.registered = Runtime::create_rt_user_event();
@@ -2823,8 +2825,8 @@ namespace Legion {
         std::set<RtEvent> local_applied; 
         const ApEvent ready = register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, term_event, collect_event, target, 
-            0/*no collective arrivals*/, local_registered, local_applied,
-            *result_info, runtime->address_space, symbolic);
+            NULL/*analysis*/, 0/*no collective arrivals*/, local_registered,
+            local_applied, *result_info, runtime->address_space, symbolic);
         Runtime::trigger_event(result_info, result, ready);
         if (!local_registered.empty())
           Runtime::trigger_event(registered,
@@ -2947,8 +2949,9 @@ namespace Legion {
         const ApEvent ready = register_user(to_perform.usage,
             *to_perform.mask, to_perform.expr, to_perform.op_id, op_ctx_index,
             index, term_event, to_perform.collect_event, manager,
-            0/*no collective arrivals*/, registered_events, applied_events,
-            *to_perform.trace_info, runtime->address_space,to_perform.symbolic);
+            NULL/*no analysis mapping*/, 0/*no collective arrivals*/,
+            registered_events, applied_events, *to_perform.trace_info,
+            runtime->address_space, to_perform.symbolic);
         Runtime::trigger_event(to_perform.trace_info, 
                       to_perform.ready_event, ready);
         if (!registered_events.empty())
@@ -3537,6 +3540,7 @@ namespace Legion {
                                          ApEvent term_event,
                                          RtEvent collect_event,
                                          PhysicalManager *target,
+                                         CollectiveMapping *analysis_mapping,
                                          size_t local_collective_arrivals,
                                          std::vector<RtEvent> &registered,
                                          std::set<RtEvent> &applied_events,
@@ -3549,11 +3553,11 @@ namespace Legion {
       assert(target == manager);
 #endif
       // Handle the collective rendezvous if necessary
-      if (local_collective_arrivals > 0)
+      if ((analysis_mapping != NULL) || (local_collective_arrivals > 0))
         return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
-              target, local_collective_arrivals, registered,
-              applied_events, trace_info, symbolic);
+              target, analysis_mapping, local_collective_arrivals,
+              registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -5344,6 +5348,7 @@ namespace Legion {
                                          ApEvent term_event,
                                          RtEvent collect_event,
                                          PhysicalManager *target,
+                                         CollectiveMapping *analysis_mapping,
                                          size_t local_collective_arrivals,
                                          std::vector<RtEvent> &registered,
                                          std::set<RtEvent> &applied_events,
@@ -5360,8 +5365,8 @@ namespace Legion {
       if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
-              target, local_collective_arrivals, registered,
-              applied_events, trace_info, symbolic);
+              target, analysis_mapping, local_collective_arrivals,
+              registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
@@ -6706,6 +6711,7 @@ namespace Legion {
                                           ApEvent term_event,
                                           RtEvent collect_event,
                                           PhysicalManager *target,
+                                          CollectiveMapping *analysis_mapping,
                                           size_t local_collective_arrivals,
                                           std::vector<RtEvent> &registered,
                                           std::set<RtEvent> &applied_events,
@@ -6754,13 +6760,14 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(target->is_owner());
+      assert(analysis_mapping == NULL);
 #endif
       // Iterate through our local views and find the view for the target
       for (unsigned idx = 0; idx < local_views.size(); idx++)
         if (local_views[idx]->get_manager() == target)
           return local_views[idx]->register_user(usage, user_mask, 
-              user_expr, op_id, op_ctx_index, index, term_event,
-              collect_event, target, local_collective_arrivals,
+              user_expr, op_id, op_ctx_index, index, term_event, collect_event, 
+              target, analysis_mapping, local_collective_arrivals,
               registered, applied_events, trace_info, source, symbolic);
       // Should never get here
       assert(false);
@@ -8211,9 +8218,9 @@ namespace Legion {
           Runtime::merge_events(trace_info, term_events[idx]);
         const ApEvent ready = local_views[idx]->register_user(usage, user_mask,
             expr, op_id, op_ctx_index, index, term_event, collect_event,
-            local_views[idx]->get_manager(), 0/*no collective arrivals*/,
-            registered_events, applied_events, *trace_info,
-            runtime->address_space, symbolic);
+            local_views[idx]->get_manager(), NULL/*analysis mapping*/,
+            0/*no collective arrivals*/, registered_events, applied_events,
+            *trace_info, runtime->address_space, symbolic);
         Runtime::trigger_event(trace_info, ready_events[idx], ready);
       }
       if (!registered_events.empty())

@@ -410,6 +410,7 @@ namespace Legion {
       bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
       bool can_collect(AddressSpaceID source, bool &already_collected);
       bool collect(RtEvent &collected);
+      void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
       RtEvent perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
@@ -500,6 +501,8 @@ namespace Legion {
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez);
       static void handle_garbage_collection_failed(Deserializer &derez);
+      static void handle_garbage_collection_notify(Runtime *runtime,
+          Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_request(Runtime *runtime,

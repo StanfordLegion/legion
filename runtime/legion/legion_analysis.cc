@@ -6160,7 +6160,7 @@ namespace Legion {
           if (!collective_arrivals.empty())
           {
             std::map<InstanceView*,size_t>::const_iterator finder =
-              collective_arrivals.find(it->first->as_collective_view());
+              collective_arrivals.find(it->first);
 #ifdef DEBUG_LEGION
             assert(finder != collective_arrivals.end()); 
 #endif
@@ -6168,7 +6168,7 @@ namespace Legion {
           }
           const ApEvent ready = it->first->register_user(usage, it->second,
               expr_node, op_id, op_ctx_index, index, termination,
-              collect_event, target_instances[idx], 
+              collect_event, target_instances[idx], collective_mapping,
               view_collective_arrivals, registered_events, applied_events,
               trace_info, local_space, symbolic);
           if (ready.exists())

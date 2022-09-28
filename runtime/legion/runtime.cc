@@ -12854,6 +12854,11 @@ namespace Legion {
               runtime->handle_gc_failed(derez);
               break;
             }
+          case SEND_GC_NOTIFY:
+            {
+              runtime->handle_gc_notify(derez);
+              break;
+            }
           case SEND_GC_DEBUG_REQUEST:
             {
               runtime->handle_gc_debug_request(derez, remote_address_space);
@@ -22906,6 +22911,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_gc_notify(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_NOTIFY>(rez,
+                                                true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_gc_debug_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -25107,6 +25120,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_failed(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_notify(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_notify(this, derez);
     }
 
     //--------------------------------------------------------------------------

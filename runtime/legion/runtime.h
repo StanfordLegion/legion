@@ -3383,6 +3383,7 @@ namespace Legion {
       void send_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_acquire(AddressSpaceID target, Serializer &rez);
       void send_gc_failed(AddressSpaceID target, Serializer &rez);
+      void send_gc_notify(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
@@ -3712,6 +3713,7 @@ namespace Legion {
       void handle_gc_response(Deserializer &derez);
       void handle_gc_acquire(Deserializer &derez);
       void handle_gc_failed(Deserializer &derez);
+      void handle_gc_notify(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
@@ -5968,6 +5970,10 @@ namespace Legion {
           break;
         case SEND_GC_FAILED:
           break;
+        case SEND_GC_NOTIFY:
+          // This one goes on the resource virtual channel because there
+          // is nothing else preventing the deletion of the managers
+          return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_GC_DEBUG_REQUEST:
           break;
         case SEND_GC_DEBUG_RESPONSE:

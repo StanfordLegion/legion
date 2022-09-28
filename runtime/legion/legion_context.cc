@@ -10876,49 +10876,48 @@ namespace Legion {
           break;
         }
         if (!found)
-        {
           collective.results.emplace_back(std::make_pair(source, result));
-          for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
-                it = insts.begin(); it != insts.end(); it++)
+        // Now update the counts for all the instances
+        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
+              it = insts.begin(); it != insts.end(); it++)
+        {
+          LegionMap<DistributedID,FieldMask>::iterator group_finder =
+            collective.groups.find(it->first);
+          if (group_finder != collective.groups.end())
           {
-            LegionMap<DistributedID,FieldMask>::iterator group_finder =
-              collective.groups.find(it->first);
-            if (group_finder != collective.groups.end())
+            if (group_finder->second == it->second)
             {
-              if (group_finder->second == it->second)
-              {
-                // Bump the counts
-                std::map<DistributedID,size_t>::iterator count_finder =
-                  collective.counts.find(it->first);
-                if (count_finder == collective.counts.end())
-                  collective.counts[it->first] = 2;
-                else
-                  count_finder->second++;
-              }
+              // Bump the counts
+              std::map<DistributedID,size_t>::iterator count_finder =
+                collective.counts.find(it->first);
+              if (count_finder == collective.counts.end())
+                collective.counts[it->first] = 2;
               else
-                // If you ever hit this then heaven help you
-                // The user has done something really out there and
-                // is using the same instance with different sets of
-                // fields for multiple point ops/tasks in the same 
-                // index space operation. All the tricks we do to 
-                // compute the collective arrivals are not going to
-                // work in this case so the arrival counts will need 
-                // to look something like:
-                //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
-                REPORT_LEGION_FATAL(
-                    LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
-                    "Operation %s (UID %lld) in context %s (UID %lld) "
-                    "requested a very strange pattern for collective "
-                    "instance rendezvous with different points asking to "
-                    "rendezvous with different field sets on the same "
-                    "physical instance. This isn't currently supported. "
-                    "Please report your use case to the Legion "
-                    "developer's mailing list.", op->get_logging_name(),
-                    op->get_unique_op_id(), get_task_name(), get_unique_id())
+                count_finder->second++;
             }
-            else // No need to update counts since empty implies only one
-              collective.groups[it->first] = it->second;
+            else
+              // If you ever hit this then heaven help you
+              // The user has done something really out there and
+              // is using the same instance with different sets of
+              // fields for multiple point ops/tasks in the same 
+              // index space operation. All the tricks we do to 
+              // compute the collective arrivals are not going to
+              // work in this case so the arrival counts will need 
+              // to look something like:
+              //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
+              REPORT_LEGION_FATAL(
+                  LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                  "Operation %s (UID %lld) in context %s (UID %lld) "
+                  "requested a very strange pattern for collective "
+                  "instance rendezvous with different points asking to "
+                  "rendezvous with different field sets on the same "
+                  "physical instance. This isn't currently supported. "
+                  "Please report your use case to the Legion "
+                  "developer's mailing list.", op->get_logging_name(),
+                  op->get_unique_op_id(), get_task_name(), get_unique_id())
           }
+          else // No need to update counts since empty implies only one
+            collective.groups[it->first] = it->second;
         }
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_arrivals > 0);
@@ -11281,12 +11280,11 @@ namespace Legion {
             owner->convert_individual_views(instances, views);
             IndividualView *view = views.back();
             result_views[idx].insert(view, overlap);
-            std::map<DistributedID,size_t>::const_iterator
-              count_finder = counts.find(inst_did);
-            if (count_finder != counts.end())
-              collective_arrivals[view] = count_finder->second;
-            else
-              collective_arrivals[view] = 1;
+            // Note we don't use the count of the instance uses here
+            // but instead use our local number of analyses since this
+            // is an individual view and not a collective view
+            if (target_mappings.size() > 1)
+              collective_arrivals[view] = target_views.size();
           }
         }
 #ifdef DEBUG_LEGION

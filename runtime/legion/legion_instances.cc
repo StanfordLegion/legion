@@ -1544,13 +1544,28 @@ namespace Legion {
     void PhysicalManager::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      AutoLock i_lock(inst_lock);
+      std::set<InstanceDeletionSubscriber*> to_notify;
+      {
+        AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(currently_active);
+        assert(currently_active);
 #endif
-      currently_active = false;
-      if (deferred_deletion.exists())
-        Runtime::trigger_event(deferred_deletion);
+        currently_active = false;
+        if (deferred_deletion.exists())
+          Runtime::trigger_event(deferred_deletion);
+        if (gc_state == COLLECTED_GC_STATE)
+          to_notify.swap(subscribers);
+      }
+      if (!to_notify.empty())
+      {
+        for (std::set<InstanceDeletionSubscriber*>::const_iterator it =
+              to_notify.begin(); it != to_notify.end(); it++)
+        {
+          (*it)->notify_instance_deletion(this);
+          if ((*it)->remove_subscriber_reference(this))
+            delete (*it);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2107,6 +2122,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_notify(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+
+      // Should still be able to find this manager here
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->find_distributed_collectable(did));
+      manager->notify_remote_deletion();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_remote_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+#endif
+      // Forward on the deletion notification to any children
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        if (!children.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                children.begin(); it != children.end(); it++)
+            runtime->send_gc_notify(*it, rez);
+        }
+      }
+      std::set<InstanceDeletionSubscriber*> to_notify;
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert((gc_state == COLLECTED_GC_STATE) ||
+                (gc_state == PENDING_COLLECTED_GC_STATE));
+#endif
+        gc_state = COLLECTED_GC_STATE;
+        if (!currently_active)
+          to_notify.swap(subscribers);
+      }
+      if (!to_notify.empty())
+      {
+        for (std::set<InstanceDeletionSubscriber*>::const_iterator it =
+              to_notify.begin(); it != to_notify.end(); it++)
+        {
+          (*it)->notify_instance_deletion(this);
+          if ((*it)->remove_subscriber_reference(this))
+            delete (*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::pack_garbage_collection_state(Serializer &rez,
                                           AddressSpaceID target, bool need_lock)
     //--------------------------------------------------------------------------
@@ -2305,8 +2383,70 @@ namespace Legion {
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
                 gc_state = COLLECTED_GC_STATE;
+                // Grab the set of active contexts to notify
+                std::set<InstanceDeletionSubscriber*> to_notify;
+                // Notify the subscribers if we're not currently active
+                if (!currently_active)
+                  to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
                 ready = perform_deletion(runtime->address_space, &i_lock);
+                // Send notification messages to the remote nodes to tell
+                // them that this instance has been deleted, this is needed
+                // so that we can invalidate any subscribers on those nodes
+                if (collective_mapping != NULL)
+                {
+#ifdef DEBUG_LEGION
+                  // We're the owner so it should contain ourselves
+                  assert(collective_mapping->contains(local_space));
+#endif
+                  std::vector<AddressSpaceID> children;
+                  collective_mapping->get_children(owner_space, local_space,
+                                                   children);
+                  for (std::vector<AddressSpaceID>::const_iterator it =
+                        children.begin(); it != children.end(); it++)
+                  {
+                    Serializer rez;
+                    {
+                      RezCheck z(rez);
+                      rez.serialize(did);
+                    }
+                    runtime->send_gc_notify(*it, rez);
+                  }
+                }
+                const size_t needed_guards = count_remote_instances();
+                if (needed_guards > 0)
+                {
+                  struct NotifyFunctor {
+                    NotifyFunctor(DistributedID d, Runtime *rt)
+                      : did(d), runtime(rt){ }
+                    inline void apply(AddressSpaceID target)
+                    {
+                      if (target == runtime->address_space)
+                        return;
+                      Serializer rez;
+                      {
+                        RezCheck z(rez);
+                        rez.serialize(did);
+                      }
+                      runtime->send_gc_notify(target, rez);
+                    }
+                    const DistributedID did;
+                    Runtime *const runtime;
+                  };
+                  NotifyFunctor functor(did, runtime);
+                  map_over_remote_instances(functor);
+                }
+                // Now that the lock is released we can notify the subscribers
+                if (!to_notify.empty())
+                {
+                  for (std::set<InstanceDeletionSubscriber*>::const_iterator
+                        it = to_notify.begin(); it != to_notify.end(); it++)
+                  {
+                    (*it)->notify_instance_deletion(this);
+                    if ((*it)->remove_subscriber_reference(this))
+                      delete (*it);
+                  }
+                }
                 return true;
               }
               break;
@@ -3005,9 +3145,6 @@ namespace Legion {
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
       prune_gc_events();
-      // Grab the set of active contexts to notify
-      std::set<InstanceDeletionSubscriber*> to_notify;
-      to_notify.swap(subscribers);
 #ifndef LEGION_DISABLE_GC
       // If we're still active that means there are still outstanding
       // users so make an event for when we are done, not we're holding
@@ -3038,17 +3175,6 @@ namespace Legion {
       // Release the i_lock since we're done with the atomic updates
       i_lock->release();
 #endif
-      // Notify any contexts of our deletion
-      if (!to_notify.empty())
-      {
-        for (std::set<InstanceDeletionSubscriber*>::const_iterator it =
-              to_notify.begin(); it != to_notify.end(); it++)
-        {
-          (*it)->notify_instance_deletion(this);
-          if ((*it)->remove_subscriber_reference(this))
-            delete (*it);
-        }
-      }
       // We issued the deletion to Realm so all our effects are done
       return RtEvent::NO_RT_EVENT;
     }
