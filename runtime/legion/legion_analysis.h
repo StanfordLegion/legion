@@ -158,8 +158,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold) = 0;
+                           ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -281,8 +280,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs, 
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -490,8 +488,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                          ApEvent precondition, PredEvent pred_guard,
-                          ReductionOpID redop, bool reduction_fold) const
+                          ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
           rec->record_issue_copy(memo, result, expr, src_fields, 
@@ -499,7 +496,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  src_tree_id, dst_tree_id,
 #endif
-                                 precondition, pred_guard,redop,reduction_fold);
+                                 precondition, pred_guard);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,

@@ -565,9 +565,7 @@ namespace Legion {
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition, 
-                                             PredEvent pred_guard,
-                                             ReductionOpID redop,
-                                             bool reduction_fold)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -604,8 +602,6 @@ namespace Legion {
 #endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);
-          rez.serialize(redop);
-          rez.serialize<bool>(reduction_fold); 
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -617,7 +613,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                               src_tree_id, dst_tree_id,
 #endif
-                              precondition, pred_guard, redop, reduction_fold);
+                              precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -1213,10 +1209,6 @@ namespace Legion {
             derez.deserialize(precondition);
             PredEvent pred_guard;
             derez.deserialize(pred_guard);
-            ReductionOpID redop;
-            derez.deserialize(redop);
-            bool reduction_fold;
-            derez.deserialize<bool>(reduction_fold);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1225,8 +1217,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                    src_tree_id, dst_tree_id,
 #endif
-                                   precondition, pred_guard,
-                                   redop, reduction_fold);
+                                   precondition, pred_guard);
             if (lhs != lhs_copy)
             {
               Serializer rez;

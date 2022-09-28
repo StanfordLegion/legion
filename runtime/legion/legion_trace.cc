@@ -4465,9 +4465,7 @@ namespace Legion {
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition,
-                                             PredEvent pred_guard,
-                                             ReductionOpID redop,
-                                             bool reduction_fold)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4492,7 +4490,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            find_event(precondition), redop, reduction_fold)); 
+            find_event(precondition))); 
     }
 
     //--------------------------------------------------------------------------
@@ -5550,13 +5548,13 @@ namespace Legion {
 #ifdef LEGION_SPY
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
-                         unsigned pi, ReductionOpID ro, bool rf)
+                         unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
         reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
-        precondition_idx(pi), redop(ro), reduction_fold(rf)
+        precondition_idx(pi)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5598,8 +5596,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT,
-                                     redop, reduction_fold);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -5631,7 +5628,6 @@ namespace Legion {
       }
       ss << "}, events[" << precondition_idx << "]";
 
-      if (redop != 0) ss << ", " << redop;
       ss << ")";
 
       return ss.str();

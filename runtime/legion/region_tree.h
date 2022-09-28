@@ -1297,8 +1297,7 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold) = 0;
+                           ApEvent precondition, PredEvent pred_guard) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages) = 0;
@@ -1368,8 +1367,7 @@ namespace Legion {
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
 #endif
-                               ApEvent precondition, PredEvent pred_guard,
-                               ReductionOpID redop, bool reduction_fold);
+                               ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1606,8 +1604,7 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages);
@@ -2525,8 +2522,7 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages);

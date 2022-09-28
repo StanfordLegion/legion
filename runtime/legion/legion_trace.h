@@ -779,8 +779,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard,
-                             ReductionOpID redop, bool reduction_fold);
+                             ApEvent precondition, PredEvent pred_guard);
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs, 
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1230,8 +1229,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                unsigned precondition_idx,
-                ReductionOpID redop, bool reduction_fold);
+                unsigned precondition_idx);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1256,8 +1254,6 @@ namespace Legion {
       RegionTreeID dst_tree_id;
 #endif
       unsigned precondition_idx;
-      ReductionOpID redop;
-      bool reduction_fold;
     };
 
     /**

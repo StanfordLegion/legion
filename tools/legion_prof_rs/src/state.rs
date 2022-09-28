@@ -161,93 +161,6 @@ impl fmt::Display for Timestamp {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ProcEntry {
-    Task(OpID),
-    MetaTask(OpID, VariantID, usize),
-    MapperCall(OpID, usize),
-    RuntimeCall(usize),
-    ProfTask(usize),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ProcEntryRef<'a> {
-    Task(OpID, &'a Task),
-    MetaTask((OpID, VariantID, usize), &'a MetaTask),
-    MapperCall((OpID, usize), &'a MapperCall),
-    RuntimeCall(usize, &'a RuntimeCall),
-    ProfTask(usize, &'a ProfTask),
-}
-
-impl<'a> ProcEntryRef<'a> {
-    pub fn base(self) -> &'a Base {
-        match self {
-            ProcEntryRef::Task(_, task) => &task.base,
-            ProcEntryRef::MetaTask(_, task) => &task.base,
-            ProcEntryRef::MapperCall(_, call) => &call.base,
-            ProcEntryRef::RuntimeCall(_, call) => &call.base,
-            ProcEntryRef::ProfTask(_, task) => &task.base,
-        }
-    }
-    pub fn time_range(self) -> &'a TimeRange {
-        match self {
-            ProcEntryRef::Task(_, task) => &task.time_range,
-            ProcEntryRef::MetaTask(_, task) => &task.time_range,
-            ProcEntryRef::MapperCall(_, call) => &call.time_range,
-            ProcEntryRef::RuntimeCall(_, call) => &call.time_range,
-            ProcEntryRef::ProfTask(_, task) => &task.time_range,
-        }
-    }
-    pub fn waiters(self) -> &'a Waiters {
-        match self {
-            ProcEntryRef::Task(_, task) => &task.waiters,
-            ProcEntryRef::MetaTask(_, task) => &task.waiters,
-            ProcEntryRef::MapperCall(_, call) => &call.waiters,
-            ProcEntryRef::RuntimeCall(_, call) => &call.waiters,
-            ProcEntryRef::ProfTask(_, task) => &task.waiters,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ProcEntryRefMut<'a> {
-    Task(OpID, &'a mut Task),
-    MetaTask((OpID, VariantID, usize), &'a mut MetaTask),
-    MapperCall((OpID, usize), &'a mut MapperCall),
-    RuntimeCall(usize, &'a mut RuntimeCall),
-    ProfTask(usize, &'a mut ProfTask),
-}
-
-impl<'a> ProcEntryRefMut<'a> {
-    pub fn base(self) -> &'a mut Base {
-        match self {
-            ProcEntryRefMut::Task(_, task) => &mut task.base,
-            ProcEntryRefMut::MetaTask(_, task) => &mut task.base,
-            ProcEntryRefMut::MapperCall(_, call) => &mut call.base,
-            ProcEntryRefMut::RuntimeCall(_, call) => &mut call.base,
-            ProcEntryRefMut::ProfTask(_, task) => &mut task.base,
-        }
-    }
-    pub fn time_range(self) -> &'a mut TimeRange {
-        match self {
-            ProcEntryRefMut::Task(_, task) => &mut task.time_range,
-            ProcEntryRefMut::MetaTask(_, task) => &mut task.time_range,
-            ProcEntryRefMut::MapperCall(_, call) => &mut call.time_range,
-            ProcEntryRefMut::RuntimeCall(_, call) => &mut call.time_range,
-            ProcEntryRefMut::ProfTask(_, task) => &mut task.time_range,
-        }
-    }
-    pub fn waiters(self) -> &'a mut Waiters {
-        match self {
-            ProcEntryRefMut::Task(_, task) => &mut task.waiters,
-            ProcEntryRefMut::MetaTask(_, task) => &mut task.waiters,
-            ProcEntryRefMut::MapperCall(_, call) => &mut call.waiters,
-            ProcEntryRefMut::RuntimeCall(_, call) => &mut call.waiters,
-            ProcEntryRefMut::ProfTask(_, task) => &mut task.waiters,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
 pub struct TimePoint<Entry, Secondary>
 where
     Entry: std::marker::Copy,
@@ -284,7 +197,7 @@ where
     }
 }
 
-pub type ProcPoint = TimePoint<ProcEntry, u64>;
+pub type ProcPoint = TimePoint<ProfUID, u64>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct ProcID(pub u64);
@@ -309,11 +222,9 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub tasks: BTreeMap<OpID, Task>,
-    pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
-    pub mapper_calls: BTreeMap<OpID, Vec<MapperCall>>,
-    pub runtime_calls: Vec<RuntimeCall>,
-    pub prof_tasks: Vec<ProfTask>,
+    entries: BTreeMap<ProfUID, ProcEntry>,
+    tasks: BTreeMap<OpID, ProfUID>,
+    meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     pub max_levels: u32,
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
@@ -325,11 +236,9 @@ impl Proc {
         Proc {
             proc_id,
             kind,
+            entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
-            mapper_calls: BTreeMap::new(),
-            runtime_calls: Vec::new(),
-            prof_tasks: Vec::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
@@ -337,82 +246,82 @@ impl Proc {
         }
     }
 
+    fn create_proc_entry(
+        &mut self,
+        base: Base,
+        op: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
+        time_range: TimeRange,
+        op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
+        prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
+    ) -> &mut ProcEntry {
+        if let Some(op_id) = op {
+            op_prof_uid.insert(op_id, base.prof_uid);
+        }
+        prof_uid_proc.insert(base.prof_uid, self.proc_id);
+        match kind {
+            ProcEntryKind::Task(_, _) => {
+                self.tasks.insert(op.unwrap(), base.prof_uid);
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                self.meta_tasks
+                    .entry((initiation_op.unwrap(), variant_id))
+                    .or_insert_with(|| Vec::new())
+                    .push(base.prof_uid);
+            }
+            // If we don't need to look up later... don't bother building the index
+            _ => {}
+        }
+        self.entries
+            .entry(base.prof_uid)
+            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range))
+    }
+
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get(prof_uid)
+    }
+
+    pub fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get_mut(prof_uid)
+    }
+
+    pub fn find_last_meta(&self, op_id: OpID, variant_id: VariantID) -> Option<&ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get(&prof_uid)
+    }
+
+    pub fn find_last_meta_mut(
+        &mut self,
+        op_id: OpID,
+        variant_id: VariantID,
+    ) -> Option<&mut ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get_mut(&prof_uid)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty()
-            && self.meta_tasks.is_empty()
-            && self.mapper_calls.is_empty()
-            && self.runtime_calls.is_empty()
-            && self.prof_tasks.is_empty()
+        self.entries.is_empty()
     }
 
-    pub fn entry(&self, entry: ProcEntry) -> ProcEntryRef {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get(&op_id).unwrap();
-                ProcEntryRef::Task(op_id, task)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                ProcEntryRef::MetaTask((op_id, variant_id, idx), task)
-            }
-            ProcEntry::MapperCall(op_id, idx) => {
-                let call = &self.mapper_calls.get(&op_id).unwrap()[idx];
-                ProcEntryRef::MapperCall((op_id, idx), call)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &self.runtime_calls[idx];
-                ProcEntryRef::RuntimeCall(idx, call)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = &self.prof_tasks[idx];
-                ProcEntryRef::ProfTask(idx, task)
-            }
-        }
+    pub fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
+        self.entries.get(&prof_uid).unwrap()
     }
 
-    pub fn entry_mut(&mut self, entry: ProcEntry) -> ProcEntryRefMut {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get_mut(&op_id).unwrap();
-                ProcEntryRefMut::Task(op_id, task)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &mut self.meta_tasks.get_mut(&(op_id, variant_id)).unwrap()[idx];
-                ProcEntryRefMut::MetaTask((op_id, variant_id, idx), task)
-            }
-            ProcEntry::MapperCall(op_id, idx) => {
-                let call = &mut self.mapper_calls.get_mut(&op_id).unwrap()[idx];
-                ProcEntryRefMut::MapperCall((op_id, idx), call)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &mut self.runtime_calls[idx];
-                ProcEntryRefMut::RuntimeCall(idx, call)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = &mut self.prof_tasks[idx];
-                ProcEntryRefMut::ProfTask(idx, task)
-            }
-        }
+    pub fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.tasks.retain(|_, t| !t.trim_time_range(start, stop));
-        for tasks in self.meta_tasks.values_mut() {
-            tasks.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
-        for calls in self.mapper_calls.values_mut() {
-            calls.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
-        self.runtime_calls
-            .retain_mut(|t| !t.trim_time_range(start, stop));
-        self.prof_tasks
-            .retain_mut(|t| !t.trim_time_range(start, stop));
+        self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
         fn add(
             time: &TimeRange,
-            entry: ProcEntry,
+            prof_uid: ProfUID,
             all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
@@ -421,23 +330,23 @@ impl Proc {
             let stop = time.stop.unwrap();
             let ready = time.ready;
             if stop - start > TASK_GRANULARITY_THRESHOLD && !ready.is_none() {
-                all_points.push(ProcPoint::new(ready.unwrap(), entry, true, start.0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             } else {
-                all_points.push(ProcPoint::new(start, entry, true, 0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+                all_points.push(ProcPoint::new(start, prof_uid, true, 0));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             }
 
-            points.push(ProcPoint::new(start, entry, true, 0));
-            points.push(ProcPoint::new(stop, entry, false, 0));
+            points.push(ProcPoint::new(start, prof_uid, true, 0));
+            points.push(ProcPoint::new(stop, prof_uid, false, 0));
 
-            util_points.push(ProcPoint::new(start, entry, true, 0));
-            util_points.push(ProcPoint::new(stop, entry, false, 0));
+            util_points.push(ProcPoint::new(start, prof_uid, true, 0));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
         }
-        fn add_waiters(waiters: &Waiters, entry: ProcEntry, util_points: &mut Vec<ProcPoint>) {
+        fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, entry, false, 0));
-                util_points.push(ProcPoint::new(wait.end, entry, true, 0));
+                util_points.push(ProcPoint::new(wait.start, prof_uid, false, 0));
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
             }
         }
 
@@ -445,40 +354,10 @@ impl Proc {
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        for task in self.tasks.values() {
-            let time = &task.time_range;
-            let entry = ProcEntry::Task(task.op_id);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&task.waiters, entry, &mut util_points);
-        }
-        for ((op_id, variant_id), tasks) in &self.meta_tasks {
-            for (idx, task) in tasks.iter().enumerate() {
-                let time = &task.time_range;
-                let entry = ProcEntry::MetaTask(*op_id, *variant_id, idx);
-                add(&time, entry, &mut all_points, &mut points, &mut util_points);
-                add_waiters(&task.waiters, entry, &mut util_points);
-            }
-        }
-        for (op_id, calls) in &self.mapper_calls {
-            for (idx, mapper_call) in calls.iter().enumerate() {
-                let time = &mapper_call.time_range;
-                let entry = ProcEntry::MapperCall(*op_id, idx);
-                add(&time, entry, &mut all_points, &mut points, &mut util_points);
-                add_waiters(&mapper_call.waiters, entry, &mut util_points);
-            }
-        }
-        for (idx, runtime_call) in self.runtime_calls.iter().enumerate() {
-            let time = &runtime_call.time_range;
-            let entry = ProcEntry::RuntimeCall(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&runtime_call.waiters, entry, &mut util_points);
-        }
-
-        for (idx, prof_task) in self.prof_tasks.iter().enumerate() {
-            let time = &prof_task.time_range;
-            let entry = ProcEntry::ProfTask(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&prof_task.waiters, entry, &mut util_points);
+        for (uid, entry) in &self.entries {
+            let time = &entry.time_range;
+            add(&time, *uid, &mut all_points, &mut points, &mut util_points);
+            add_waiters(&entry.waiters, *uid, &mut util_points);
         }
 
         points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
@@ -494,9 +373,9 @@ impl Proc {
                     self.max_levels += 1;
                     self.max_levels
                 };
-                self.entry_mut(point.entry).base().set_level(level);
+                self.entry_mut(point.entry).base.set_level(level);
             } else {
-                let level = self.entry(point.entry).base().level.unwrap();
+                let level = self.entry(point.entry).base.level.unwrap();
                 free_levels.push(Reverse(level));
             }
         }
@@ -513,9 +392,9 @@ impl Proc {
                     self.max_levels_ready += 1;
                     self.max_levels_ready
                 };
-                self.entry_mut(point.entry).base().set_level_ready(level);
+                self.entry_mut(point.entry).base.set_level_ready(level);
             } else {
-                let level = self.entry(point.entry).base().level_ready.unwrap();
+                let level = self.entry(point.entry).base.level_ready.unwrap();
                 free_levels_ready.push(Reverse(level));
             }
         }
@@ -1261,7 +1140,7 @@ pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct MapperCallKind {
-    kind: MapperCallKindID,
+    pub kind: MapperCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
@@ -1285,7 +1164,7 @@ pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct RuntimeCallKind {
-    kind: RuntimeCallKindID,
+    pub kind: RuntimeCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
@@ -1309,7 +1188,7 @@ pub struct TaskID(pub u32);
 
 #[derive(Debug)]
 pub struct TaskKind {
-    task_id: TaskID,
+    pub task_id: TaskID,
     pub name: Option<String>,
 }
 
@@ -1390,14 +1269,6 @@ impl Base {
     fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
         assert_eq!(self.level_ready, None);
         self.level_ready = Some(level_ready);
-        self
-    }
-    fn track_op(self, op_prof_uid: &mut BTreeMap<OpID, ProfUID>, op_id: OpID) -> Self {
-        op_prof_uid.insert(op_id, self.prof_uid);
-        self
-    }
-    fn track_proc(self, prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>, proc_id: ProcID) -> Self {
-        prof_uid_proc.insert(self.prof_uid, proc_id);
         self
     }
 }
@@ -1509,29 +1380,38 @@ impl From<spy::serialize::ContextID> for OpID {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum ProcEntryKind {
+    Task(TaskID, VariantID),
+    MetaTask(VariantID),
+    MapperCall(MapperCallKindID),
+    RuntimeCall(RuntimeCallKindID),
+    ProfTask,
+}
+
 #[derive(Debug)]
-pub struct Task {
+pub struct ProcEntry {
     pub base: Base,
-    pub op_id: OpID,
-    pub task_id: TaskID,
-    pub variant_id: VariantID,
+    pub op_id: Option<OpID>,
+    pub initiation_op: Option<OpID>,
+    pub kind: ProcEntryKind,
     pub time_range: TimeRange,
     pub waiters: Waiters,
 }
 
-impl Task {
+impl ProcEntry {
     fn new(
         base: Base,
-        op_id: OpID,
-        task_id: TaskID,
-        variant_id: VariantID,
+        op_id: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
         time_range: TimeRange,
     ) -> Self {
-        Task {
+        ProcEntry {
             base,
             op_id,
-            task_id,
-            variant_id,
+            initiation_op,
+            kind,
             time_range,
             waiters: Waiters::new(),
         }
@@ -1575,7 +1455,7 @@ impl OpKind {
 #[derive(Debug)]
 pub struct Operation {
     pub base: Base,
-    pub parent_id: OpID,
+    pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
     // owner: Option<OpID>,
@@ -1585,7 +1465,7 @@ impl Operation {
     fn new(base: Base) -> Self {
         Operation {
             base,
-            parent_id: OpID(0),
+            parent_id: None,
             kind: None,
             provenance: None,
             // owner: None,
@@ -1593,9 +1473,9 @@ impl Operation {
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
         if parent_id == OpID(std::u64::MAX) {
-            self.parent_id = OpID(0)
+            self.parent_id = None;
         } else {
-            self.parent_id = parent_id;
+            self.parent_id = Some(parent_id);
         }
         self
     }
@@ -1607,94 +1487,6 @@ impl Operation {
     fn set_provenance(&mut self, provenance: &str) -> &mut Self {
         self.provenance = Some(provenance.to_owned());
         self
-    }
-}
-
-#[derive(Debug)]
-pub struct MetaTask {
-    base: Base,
-    pub variant_id: VariantID,
-    time_range: TimeRange,
-    waiters: Waiters,
-}
-
-impl MetaTask {
-    fn new(base: Base, variant_id: VariantID, time_range: TimeRange) -> Self {
-        MetaTask {
-            base,
-            variant_id,
-            time_range,
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
-}
-
-#[derive(Debug)]
-pub struct MapperCall {
-    pub base: Base,
-    pub kind: MapperCallKindID,
-    pub time_range: TimeRange,
-    pub waiters: Waiters,
-}
-
-impl MapperCall {
-    fn new(base: Base, kind: MapperCallKindID, time_range: TimeRange) -> Self {
-        MapperCall {
-            base,
-            kind,
-            time_range,
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
-}
-
-#[derive(Debug)]
-pub struct RuntimeCall {
-    pub base: Base,
-    pub kind: RuntimeCallKindID,
-    pub time_range: TimeRange,
-    pub waiters: Waiters,
-}
-
-impl RuntimeCall {
-    fn new(base: Base, kind: RuntimeCallKindID, time_range: TimeRange) -> Self {
-        RuntimeCall {
-            base,
-            kind,
-            time_range,
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
-}
-
-#[derive(Debug)]
-pub struct ProfTask {
-    base: Base,
-    pub op_id: OpID,
-    time_range: TimeRange,
-    waiters: Waiters,
-}
-
-impl ProfTask {
-    fn new(base: Base, op_id: OpID, time_range: TimeRange) -> Self {
-        ProfTask {
-            base,
-            op_id,
-            time_range,
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1975,40 +1767,31 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-    ) -> &mut Task {
-        self.create_op(op_id);
+    ) -> &mut ProcEntry {
+        let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let op_prof_uid = &mut self.op_prof_uid;
-        let prof_uid_proc = &mut self.prof_uid_proc;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .tasks
-            .entry(op_id)
-            .or_insert_with(|| {
-                Task::new(
-                    Base::new(alloc)
-                        .track_op(op_prof_uid, op_id)
-                        .track_proc(prof_uid_proc, proc_id),
-                    op_id,
-                    task_id,
-                    variant_id,
-                    time_range,
-                )
-            })
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            parent_id,
+            ProcEntryKind::Task(task_id, variant_id),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut Task> {
-        self.create_op(op_id);
-        self.procs
-            .get_mut(self.tasks.get(&op_id)?)?
-            .tasks
-            .get_mut(&op_id)
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let proc = self.procs.get(self.tasks.get(&op_id)?)?;
+        proc.find_task(op_id)
     }
 
-    pub fn find_task(&self, op_id: OpID) -> Option<&Task> {
-        self.procs.get(self.tasks.get(&op_id)?)?.tasks.get(&op_id)
+    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        self.create_op(op_id); // FIXME: Elliott: do we REALLY need this? (and if so, yuck)
+        let proc = self.procs.get_mut(self.tasks.get(&op_id)?)?;
+        proc.find_task_mut(op_id)
     }
 
     fn create_meta(
@@ -2017,31 +1800,27 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) -> &mut MetaTask {
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let tasks = self
-            .procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .meta_tasks
-            .entry((op_id, variant_id))
-            .or_insert_with(|| Vec::new());
         let alloc = &mut self.prof_uid_allocator;
-        tasks.push(MetaTask::new(
-            Base::new(alloc).track_proc(&mut self.prof_uid_proc, proc_id),
-            variant_id,
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            Some(op_id),
+            ProcEntryKind::MetaTask(variant_id),
             time_range,
-        ));
-        tasks.last_mut().unwrap()
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn find_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut MetaTask> {
-        self.procs
-            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?
-            .meta_tasks
-            .get_mut(&(op_id, variant_id))?
-            .last_mut()
+    fn find_last_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut ProcEntry> {
+        let proc = self
+            .procs
+            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?;
+        proc.find_last_meta_mut(op_id, variant_id)
     }
 
     fn create_mapper_call(
@@ -2050,20 +1829,19 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-    ) {
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .mapper_calls
-            .entry(op_id)
-            .or_insert_with(|| Vec::new())
-            .push(MapperCall::new(
-                Base::new(alloc).track_proc(&mut self.prof_uid_proc, proc_id),
-                kind,
-                time_range,
-            ));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            if op_id.0 > 0 { Some(op_id) } else { None },
+            ProcEntryKind::MapperCall(kind),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
     fn create_runtime_call(
@@ -2071,30 +1849,37 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) {
+    ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .runtime_calls
-            .push(RuntimeCall::new(
-                Base::new(alloc).track_proc(&mut self.prof_uid_proc, proc_id),
-                kind,
-                time_range,
-            ));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn create_prof_task(&mut self, proc_id: ProcID, op_id: OpID, time_range: TimeRange) {
+    fn create_prof_task(
+        &mut self,
+        proc_id: ProcID,
+        op_id: OpID,
+        time_range: TimeRange,
+    ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .prof_tasks
-            .push(ProfTask::new(
-                Base::new(alloc).track_proc(&mut self.prof_uid_proc, proc_id),
-                op_id,
-                time_range,
-            ));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            Some(op_id),
+            ProcEntryKind::ProfTask,
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
     fn create_copy(
@@ -2462,61 +2247,39 @@ impl State {
             Self::compute_op_children(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_children);
         }
 
-        // Now add the implicit dependencies on meta tasks
+        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
         for proc in self.procs.values() {
-            for ((op_id, _), meta_tasks) in &proc.meta_tasks {
-                if let Some(task_stop) = self.find_task(*op_id).map(|task| task.time_range.stop) {
-                    let task_uid = self.op_prof_uid.get(op_id).unwrap();
-                    for meta_task in meta_tasks {
-                        let before = meta_task.time_range.stop < task_stop;
-
-                        let task_deps = self
-                            .spy_op_deps
-                            .entry(*task_uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            task_deps.in_.insert(meta_task.base.prof_uid);
-                        } else {
-                            task_deps.out.insert(meta_task.base.prof_uid);
-                        }
-
-                        let meta_deps = self
-                            .spy_op_deps
-                            .entry(meta_task.base.prof_uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            meta_deps.out.insert(*task_uid);
-                        } else {
-                            meta_deps.in_.insert(*task_uid);
-                        }
-                    }
+            for (uid, entry) in &proc.entries {
+                if let ProcEntryKind::ProfTask = entry.kind {
+                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
+                    // has an op_id not an initiation_op, so we have to work
+                    // around that here
+                    continue;
                 }
-            }
-
-            for (op_id, mapper_calls) in &proc.mapper_calls {
-                if let Some(task_stop) = self.find_task(*op_id).map(|task| task.time_range.stop) {
-                    let task_uid = self.op_prof_uid.get(op_id).unwrap();
-                    for mapper_call in mapper_calls {
-                        let before = mapper_call.time_range.stop < task_stop;
+                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
+                    if let Some(task) = self.find_task(initiation_op) {
+                        let task_stop = task.time_range.stop;
+                        let task_uid = task.base.prof_uid;
+                        let before = entry.time_range.stop < task_stop;
 
                         let task_deps = self
                             .spy_op_deps
-                            .entry(*task_uid)
+                            .entry(task_uid)
                             .or_insert_with(|| Dependencies::new());
                         if before {
-                            task_deps.in_.insert(mapper_call.base.prof_uid);
+                            task_deps.in_.insert(*uid);
                         } else {
-                            task_deps.out.insert(mapper_call.base.prof_uid);
+                            task_deps.out.insert(*uid);
                         }
 
-                        let meta_deps = self
+                        let entry_deps = self
                             .spy_op_deps
-                            .entry(mapper_call.base.prof_uid)
+                            .entry(*uid)
                             .or_insert_with(|| Dependencies::new());
                         if before {
-                            meta_deps.out.insert(*task_uid);
+                            entry_deps.out.insert(task_uid);
                         } else {
-                            meta_deps.in_.insert(*task_uid);
+                            entry_deps.in_.insert(task_uid);
                         }
                     }
                 }
@@ -2562,7 +2325,8 @@ impl State {
                     continue;
                 }
                 total_messages += meta_tasks.len();
-                for meta_task in meta_tasks {
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
                     let latency =
                         meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
                     if threshold <= latency.to_us() {
@@ -2886,6 +2650,9 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
                 .set_provenance(provenance);
+            if let Some(task) = state.find_task_mut(*op_id) {
+                task.initiation_op = Some(*parent_id);
+            }
         }
         Record::MultiTask { op_id, task_id } => {
             state.create_op(*op_id);
@@ -2921,7 +2688,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
         } => {
             state.create_op(*op_id);
             state
-                .find_meta_mut(*op_id, *lg_id)
+                .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
                 .add_wait_interval(WaitInterval::new(*start, *ready, *end));
