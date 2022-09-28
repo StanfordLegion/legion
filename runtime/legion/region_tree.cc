@@ -3173,7 +3173,8 @@ namespace Legion {
                                           const ApEvent termination_event,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                          RtEvent filter_precondition)
+                                          RtEvent filter_precondition,
+                                          const bool second_analysis)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -3185,8 +3186,11 @@ namespace Legion {
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
                                 region, trace_info, true/*remove restriction*/);
       analysis->add_reference();
-      const RtEvent views_ready =
-        analysis->convert_views(req.region, instances);
+      // If we have a filter precondition, then we know this is not the first
+      // potential collective analysis to be used here
+      const RtEvent views_ready = analysis->convert_views(req.region, 
+          instances, NULL/*sources*/, false/*collective*/, 
+          second_analysis ? 1 : 0);
       // Don't start the analysis until the views are ready and the filter
       // precondition has been met
       const RtEvent traversal_precondition = 

@@ -23693,7 +23693,7 @@ namespace Legion {
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
                                          version_info, references, detach_post,
                                          trace_info, map_applied_conditions,
-                                         filter_precondition);
+                                         filter_precondition, flush);
       Runtime::trigger_event(&trace_info, detach_post, detach_event);
       record_completion_effect(detach_post);
       if (runtime->legion_spy_enabled)

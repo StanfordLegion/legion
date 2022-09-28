@@ -1903,7 +1903,7 @@ namespace Legion {
     public:
       RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
           const std::vector<PhysicalManager*> *sources = NULL,
-          bool collective_rendezvous = false);
+          bool collective_rendezvous = false, unsigned analysis_index = 0);
     public:
       virtual RtEvent perform_registration(RtEvent precondition,
                                            const RegionUsage &usage,
@@ -2499,7 +2499,8 @@ namespace Legion {
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
     public:
-      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets);
+      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
+                            unsigned analysis_index = 0);
       static void handle_remote_overwrites(Deserializer &derez, Runtime *rt,
                                            AddressSpaceID previous); 
     public:

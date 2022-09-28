@@ -6087,7 +6087,7 @@ namespace Legion {
     RtEvent RegistrationAnalysis::convert_views(LogicalRegion region,
                         const InstanceSet &targets,
                         const std::vector<PhysicalManager*> *sources,
-                        bool collective_rendezvous)
+                        bool collective_rendezvous, unsigned analysis_index)
     //--------------------------------------------------------------------------
     {
       InnerContext *context = op->find_physical_context(index);
@@ -6097,9 +6097,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
         target_instances[idx] = targets[idx].get_physical_manager();
       if (collective_rendezvous)
-        return context->convert_collective_views(op, index, region, targets,
-                                  collective_mapping, collective_first_local,
-                                  target_views, collective_arrivals);
+        return context->convert_collective_views(op, index, analysis_index,
+                                  region, targets, collective_mapping, 
+                                  collective_first_local, target_views,
+                                  collective_arrivals);
       else if (op->perform_collective_analysis(collective_mapping,
                                                collective_first_local))
       {
@@ -6113,9 +6114,10 @@ namespace Legion {
                 targets[idx].get_valid_fields());
         }
         else
-          return context->convert_collective_views(op, index, region, targets,
-                                  collective_mapping, collective_first_local,
-                                  target_views, collective_arrivals);
+          return context->convert_collective_views(op, index, analysis_index,
+                                  region, targets, collective_mapping,
+                                  collective_first_local, target_views,
+                                  collective_arrivals);
       }
       else
         context->convert_analysis_views(targets, target_views);
@@ -8575,7 +8577,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent OverwriteAnalysis::convert_views(LogicalRegion region,
-                                             const InstanceSet &targets)
+                            const InstanceSet &targets, unsigned analysis_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8597,9 +8599,9 @@ namespace Legion {
         else
         {
           dummy_arrivals = new std::map<InstanceView*,size_t>();
-          return context->convert_collective_views(op, index, region, targets,
-                                  collective_mapping, collective_first_local,
-                                  target_views, *dummy_arrivals);
+          return context->convert_collective_views(op, index, analysis_index,
+                      region, targets, collective_mapping, 
+                      collective_first_local, target_views, *dummy_arrivals);
         }
       }
       else

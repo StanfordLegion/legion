@@ -10753,7 +10753,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::convert_collective_views(Operation *op, unsigned index,
-                        LogicalRegion region, const InstanceSet &targets,
+                        unsigned analysis, LogicalRegion region, 
+                        const InstanceSet &targets,
                         CollectiveMapping *&analysis_mapping, bool &first_local,
                         LegionVector<FieldMaskSet<InstanceView> > &target_views,
                         std::map<InstanceView*,size_t> &collective_arrivals)
@@ -10762,7 +10763,7 @@ namespace Legion {
       target_views.resize(targets.size());
       RendezvousResult *result = NULL;
       // Find or create a rendezvous result and record for this context
-      const PendingRendezvousKey key(op->get_ctx_index(), index, region);
+      const PendingRendezvousKey key(op->get_ctx_index(),index,analysis,region);
       {
         AutoLock c_lock(collective_lock);
         std::vector<RendezvousResult*> &pending = pending_rendezvous[key];
@@ -10789,8 +10790,8 @@ namespace Legion {
         // Reference for ourselves
         result->add_reference();
       }
-      rendezvous_collective_mapping(op, index, result, runtime->address_space,
-                                    region, result->instances);
+      rendezvous_collective_mapping(op, index, analysis, result,
+              runtime->address_space, region, result->instances);
       const RtEvent ready = result->ready;
       if (result->remove_reference())
         delete result;
@@ -10847,13 +10848,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::rendezvous_collective_mapping(Operation *op, 
-                 unsigned requirement_index, RendezvousResult *result,
-                 AddressSpaceID source, LogicalRegion region,
-                 const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
+         unsigned requirement_index, unsigned analysis,
+         RendezvousResult *result, AddressSpaceID source, LogicalRegion region,
+         const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
     //--------------------------------------------------------------------------
     {
       std::map<LogicalRegion,CollectiveRendezvous> to_construct;
-      const RendezvousKey key(op->get_ctx_index(), requirement_index);
+      const RendezvousKey key(op->get_ctx_index(), requirement_index, analysis);
       {
         AutoLock c_lock(collective_lock);
         std::map<RendezvousKey,PendingCollective>::iterator finder =

@@ -3553,7 +3553,7 @@ namespace Legion {
       assert(target == manager);
 #endif
       // Handle the collective rendezvous if necessary
-      if ((analysis_mapping != NULL) || (local_collective_arrivals > 0))
+      if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
               op_id, op_ctx_index, index, term_event, collect_event,
               target, analysis_mapping, local_collective_arrivals,

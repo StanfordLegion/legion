@@ -670,7 +670,8 @@ namespace Legion {
                               const ApEvent termination_event,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
-                              RtEvent filter_precondition);
+                              RtEvent filter_precondition,
+                              const bool second_analysis);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,
                              const VersionInfo &version_info,

@@ -1076,31 +1076,36 @@ namespace Legion {
       // The hairy collective instance rendezvous data structures
       struct RendezvousKey {
       public:
-        RendezvousKey(void) : context_index(0), region_index(0) { }
-        RendezvousKey(size_t ctx_index, unsigned index)
-          : context_index(ctx_index), region_index(index) { }
+        RendezvousKey(void) : context_index(0), region_index(0), analysis(0) { }
+        RendezvousKey(size_t ctx_index, unsigned index, unsigned ana)
+          : context_index(ctx_index), region_index(index), analysis(ana) { }
       public:
         inline bool operator<(const RendezvousKey &rhs) const
         {
           if (context_index < rhs.context_index) return true;
           if (context_index > rhs.context_index) return false;
-          return (region_index < rhs.region_index);
+          if (region_index < rhs.region_index) return true;
+          if (region_index > rhs.region_index) return false;
+          return (analysis < rhs.analysis);
         }
         inline bool operator==(const RendezvousKey &rhs) const
         {
           if (context_index != rhs.context_index) return false;
-          return (region_index == rhs.region_index);
+          if (region_index != rhs.region_index) return false;
+          return (analysis == rhs.analysis);
         }
       public:
         size_t context_index;
         unsigned region_index;
+        unsigned analysis;
       };
       struct PendingRendezvousKey : public RendezvousKey {
       public:
         PendingRendezvousKey(void) 
           : RendezvousKey(), region(LogicalRegion::NO_REGION) { }
-        PendingRendezvousKey(size_t ctx_index, unsigned index, LogicalRegion r)
-          : RendezvousKey(ctx_index, index), region(r) { }
+        PendingRendezvousKey(size_t ctx_index, unsigned index,
+                             unsigned ana, LogicalRegion r)
+          : RendezvousKey(ctx_index, index, ana), region(r) { }
       public:
         inline bool operator<(const PendingRendezvousKey &rhs) const
         {
@@ -1108,12 +1113,15 @@ namespace Legion {
           if (context_index > rhs.context_index) return false;
           if (region_index < rhs.region_index) return true;
           if (region_index > rhs.region_index) return false;
+          if (analysis < rhs.analysis) return true;
+          if (analysis > rhs.analysis) return false;
           return (region < rhs.region);
         }
         inline bool operator==(const PendingRendezvousKey &rhs) const
         {
           if (context_index != rhs.context_index) return false;
           if (region_index != rhs.region_index) return false;
+          if (analysis != rhs.analysis) return false;
           return (region == rhs.region);
         }
       public:
@@ -1907,8 +1915,9 @@ namespace Legion {
       // The view collective arrivals say how many different arrivals can be
       // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
-      RtEvent convert_collective_views(Operation *op, unsigned index,
-                       LogicalRegion region, const InstanceSet &targets,
+      RtEvent convert_collective_views(Operation *op, unsigned index, 
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets,
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
@@ -1922,6 +1931,7 @@ namespace Legion {
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
                                   unsigned requirement_index,
+                                  unsigned analysis_index,
                                   RendezvousResult *result,
                                   AddressSpaceID source,
                                   LogicalRegion region,
