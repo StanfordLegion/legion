@@ -318,9 +318,9 @@ def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure
     except OSError:
         pass # Hope this means it already exists
     assert(os.path.isdir(hdf_dir))
-    hdf_tarball = os.path.join(hdf_dir, 'hdf5-1.10.1.tar.gz')
-    hdf_source_dir = os.path.join(hdf_dir, 'hdf5-1.10.1')
-    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '048a9d149fb99aaa1680a712963f5a78e9c43b588d0e79d55e06760ec377c172', insecure=insecure)
+    hdf_tarball = os.path.join(hdf_dir, 'hdf5-1_10_1.tar.gz')
+    hdf_source_dir = os.path.join(hdf_dir, 'hdf5-hdf5-1_10_1')
+    download(hdf_tarball, 'https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5-1_10_1.tar.gz', '1658e734d209b653c84461cd198366fdb741384c31e49490612f26028c3d3258', insecure=insecure)
     if not cache:
         extract(hdf_dir, hdf_tarball, 'gz')
         build_hdf(hdf_source_dir, hdf_install_dir, thread_count, is_cray)
@@ -517,7 +517,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     if hdf_enabled():
         hdf_dir = os.path.join(prefix_dir, 'hdf')
         hdf_install_dir = os.path.join(hdf_dir, 'install')
-        hdf_build_result = os.path.join(hdf_install_dir, 'lib', 'libhdf5.so')
+        hdf_build_result = os.path.join(hdf_install_dir, 'lib', 'libhdf5.a')
         if not os.path.exists(hdf_install_dir):
             try:
                 install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure)

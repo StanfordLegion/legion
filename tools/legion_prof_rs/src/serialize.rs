@@ -604,7 +604,15 @@ fn parse_operation(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, parent_id) = parse_op_id(input)?;
     let (input, kind) = le_u32(input)?;
     let (input, provenance) = parse_string(input)?;
-    Ok((input, Record::OperationInstance { op_id, parent_id, kind, provenance }))
+    Ok((
+        input,
+        Record::OperationInstance {
+            op_id,
+            parent_id,
+            kind,
+            provenance,
+        },
+    ))
 }
 fn parse_multi_task(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
