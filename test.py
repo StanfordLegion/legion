@@ -166,6 +166,10 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['tests/pass/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/no_access.py', '-ll:py', '1', '-ll:cpu', '0']],
 
+    # Tests for Package Import
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package1.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package2.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
+
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
 
@@ -823,11 +827,14 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     return os.path.join(build_dir, 'bin')
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
+    legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
     cmd(['cargo', 'install',
          '--locked',
-         '--path', os.path.join(root_dir, 'tools', 'legion_prof_rs'),
+         '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
+    cmd(['cargo', 'test'], env=env, cwd=legion_prof_dir)
+    cmd(['cargo', 'fmt', '--all', '--', '--check'], env=env, cwd=legion_prof_dir)
 
 def build_regent(root_dir, env):
     cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
@@ -1097,8 +1104,9 @@ def run_tests(test_modules=None,
     try:
         # Build tests.
         with Stage('build'):
-            if use_prof:
+            if use_prof or use_spy:
                 build_legion_prof_rs(root_dir, tmp_dir, env)
+            if use_prof:
                 run_test_legion_prof_mypy(root_dir)
             if use_cmake:
                 bin_dir = build_cmake(

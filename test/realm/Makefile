@@ -64,6 +64,7 @@ TESTS += realm_reinit
 TESTS += sparse_construct
 TESTS += memmodel
 TESTS += extres_alias
+TESTS += reservations
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000

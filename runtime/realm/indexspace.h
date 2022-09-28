@@ -356,12 +356,6 @@ namespace Realm {
                Event wait_on = Event::NO_EVENT) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
-               const std::vector<CopySrcDstField> &dsts,
-               const ProfilingRequestSet &requests,
-               Event wait_on,
-               ReductionOpID redop_id, bool red_fold = false) const;
-
-    Event copy(const std::vector<CopySrcDstField> &srcs,
 	       const std::vector<CopySrcDstField> &dsts,
 	       const ProfilingRequestSet &requests,
 	       Event wait_on = Event::NO_EVENT) const;
