@@ -1871,21 +1871,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::record_physical_instance_fields(UniqueID op_id, 
-                                                IDType inst_id, FieldSpace fs,
-                                                std::vector<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-
-      for (std::vector<FieldID>::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
-	thread_local_profiling_instance->register_physical_instance_field(op_id,
-                             inst_id, *it, fs.get_id(), 0, false, LEGION_LT_EK);
-    }
-
-    //--------------------------------------------------------------------------
     void LegionProfiler::register_task_kind(TaskID task_id,
                                           const char *task_name, bool overwrite)
     //--------------------------------------------------------------------------

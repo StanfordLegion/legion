@@ -634,8 +634,6 @@ namespace Legion {
 				 unsigned tree_id, const char* name);
       void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
                                            LogicalRegion handle);
-      void record_physical_instance_fields(UniqueID op_id, IDType inst_id, 
-                                  FieldSpace fs, std::vector<FieldID>& fields);
       void record_physical_instance_layout(UniqueID op_id,
                                            IDType inst_id, FieldSpace fs,
                                            const LayoutConstraintSet &lc);
