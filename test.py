@@ -158,8 +158,8 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['tests/pass/no_access.py', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Tests for Package Import
-    ['bindings/python/legion_python', ['-m', 'test_package1/a/b/c', '-ll:py', '1', '-ll:cpu', '0']],
-    ['bindings/python/legion_python', ['-m', 'test_package2/a/b/c', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package1.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['-m', 'tests.pass.test_package2.a.b.c', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
