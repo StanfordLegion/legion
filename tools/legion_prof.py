@@ -1393,7 +1393,8 @@ class Operation(ProcOperation):
     @typecheck
     def _dump_instances(self) -> Union[str, None]:
         if len(self.instances) > 0:
-            tmp = (str(hex(inst[0])) + "(" + str(inst[3].prof_uid) + ")" for inst in self.instances) #type: ignore
+            # tmp = (str(hex(inst[0])) + "(" + str(inst[3].prof_uid) + ")" for inst in self.instances) #type: ignore
+            tmp = (str(inst[3].prof_uid) for inst in self.instances) #type: ignore
             instances = "|".join(tmp)
         else:
             instances = None
@@ -2037,9 +2038,11 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         instances_list = []
         for node in self.copy_info:
             assert node.src_instance is not None
-            instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
+            # instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
+            instances_list.append(str(node.src_instance.prof_uid))
             assert node.dst_instance is not None
-            instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            # instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            instances_list.append(str(node.dst_instance.prof_uid))
         instances = "|".join(instances_list)
         return instances
 
@@ -2156,7 +2159,8 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         instances_list = []
         for node in self.fill_info:
             assert node.dst_instance is not None
-            instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            # instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            instances_list.append(str(node.dst_instance.prof_uid))
         instances = "|".join(instances_list)
         return instances
 
