@@ -2616,10 +2616,12 @@ namespace Legion {
       physical_instances = parent_instances;
       virtual_mapped.resize(regions.size());
       no_access_regions.resize(regions.size());
+      region_preconditions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         virtual_mapped[idx] = false;
         no_access_regions[idx] = IS_NO_ACCESS(regions[idx]);
+        region_preconditions[idx] = ApEvent::NO_AP_EVENT;
       }
       complete_mapping();
       // Now we can launch this task right inline in this thread
