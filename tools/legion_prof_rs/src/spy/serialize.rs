@@ -304,6 +304,8 @@ pub enum Record {
     MappingOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Close Operation")]
     CloseOperation { ctx: ContextID, uid: UniqueID, index: u64, is_inter: bool },
+    #[serde(rename = "Refinement Operation")]
+    RefinementOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Internal Operation Creator")]
     InternalCreator { uid: UniqueID, cuid: UniqueID, index: u64 },
     #[serde(rename = "Fence Operation")]
