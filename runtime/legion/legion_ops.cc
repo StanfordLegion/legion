@@ -11090,9 +11090,9 @@ namespace Legion {
           assert(false);
       }
       if (!complete_preconditions.empty())
-        complete_operation(Runtime::merge_events(complete_preconditions));
+        complete_execution(Runtime::merge_events(complete_preconditions));
       else
-        complete_operation();
+        complete_execution();
     }
 
     /////////////////////////////////////////////////////////////

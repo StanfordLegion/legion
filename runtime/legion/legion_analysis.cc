@@ -8733,40 +8733,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent OverwriteAnalysis::perform_updates(RtEvent perform_precondition,
-                                              std::set<RtEvent> &applied_events,
-                                              const bool already_deferred)
-    //--------------------------------------------------------------------------
-    {
-      if (perform_precondition.exists() && 
-          !perform_precondition.has_triggered())
-        return defer_updates(perform_precondition, applied_events);
-      if (output_aggregator != NULL)
-      {
-        output_aggregator->issue_updates(trace_info, precondition, 
-                                         true/*restricted output*/);
-        // Need to wait before we can get the summary
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-        if (!output_aggregator->effects_applied.has_triggered())
-          return output_aggregator->effects_applied;
-#else
-        if (output_aggregator->effects_applied.has_triggered())
-        {
-          if (original_source == runtime->address_space)
-          {
-            applied_events.insert(output_aggregator->effects_applied);
-            if (!output_aggregator->guard_postcondition.has_triggered())
-              return output_aggregator->guard_postcondition;
-          }
-          else
-            return output_aggregator->effects_applied;
-        }
-#endif
-      }
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent OverwriteAnalysis::perform_output(RtEvent perform_precondition,
                                               std::set<RtEvent> &applied_events,
                                               const bool already_deferred)
@@ -8889,16 +8855,10 @@ namespace Legion {
                           applied_events, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, applied_events);
-      RtEvent output_ready;
+        analysis->perform_remote(traversal_done, applied_events);
       if (traversal_done.exists() || analysis->has_output_updates())
-        output_ready = 
-          analysis->perform_updates(traversal_done, applied_events);
-      analysis->perform_output(
-         Runtime::merge_events(remote_ready, output_ready), applied_events);
+        analysis->perform_output(traversal_done, applied_events);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));

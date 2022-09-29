@@ -3105,16 +3105,10 @@ namespace Legion {
       analysis->add_reference();
       const RtEvent traversal_done = analysis->perform_traversal(
           RtEvent::NO_RT_EVENT, version_info, map_applied_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, map_applied_events);
-      RtEvent output_ready;
+        analysis->perform_remote(traversal_done, map_applied_events);
       if (traversal_done.exists() || analysis->has_output_updates())
-        output_ready = 
-          analysis->perform_updates(traversal_done, map_applied_events);
-      analysis->perform_output(
-         Runtime::merge_events(remote_ready, output_ready), map_applied_events);
+        analysis->perform_output(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
     }

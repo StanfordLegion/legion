@@ -2492,9 +2492,6 @@ namespace Legion {
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
-      virtual RtEvent perform_updates(RtEvent precondition, 
-                                      std::set<RtEvent> &applied_events,
-                                      const bool already_deferred = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
