@@ -6740,6 +6740,8 @@ namespace Legion {
       }
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
+      // Remote individual tasks are always resolved
+      resolved = true;
       // Have to do this before resolving speculation in case
       // we get cleaned up after the resolve speculation call
       if (runtime->legion_spy_enabled)
@@ -7443,6 +7445,8 @@ namespace Legion {
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
       set_provenance(slice_owner->get_provenance());
+      // Remote point tasks are always resolved
+      resolved = true;
       // We should always just apply these things now since we were mapped 
       // on the owner node
 #ifdef DEBUG_LEGION
@@ -11320,6 +11324,8 @@ namespace Legion {
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
+      // Remote slice tasks are always resolved
+      resolved = true;
       // Check to see if we ended up back on the original node
       // We have to do this before unpacking the points
       if (is_remote())

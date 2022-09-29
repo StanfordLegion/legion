@@ -1415,11 +1415,15 @@ namespace Legion {
       parent_ctx = ctx;
       track_parent = track;
       if (track_parent)
+      {
         context_index = parent_ctx->register_new_child_operation(this,
                                           resolved_event, dependences);
-      // If we don't have a resolved event then we can consider
-      // speculation already resolved
-      if (!resolved_event.exists())
+        // If we don't have a resolved event then we can consider
+        // speculation already resolved
+        if (!resolved_event.exists())
+          resolved = true;
+      }
+      else // Untracked operations will never resolve speculation
         resolved = true;
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
