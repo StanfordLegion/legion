@@ -2008,9 +2008,7 @@ impl State {
     }
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        self.spy_ops
-            .entry(op)
-            .or_insert_with(|| SpyOp::new(pre, post));
+        assert!(self.spy_ops.insert(op, SpyOp::new(pre, post)).is_none());
         self.spy_op_by_precondition
             .entry(pre)
             .or_insert_with(|| BTreeSet::new())
@@ -2082,7 +2080,6 @@ impl State {
                 stack.extend(event.preconditions.iter());
             }
 
-
             if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
                 for op_id in op_ids {
                     if let Some(prof_uid) = op_prof_uid.get(op_id) {
@@ -2112,7 +2109,6 @@ impl State {
             if let Some(event) = spy_events.get(&event_id) {
                 stack.extend(event.postconditions.iter());
             }
-
 
             if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
                 for op_id in op_ids {
@@ -2921,19 +2917,14 @@ fn process_spy_record(record: &spy::serialize::Record, state: &mut State) {
         Record::OperationEvents { uid, pre, post } => {
             state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
         }
-        Record::RealmCopy { uid, pre, post, .. } => {
-            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        Record::RealmCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
-        Record::IndirectCopy { uid, pre, post, .. } => {
-            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        Record::IndirectCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
-        Record::RealmFill {
-            fill_uid,
-            pre,
-            post,
-            ..
-        } => {
-            state.create_spy_op((*fill_uid).into(), (*pre).into(), (*post).into());
+        Record::RealmFill { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
 
         Record::TopTask { ctx, uid, .. } => {
