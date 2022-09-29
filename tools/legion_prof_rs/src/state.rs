@@ -1746,6 +1746,7 @@ pub struct State {
     spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
     pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
     spy_events: BTreeMap<EventID, SpyEvent>,
+    pub critical_path: Vec<ProfUID>,
 }
 
 impl State {
@@ -2181,7 +2182,7 @@ impl State {
                 }
             }
         }
-        return postorder;
+        postorder
     }
 
     fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
@@ -2223,6 +2224,80 @@ impl State {
         let toposort = self.toposort_graph();
 
         self.transitive_reduce_graph(&toposort);
+    }
+
+    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
+        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
+            let proc = self.procs.get(proc_id).unwrap();
+            let entry = &proc.entry(prof_uid);
+            let mut total = 0;
+            let mut start = entry.time_range.start.unwrap().0;
+            for wait in &entry.waiters.wait_intervals {
+                total += wait.start.0 - start;
+                start = wait.end.0;
+            }
+            total += entry.time_range.stop.unwrap().0 - start;
+            return total;
+        }
+        0
+    }
+
+    fn compute_critical_path(&mut self) {
+        // Postorder DFS walking both in and child edges, computing the
+        // longest path at each node based on the sum of the longest input and
+        // longest child
+        type Path = (u64, Vec<ProfUID>);
+        fn path_max<'a>(a: &'a Path, b: &'a Path) -> &'a Path {
+            if a.0 > b.0 {
+                a
+            } else {
+                b
+            }
+        }
+
+        let empty_path = (0, Vec::new());
+
+        let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in self.spy_op_deps.keys() {
+            stack.push((*root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    let deps = self.spy_op_deps.get(&node).unwrap();
+                    stack.push((node, false));
+                    stack.extend(deps.children.iter().map(|x| (*x, true)));
+                    stack.extend(deps.in_.iter().map(|x| (*x, true)));
+                } else {
+                    let deps = self.spy_op_deps.get(&node).unwrap();
+                    let long_in = deps
+                        .in_
+                        .iter()
+                        .map(|dep| longest_paths.get(dep).unwrap())
+                        .fold(&empty_path, path_max);
+                    let long_child = deps
+                        .children
+                        .iter()
+                        .map(|dep| longest_paths.get(dep).unwrap())
+                        .fold(&empty_path, path_max);
+                    let duration = long_in.0 + long_child.0 + self.compute_duration(node);
+                    let mut path = long_in.1.to_owned();
+                    path.extend(long_child.1.iter());
+                    path.push(node);
+                    longest_paths.insert(node, (duration, path));
+                }
+            }
+        }
+        self.critical_path = longest_paths
+            .values()
+            .fold(&empty_path, path_max)
+            .1
+            .to_owned();
+        dbg!(&self.critical_path);
     }
 
     pub fn postprocess_spy_records(&mut self) {
@@ -2301,6 +2376,8 @@ impl State {
 
         // Reduce the graph
         self.simplify_spy_graph();
+
+        self.compute_critical_path();
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {

@@ -54,6 +54,12 @@ impl Serialize for Count {
 struct DependencyRecord(u64, u64, u64);
 
 #[derive(Serialize, Copy, Clone)]
+struct CriticalPathRecord {
+    tuple: Option<DependencyRecord>,
+    obj: Option<DependencyRecord>,
+}
+
+#[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
@@ -1638,8 +1644,24 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     {
         let filename = path.join("json").join("critical_path.json");
-        let mut file = File::create(filename)?;
-        write!(file, "[]")?;
+        let file = File::create(filename)?;
+        let render_op = |prof_uid: &ProfUID| {
+            state.prof_uid_proc.get(prof_uid).map(|proc_id| {
+                DependencyRecord(proc_id.node_id().0, proc_id.proc_in_node(), prof_uid.0)
+            })
+        };
+        let mut critical_path = Vec::new();
+        // FIXME: Elliott: need to figure out what this `obj` field
+        // actually represents, it's not just null at the start
+        let mut last = ProfUID(0); // Hack: this is kind of awful, but zero happens to be unused
+        for node in &state.critical_path {
+            critical_path.push(CriticalPathRecord {
+                tuple: render_op(node),
+                obj: render_op(&last),
+            });
+            last = *node;
+        }
+        serde_json::to_writer(file, &critical_path)?;
     }
 
     Ok(())
