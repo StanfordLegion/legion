@@ -2062,120 +2062,66 @@ impl State {
         assert!(self.has_spy_data, "no Legion Spy logs in logfile");
     }
 
-    fn compute_event_preconditions(
-        event_id: EventID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-        visited: &mut BTreeSet<EventID>,
-    ) {
-        // This is a DAG, don't bother walking the same node multiple times
-        if visited.get(&event_id).is_some() {
-            return;
-        }
-        visited.insert(event_id);
-
-        if let Some(event) = spy_events.get(&event_id) {
-            for precondition in &event.preconditions {
-                Self::compute_event_preconditions(
-                    *precondition,
-                    deps,
-                    op_prof_uid,
-                    spy_ops,
-                    spy_op_by_postcondition,
-                    spy_events,
-                    visited,
-                );
-            }
-        }
-
-        if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
-            for op_id in op_ids {
-                if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                    deps.in_.insert(*prof_uid);
-                }
-            }
-        }
-    }
-
-    fn compute_event_postconditions(
-        event_id: EventID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-        visited: &mut BTreeSet<EventID>,
-    ) {
-        // This is a DAG, don't bother walking the same node multiple times
-        if visited.get(&event_id).is_some() {
-            return;
-        }
-        visited.insert(event_id);
-
-        if let Some(event) = spy_events.get(&event_id) {
-            for postcondition in &event.postconditions {
-                Self::compute_event_postconditions(
-                    *postcondition,
-                    deps,
-                    op_prof_uid,
-                    spy_ops,
-                    spy_op_by_precondition,
-                    spy_events,
-                    visited,
-                );
-            }
-        }
-
-        if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
-            for op_id in op_ids {
-                if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                    deps.out.insert(*prof_uid);
-                }
-            }
-        }
-    }
-
     fn compute_op_preconditions(
         op: &SpyOp,
         deps: &mut Dependencies,
         op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
         spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
         spy_events: &BTreeMap<EventID, SpyEvent>,
     ) {
         let mut visited = BTreeSet::new();
-        Self::compute_event_preconditions(
-            op.precondition,
-            deps,
-            op_prof_uid,
-            spy_ops,
-            spy_op_by_postcondition,
-            spy_events,
-            &mut visited,
-        );
+        let mut stack = Vec::new();
+        stack.push(op.precondition);
+        while let Some(event_id) = stack.pop() {
+            if visited.contains(&event_id) {
+                continue;
+            }
+            visited.insert(event_id);
+
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.preconditions.iter());
+            }
+
+
+            if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.in_.insert(*prof_uid);
+                    }
+                }
+            }
+        }
     }
 
     fn compute_op_postconditions(
         op: &SpyOp,
         deps: &mut Dependencies,
         op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
         spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
         spy_events: &BTreeMap<EventID, SpyEvent>,
     ) {
         let mut visited = BTreeSet::new();
-        Self::compute_event_postconditions(
-            op.postcondition,
-            deps,
-            op_prof_uid,
-            spy_ops,
-            spy_op_by_precondition,
-            spy_events,
-            &mut visited,
-        );
+        let mut stack = Vec::new();
+        stack.push(op.postcondition);
+        while let Some(event_id) = stack.pop() {
+            if visited.contains(&event_id) {
+                continue;
+            }
+            visited.insert(event_id);
+
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.postconditions.iter());
+            }
+
+
+            if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.out.insert(*prof_uid);
+                    }
+                }
+            }
+        }
     }
 
     fn compute_op_parent(
@@ -2184,11 +2130,15 @@ impl State {
         op_prof_uid: &BTreeMap<OpID, ProfUID>,
         spy_op_parent: &BTreeMap<OpID, OpID>,
     ) {
-        if let Some(parent) = spy_op_parent.get(&op_id) {
-            if let Some(parent_uid) = op_prof_uid.get(parent) {
-                deps.parent.insert(*parent_uid);
-            } else {
-                Self::compute_op_parent(*parent, deps, op_prof_uid, spy_op_parent);
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(parent) = spy_op_parent.get(&node) {
+                if let Some(parent_uid) = op_prof_uid.get(parent) {
+                    deps.parent.insert(*parent_uid);
+                } else {
+                    stack.push(*parent);
+                }
             }
         }
     }
@@ -2199,15 +2149,84 @@ impl State {
         op_prof_uid: &BTreeMap<OpID, ProfUID>,
         spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
     ) {
-        if let Some(children) = spy_op_children.get(&op_id) {
-            for child in children {
-                if let Some(child_uid) = op_prof_uid.get(child) {
-                    deps.children.insert(*child_uid);
-                } else {
-                    Self::compute_op_children(*child, deps, op_prof_uid, spy_op_children);
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(children) = spy_op_children.get(&node) {
+                for child in children {
+                    if let Some(child_uid) = op_prof_uid.get(child) {
+                        deps.children.insert(*child_uid);
+                    } else {
+                        stack.push(*child);
+                    }
                 }
             }
         }
+    }
+
+    fn toposort_graph(&mut self) -> Vec<ProfUID> {
+        // Postorder DFS to toposort
+        let mut postorder = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in self.spy_op_deps.keys() {
+            stack.push((*root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    let deps = self.spy_op_deps.get(&node).unwrap();
+                    stack.push((node, false));
+                    stack.extend(deps.in_.iter().map(|x| (*x, true)));
+                } else {
+                    postorder.push(node);
+                }
+            }
+        }
+        return postorder;
+    }
+
+    fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
+        // TODO: Elliott: legion_spy.py computes this with a bit set,
+        // which may be more efficient.
+        let mut reachable: BTreeMap<ProfUID, BTreeSet<ProfUID>> = BTreeMap::new();
+        for root in toposort {
+            // Compute the reachable sets in topological order to
+            // minimize the size of the graph we have to traverse
+            let mut root_reachable = BTreeSet::new();
+            let deps = self.spy_op_deps.get(root).unwrap();
+            for node in &deps.in_ {
+                // Ok to unwrap here as we're walking in toposort
+                // order to make sure this has been precomputed
+                let node_reachable = reachable.get(&node).unwrap();
+                root_reachable.extend(node_reachable.iter());
+            }
+
+            let mut to_remove = Vec::new();
+            for node in &deps.in_ {
+                if root_reachable.contains(node) {
+                    to_remove.push(*node);
+                } else {
+                    root_reachable.insert(*node);
+                }
+            }
+            reachable.insert(*root, root_reachable);
+
+            for node in to_remove {
+                let root_deps = self.spy_op_deps.get_mut(root).unwrap();
+                assert!(root_deps.in_.remove(&node));
+                let node_deps = self.spy_op_deps.get_mut(&node).unwrap();
+                assert!(node_deps.out.remove(root));
+            }
+        }
+    }
+
+    fn simplify_spy_graph(&mut self) {
+        let toposort = self.toposort_graph();
+
+        self.transitive_reduce_graph(&toposort);
     }
 
     pub fn postprocess_spy_records(&mut self) {
@@ -2231,7 +2250,6 @@ impl State {
                 &op,
                 &mut deps,
                 &self.op_prof_uid,
-                &self.spy_ops,
                 &self.spy_op_by_postcondition,
                 &self.spy_events,
             );
@@ -2239,7 +2257,6 @@ impl State {
                 &op,
                 &mut deps,
                 &self.op_prof_uid,
-                &self.spy_ops,
                 &self.spy_op_by_precondition,
                 &self.spy_events,
             );
@@ -2285,6 +2302,9 @@ impl State {
                 }
             }
         }
+
+        // Reduce the graph
+        self.simplify_spy_graph();
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
