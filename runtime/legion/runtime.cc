@@ -5608,6 +5608,30 @@ namespace Legion {
         global_indexing(global)
     //--------------------------------------------------------------------------
     {
+      FieldSpaceNode *fspace_node =
+        runtime->forest->get_node(req.region.get_field_space());
+      for (FieldID field_id : req.instance_fields)
+      {
+        field_sizes[field_id] = fspace_node->get_field_size(field_id);
+
+        std::set<FieldID> fields; fields.insert(field_id);
+        FieldMask mask = fspace_node->get_field_mask(fields);
+
+        IndividualManager* &manager = managers[field_id];
+        manager = NULL;
+        for (unsigned idx = 0; idx < is.size(); ++idx)
+        {
+          const InstanceRef &instance = is[idx];
+          if (!!(instance.get_valid_fields() & mask))
+          {
+            manager = instance.get_physical_manager()->as_individual_manager();
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(manager != NULL);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5744,9 +5768,19 @@ namespace Legion {
     size_t OutputRegionImpl::get_field_size(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(req.region);
-      FieldSpaceNode *fspace_node = node->get_column_source();
-      return fspace_node->get_field_size(field_id);
+      std::map<FieldID,size_t>::const_iterator finder =
+        field_sizes.find(field_id);
+#ifdef DEBUG_LEGION
+      if (finder == field_sizes.end())
+      {
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_FIELD,
+          "Field %u does not exist in output region %u of task %s "
+          "(UID: %lld).",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
+      }
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -5899,11 +5933,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain domain;
-      RegionNode *node = runtime->forest->get_node(req.region);
+      IndexSpaceNode *node =
+        runtime->forest->get_node(req.region.get_index_space());
       if (created_region)
       {
-        IndexSpaceNode *index_node =
-          node->get_row_source()->as_index_space_node();
         // Subregions of a globally indexed output region cannot be finalized 
         // in the first round because their sizes are yet to be determined.
         if (defer && req.partition.exists() && global_indexing)
@@ -5912,7 +5945,7 @@ namespace Legion {
           FinalizeOutputArgs args(this);
           runtime->issue_runtime_meta_task(
               args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(index_node->index_space_ready));
+              Runtime::protect_event(node->index_space_ready));
           return;
         }
 
@@ -5921,8 +5954,7 @@ namespace Legion {
         {
           if (!global_indexing)
           {
-            DomainPoint color_point =
-              node->row_source->get_domain_point_color();
+            DomainPoint color_point = node->get_domain_point_color();
             domain.dim = color_point.dim + extents.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
@@ -5940,7 +5972,7 @@ namespace Legion {
             }
 
             runtime->forest->set_pending_space_domain(
-                index_node->handle, domain, runtime->address_space);
+                node->handle, domain, runtime->address_space);
           }
           else
           {
@@ -5948,7 +5980,7 @@ namespace Legion {
             // already been initialized once we reach here, so
             // we just retrieve it.
             ApEvent ready = ApEvent::NO_AP_EVENT;
-            domain = index_node->get_domain(ready, true);
+            domain = node->get_domain(ready, true);
             if (ready.exists())
               ready.wait();
           }
@@ -5957,13 +5989,11 @@ namespace Legion {
         {
           DomainPoint lo; lo.dim = extents.dim;
           domain = Domain(lo, extents - 1);
-          index_node->set_domain(domain, runtime->address_space);
+          node->set_domain(domain, runtime->address_space);
         }
       }
       else
-        node->row_source->get_launch_space_domain(domain);
-
-      FieldSpaceNode *fspace_node = node->get_column_source();
+        node->get_launch_space_domain(domain);
 
       // Create a Realm instance and update the physical manager
       // for each output field
@@ -5986,7 +6016,7 @@ namespace Legion {
             dim_order.push_back(ordering[idx] - static_cast<int>(LEGION_DIM_X));
 
         std::map<Realm::FieldID,size_t> field_sizes;
-        size_t field_size = fspace_node->get_field_size(field_id);
+        size_t field_size = get_field_size(field_id);
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
@@ -6094,28 +6124,19 @@ namespace Legion {
     IndividualManager *OutputRegionImpl::get_manager(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = runtime->forest->get_node(req.region);
-      FieldSpaceNode *fspace_node = node->get_column_source();
-
-      std::set<FieldID> fields; fields.insert(field_id);
-      FieldMask mask = fspace_node->get_field_mask(fields);
-
-      // Find the right physical manager by checking against
-      // the field mask of the instance ref
-      IndividualManager *manager = NULL;
-      for (unsigned idx = 0; idx < instance_set.size(); ++idx)
-      {
-        const InstanceRef &instance = instance_set[idx];
-        if (!!(instance.get_valid_fields() & mask))
-        {
-          manager = instance.get_physical_manager()->as_individual_manager();
-          break;
-        }
-      }
+      std::map<FieldID,IndividualManager*>::const_iterator finder =
+        managers.find(field_id);
 #ifdef DEBUG_LEGION
-      assert(manager != NULL);
+      if (finder == managers.end())
+      {
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_FIELD,
+          "Field %u does not exist in output region %u of task %s "
+          "(UID: %lld).",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
+      }
 #endif
-      return manager;
+      return finder->second;
     }
 
     /////////////////////////////////////////////////////////////
@@ -16956,11 +16977,7 @@ namespace Legion {
         unsafe_mapper(!config.safe_mapper),
 #endif
         disable_independence_tests(config.disable_independence_tests),
-#ifdef LEGION_SPY
-        legion_spy_enabled(true),
-#else
         legion_spy_enabled(config.legion_spy_enabled),
-#endif
         supply_default_mapper(default_mapper),
         enable_test_mapper(config.enable_test_mapper),
         legion_ldb_enabled(!config.ldb_file.empty()),

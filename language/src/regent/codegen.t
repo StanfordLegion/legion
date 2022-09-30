@@ -9789,6 +9789,7 @@ function codegen.stat_var(cx, node)
       actions = quote
         [actions]
         c.legion_logical_partition_attach_name([cx.runtime], [rhs_value].impl, [lhs.displayname], false)
+        c.legion_index_partition_attach_name([cx.runtime], [rhs_value].impl.index_partition, [lhs.displayname], false)
       end
     end
     decls:insert(quote var [lhs] = [rhs_value] end)

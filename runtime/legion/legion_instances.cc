@@ -4009,6 +4009,8 @@ namespace Legion {
       assert(is_owner());
       assert(memory == instance.get_location());
 #endif
+      if (use_event.exists() && !use_event.has_triggered())
+        use_event.wait();
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       pointers.push_back(uintptr_t(inst_ptr));
     }

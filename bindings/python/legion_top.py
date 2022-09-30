@@ -410,24 +410,30 @@ def legion_python_main(raw_args, user_data, proc):
     elif args[start] == '-m':
         if len(args) > (start+1):
             mod_name = args[start+1]
+            mod_dir = mod_name.split(".")
+            if len(mod_dir) > 1:
+                prefix_path = os.path.join(*mod_dir[:-1])
+                mod_name = mod_dir[-1]
+            else:
+                prefix_path = ""
             filename = mod_name + '.py'
             found = False
             for path in sys.path:
-                for root,dirs,files in os.walk(path):
-                    if mod_name in dirs:
-                        main_py = os.path.join(root, mod_name, '__main__.py')
-                        if not os.path.exists(main_py):
-                            continue
-                        filename = main_py
-                    elif filename not in files:
-                        continue
-                    module = os.path.join(root, filename)
-                    sys.argv = [module] + list(args[start+2:])
-                    run_path(module, run_name='__main__')
-                    found = True
-                    break
-                if found:
-                    break
+                path = os.path.join(path, prefix_path)
+                main_py_full_path = os.path.join(path, mod_name, '__main__.py')
+                filename_full_path = os.path.join(path, filename)
+                # first, check mod_name/__main__.py
+                if os.path.exists(main_py_full_path):
+                    module = main_py_full_path
+                # second, check mod_name.py
+                elif os.path.exists(filename_full_path):
+                    module = filename_full_path
+                else:
+                    continue
+                sys.argv = [module] + list(args[start+2:])
+                run_path(module, run_name='__main__')
+                found = True
+                break
             if not found:
                 print('No module named ' + mod_name)
                 c.legion_runtime_set_return_code(1)

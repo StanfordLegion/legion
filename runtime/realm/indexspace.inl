@@ -135,13 +135,10 @@ namespace Realm {
   inline Event Rect<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
 				const std::vector<CopySrcDstField> &dsts,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/,
-				ReductionOpID redop_id /*= 0*/,
-				bool red_fold /*= false*/) const
+				Event wait_on /*= Event::NO_EVENT*/) const
   {
     return IndexSpace<N,T>(*this).copy(srcs, dsts,
-					requests, wait_on,
-					redop_id, red_fold);
+					requests, wait_on);
   }
 
   template <int N, typename T>
@@ -149,13 +146,10 @@ namespace Realm {
 				const std::vector<CopySrcDstField> &dsts,
 				const IndexSpace<N,T> &mask,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/,
-				ReductionOpID redop_id /*= 0*/,
-				bool red_fold /*= false*/) const
+				Event wait_on /*= Event::NO_EVENT*/) const
   {
     return IndexSpace<N,T>(*this).copy(srcs, dsts, mask,
-					requests, wait_on,
-					redop_id, red_fold);
+					requests, wait_on);
   }
 
 
@@ -889,30 +883,6 @@ namespace Realm {
     return copy(srcs, dsts,
 		std::vector<const typename CopyIndirection<N,T>::Base *>(),
 		requests, wait_on);
-  }
-
-  template <int N, typename T>
-  inline Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
-				     const std::vector<CopySrcDstField> &dsts,
-				     const ProfilingRequestSet &requests,
-				     Event wait_on,
-				     ReductionOpID redop_id,
-				     bool red_fold /*= false*/) const
-  {
-    if(redop_id == 0) {
-      // passthrough
-      return copy(srcs, dsts,
-		  std::vector<const typename CopyIndirection<N,T>::Base *>(),
-		  requests, wait_on);
-    } else {
-      // copy reduction op into dst fields
-      std::vector<CopySrcDstField> dsts2(dsts);
-      for(size_t i = 0; i < dsts2.size(); i++)
-	dsts2[i].set_redop(redop_id, red_fold);
-      return copy(srcs, dsts2,
-		  std::vector<const typename CopyIndirection<N,T>::Base *>(),
-		  requests, wait_on);
-    }
   }
 
   template <int N, typename T>

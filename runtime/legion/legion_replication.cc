@@ -8472,6 +8472,14 @@ namespace Legion {
       collective->exchange_spaces(spaces);
       attach_coregions_collective = 
         new IndexAttachCoregions(ctx, COLLECTIVE_LOC_103, points.size());
+      // If we don't have any points then we can perform this now
+      if (points.empty())
+      {
+        attach_coregions_collective->perform_collective_async();
+        const RtEvent collective_done =
+          attach_coregions_collective->perform_collective_wait(false/*block*/);
+        map_applied_conditions.insert(collective_done);
+      }
     }
 
     //--------------------------------------------------------------------------

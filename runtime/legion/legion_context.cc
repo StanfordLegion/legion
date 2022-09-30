@@ -12154,24 +12154,74 @@ namespace Legion {
         if (hasher.verify(__func__))
           break;
       }
+      // If the task registration is marked as global, then one shard will do
+      // the registration and broadcast the variant information to all other
+      // shards. If not, all shards performing the registration will
+      // independently register the variant.
       VariantID result;
-      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      if (registrar.global_registration)
       {
-        ValueBroadcast<VariantID> collective(this, COLLECTIVE_LOC_17);
-        // Have this shard do the registration, and then broadcast the
-        // resulting variant to all the other shards
-        result = runtime->register_variant(registrar, user_data, user_data_size,
-           desc,ret_size,has_ret_size,vid,check_task_id,false/*check context*/);
-        collective.broadcast(result);
+        if (owner_shard->shard_id == dynamic_id_allocator_shard)
+        {
+          ValueBroadcast<VariantID> collective(this, COLLECTIVE_LOC_17);
+          result = runtime->register_variant(registrar, user_data, 
+                                             user_data_size, desc, 
+                                             ret_size, has_ret_size, 
+                                             vid, check_task_id, 
+                                             false/*check context*/);
+          collective.broadcast(result);
+        }
+        else
+        {
+          ValueBroadcast<VariantID> collective(this, 
+                  dynamic_id_allocator_shard, COLLECTIVE_LOC_17);
+          result = collective.get_value();
+        }
+        if (++dynamic_id_allocator_shard == total_shards)
+          dynamic_id_allocator_shard = 0;
       }
       else
       {
-        ValueBroadcast<VariantID> collective(this, dynamic_id_allocator_shard,
-                                             COLLECTIVE_LOC_17);
-        result = collective.get_value();
+        // We have to be a little careful here when assigning the variant ID for
+        // the registered task. If the user specified it already, then can just
+        // use the ID passed in. However, if we are supposed to generate the 
+        // variant ID, then we'll need to pick an ID (on one shard) and tell 
+        // everyone else to register the variant with this ID.
+        if (vid == LEGION_AUTO_GENERATE_ID)
+        {
+          auto impl = 
+              this->runtime->find_or_create_task_impl(registrar.task_id);
+          if (this->owner_shard->shard_id == this->dynamic_id_allocator_shard)
+          {
+            vid = impl->get_unique_variant_id();
+            ValueBroadcast<VariantID> collective(this, COLLECTIVE_LOC_17);
+            collective.broadcast(vid);
+          }
+          else
+          {
+            ValueBroadcast<VariantID> collective(this, 
+                    this->dynamic_id_allocator_shard, COLLECTIVE_LOC_17);
+            vid = collective.get_value();
+          }
+          if (++dynamic_id_allocator_shard == total_shards)
+            dynamic_id_allocator_shard = 0;
+        }
+
+        // Finally, if there are multiple shards in the same address space, only
+        // one of the shards needs to do the registration.
+        if (this->shard_manager->is_first_local_shard(this->owner_shard))
+        {
+          result = runtime->register_variant(registrar, user_data, 
+                                             user_data_size, desc, 
+                                             ret_size, has_ret_size, 
+                                             vid, check_task_id, 
+                                             false/*check context*/);
+        }
+        else
+        {
+          result = vid;
+        }
       }
-      if (++dynamic_id_allocator_shard == total_shards)
-        dynamic_id_allocator_shard = 0;
       return result;
     }
 
