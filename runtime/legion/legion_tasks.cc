@@ -4209,9 +4209,9 @@ namespace Legion {
         trace_info.record_replay_mapping(single_task_termination,
             TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND));
       ApEvent init_precondition = compute_sync_precondition(trace_info);
-      region_preconditions.resize(regions.size());
       // After we've got our results, apply the state to the region tree
       size_t region_count = get_region_count();
+      region_preconditions.resize(region_count);
       if (region_count > 0)
       {
         if (regions.size() == 1 && output_regions.empty())
