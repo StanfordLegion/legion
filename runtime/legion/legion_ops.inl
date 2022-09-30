@@ -220,13 +220,21 @@ namespace Legion {
                 this->predication_state = OP::SPECULATIVE_MAPPING_STATE;
               }
               else
+              {
                 this->predication_state = OP::WAITING_MAPPING_STATE;
+                // Clear the predicates since they won't matter
+                this->true_guard = PredEvent::NO_PRED_EVENT;
+                this->false_guard = PredEvent::NO_PRED_EVENT;
+              }
               break;
             }
           case OP::RESOLVE_TRUE_STATE:
             {
               trigger = true;
               continue_true = true;
+              // Clear the predicates since they won't matter
+              this->true_guard = PredEvent::NO_PRED_EVENT;
+              this->false_guard = PredEvent::NO_PRED_EVENT;
               break;
             }
           case OP::RESOLVE_FALSE_STATE:

@@ -4476,54 +4476,38 @@ namespace Legion {
     PredEvent PredicateImpl::get_true_guard(void)
     //--------------------------------------------------------------------------
     {
-      bool trigger = false;
-      bool poison = false;
-      PredEvent result;
+      AutoLock o_lock(op_lock);
+      if (!true_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!true_guard.exists())
-          true_guard = Runtime::create_pred_event();
-        result = true_guard;
+        true_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            trigger = true;
+            Runtime::trigger_event(true_guard);
           else
-            poison = true;
+            Runtime::poison_event(true_guard);
         }
       }
-      if (trigger)
-        Runtime::trigger_event(result);
-      else if (poison)
-        Runtime::poison_event(result);
-      return result;
+      return true_guard;
     }
 
     //--------------------------------------------------------------------------
     PredEvent PredicateImpl::get_false_guard(void)
     //--------------------------------------------------------------------------
     {
-      bool trigger = false;
-      bool poison = false;
-      PredEvent result;
+      AutoLock o_lock(op_lock);
+      if (!false_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!false_guard.exists())
-          false_guard = Runtime::create_pred_event();
-        result = false_guard;
+        false_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            poison = true;
+            Runtime::poison_event(false_guard);
           else
-            trigger = true;
+            Runtime::trigger_event(false_guard);
         }
       }
-      if (trigger)
-        Runtime::trigger_event(result);
-      else if (poison)
-        Runtime::poison_event(result);
-      return result;
+      return false_guard;
     }
 
     //--------------------------------------------------------------------------
@@ -4531,34 +4515,31 @@ namespace Legion {
                                              PredEvent &false_result)
     //--------------------------------------------------------------------------
     {
-      bool handle_true = false;
-      bool handle_false = false;
+      AutoLock o_lock(op_lock);
+      if (!true_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!true_guard.exists())
-          true_guard = Runtime::create_pred_event();
-        true_result = true_guard;
-        if (!false_guard.exists())
-          false_guard = Runtime::create_pred_event();
-        false_result = false_guard;
+        true_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            handle_true = true;
+            Runtime::trigger_event(true_guard);
           else
-            handle_false = true;
+            Runtime::poison_event(true_guard);
         }
       }
-      if (handle_true)
+      true_result = true_guard;
+      if (!false_guard.exists())
       {
-        Runtime::trigger_event(true_result);
-        Runtime::poison_event(false_result);
+        false_guard = Runtime::create_pred_event();
+        if (predicate_resolved)
+        {
+          if (predicate_value)
+            Runtime::poison_event(false_guard);
+          else
+            Runtime::trigger_event(true_guard);
+        }
       }
-      else if (handle_false)
-      {
-        Runtime::poison_event(true_result);
-        Runtime::trigger_event(false_result);
-      }
+      false_result = false_guard;
     }
 
     //--------------------------------------------------------------------------
@@ -20589,13 +20570,7 @@ namespace Legion {
     {
       // Always speculate on fill ops, but mapping only since
       // we know that there is an easy way to defer them
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      predicate->get_predicate_guards(true_guard, false_guard);
-      return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------

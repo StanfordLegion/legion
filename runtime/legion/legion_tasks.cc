@@ -842,11 +842,6 @@ namespace Legion {
       mapper->invoke_task_speculate(this, &output);
       if (output.speculate && output.speculate_mapping_only)
       {
-#ifdef DEBUG_LEGION
-        assert(!true_guard.exists());
-        assert(!false_guard.exists());
-#endif
-        predicate->get_predicate_guards(true_guard, false_guard);
         // Switch any write-discard privileges back to read-write
         // so we can make sure we get the right data if we end up
         // predicating false
@@ -3702,9 +3697,9 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
+      execution_context = inner_ctx;
       execution_context->add_reference();
       runtime->register_local_context(inner_ctx);
-      execution_context = inner_ctx;
       return inner_ctx;
     }
 
@@ -9797,7 +9792,7 @@ namespace Legion {
       if (redop != 0)
       {
         // Set the future if we actually ran the task or we speculated
-        if ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists())
+        if (predication_state != RESOLVE_FALSE_STATE)
         {
 #ifdef DEBUG_LEGION
           assert(!reduction_instances.empty());
