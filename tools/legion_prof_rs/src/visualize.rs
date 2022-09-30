@@ -111,6 +111,15 @@ struct ScaleRecord {
     max_level: u32,
 }
 
+fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord> {
+    let proc_id = state.prof_uid_proc.get(&prof_uid)?;
+    Some(DependencyRecord(
+        proc_id.node_id().0,
+        proc_id.proc_in_node(),
+        prof_uid.0,
+    ))
+}
+
 impl Proc {
     fn emit_tsv_point(
         &self,
@@ -191,11 +200,7 @@ impl Proc {
             _ => op_id.map(|id| id.0),
         };
 
-        let render_op = |prof_uid: &ProfUID| {
-            state.prof_uid_proc.get(prof_uid).map(|proc_id| {
-                DependencyRecord(proc_id.node_id().0, proc_id.proc_in_node(), prof_uid.0)
-            })
-        };
+        let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
 
         let deps = spy_state.spy_op_deps.get(&base.prof_uid);
 
@@ -1652,21 +1657,15 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     {
         let filename = path.join("json").join("critical_path.json");
         let file = File::create(filename)?;
-        let render_op = |prof_uid: &ProfUID| {
-            state.prof_uid_proc.get(prof_uid).map(|proc_id| {
-                DependencyRecord(proc_id.node_id().0, proc_id.proc_in_node(), prof_uid.0)
-            })
-        };
+        let render_op = |prof_uid: ProfUID| prof_uid_record(prof_uid, state);
         let mut critical_path = Vec::new();
-        // FIXME: Elliott: need to figure out what this `obj` field
-        // actually represents, it's not just null at the start
-        let mut last = ProfUID(0); // Hack: this is kind of awful, but zero happens to be unused
+        let mut last = None;
         for node in &spy_state.critical_path {
             critical_path.push(CriticalPathRecord {
-                tuple: render_op(node),
-                obj: render_op(&last),
+                tuple: render_op(*node),
+                obj: last.and_then(render_op),
             });
-            last = *node;
+            last = Some(*node);
         }
         serde_json::to_writer(file, &critical_path)?;
     }
