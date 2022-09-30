@@ -512,7 +512,7 @@ impl Mem {
 
 #[derive(Debug)]
 pub struct MemProcAffinity {
-    mem_id: MemID,
+    _mem_id: MemID,
     bandwidth: u32,
     latency: u32,
     pub best_aff_proc: ProcID,
@@ -521,7 +521,7 @@ pub struct MemProcAffinity {
 impl MemProcAffinity {
     fn new(mem_id: MemID, bandwidth: u32, latency: u32, best_aff_proc: ProcID) -> Self {
         MemProcAffinity {
-            mem_id,
+            _mem_id: mem_id,
             bandwidth,
             latency,
             best_aff_proc,
@@ -853,7 +853,7 @@ pub struct IPartID(pub u64);
 
 #[derive(Debug)]
 pub struct IPart {
-    ipart_id: IPartID,
+    _ipart_id: IPartID,
     name: Option<String>,
     pub parent: Option<ISpaceID>,
     disjoint: Option<bool>,
@@ -863,7 +863,7 @@ pub struct IPart {
 impl IPart {
     fn new(ipart_id: IPartID) -> Self {
         IPart {
-            ipart_id,
+            _ipart_id: ipart_id,
             name: None,
             parent: None,
             disjoint: None,
@@ -923,18 +923,18 @@ pub struct FieldID(pub u32);
 
 #[derive(Debug)]
 pub struct Field {
-    fspace_id: FSpaceID,
-    field_id: FieldID,
-    size: u64,
+    _fspace_id: FSpaceID,
+    _field_id: FieldID,
+    _size: u64,
     pub name: String,
 }
 
 impl Field {
     fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
         Field {
-            fspace_id,
-            field_id,
-            size,
+            _fspace_id: fspace_id,
+            _field_id: field_id,
+            _size: size,
             name: name.to_owned(),
         }
     }
@@ -945,19 +945,19 @@ pub struct TreeID(pub u32);
 
 #[derive(Debug)]
 pub struct Region {
-    ispace_id: ISpaceID,
-    fspace_id: FSpaceID,
-    tree_id: TreeID,
-    name: String,
+    _ispace_id: ISpaceID,
+    _fspace_id: FSpaceID,
+    _tree_id: TreeID,
+    _name: String,
 }
 
 impl Region {
     fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
         Region {
-            ispace_id,
-            fspace_id,
-            tree_id,
-            name: name.to_owned(),
+            _ispace_id: ispace_id,
+            _fspace_id: fspace_id,
+            _tree_id: tree_id,
+            _name: name.to_owned(),
         }
     }
 }
@@ -1013,8 +1013,8 @@ impl SpyOp {
 
 #[derive(Debug)]
 pub struct Align {
-    field_id: FieldID,
-    eqk: u32,
+    _field_id: FieldID,
+    _eqk: u32,
     pub align_desc: u32,
     pub has_align: bool,
 }
@@ -1022,8 +1022,8 @@ pub struct Align {
 impl Align {
     fn new(field_id: FieldID, eqk: u32, align_desc: u32, has_align: bool) -> Self {
         Align {
-            field_id,
-            eqk,
+            _field_id: field_id,
+            _eqk: eqk,
             align_desc,
             has_align,
         }
@@ -1503,7 +1503,7 @@ impl From<spy::serialize::EventID> for EventID {
 pub struct CopyInfo {
     src_inst: InstID,
     dst_inst: InstID,
-    fevent: EventID,
+    _fevent: EventID,
     num_fields: u32,
     request_type: u32,
     num_hops: u32,
@@ -1531,12 +1531,12 @@ impl fmt::Display for CopyInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    src: MemID,
-    dst: MemID,
+    _src: MemID,
+    _dst: MemID,
     pub size: u64,
     time_range: TimeRange,
-    fevent: EventID,
-    num_requests: u32,
+    _fevent: EventID,
+    _num_requests: u32,
     pub copy_info: Vec<CopyInfo>,
 }
 
@@ -1553,12 +1553,12 @@ impl Copy {
     ) -> Self {
         Copy {
             base,
-            src,
-            dst,
+            _src: src,
+            _dst: dst,
             size,
             time_range,
-            fevent,
-            num_requests,
+            _fevent: fevent,
+            _num_requests: num_requests,
             copy_info,
         }
     }
@@ -1570,7 +1570,7 @@ impl Copy {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    dst: MemID,
+    _dst: MemID,
     time_range: TimeRange,
 }
 
@@ -1578,7 +1578,7 @@ impl Fill {
     fn new(base: Base, dst: MemID, time_range: TimeRange) -> Self {
         Fill {
             base,
-            dst,
+            _dst: dst,
             time_range,
         }
     }
@@ -2771,7 +2771,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let copy_info = CopyInfo {
                 src_inst: *src_inst,
                 dst_inst: *dst_inst,
-                fevent: *fevent,
+                _fevent: *fevent,
                 num_fields: *num_fields,
                 request_type: *request_type,
                 num_hops: *num_hops,
