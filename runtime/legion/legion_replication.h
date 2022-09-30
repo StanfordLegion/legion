@@ -2362,6 +2362,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void check_point_requirements(
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local);
