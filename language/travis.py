@@ -32,6 +32,7 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
             num_cores = len(os.sched_getaffinity(0))
         except AttributeError:
             # macos doesn't have sched_getaffinity
+            import multiprocessing
             num_cores = multiprocessing.cpu_count()
         install_threads = ['-j', str(num_cores)]
         # assume a non-empty LAUNCHER means we're running 2 processes/test
@@ -84,7 +85,7 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         # if not spy and not prof and not gcov and not hdf5 and not openmp and not cuda:
         #     extra_flags.append('--debug')
 
-        if prof and 'TMP_BIN_DIR' in env:
+        if (prof or spy) and 'TMP_BIN_DIR' in env:
             extra_flags.append('--legion-prof-rs=%s' % (
                 os.path.join(env['TMP_BIN_DIR'], 'legion_prof')))
 

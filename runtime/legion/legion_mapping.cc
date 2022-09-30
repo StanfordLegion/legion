@@ -1651,6 +1651,7 @@ namespace Legion {
           ready = local_lock.rdlock();
         }
       }
+      held = true;
       Internal::local_lock_list = this;
       if (paused)
         ctx->manager->resume_mapper_call(ctx);

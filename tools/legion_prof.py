@@ -226,6 +226,9 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
            str_op_id + "\n"
 
+def dump_json(value: Union[Set, List]) -> str:
+    return json.dumps(value, separators=(',', ':'))
+
 @typecheck
 def slugify(filename: str) -> str:
     # convert spaces to underscores
@@ -1164,10 +1167,11 @@ class HasWaiters(ABC):
         initiation = str(self.initiation)
         color = self.get_color()
 
-        _in = json.dumps(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        def by_prof_uid(k: List[int]) -> int: return k[2]
+        _in = dump_json(sorted(self.deps["in"], key=by_prof_uid)) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(sorted(self.deps["out"], key=by_prof_uid)) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(sorted(self.deps["children"], key=by_prof_uid)) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(sorted(self.deps["parents"], key=by_prof_uid)) if len(self.deps["parents"]) > 0 else ""
         if (level_ready != None):
             l_ready = base_level + (max_levels_ready - level_ready)
         else:
@@ -1667,10 +1671,10 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
                  level_ready: Union[int, None]
     ) -> None:
         title = repr(self)
-        _in = json.dumps(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        _in = dump_json(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         if (level_ready is not None):
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1974,10 +1978,10 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         assert self.start is not None
         assert self.stop is not None
         copy_name = repr(self)
-        _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2023,10 +2027,10 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
                  level_ready: None
     ) -> None:
         fill_name = repr(self)
-        _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2072,10 +2076,10 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
                  level_ready: None
     ) -> None:
         deppart_name = repr(self)
-        _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2150,10 +2154,10 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         assert self.ready == self.start
         inst_name = repr(self)
 
-        _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
-        out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
-        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
-        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
+        out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         # deferred allocation
         threshold = 0.0

@@ -1036,6 +1036,8 @@ namespace Legion {
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ReturnedInstanceInfo> returned_instances;
+      std::map<FieldID,size_t> field_sizes;
+      std::map<FieldID,PhysicalManager*> managers;
       std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
       const unsigned index;
@@ -2515,7 +2517,11 @@ namespace Legion {
             unsafe_mapper(false),
             safe_mapper(false),
             disable_independence_tests(false),
+#ifdef LEGION_SPY
+            legion_spy_enabled(true),
+#else
             legion_spy_enabled(false),
+#endif
             enable_test_mapper(false),
             slow_config_ok(false),
 #ifdef DEBUG_LEGION
