@@ -3073,11 +3073,15 @@ namespace Legion {
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     protected:
       template<typename T>
-      bool refine_collective_views(const FieldMaskSet<T> &views,
-          FieldMaskSet<T> &refined_views, std::set<RtEvent> &applied_events);
+      bool refine_collective_views(const FieldMask &refine_mask,
+                                   const FieldMaskSet<T> &views,
+                                   FieldMaskSet<T> &refined_views,
+                                   std::set<RtEvent> &applied_events);
       template<typename T>
-      bool refine_collective_views(const FieldMaskSet<T> &views,
-          FieldMaskSet<T> &refined_views, ReferenceMutator &mutator);
+      bool refine_collective_views(const FieldMask &refine_mask,
+                                   const FieldMaskSet<T> &views,
+                                   FieldMaskSet<T> &refined_views,
+                                   ReferenceMutator &mutator);
       template<typename T>
       bool find_collective_interfering(CollectiveView *collective,
           const std::vector<DistributedID> &instances,

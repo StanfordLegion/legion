@@ -10088,18 +10088,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    bool EquivalenceSet::refine_collective_views(const FieldMaskSet<T> &views,
-              FieldMaskSet<T> &refined_views, std::set<RtEvent> &applied_events)
+    bool EquivalenceSet::refine_collective_views(const FieldMask &refine_mask,
+                                              const FieldMaskSet<T> &views,
+                                              FieldMaskSet<T> &refined_views,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       WrapperReferenceMutator mutator(applied_events);
-      return refine_collective_views(views, refined_views, mutator);
+      return refine_collective_views(refine_mask, views, refined_views,mutator);
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    bool EquivalenceSet::refine_collective_views(const FieldMaskSet<T> &views,
-                      FieldMaskSet<T> &refined_views, ReferenceMutator &mutator)
+    bool EquivalenceSet::refine_collective_views(const FieldMask &refine_mask,
+                                                 const FieldMaskSet<T> &views,
+                                                 FieldMaskSet<T> &refined_views,
+                                                 ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       if (collective_instances.empty())
@@ -10252,7 +10256,7 @@ namespace Legion {
           // the collective views and therefore don't need to refine
           IndividualView *individual = vit->first->as_individual_view();
           const DistributedID inst_did = individual->get_manager()->did;
-          FieldMask remaining = vit->second;
+          FieldMask remaining = vit->second & refine_mask;
           for (FieldMaskSet<CollectiveView>::const_iterator it =
                 collective_instances.begin(); it !=
                 collective_instances.end(); it++)
@@ -10274,7 +10278,7 @@ namespace Legion {
           CollectiveView *collective = vit->first->as_collective_view();
           FieldMaskSet<CollectiveView>::const_iterator finder =
             collective_instances.find(collective);
-          FieldMask remaining = vit->second;
+          FieldMask remaining = vit->second & refine_mask;
           if (finder != collective_instances.end())
           {
             remaining -= finder->second;
@@ -10533,20 +10537,22 @@ namespace Legion {
         for (typename FieldMaskSet<T>::const_iterator it =
               views.begin(); it != views.end(); it++)
         {
+          FieldMask overlap = it->second & refine_mask;
+          if (!overlap)
+            continue;
           if (!it->first->is_collective_view())
           {
 #ifdef DEBUG_LEGION
             assert(it->second * refined_views.get_valid_mask());
 #endif
-            refined_views.insert(it->first, it->second);
+            refined_views.insert(it->first, overlap);
           }
           else
           {
-            const FieldMask notrefined = 
-              it->second - refined_views.get_valid_mask();
-            if (!notrefined)
+            overlap -= refined_views.get_valid_mask();
+            if (!overlap)
               continue;
-            refined_views.insert(it->first, notrefined);
+            refined_views.insert(it->first, overlap);
           }
         }
         return true;
@@ -10807,7 +10813,7 @@ namespace Legion {
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
       const FieldMaskSet<LogicalView> &valid_instances = 
-        refine_collective_views(analysis.valid_instances,
+        refine_collective_views(user_mask, analysis.valid_instances,
                                 refined_instances, applied_events)
         ? refined_instances : analysis.valid_instances;
       for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -10942,7 +10948,7 @@ namespace Legion {
       AutoLock a_lock(analysis);
       FieldMaskSet<LogicalView> refined_instances;
       const FieldMaskSet<LogicalView> &antivalid_instances = 
-        refine_collective_views(analysis.antivalid_instances,
+        refine_collective_views(user_mask, analysis.antivalid_instances,
                                 refined_instances, applied_events)
         ? refined_instances : analysis.antivalid_instances;
       for (FieldMaskSet<LogicalView>::const_iterator ait =
@@ -11078,7 +11084,7 @@ namespace Legion {
           {
             FieldMaskSet<InstanceView> refined_views;
             const FieldMaskSet<InstanceView> &red_views =
-              refine_collective_views(analysis.target_views[idx],
+              refine_collective_views(user_mask, analysis.target_views[idx],
                                       refined_views, applied_events)
               ? refined_views : analysis.target_views[idx];
             for (FieldMaskSet<InstanceView>::const_iterator rit =
@@ -12343,7 +12349,8 @@ namespace Legion {
       if (check_collectives)
       {
         FieldMaskSet<T> refined_instances;
-        if (refine_collective_views(target_insts, refined_instances, mutator))
+        if (refine_collective_views(record_mask, target_insts, 
+                                    refined_instances, mutator))
         {
           record_instances(expr, expr_covers, record_mask, refined_instances,
                            mutator, false/*check collectives*/);
@@ -12525,7 +12532,8 @@ namespace Legion {
       if (check_collectives)
       {
         FieldMaskSet<T> refined_instances;
-        if (refine_collective_views(target_insts, refined_instances, mutator))
+        if (refine_collective_views(record_mask, target_insts,
+                                    refined_instances, mutator))
         {
           record_unrestricted_instances(expr, expr_covers, record_mask,
                 refined_instances, mutator, false/*check collectives*/);
@@ -13418,14 +13426,14 @@ namespace Legion {
           continue;
         FieldMaskSet<InstanceView> refined_targets;
         const FieldMaskSet<InstanceView> &targets = !skip_check &&
-          refine_collective_views(target_views[idx],
+          refine_collective_views(update_mask, target_views[idx],
                                   refined_targets, applied_events) 
           ? refined_targets : target_views[idx];
         for (FieldMaskSet<InstanceView>::const_iterator it =
               targets.begin(); it != targets.end(); it++)
         {
           InstanceView *target = it->first;
-          FieldMask inst_mask = it->second;
+          FieldMask inst_mask = it->second & update_mask;
           if (!skip_check)
           {
             // Check first to see if this is a total valid instance
@@ -14616,7 +14624,7 @@ namespace Legion {
         {
           FieldMaskSet<InstanceView> refined_views;
           const FieldMaskSet<InstanceView> &target_views = 
-            refine_collective_views(analysis.target_views[idx],
+            refine_collective_views(release_mask, analysis.target_views[idx],
                                     refined_views, applied_events)
             ? refined_views : analysis.target_views[idx];
           for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -15722,16 +15730,7 @@ namespace Legion {
       // Two different cases here depending on whether we have a precidate 
       if (analysis.pred_guard.exists())
       {
-#ifdef DEBUG_LEGION
-        assert(!analysis.add_restriction); // shouldn't be doing this
-#endif
-        // TODO: this should be a predicated fill operation
-        // Two options:
-        // 1. Generate a phi view so we can still use the base instances
-        //    just with extra predicated fills done to them
-        // 2. We can eagerly issue fills to all the valid instances for
-        //    this expression masked by the predicate value
-        assert(false);
+        assert(false); 
       }
       else
       {
@@ -15775,7 +15774,7 @@ namespace Legion {
           WrapperReferenceMutator mutator(applied_events);
           FieldMaskSet<InstanceView> refined_views;
           const FieldMaskSet<InstanceView> &reduction_views =
-            refine_collective_views(analysis.reduction_views,
+            refine_collective_views(overwrite_mask, analysis.reduction_views,
                                     refined_views, applied_events)
             ? refined_views : analysis.reduction_views;
           for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -15797,7 +15796,7 @@ namespace Legion {
         {
           FieldMaskSet<LogicalView> refined_views;
           const FieldMaskSet<LogicalView> &views = 
-            refine_collective_views(analysis.views,
+            refine_collective_views(overwrite_mask, analysis.views,
                                     refined_views, applied_events)
             ? refined_views : analysis.views;
 #ifdef DEBUG_LEGION
@@ -15846,7 +15845,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(applied_events);
       FieldMaskSet<InstanceView> refined_views;
       const FieldMaskSet<InstanceView> &filter_views =
-        refine_collective_views(analysis.filter_views,
+        refine_collective_views(filter_mask, analysis.filter_views,
                                 refined_views, applied_events)
         ? refined_views : analysis.filter_views;
       // Filter partial first since total could flow back here
