@@ -2061,6 +2061,54 @@ impl State {
         assert!(self.has_spy_data, "no Legion Spy logs in logfile");
     }
 
+    fn traverse_dag_pre<V, N, F>(root: V, neighbors: N, mut pre: F)
+    where
+        V: std::marker::Copy + Ord,
+        N: Fn(&mut Vec<V>, V),
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        stack.push(root);
+        while let Some(node) = stack.pop() {
+            if visited.contains(&node) {
+                continue;
+            }
+            visited.insert(node);
+
+            neighbors(&mut stack, node);
+
+            pre(node);
+        }
+    }
+
+    fn traverse_dag_post<V, I, J, N, F>(roots: I, neighbors: N, mut post: F)
+    where
+        V: std::marker::Copy + Ord,
+        I: Iterator<Item = V>,
+        J: Iterator<Item = V>,
+        N: Fn(V) -> J,
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            stack.push((root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    stack.push((node, false));
+                    stack.extend(neighbors(node).map(|x| (x, true)));
+                } else {
+                    post(node);
+                }
+            }
+        }
+    }
+
     fn compute_op_preconditions(
         op: &SpyOp,
         deps: &mut Dependencies,
@@ -2068,19 +2116,12 @@ impl State {
         spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
         spy_events: &BTreeMap<EventID, SpyEvent>,
     ) {
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        stack.push(op.precondition);
-        while let Some(event_id) = stack.pop() {
-            if visited.contains(&event_id) {
-                continue;
-            }
-            visited.insert(event_id);
-
+        let neighbors = |stack: &mut Vec<_>, event_id| {
             if let Some(event) = spy_events.get(&event_id) {
                 stack.extend(event.preconditions.iter());
             }
-
+        };
+        let visit = |event_id| {
             if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
                 for op_id in op_ids {
                     if let Some(prof_uid) = op_prof_uid.get(op_id) {
@@ -2088,7 +2129,8 @@ impl State {
                     }
                 }
             }
-        }
+        };
+        Self::traverse_dag_pre(op.precondition, neighbors, visit);
     }
 
     fn compute_op_postconditions(
@@ -2098,19 +2140,12 @@ impl State {
         spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
         spy_events: &BTreeMap<EventID, SpyEvent>,
     ) {
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        stack.push(op.postcondition);
-        while let Some(event_id) = stack.pop() {
-            if visited.contains(&event_id) {
-                continue;
-            }
-            visited.insert(event_id);
-
+        let neighbors = |stack: &mut Vec<_>, event_id| {
             if let Some(event) = spy_events.get(&event_id) {
                 stack.extend(event.postconditions.iter());
             }
-
+        };
+        let visit = |event_id| {
             if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
                 for op_id in op_ids {
                     if let Some(prof_uid) = op_prof_uid.get(op_id) {
@@ -2118,7 +2153,8 @@ impl State {
                     }
                 }
             }
-        }
+        };
+        Self::traverse_dag_pre(op.postcondition, neighbors, visit);
     }
 
     fn compute_op_parent(
@@ -2162,26 +2198,15 @@ impl State {
     }
 
     fn toposort_graph(&mut self) -> Vec<ProfUID> {
-        // Postorder DFS to toposort
         let mut postorder = Vec::new();
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        for root in self.spy_op_deps.keys() {
-            stack.push((*root, true));
-            while let Some((node, first_pass)) = stack.pop() {
-                if first_pass {
-                    if visited.contains(&node) {
-                        continue;
-                    }
-                    visited.insert(node);
-                    let deps = self.spy_op_deps.get(&node).unwrap();
-                    stack.push((node, false));
-                    stack.extend(deps.in_.iter().map(|x| (*x, true)));
-                } else {
-                    postorder.push(node);
-                }
-            }
-        }
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            deps.in_.iter().copied()
+        };
+        let visit = |node| {
+            postorder.push(node);
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
         postorder
     }
 
@@ -2258,46 +2283,28 @@ impl State {
         let empty_path = (0, Vec::new());
 
         let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        for root in self.spy_op_deps.keys() {
-            stack.push((*root, true));
-            while let Some((node, first_pass)) = stack.pop() {
-                if first_pass {
-                    if visited.contains(&node) {
-                        continue;
-                    }
-                    visited.insert(node);
-                    let deps = self.spy_op_deps.get(&node).unwrap();
-                    stack.push((node, false));
-                    stack.extend(deps.children.iter().map(|x| (*x, true)));
-                    stack.extend(deps.in_.iter().map(|x| (*x, true)));
-                } else {
-                    let deps = self.spy_op_deps.get(&node).unwrap();
-                    let long_in = deps
-                        .in_
-                        .iter()
-                        .map(|dep| longest_paths.get(dep).unwrap())
-                        .fold(&empty_path, path_max);
-                    let long_child = deps
-                        .children
-                        .iter()
-                        .map(|dep| longest_paths.get(dep).unwrap())
-                        .fold(&empty_path, path_max);
-                    let duration = long_in.0 + long_child.0 + self.compute_duration(node);
-                    let mut path = long_in.1.to_owned();
-                    path.extend(long_child.1.iter());
-                    path.push(node);
-                    longest_paths.insert(node, (duration, path));
-                }
-            }
-        }
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let children = deps.children.iter().copied();
+            children.chain(deps.in_.iter().copied())
+        };
+        let visit = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let path = |dep| longest_paths.get(dep).unwrap();
+            let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
+            let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
+            let duration = long_in.0 + long_child.0 + self.compute_duration(node);
+            let mut path = long_in.1.to_owned();
+            path.extend(long_child.1.iter());
+            path.push(node);
+            longest_paths.insert(node, (duration, path));
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
         self.critical_path = longest_paths
             .values()
             .fold(&empty_path, path_max)
             .1
             .to_owned();
-        dbg!(&self.critical_path);
     }
 
     pub fn postprocess_spy_records(&mut self) {
