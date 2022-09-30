@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
     ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
-    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
+    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -117,6 +117,7 @@ impl Proc {
         f: &mut csv::Writer<File>,
         point: &ProcPoint,
         state: &State,
+        spy_state: &SpyState,
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
         let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
@@ -196,7 +197,7 @@ impl Proc {
             })
         };
 
-        let deps = state.spy_op_deps.get(&base.prof_uid);
+        let deps = spy_state.spy_op_deps.get(&base.prof_uid);
 
         let mut in_ = String::new();
         let mut out = String::new();
@@ -308,7 +309,12 @@ impl Proc {
         Ok(())
     }
 
-    fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
+    fn emit_tsv<P: AsRef<Path>>(
+        &self,
+        path: P,
+        state: &State,
+        spy_state: &SpyState,
+    ) -> io::Result<ProcessorRecord> {
         let mut filename = PathBuf::new();
         filename.push("tsv");
         filename.push(format!("Proc_0x{:x}.tsv", self.proc_id));
@@ -318,7 +324,7 @@ impl Proc {
 
         for point in &self.time_points {
             if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
+                self.emit_tsv_point(&mut f, point, state, spy_state)?;
             }
         }
 
@@ -1475,6 +1481,7 @@ fn write_file<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 
 pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
+    spy_state: &SpyState,
     path: P,
     force: bool,
 ) -> io::Result<()> {
@@ -1500,7 +1507,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         .par_iter()
         .filter(|proc| !proc.is_empty())
         .map(|proc| {
-            proc.emit_tsv(&path, state)
+            proc.emit_tsv(&path, state, spy_state)
                 .map(|record| (proc.proc_id, record))
         })
         .collect::<io::Result<_>>()?;
@@ -1654,7 +1661,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         // FIXME: Elliott: need to figure out what this `obj` field
         // actually represents, it's not just null at the start
         let mut last = ProfUID(0); // Hack: this is kind of awful, but zero happens to be unused
-        for node in &state.critical_path {
+        for node in &spy_state.critical_path {
             critical_path.push(CriticalPathRecord {
                 tuple: render_op(node),
                 obj: render_op(&last),

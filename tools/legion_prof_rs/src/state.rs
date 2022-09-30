@@ -1738,15 +1738,6 @@ pub struct State {
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     copy_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
     pub has_prof_data: bool,
-    has_spy_data: bool,
-    spy_ops: BTreeMap<OpID, SpyOp>,
-    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_parent: BTreeMap<OpID, OpID>,
-    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
-    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
-    spy_events: BTreeMap<EventID, SpyEvent>,
-    pub critical_path: Vec<ProfUID>,
 }
 
 impl State {
@@ -1994,6 +1985,185 @@ impl State {
             .or_insert_with(|| FSpace::new(fspace_id))
     }
 
+    fn update_last_time(&mut self, value: Timestamp) {
+        self.last_time = max(value, self.last_time);
+    }
+
+    pub fn process_records(&mut self, records: &Vec<Record>) {
+        // We need a separate table here because instances can't be
+        // immediately linked to their associated memory from the
+        // logs. Therefore we defer this process until all records
+        // have been processed.
+        let mut insts = BTreeMap::new();
+        for record in records {
+            process_record(record, self, &mut insts);
+        }
+        for (key, inst) in insts {
+            if let Some(mem_id) = inst.mem_id {
+                let mem = self.mems.get_mut(&mem_id).unwrap();
+                mem.insts.insert(key, inst);
+            } else {
+                unreachable!();
+            }
+        }
+        self.has_prof_data = true;
+    }
+
+    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
+        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
+            let proc = self.procs.get(proc_id).unwrap();
+            let entry = &proc.entry(prof_uid);
+            let mut total = 0;
+            let mut start = entry.time_range.start.unwrap().0;
+            for wait in &entry.waiters.wait_intervals {
+                total += wait.start.0 - start;
+                start = wait.end.0;
+            }
+            total += entry.time_range.stop.unwrap().0 - start;
+            return total;
+        }
+        0
+    }
+
+    pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
+        if start.is_none() && stop.is_none() {
+            return;
+        }
+        let start = start.unwrap_or(0.into());
+        let stop = stop.unwrap_or(self.last_time);
+
+        assert!(start <= stop);
+        assert!(start >= 0.into());
+        assert!(stop <= self.last_time);
+
+        for proc in self.procs.values_mut() {
+            proc.trim_time_range(start, stop);
+        }
+        for mem in self.mems.values_mut() {
+            mem.trim_time_range(start, stop);
+        }
+        for chan in self.chans.values_mut() {
+            chan.trim_time_range(start, stop);
+        }
+
+        self.last_time = stop - start;
+    }
+
+    pub fn check_message_latencies(&self, threshold: f64 /* us */, warn_percentage: f64) {
+        assert!(threshold >= 0.0);
+        assert!(warn_percentage >= 0.0 && warn_percentage < 100.0);
+
+        let mut total_messages = 0;
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::from_us(0);
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(&variant_id).unwrap();
+                if !variant.message || variant.ordered_vc {
+                    continue;
+                }
+                total_messages += meta_tasks.len();
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
+                    let latency =
+                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
+                    if threshold <= latency.to_us() {
+                        bad_messages += 1;
+                    }
+                    longest_latency = max(longest_latency, latency);
+                }
+            }
+        }
+        if total_messages == 0 {
+            return;
+        }
+        let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
+        if warn_percentage <= percentage {
+            for _ in 0..5 {
+                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            }
+            println!(
+                "WARNING: A significant number of long latency messages \
+                    were detected during this run meaning that the network \
+                    was likely congested and could be causing a significant \
+                    performance degredation. We detected {} messages that took \
+                    longer than {:.2}us to run, representing {:.2}% of {} total \
+                    messages. The longest latency message required {:.2}us to \
+                    execute. Please report this case to the Legion developers \
+                    along with an accompanying Legion Prof profile so we can \
+                    better understand why the network is so congested.",
+                bad_messages,
+                threshold,
+                percentage,
+                total_messages,
+                longest_latency.to_us()
+            );
+            for _ in 0..5 {
+                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            }
+        }
+    }
+
+    pub fn sort_time_range(&mut self) {
+        self.procs
+            .par_iter_mut()
+            .for_each(|(_, proc)| proc.sort_time_range());
+        self.mems
+            .par_iter_mut()
+            .for_each(|(_, mem)| mem.sort_time_range());
+        self.chans
+            .par_iter_mut()
+            .for_each(|(_, chan)| chan.sort_time_range());
+    }
+
+    pub fn assign_colors(&mut self) {
+        let num_colors = (self.variants.len()
+            + self.meta_variants.len()
+            + self.op_kinds.len()
+            + self.mapper_call_kinds.len()
+            + self.runtime_call_kinds.len()) as u64;
+        let mut lfsr = LFSR::new(num_colors);
+        let num_colors = lfsr.max_value;
+        for variant in self.variants.values_mut() {
+            variant.set_color(compute_color(lfsr.next(), num_colors));
+        }
+        for variant in self.meta_variants.values_mut() {
+            variant.set_color(match variant.variant_id.0 {
+                1 => Color(0x006600), // Remote message => Evergreen
+                2 => Color(0x333399), // Post-Execution => Deep Purple
+                6 => Color(0x990000), // Garbage Collection => Crimson
+                7 => Color(0x0000FF), // Logical Dependence Analysis => Duke Blue
+                8 => Color(0x009900), // Operation Physical Analysis => Green
+                9 => Color(0x009900), // Task Physical Analysis => Green
+                _ => compute_color(lfsr.next(), num_colors),
+            });
+        }
+        for op_kind in self.op_kinds.values_mut() {
+            op_kind.set_color(compute_color(lfsr.next(), num_colors));
+        }
+        for kind in self.mapper_call_kinds.values_mut() {
+            kind.set_color(compute_color(lfsr.next(), num_colors));
+        }
+        for kind in self.runtime_call_kinds.values_mut() {
+            kind.set_color(compute_color(lfsr.next(), num_colors));
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SpyState {
+    has_spy_data: bool,
+    spy_ops: BTreeMap<OpID, SpyOp>,
+    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_parent: BTreeMap<OpID, OpID>,
+    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
+    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
+    spy_events: BTreeMap<EventID, SpyEvent>,
+    pub critical_path: Vec<ProfUID>,
+}
+
+impl SpyState {
     fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
         assert!(pre != post);
         self.spy_events
@@ -2028,30 +2198,6 @@ impl State {
             .entry(parent)
             .or_insert_with(|| BTreeSet::new())
             .insert(child);
-    }
-
-    fn update_last_time(&mut self, value: Timestamp) {
-        self.last_time = max(value, self.last_time);
-    }
-
-    pub fn process_records(&mut self, records: &Vec<Record>) {
-        // We need a separate table here because instances can't be
-        // immediately linked to their associated memory from the
-        // logs. Therefore we defer this process until all records
-        // have been processed.
-        let mut insts = BTreeMap::new();
-        for record in records {
-            process_record(record, self, &mut insts);
-        }
-        for (key, inst) in insts {
-            if let Some(mem_id) = inst.mem_id {
-                let mem = self.mems.get_mut(&mem_id).unwrap();
-                mem.insts.insert(key, inst);
-            } else {
-                unreachable!();
-            }
-        }
-        self.has_prof_data = true;
     }
 
     pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
@@ -2251,23 +2397,7 @@ impl State {
         self.transitive_reduce_graph(&toposort);
     }
 
-    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
-        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
-            let proc = self.procs.get(proc_id).unwrap();
-            let entry = &proc.entry(prof_uid);
-            let mut total = 0;
-            let mut start = entry.time_range.start.unwrap().0;
-            for wait in &entry.waiters.wait_intervals {
-                total += wait.start.0 - start;
-                start = wait.end.0;
-            }
-            total += entry.time_range.stop.unwrap().0 - start;
-            return total;
-        }
-        0
-    }
-
-    fn compute_critical_path(&mut self) {
+    fn compute_critical_path(&mut self, state: &State) {
         // Postorder DFS walking both in and child edges, computing the
         // longest path at each node based on the sum of the longest input and
         // longest child
@@ -2293,7 +2423,7 @@ impl State {
             let path = |dep| longest_paths.get(dep).unwrap();
             let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
             let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
-            let duration = long_in.0 + long_child.0 + self.compute_duration(node);
+            let duration = long_in.0 + long_child.0 + state.compute_duration(node);
             let mut path = long_in.1.to_owned();
             path.extend(long_child.1.iter());
             path.push(node);
@@ -2307,15 +2437,15 @@ impl State {
             .to_owned();
     }
 
-    pub fn postprocess_spy_records(&mut self) {
+    pub fn postprocess_spy_records(&mut self, state: &State) {
         if !self.has_spy_data {
             println!("No Legion Spy data, skipping postprocess step");
             return;
         }
 
         // Process tasks first
-        for op_id in self.tasks.keys() {
-            let prof_uid = self.op_prof_uid.get(op_id).unwrap();
+        for op_id in state.tasks.keys() {
+            let prof_uid = state.op_prof_uid.get(op_id).unwrap();
             let mut deps = self
                 .spy_op_deps
                 .entry(*prof_uid)
@@ -2327,23 +2457,23 @@ impl State {
             Self::compute_op_preconditions(
                 &op,
                 &mut deps,
-                &self.op_prof_uid,
+                &state.op_prof_uid,
                 &self.spy_op_by_postcondition,
                 &self.spy_events,
             );
             Self::compute_op_postconditions(
                 &op,
                 &mut deps,
-                &self.op_prof_uid,
+                &state.op_prof_uid,
                 &self.spy_op_by_precondition,
                 &self.spy_events,
             );
-            Self::compute_op_parent(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_parent);
-            Self::compute_op_children(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_children);
+            Self::compute_op_parent(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_parent);
+            Self::compute_op_children(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_children);
         }
 
         // Now add the implicit dependencies on meta tasks/mapper calls/etc.
-        for proc in self.procs.values() {
+        for proc in state.procs.values() {
             for (uid, entry) in &proc.entries {
                 if let ProcEntryKind::ProfTask = entry.kind {
                     // FIXME: Elliott: legion_prof.py seems to think ProfTask
@@ -2352,7 +2482,7 @@ impl State {
                     continue;
                 }
                 if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
-                    if let Some(task) = self.find_task(initiation_op) {
+                    if let Some(task) = state.find_task(initiation_op) {
                         let task_stop = task.time_range.stop;
                         let task_uid = task.base.prof_uid;
                         let before = entry.time_range.stop < task_stop;
@@ -2384,131 +2514,7 @@ impl State {
         // Reduce the graph
         self.simplify_spy_graph();
 
-        self.compute_critical_path();
-    }
-
-    pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
-        if start.is_none() && stop.is_none() {
-            return;
-        }
-        let start = start.unwrap_or(0.into());
-        let stop = stop.unwrap_or(self.last_time);
-
-        assert!(start <= stop);
-        assert!(start >= 0.into());
-        assert!(stop <= self.last_time);
-
-        for proc in self.procs.values_mut() {
-            proc.trim_time_range(start, stop);
-        }
-        for mem in self.mems.values_mut() {
-            mem.trim_time_range(start, stop);
-        }
-        for chan in self.chans.values_mut() {
-            chan.trim_time_range(start, stop);
-        }
-
-        self.last_time = stop - start;
-    }
-
-    pub fn check_message_latencies(&self, threshold: f64 /* us */, warn_percentage: f64) {
-        assert!(threshold >= 0.0);
-        assert!(warn_percentage >= 0.0 && warn_percentage < 100.0);
-
-        let mut total_messages = 0;
-        let mut bad_messages = 0;
-        let mut longest_latency = Timestamp::from_us(0);
-        for proc in self.procs.values() {
-            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
-                let variant = self.meta_variants.get(&variant_id).unwrap();
-                if !variant.message || variant.ordered_vc {
-                    continue;
-                }
-                total_messages += meta_tasks.len();
-                for meta_uid in meta_tasks {
-                    let meta_task = proc.entry(*meta_uid);
-                    let latency =
-                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
-                    if threshold <= latency.to_us() {
-                        bad_messages += 1;
-                    }
-                    longest_latency = max(longest_latency, latency);
-                }
-            }
-        }
-        if total_messages == 0 {
-            return;
-        }
-        let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
-        if warn_percentage <= percentage {
-            for _ in 0..5 {
-                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            }
-            println!(
-                "WARNING: A significant number of long latency messages \
-                    were detected during this run meaning that the network \
-                    was likely congested and could be causing a significant \
-                    performance degredation. We detected {} messages that took \
-                    longer than {:.2}us to run, representing {:.2}% of {} total \
-                    messages. The longest latency message required {:.2}us to \
-                    execute. Please report this case to the Legion developers \
-                    along with an accompanying Legion Prof profile so we can \
-                    better understand why the network is so congested.",
-                bad_messages,
-                threshold,
-                percentage,
-                total_messages,
-                longest_latency.to_us()
-            );
-            for _ in 0..5 {
-                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            }
-        }
-    }
-
-    pub fn sort_time_range(&mut self) {
-        self.procs
-            .par_iter_mut()
-            .for_each(|(_, proc)| proc.sort_time_range());
-        self.mems
-            .par_iter_mut()
-            .for_each(|(_, mem)| mem.sort_time_range());
-        self.chans
-            .par_iter_mut()
-            .for_each(|(_, chan)| chan.sort_time_range());
-    }
-
-    pub fn assign_colors(&mut self) {
-        let num_colors = (self.variants.len()
-            + self.meta_variants.len()
-            + self.op_kinds.len()
-            + self.mapper_call_kinds.len()
-            + self.runtime_call_kinds.len()) as u64;
-        let mut lfsr = LFSR::new(num_colors);
-        let num_colors = lfsr.max_value;
-        for variant in self.variants.values_mut() {
-            variant.set_color(compute_color(lfsr.next(), num_colors));
-        }
-        for variant in self.meta_variants.values_mut() {
-            variant.set_color(match variant.variant_id.0 {
-                1 => Color(0x006600), // Remote message => Evergreen
-                2 => Color(0x333399), // Post-Execution => Deep Purple
-                6 => Color(0x990000), // Garbage Collection => Crimson
-                7 => Color(0x0000FF), // Logical Dependence Analysis => Duke Blue
-                8 => Color(0x009900), // Operation Physical Analysis => Green
-                9 => Color(0x009900), // Task Physical Analysis => Green
-                _ => compute_color(lfsr.next(), num_colors),
-            });
-        }
-        for op_kind in self.op_kinds.values_mut() {
-            op_kind.set_color(compute_color(lfsr.next(), num_colors));
-        }
-        for kind in self.mapper_call_kinds.values_mut() {
-            kind.set_color(compute_color(lfsr.next(), num_colors));
-        }
-        for kind in self.runtime_call_kinds.values_mut() {
-            kind.set_color(compute_color(lfsr.next(), num_colors));
-        }
+        self.compute_critical_path(state);
     }
 }
 
@@ -2986,7 +2992,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
     }
 }
 
-fn process_spy_record(record: &spy::serialize::Record, state: &mut State) {
+fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
     use spy::serialize::Record;
 
     match record {
