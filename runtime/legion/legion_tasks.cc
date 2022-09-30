@@ -7057,6 +7057,13 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    Operation* PointTask::get_origin_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_origin_operation();
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::is_reducing_future(void) const
     //--------------------------------------------------------------------------
     {
@@ -7658,6 +7665,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->find_shard_participants(shards);
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -12468,6 +12482,16 @@ namespace Legion {
         return launch_space->get_volume();
       else
         return index_owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_remote());
+#endif
+      return index_owner->find_shard_participants(shards);
     }
     
 #ifdef NO_EXPLICIT_COLLECTIVES

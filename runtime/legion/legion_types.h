@@ -884,6 +884,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+      SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
@@ -1130,6 +1131,7 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
+        "Send Remote Context Collective Rendezvous",                  \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Cancel Equivalence Sets Subscription",                  \
@@ -1648,7 +1650,7 @@ namespace Legion {
       COLLECTIVE_LOC_100 = 100,
       COLLECTIVE_LOC_101 = 101,
       COLLECTIVE_LOC_102 = 102,
-      //COLLECTIVE_LOC_103 = 103,
+      COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
       COLLECTIVE_LOC_105 = 105
     };

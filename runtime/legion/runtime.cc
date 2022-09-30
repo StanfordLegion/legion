@@ -12643,6 +12643,12 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
+          case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
+            {
+              runtime->handle_remote_context_collective_rendezvous(derez,
+                                                    remote_address_space);
+              break;
+            }
           case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
             {
               runtime->handle_compute_equivalence_sets_request(derez,
@@ -16479,39 +16485,46 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    ShardedMapping* ShardingFunction::find_sharded_mapping(
-               IndexSpaceNode *full_space, IndexSpace shard_space, size_t radix)
+    bool ShardingFunction::find_shard_participants(IndexSpaceNode *full_space,
+                     IndexSpace shard_space, std::vector<ShardID> &participants)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(participants.empty());
+#endif
       std::pair<IndexSpace,IndexSpace> key(full_space->handle, shard_space); 
       {
         AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
-        std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*>::
-          const_iterator finder = shard_mappings.find(key);
-        if (finder != shard_mappings.end())
+        std::map<std::pair<IndexSpace,IndexSpace>,std::vector<ShardID> >::
+          const_iterator finder = shard_participants.find(key);
+        if (finder != shard_participants.end())
         {
-          finder->second->add_reference();
-          return finder->second;
+          // If the vector is empty that means all the shards are 
+          // participants so we didn't need to record them all 
+          if (!finder->second.empty())
+          {
+            // Record the specific participating shards
+            participants = finder->second;
+            return false;
+          }
+          else
+            return true;
         }
       }
       std::set<ShardID> range_shards;
       full_space->compute_range_shards(this, shard_space,
           manager->shard_points, manager->shard_domain, range_shards);
+#ifdef DEBUG_LEGION
+      // Should always have at least one shard participant
+      assert(!range_shards.empty());
+#endif
+      // Only need to record the results if they aren't all participating
+      if (range_shards.size() < manager->total_shards)
+        participants.insert(participants.end(), 
+            range_shards.begin(), range_shards.end());
       AutoLock s_lock(sharding_lock);
-      std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*>::
-        const_iterator finder = shard_mappings.find(key);
-      if (finder != shard_mappings.end())
-      {
-        finder->second->add_reference();
-        return finder->second;
-      }
-      else
-      {
-        ShardedMapping *mapping = new ShardedMapping(range_shards, radix);
-        mapping->add_reference(2/*two references*/);
-        shard_mappings[key] = mapping;
-        return mapping;
-      }
+      shard_participants[key] = participants;
+      return participants.empty();
     }
 
     /////////////////////////////////////////////////////////////
@@ -22579,6 +22592,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_collective_rendezvous(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24790,6 +24812,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_physical_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_collective_rendezvous(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_collective_rendezvous(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

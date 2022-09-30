@@ -392,6 +392,7 @@ namespace Legion {
       virtual MemoizableOp* get_memoizable(void) { return NULL; }
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = false; return true; }
+      virtual Operation* get_origin_operation(void) { return this; }
     protected:
       // Base call
       void activate_operation(void);
@@ -532,6 +533,7 @@ namespace Legion {
       virtual size_t get_collective_points(void) const;
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // Collective instance support
@@ -1782,6 +1784,7 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -3814,6 +3817,7 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -4049,6 +4053,7 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instances
@@ -4258,6 +4263,7 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
     protected:
@@ -4411,6 +4417,7 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
     protected:
@@ -4587,6 +4594,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
+      virtual Operation* get_origin_operation(void) 
+        { assert(false); return NULL; } // should never be called on remote ops
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,

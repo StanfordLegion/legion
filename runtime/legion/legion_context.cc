@@ -10930,7 +10930,7 @@ namespace Legion {
         }
       }
       if (!to_construct.empty())
-        construct_collective_mapping(to_construct);
+        construct_collective_mapping(key, op, to_construct);
     }
 
     //--------------------------------------------------------------------------
@@ -11033,8 +11033,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::construct_collective_mapping(
-                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    void InnerContext::construct_collective_mapping(const RendezvousKey &key,
+        Operation *op, std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
     //--------------------------------------------------------------------------
     {
       const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
@@ -19865,6 +19865,7 @@ namespace Legion {
       ReplIndexDetachOp *op = runtime->get_available_repl_index_detach_op();
       Future result =
         resources.impl->detach(this, op, flush, unordered, provenance);
+      op->initialize_replication(this);
       if (!add_to_dependence_queue(op, unordered))
       {
 #ifdef DEBUG_LEGION
@@ -20388,6 +20389,20 @@ namespace Legion {
       }
       else
         return InnerContext::add_to_dependence_queue(op, unordered, outermost);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::construct_collective_mapping(
+                       const RendezvousKey &key, Operation *op,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
+      // Need to perform the rendezvous through the shard manager with 
+      // any other participating shards
+      shard_manager->construct_collective_mapping(key, op, rendezvous);
     }
 
     //--------------------------------------------------------------------------
@@ -22855,6 +22870,69 @@ namespace Legion {
 #endif
         return physical_contexts[index]; 
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::rendezvous_collective_mapping(Operation *op,
+          unsigned requirement_index, unsigned analysis_index,
+          RendezvousResult *result, AddressSpaceID source, LogicalRegion region,
+          const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(source == runtime->address_space);
+#endif
+      // Send this back to the owner node
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(context_uid);
+        rez.serialize(op->get_origin_operation());
+        rez.serialize(requirement_index);
+        rez.serialize(analysis_index);
+        rez.serialize(result);
+        rez.serialize(region);
+        rez.serialize<size_t>(insts.size());
+        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
+              it = insts.begin(); it != insts.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+      runtime->send_remote_context_collective_rendezvous(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_collective_rendezvous(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      Operation *op;
+      derez.deserialize(op);
+      unsigned requirement_index, analysis_index;
+      derez.deserialize(requirement_index);
+      derez.deserialize(analysis_index);
+      RendezvousResult *result;
+      derez.deserialize(result);
+      LogicalRegion region;
+      derez.deserialize(region);
+      size_t num_insts;
+      derez.deserialize(num_insts);
+      LegionVector<std::pair<DistributedID,FieldMask> > instances(num_insts);
+      for (unsigned idx = 0; idx < num_insts; idx++)
+      {
+        derez.deserialize(instances[idx].first);
+        derez.deserialize(instances[idx].second);
+      }
+
+      InnerContext *context = runtime->find_context(context_uid);
+      context->rendezvous_collective_mapping(op, requirement_index,
+          analysis_index, result, source, region, instances);
     }
 
     //--------------------------------------------------------------------------

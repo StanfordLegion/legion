@@ -2462,6 +2462,21 @@ namespace Legion {
       return runtime->forest->get_node(internal_space)->get_volume();
     }
 
+    //--------------------------------------------------------------------------
+    bool ReplIndexTask::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
+      if (sharding_space.exists())
+        return sharding_function->find_shard_participants(launch_space,
+                                                sharding_space, shards);
+      else
+        return sharding_function->find_shard_participants(launch_space,
+                                          launch_space->handle, shards);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Merge Close Op 
     /////////////////////////////////////////////////////////////
@@ -3604,6 +3619,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReplIndexFillOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
+      if (sharding_space.exists())
+        return sharding_function->find_shard_participants(launch_space,
+                                                sharding_space, shards);
+      else
+        return sharding_function->find_shard_participants(launch_space,
+                                          launch_space->handle, shards);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
@@ -4506,6 +4536,21 @@ namespace Legion {
       }
       else // The next shard is ourself, so we can do the normal thing
         IndexCopyOp::record_intra_space_dependence(point, next, point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexCopyOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
+      if (sharding_space.exists())
+        return sharding_function->find_shard_participants(launch_space,
+                                                sharding_space, shards);
+      else
+        return sharding_function->find_shard_participants(launch_space,
+                                          launch_space->handle, shards);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5785,6 +5830,19 @@ namespace Legion {
       else // singular so just do the normal thing
         return forest->create_partition_by_preimage_range(op, pid, projection, 
                                                  instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDependentPartitionOp::find_shard_participants(
+                                                   std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_index_space);
+      assert(sharding_function != NULL);
+#endif
+      return sharding_function->find_shard_participants(launch_space,
+                                        launch_space->handle, shards);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8086,6 +8144,7 @@ namespace Legion {
     {
       activate_index_attach();
       collective = NULL;
+      participants = NULL;
       sharding_function = NULL;
     }
 
@@ -8096,6 +8155,8 @@ namespace Legion {
       deactivate_index_attach();
       if (collective != NULL)
         delete collective;
+      if (participants != NULL)
+        delete participants;
       runtime->free_repl_index_attach_op(this);
     }
 
@@ -8111,6 +8172,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < points.size(); idx++)
         spaces[idx] = points[idx]->get_requirement().region.get_index_space();
       collective->exchange_spaces(spaces);
+      participants = new ShardParticipantsExchange(ctx, COLLECTIVE_LOC_103);
+      participants->exchange(points.size() > 0);
     }
 
     //--------------------------------------------------------------------------
@@ -8166,6 +8229,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+      {
+        // Still need to wait for our collectives to be done
+        complete_mapping();
+        const RtEvent collective_done =
+          participants->perform_collective_wait(false/*block*/);
+        complete_execution(collective_done);
+      }
+      else
+        IndexAttachOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexAttachOp::check_point_requirements(
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
@@ -8216,6 +8295,17 @@ namespace Legion {
       return all_direct_children.sync_all_reduce(local);
     }
 
+    //--------------------------------------------------------------------------
+    bool ReplIndexAttachOp::find_shard_participants(
+                                                   std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants != NULL);
+#endif
+      return participants->find_shard_participants(shards);  
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Detach Op 
     /////////////////////////////////////////////////////////////
@@ -8258,6 +8348,7 @@ namespace Legion {
     {
       activate_index_detach();
       sharding_function = NULL;
+      participants = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -8265,7 +8356,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_index_detach();
+      if (participants != NULL)
+        delete participants;
       runtime->free_repl_index_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      participants = new ShardParticipantsExchange(ctx, COLLECTIVE_LOC_103);
+      participants->exchange(points.size() > 0);
     }
 
     //--------------------------------------------------------------------------
@@ -8302,6 +8403,33 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+      {
+        // Still need to make sure our collective is done
+        complete_mapping();
+        const RtEvent collective_done =
+          participants->perform_collective_wait(false/*block*/);
+        complete_execution(collective_done);
+      }
+      else
+        IndexDetachOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexDetachOp::find_shard_participants(
+                                                   std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants != NULL);
+#endif
+      return participants->find_shard_participants(shards);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11606,6 +11734,314 @@ namespace Legion {
       }
       // Should never get here
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::construct_collective_mapping(const RendezvousKey &key,
+        Operation *op, std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveMapping *mapping = NULL;
+      {
+        AutoLock m_lock(manager_lock);
+        // Check see if this is the first arrival for the rendezvous
+        std::map<RendezvousKey,ShardRendezvous>::iterator finder = 
+          collective_rendezvous.find(key);
+        if (finder == collective_rendezvous.end())
+        {
+          // First arrival
+          finder = collective_rendezvous.insert(
+              std::make_pair(key, ShardRendezvous())).first;
+          if (op == NULL)
+          {
+            // First arrival is from a remote node if op is NULL
+            // Just initialize the counts
+            finder->second.mapping = NULL;
+            finder->second.local_op = NULL;
+            finder->second.remaining_local = 0;
+            finder->second.remaining_remote = 0;
+          }
+          else
+          {
+            // First arrival is a local arrival, find all the participant
+            // shards so we can see which local ones are participating
+            // as well as making the collective mapping to use to figure
+            // out how many remote arrivals to expect
+            std::vector<ShardID> participants;
+            if (op->find_shard_participants(participants))
+            {
+              // Common case where all shards are participating
+              const unsigned owner_index = key.context_index % total_shards;
+              const AddressSpaceID owner = (*collective_mapping)[owner_index];
+              finder->second.remaining_local = local_shards.size();
+              finder->second.remaining_remote = 
+               collective_mapping->count_children(owner,runtime->address_space);
+              finder->second.mapping = collective_mapping;
+              finder->second.mapping->add_reference();
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(!participants.empty());
+#endif
+              // Only a subset of the shards are participating
+              // Figure out all the address spaces that are participating
+              std::vector<AddressSpaceID> spaces;
+              spaces.reserve(participants.size());
+              for (std::vector<ShardID>::const_iterator it =
+                    participants.begin(); it != participants.end(); it++)
+              {
+                const AddressSpaceID space = (*address_spaces)[*it];
+                spaces.push_back(space);
+                if (space == runtime->address_space)
+                  finder->second.remaining_local++;
+              }
+#ifdef DEBUG_LEGION
+              assert(finder->second.remaining_local > 0);
+#endif
+              std::sort(spaces.begin(), spaces.end());
+              std::vector<AddressSpaceID>::iterator end = 
+                std::unique(spaces.begin(), spaces.end());
+              spaces.resize(std::distance(spaces.begin(),end));
+              const unsigned owner_index = key.context_index % spaces.size();
+              const AddressSpaceID owner = spaces[owner_index];
+              finder->second.mapping =
+                new CollectiveMapping(spaces, runtime->legion_collective_radix);
+#ifdef DEBUG_LEGION
+              assert(finder->second.mapping->contains(runtime->address_space));
+#endif
+              finder->second.mapping->add_reference();
+              finder->second.remaining_remote = 
+                finder->second.mapping->count_children(owner, 
+                                      runtime->address_space);
+            }
+            finder->second.local_op = op;
+          }
+          // First arrivals so we can just swap in the rendezvous 
+          finder->second.rendezvous.swap(rendezvous);
+          // No field failures yet
+          finder->second.field_failure = false;
+        }
+        else
+        {
+          // Need to perform the merge of the rendezvous
+          for (std::map<LogicalRegion,CollectiveRendezvous>::iterator 
+                rit = rendezvous.begin(); rit != rendezvous.end(); rit++)
+          {
+            std::map<LogicalRegion,CollectiveRendezvous>::iterator
+                region_finder = finder->second.rendezvous.find(rit->first); 
+            if (region_finder != finder->second.rendezvous.end())
+            {
+              region_finder->second.results.insert(
+                  region_finder->second.results.end(),
+                  rit->second.results.begin(), rit->second.results.end());
+              for (LegionMap<DistributedID,FieldMask>::const_iterator it =
+                    rit->second.groups.begin(); it != 
+                    rit->second.groups.end(); it++)
+              {
+                LegionMap<DistributedID,FieldMask>::iterator group_finder =
+                  region_finder->second.groups.find(it->first);
+                std::map<DistributedID,size_t>::iterator count_finder =
+                  rit->second.counts.find(it->first);
+                if (group_finder != region_finder->second.groups.end())
+                {
+                  if (group_finder->second == it->second)
+                  {
+                    std::map<DistributedID,size_t>::iterator local_finder =
+                        region_finder->second.counts.find(it->first);
+                    if (count_finder != rit->second.counts.end())
+                    {
+                      if (local_finder == region_finder->second.counts.end())
+                        region_finder->second.counts[it->first] = 
+                          count_finder->second + 1;
+                      else
+                        local_finder->second += count_finder->second;
+                    }
+                    else
+                    {
+                      if (local_finder == region_finder->second.counts.end())
+                        region_finder->second.counts[it->first] = 2;
+                      else
+                        local_finder->second++;
+                    }
+                  }
+                  else
+                  {
+                    // If you ever hit this then heaven help you
+                    // The user has done something really out there and
+                    // is using the same instance with different sets of
+                    // fields for multiple point ops/tasks in the same 
+                    // index space operation. All the tricks we do to 
+                    // compute the collective arrivals are not going to
+                    // work in this case so the arrival counts will need 
+                    // to look something like:
+                    //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
+                    if (op != NULL)
+                    {
+                      InnerContext *ctx = op->get_context();
+                      REPORT_LEGION_FATAL(
+                          LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                          "Operation %s (UID %lld) in context %s (UID %lld) "
+                          "requested a very strange pattern for collective "
+                          "instance rendezvous with different points asking to "
+                          "rendezvous with different field sets on the same "
+                          "physical instance. This isn't currently supported. "
+                          "Please report your use case to the Legion "
+                          "developer's mailing list.", op->get_logging_name(),
+                          op->get_unique_op_id(), ctx->get_task_name(),
+                          ctx->get_unique_id())
+                    }
+                    else if (finder->second.local_op != NULL)
+                    {
+                      InnerContext *ctx = 
+                        finder->second.local_op->get_context();
+                      REPORT_LEGION_FATAL(
+                          LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                          "Operation %s (UID %lld) in context %s (UID %lld) "
+                          "requested a very strange pattern for collective "
+                          "instance rendezvous with different points asking to "
+                          "rendezvous with different field sets on the same "
+                          "physical instance. This isn't currently supported. "
+                          "Please report your use case to the Legion "
+                          "developer's mailing list.", 
+                          finder->second.local_op->get_logging_name(),
+                          finder->second.local_op->get_unique_op_id(),
+                          ctx->get_task_name(), ctx->get_unique_id())
+                    }
+                    else
+                      finder->second.field_failure = true;
+                  }
+                }
+                else
+                {
+                  // New instance, just insert it
+                  region_finder->second.groups.insert(*it);
+                  // See if we have any counts to move over
+                  if (count_finder != rit->second.counts.end())
+                    region_finder->second.counts.insert(*count_finder);
+                }
+              }
+            }
+            else
+            {
+              CollectiveRendezvous &rendezvous = 
+                finder->second.rendezvous[rit->first];
+              rendezvous.results.swap(rit->second.results);
+              rendezvous.groups.swap(rit->second.groups);
+              rendezvous.counts.swap(rit->second.counts);
+            }
+          }
+        }
+        if (op != NULL)
+        {
+          // Local arrivals
+          if (finder->second.mapping == NULL)
+          {
+            if (finder->second.field_failure)
+            {
+              InnerContext *ctx = op->get_context();
+              REPORT_LEGION_FATAL(
+                  LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                  "Operation %s (UID %lld) in context %s (UID %lld) "
+                  "requested a very strange pattern for collective "
+                  "instance rendezvous with different points asking to "
+                  "rendezvous with different field sets on the same "
+                  "physical instance. This isn't currently supported. "
+                  "Please report your use case to the Legion "
+                  "developer's mailing list.", op->get_logging_name(),
+                  op->get_unique_op_id(), ctx->get_task_name(),
+                  ctx->get_unique_id())
+            }
+            else
+              finder->second.local_op = op;
+            // Need to initialize the arrival counts and mapping
+            std::vector<ShardID> participants;
+            if (op->find_shard_participants(participants))
+            {
+              // Common case where all shards are participating
+              const unsigned owner_index = key.context_index % total_shards;
+              const AddressSpaceID owner = (*collective_mapping)[owner_index];
+              finder->second.remaining_local = local_shards.size();
+              // Add here since we might already have counted some remotes
+              finder->second.remaining_remote += 
+               collective_mapping->count_children(owner,runtime->address_space);
+              finder->second.mapping = collective_mapping;
+              finder->second.mapping->add_reference();
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(!participants.empty());
+#endif
+              // Only a subset of the shards are participating
+              // Figure out all the address spaces that are participating
+              std::vector<AddressSpaceID> spaces;
+              spaces.reserve(participants.size());
+              for (std::vector<ShardID>::const_iterator it =
+                    participants.begin(); it != participants.end(); it++)
+              {
+                const AddressSpaceID space = (*address_spaces)[*it];
+                spaces.push_back(space);
+                if (space == runtime->address_space)
+                  finder->second.remaining_local++;
+              }
+#ifdef DEBUG_LEGION
+              assert(finder->second.remaining_local > 0);
+#endif
+              std::sort(spaces.begin(), spaces.end());
+              std::vector<AddressSpaceID>::iterator end = 
+                std::unique(spaces.begin(), spaces.end());
+              spaces.resize(std::distance(spaces.begin(),end));
+              const unsigned owner_index = key.context_index % spaces.size();
+              const AddressSpaceID owner = spaces[owner_index];
+              finder->second.mapping =
+                new CollectiveMapping(spaces, runtime->legion_collective_radix);
+#ifdef DEBUG_LEGION
+              assert(finder->second.mapping->contains(runtime->address_space));
+#endif
+              finder->second.mapping->add_reference();
+              finder->second.remaining_remote += 
+                finder->second.mapping->count_children(owner, 
+                                      runtime->address_space);
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(finder->second.remaining_local > 0);
+#endif
+          finder->second.remaining_local--;
+        }
+        else
+          // Remote arrival
+          finder->second.remaining_remote--;
+        if ((finder->second.remaining_local== 0) &&
+            (finder->second.remaining_remote == 0))
+        {
+          // We've seen all the arrivals so we can break perform them now
+          mapping = finder->second.mapping;
+          rendezvous.swap(finder->second.rendezvous);
+          collective_rendezvous.erase(finder);
+        }
+      }
+      if (mapping != NULL)
+      {
+        const unsigned owner_index = key.context_index % mapping->size();
+        const AddressSpaceID owner = (*mapping)[owner_index];
+        if (owner != runtime->address_space)
+        {
+          // Send to the parent
+          //const AddressSpaceID parent = 
+          //  mapping->get_parent(owner, runtime->address_space);
+
+        }
+        else
+        {
+          // Rendezvous is done so perform it
+
+
+        }
+        if (mapping->remove_reference())
+          delete mapping;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16436,6 +16872,77 @@ namespace Legion {
         spaces.insert(spaces.end(), it->second.begin(), it->second.end());
       }
       return local_size;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Shard Participants Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardParticipantsExchange::ShardParticipantsExchange(
+                             ReplicateContext *ctx, CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardParticipantsExchange::~ShardParticipantsExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardParticipantsExchange::pack_collective_stage(Serializer &rez,
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(participants.size());
+      for (std::set<ShardID>::const_iterator it =
+            participants.begin(); it != participants.end(); it++)
+        rez.serialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardParticipantsExchange::unpack_collective_stage(Deserializer &derez,
+                                                            int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_participants;
+      derez.deserialize(num_participants);
+      for (unsigned idx = 0; idx < num_participants; idx++)
+      {
+        ShardID shard;
+        derez.deserialize(shard);
+        participants.insert(shard);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardParticipantsExchange::exchange(bool participating)
+    //--------------------------------------------------------------------------
+    {
+      if (participating)
+        participants.insert(local_shard);
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardParticipantsExchange::find_shard_participants(
+                                                   std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shards.empty());
+#endif
+      perform_collective_wait();
+      if (participants.size() < manager->total_shards)
+      {
+        shards.insert(shards.end(), participants.begin(), participants.end());
+        return false;
+      }
+      else
+        return true;
     }
 
     /////////////////////////////////////////////////////////////

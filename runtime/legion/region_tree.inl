@@ -6058,6 +6058,7 @@ namespace Legion {
         sharding_domain = local_space;
       if (!func->functor->is_invertible())
       {
+        const size_t max_size = get_volume();
         for (Realm::IndexSpaceIterator<DIM,T> rect_itr(local_space); 
               rect_itr.valid; rect_itr.step())
         {
@@ -6066,8 +6067,12 @@ namespace Legion {
           {
             const ShardID point_shard = 
              func->find_owner(DomainPoint(Point<DIM,T>(itr.p)),sharding_domain);
-            range_shards.insert(point_shard);
+            if (range_shards.insert(point_shard).second && 
+                (range_shards.size() == max_size))
+              break;
           }
+          if (range_shards.size() == max_size)
+            break;
         }
       }
       else

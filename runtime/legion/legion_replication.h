@@ -1115,7 +1115,7 @@ namespace Legion {
     };
 
     /**
-     * \class IndexAttachLaunchSpace
+     as \class IndexAttachLaunchSpace
      * This collective computes the number of points in each
      * shard of a replicated index attach collective in order
      * to help compute the index launch space
@@ -1186,6 +1186,29 @@ namespace Legion {
       IndexSpaceNode* get_launch_space(void); 
     protected:
       std::map<ShardID,std::vector<IndexSpace> > shard_spaces;
+    };
+
+    /**
+     * \class ShardParticipants
+     * Find the shard participants in a replicated context
+     */
+    class ShardParticipantsExchange : public AllGatherCollective<false> {
+    public:
+      ShardParticipantsExchange(ReplicateContext *ctx,
+                                CollectiveIndexLocation loc);
+      ShardParticipantsExchange(const ShardParticipantsExchange &rhs) = delete;
+      virtual ~ShardParticipantsExchange(void);
+    public:
+      ShardParticipantsExchange& operator=(
+                                const ShardParticipantsExchange &rhs) = delete;
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange(bool participating);
+      bool find_shard_participants(std::vector<ShardID> &shards);
+    protected:
+      std::set<ShardID> participants;
     };
 
     /**
@@ -1522,6 +1545,7 @@ namespace Legion {
       virtual void finalize_output_regions(void);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1671,6 +1695,7 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1747,6 +1772,7 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
@@ -2010,6 +2036,7 @@ namespace Legion {
       virtual void select_partition_projection(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       void select_sharding_function(void);
     protected:
@@ -2302,13 +2329,16 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void check_point_requirements(
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
       IndexAttachExchange *collective;
+      ShardParticipantsExchange *participants;
       ShardingFunction *sharding_function;
     };
 
@@ -2363,8 +2393,13 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingFunction *sharding_function;
+      ShardParticipantsExchange *participants;
     };
 
     /**
@@ -2685,6 +2720,17 @@ namespace Legion {
         unsigned done_count;
       };
     public:
+      typedef InnerContext::RendezvousKey RendezvousKey;
+      typedef InnerContext::CollectiveRendezvous CollectiveRendezvous;
+      struct ShardRendezvous {
+        std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+        CollectiveMapping *mapping;
+        Operation *local_op;
+        int remaining_local;
+        int remaining_remote;
+        bool field_failure;
+      };
+    public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, bool isomorphic_points,
                    const Domain &shard_domain,
@@ -2858,7 +2904,9 @@ namespace Legion {
                           AddressSpaceID template_source, unsigned frontier,
                           ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
-      void handle_trace_update(Deserializer &derez, AddressSpaceID source);
+      void handle_trace_update(Deserializer &derez, AddressSpaceID source); 
+      void construct_collective_mapping(const RendezvousKey &key,
+        Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -2971,6 +3019,7 @@ namespace Legion {
                                         created_equivalence_sets;
       std::map<DistributedID,std::pair<FillView*,size_t> > 
                                         created_fill_views;
+      std::map<RendezvousKey,ShardRendezvous> collective_rendezvous;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
     protected:

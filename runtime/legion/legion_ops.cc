@@ -1640,6 +1640,15 @@ namespace Legion {
       return false;
     }
 
+    //--------------------------------------------------------------------------
+    bool Operation::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called in derived types
+      assert(false);
+      return false;
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent Operation::acquire_collective_allocation_privileges(
@@ -10169,6 +10178,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointCopyOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -20082,6 +20098,13 @@ namespace Legion {
       return owner->get_collective_points();
     }
 
+    //--------------------------------------------------------------------------
+    bool PointDepPartOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointDepPartOp::acquire_collective_allocation_privileges(
@@ -21746,6 +21769,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointFillOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -23445,6 +23475,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PointAttachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointAttachOp::perform_collective_analysis(CollectiveMapping *&mapping,
                                                     bool &first_local)
     //--------------------------------------------------------------------------
@@ -24268,6 +24305,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDetachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
     }
 
     //--------------------------------------------------------------------------

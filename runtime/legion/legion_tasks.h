@@ -737,6 +737,8 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const { return DomainPoint(0); }
       virtual Domain get_shard_domain(void) const
         { return Domain(DomainPoint(0),DomainPoint(0)); }
+      virtual Operation* get_origin_operation(void) 
+        { return is_remote() ? orig_task : this; }
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
@@ -855,6 +857,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual Operation* get_origin_operation(void); 
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
       virtual Domain get_slice_domain(void) const 
         { return Domain(index_point,index_point); }
@@ -920,6 +923,7 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation
@@ -1340,6 +1344,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual Operation* get_origin_operation(void) { return index_owner; }
     public:
       virtual void trigger_dependence_analysis(void);
     public:
@@ -1445,6 +1450,7 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       virtual size_t get_collective_points(void) const;
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation

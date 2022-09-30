@@ -2451,9 +2451,8 @@ namespace Legion {
                          const Domain &sharding_space);
       IndexSpace find_shard_space(ShardID shard, IndexSpaceNode *full_space,
           IndexSpace sharding_space, Provenance *provenance);
-      ShardedMapping* find_sharded_mapping(IndexSpaceNode *full_space,
-                                           IndexSpace sharding_space,
-                                           size_t radix);
+      bool find_shard_participants(IndexSpaceNode *full_space,
+          IndexSpace sharding_space, std::vector<ShardID> &participants);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
@@ -2463,7 +2462,8 @@ namespace Legion {
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;
-      std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*> shard_mappings;
+      std::map<std::pair<IndexSpace,IndexSpace>,
+               std::vector<ShardID> > shard_participants;
     };
 
     /**
@@ -3321,6 +3321,8 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_remote_context_collective_rendezvous(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
       void send_compute_equivalence_sets_response(AddressSpaceID target,
@@ -3653,6 +3655,8 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
+      void handle_remote_context_collective_rendezvous(Deserializer &derez,
+                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez,
@@ -5893,6 +5897,8 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
           break;
         case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
+          break;
+        case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;

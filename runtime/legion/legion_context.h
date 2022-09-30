@@ -1072,7 +1072,7 @@ namespace Legion {
         const std::vector<IndexSpace> handles;
         const ProjectionID pid;
       };
-    protected:
+    public:
       // The hairy collective instance rendezvous data structures
       struct RendezvousKey {
       public:
@@ -1927,7 +1927,6 @@ namespace Legion {
       virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
                    const std::vector<DistributedID> &instances, RtEvent &ready);
       void notify_collective_deletion(RegionTreeID tid, DistributedID did);
-    protected:
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
                                   unsigned requirement_index,
@@ -1937,9 +1936,10 @@ namespace Legion {
                                   LogicalRegion region,
                                   const LegionVector<
                                    std::pair<DistributedID,FieldMask> > &insts);
+    protected:
       // Now we can construct the collective mapping
-      virtual void construct_collective_mapping(
-                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+        Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       bool remove_pending_rendezvous(RendezvousResult *rendezvous);
       // This function will distribute out the results of a collective 
       // rendezvous to all the rendezvous result objects
@@ -2918,6 +2918,12 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,
                                            bool outermost = true);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+        Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+#if 0
+      virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
+                   const std::vector<DistributedID> &instances, RtEvent &ready);
+#endif
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);
@@ -3372,6 +3378,16 @@ namespace Legion {
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual void rendezvous_collective_mapping(Operation *op,
+                                  unsigned requirement_index,
+                                  unsigned analysis_index,
+                                  RendezvousResult *result,
+                                  AddressSpaceID source,
+                                  LogicalRegion region,
+                                  const LegionVector<
+                                   std::pair<DistributedID,FieldMask> > &insts);
+      static void handle_collective_rendezvous(Deserializer &derez,
+                                       Runtime *runtime, AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
