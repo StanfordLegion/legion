@@ -827,7 +827,7 @@ impl ISpace {
         self
     }
 
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.is_none());
         self.name = Some(name.to_owned());
         self
@@ -870,7 +870,7 @@ impl IPart {
             point0: None,
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.as_ref().map_or(true, |x| x == name));
         self.name = Some(name.to_owned());
         self
@@ -910,7 +910,7 @@ impl FSpace {
             fields: BTreeMap::new(),
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         let new_name = Some(name.to_owned());
         assert!(self.name.is_none() || self.name == new_name);
         self.name = new_name;
@@ -930,7 +930,7 @@ pub struct Field {
 }
 
 impl Field {
-    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
+    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &str) -> Self {
         Field {
             _fspace_id: fspace_id,
             _field_id: field_id,
@@ -952,7 +952,7 @@ pub struct Region {
 }
 
 impl Region {
-    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
+    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &str) -> Self {
         Region {
             _ispace_id: ispace_id,
             _fspace_id: fspace_id,
@@ -1146,7 +1146,7 @@ pub struct MapperCallKind {
 }
 
 impl MapperCallKind {
-    fn new(kind: MapperCallKindID, name: &String) -> Self {
+    fn new(kind: MapperCallKindID, name: &str) -> Self {
         MapperCallKind {
             kind,
             name: name.to_owned(),
@@ -1170,7 +1170,7 @@ pub struct RuntimeCallKind {
 }
 
 impl RuntimeCallKind {
-    fn new(kind: RuntimeCallKindID, name: &String) -> Self {
+    fn new(kind: RuntimeCallKindID, name: &str) -> Self {
         RuntimeCallKind {
             kind,
             name: name.to_owned(),
@@ -1199,7 +1199,7 @@ impl TaskKind {
             name: None,
         }
     }
-    fn set_name(&mut self, name: &String, overwrite: bool) {
+    fn set_name(&mut self, name: &str, overwrite: bool) {
         if self.name.is_none() || overwrite {
             self.name = Some(name.to_owned());
         }
@@ -1220,7 +1220,7 @@ pub struct Variant {
 }
 
 impl Variant {
-    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &String) -> Self {
+    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &str) -> Self {
         Variant {
             variant_id,
             message,
