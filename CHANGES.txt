@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 22.09.0 (September ??, 2022)
+Version 22.09.0 (September 30, 2022)
   * Python
      - Support for running packages via `legion_python -m`
      - Support for Jupyter Notebook on single node execution.
