@@ -7113,14 +7113,6 @@ namespace Legion {
       collective->exchange_spaces(spaces);
       attach_coregions_collective = 
         new IndexAttachCoregions(ctx, COLLECTIVE_LOC_103, points.size());
-      // If we don't have any points then we can perform this now
-      if (points.empty())
-      {
-        attach_coregions_collective->perform_collective_async();
-        const RtEvent collective_done =
-          attach_coregions_collective->perform_collective_wait(false/*block*/);
-        map_applied_conditions.insert(collective_done);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7173,6 +7165,23 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+      {
+        complete_mapping();
+        // Still need to perform our collective with the other shards
+        attach_coregions_collective->perform_collective_async();
+        const RtEvent collective_done =
+          attach_coregions_collective->perform_collective_wait(false/*block*/);
+        complete_execution(collective_done);
+      }
+      else
+        IndexAttachOp::trigger_ready();
     }
 
     //--------------------------------------------------------------------------
