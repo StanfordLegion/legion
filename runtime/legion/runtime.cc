@@ -12977,6 +12977,11 @@ namespace Legion {
               runtime->handle_replicate_trigger_commit(derez);
               break;
             }
+          case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
+            {
+              runtime->handle_control_replicate_collective_message(derez);
+              break;
+            }
           case SEND_LIBRARY_MAPPER_REQUEST:
             {
               runtime->handle_library_mapper_request(derez, 
@@ -28328,7 +28333,7 @@ namespace Legion {
         if (remote_finder != remote_contexts.end())
         {
           if (return_null_if_not_found &&
-              !local_finder->second->check_add_reference())
+              !remote_finder->second->check_add_reference())
             return NULL;
           return remote_finder->second;
         }
