@@ -7825,6 +7825,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_single();
+      resolved = true;
       target_proc = proc;
       current_proc = proc;
       shard_manager = manager;
