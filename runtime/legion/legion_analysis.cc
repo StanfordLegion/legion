@@ -643,6 +643,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(PredEvent &lhs,
+                           PredEvent e1, PredEvent e2, const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_MERGE_PRED_EVENTS);
+          rez.serialize(done);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          rez.serialize(e1);
+          rez.serialize(e2);
+          tlid.serialize(rez);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_merge_events(lhs, e1, e2, tlid);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_collective_barrier(ApBarrier bar, 
               ApEvent pre, const std::pair<size_t,size_t> &key, size_t arrivals)
     //--------------------------------------------------------------------------
@@ -1299,6 +1327,36 @@ namespace Legion {
               Runtime::trigger_event(done);
             break;
           }
+        case REMOTE_TRACE_MERGE_PRED_EVENTS:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            PredEvent *event_ptr;
+            derez.deserialize(event_ptr);
+            PredEvent lhs, e1, e2;
+            derez.deserialize(lhs);
+            derez.deserialize(e1);
+            derez.deserialize(e2);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
+            PredEvent lhs_copy = lhs;
+            tpl->record_merge_events(lhs_copy, e1, e2, tlid);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_MERGE_PRED_EVENTS);
+                rez.serialize(event_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // didn't change so just trigger
+              Runtime::trigger_event(done);
+            break;
+          }
         case REMOTE_TRACE_ISSUE_COPY:
           {
             RtUserEvent done;
@@ -1711,6 +1769,16 @@ namespace Legion {
         case REMOTE_TRACE_SET_OP_SYNC:
           {
             ApEvent *event_ptr;
+            derez.deserialize(event_ptr);
+            derez.deserialize(*event_ptr);
+            RtUserEvent done;
+            derez.deserialize(done);
+            Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_MERGE_PRED_EVENTS:
+          {
+            PredEvent *event_ptr;
             derez.deserialize(event_ptr);
             derez.deserialize(*event_ptr);
             RtUserEvent done;
@@ -4285,6 +4353,7 @@ namespace Legion {
                                            LogicalView *src_view,
                                            const FieldMask &src_mask,
                                            IndexSpaceExpression *expr,
+                                           const PhysicalTraceInfo &trace_info,
                                            EquivalenceSet *tracing_eq,
                                            std::set<RtEvent> &applied,
                                            ReductionOpID redop /*=0*/,
@@ -4301,12 +4370,8 @@ namespace Legion {
         assert(redop == 0);
 #endif
         DeferredView *def_view = src_view->as_deferred_view();
-        if (def_view->is_fill_view())
-          record_fill(dst_view, def_view->as_fill_view(), src_mask, expr,
-                      tracing_eq, applied, helper);
-        else
-          def_view->flatten(*this, dst_view, src_mask, expr, 
-                            tracing_eq, applied, helper);
+        def_view->flatten(*this, dst_view, src_mask, expr, predicate_guard,
+                          trace_info, tracing_eq, applied, helper);
       }
       else
       {
@@ -4427,6 +4492,7 @@ namespace Legion {
                                     const FieldMaskSet<LogicalView> &src_views,
                                     const FieldMask &src_mask,
                                     IndexSpaceExpression *expr,
+                                    const PhysicalTraceInfo &trace_info,
                                     EquivalenceSet *tracing_eq,
                                     std::set<RtEvent> &applied,
                                     ReductionOpID redop /*=0*/,
@@ -4443,7 +4509,7 @@ namespace Legion {
         LogicalView *src_view = src_views.begin()->first;
         const FieldMask record_mask = src_views.get_valid_mask() & src_mask;
         record_update(dst_view, dst_man, src_view, record_mask, expr,
-                      tracing_eq, applied, redop, helper);
+                      trace_info, tracing_eq, applied, redop, helper);
       }
       else
       {
@@ -4461,12 +4527,11 @@ namespace Legion {
             LogicalView *src_view = *(vit->elements.begin());
             const FieldMask &record_mask = vit->set_mask;
             record_update(dst_view, dst_man, src_view, record_mask, expr,
-                          tracing_eq, applied, redop, helper); 
+                          trace_info, tracing_eq, applied, redop, helper); 
           }
           else
           {
-            // Sort the views, prefer fills, then instances, then deferred
-            FillView *fill = NULL;
+            // Sort the views, prefer deferred  then instances
             DeferredView *deferred = NULL;
             std::vector<InstanceView*> instances;
             for (std::set<LogicalView*>::const_iterator it = 
@@ -4474,25 +4539,16 @@ namespace Legion {
             {
               if (!(*it)->is_instance_view())
               {
-                DeferredView *def = (*it)->as_deferred_view();
-                if (!def->is_fill_view())
-                {
-                  if (deferred == NULL)
-                    deferred = def;
-                }
-                else
-                {
-                  fill = def->as_fill_view();
-                  // Break out since we found what we're looking for
-                  break;
-                }
+                deferred = (*it)->as_deferred_view();
+                // Break out since we found what we're looking for
+                break;
               }
               else
                 instances.push_back((*it)->as_instance_view());
             }
-            if (fill != NULL)
-              record_fill(dst_view, fill, vit->set_mask, expr,
-                          tracing_eq, applied, helper);
+            if (deferred != NULL)
+              deferred->flatten(*this, dst_view, vit->set_mask, expr,
+                  predicate_guard, trace_info, tracing_eq, applied, helper);
             else if (!instances.empty())
             {
               if (instances.size() == 1)
@@ -4500,7 +4556,7 @@ namespace Legion {
                 // Easy, just one instance to use and no collective instances
                 InstanceView *src_view = instances.back();
                 record_update(dst_view, dst_man, src_view, vit->set_mask, expr,
-                              tracing_eq, applied, redop, helper);
+                              trace_info, tracing_eq, applied, redop, helper);
               }
               else
               {
@@ -4528,14 +4584,6 @@ namespace Legion {
                     vit->set_mask, expr, tracing_eq, applied, redop, helper);
               }
             }
-            else
-            {
-#ifdef DEBUG_LEGION
-              assert(deferred != NULL);
-#endif
-              deferred->flatten(*this, dst_view, vit->set_mask, expr, 
-                                tracing_eq, applied, helper);
-            }
           }
         }
       }
@@ -4546,6 +4594,7 @@ namespace Legion {
                           PhysicalManager *dst_man,const LegionMap<LogicalView*,
                                  FieldMaskSet<IndexSpaceExpression> >&src_views,
                           const FieldMask &src_mask, IndexSpaceExpression *expr, 
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,std::set<RtEvent> &applied,
                           ReductionOpID redop, CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
@@ -4558,10 +4607,9 @@ namespace Legion {
       update_fields |= src_mask;
       record_view(dst_view);
       std::vector<InstanceView*> instances;
-      std::vector<DeferredView*> deferred;
       FieldMaskSet<IndexSpaceExpression> remainders;
       remainders.insert(expr, src_mask);
-      // Issue fills from immediately, otherwise record instances so that
+      // Issue deferred immediately, otherwise record instances so that
       // we can ask the mapper what order it wants us to issue copies from
       for (LegionMap<LogicalView*,
             FieldMaskSet<IndexSpaceExpression> >::const_iterator vit =
@@ -4571,65 +4619,59 @@ namespace Legion {
           vit->second.get_valid_mask() & remainders.get_valid_mask();;
         if (!view_overlap)
           continue;
-        if (!vit->first->is_instance_view())
+        if (vit->first->is_deferred_view())
         {
-          DeferredView *def = vit->first->as_deferred_view();
-          if (def->is_fill_view())
+          DeferredView *deferred = vit->first->as_deferred_view();
+          // Skip any deferred if we're doing a reduction, we only care
+          // about valid instances here
+          if (redop > 0)
+            continue;
+          // Join in the fields to see what overlaps
+          LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+            FieldMask> deferred_exprs;
+          unique_join_on_field_mask_sets(remainders,vit->second,deferred_exprs);
+          bool need_tighten = false;
+          for (LegionMap<std::pair<IndexSpaceExpression*,
+                IndexSpaceExpression*>,FieldMask>::const_iterator 
+                it = deferred_exprs.begin(); it != deferred_exprs.end(); it++)
           {
-            // Skip any fills if we're doing a reduction, we only care
-            // about valid instances here
-            if (redop > 0)
+            IndexSpaceExpression *overlap =
+             forest->intersect_index_spaces(it->first.first,it->first.second);
+            const size_t overlap_size = overlap->get_volume();
+            if (overlap_size == 0)
               continue;
-            FillView *fill = def->as_fill_view();
-            // Join in the fields to see what overlaps
-            LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-              FieldMask> fill_exprs;
-            unique_join_on_field_mask_sets(remainders, vit->second, fill_exprs);
-            bool need_tighten = false;
-            for (LegionMap<std::pair<IndexSpaceExpression*,
-                  IndexSpaceExpression*>,FieldMask>::const_iterator 
-                  it = fill_exprs.begin(); it != fill_exprs.end(); it++)
-            {
-              IndexSpaceExpression *overlap =
-               forest->intersect_index_spaces(it->first.first,it->first.second);
-              const size_t overlap_size = overlap->get_volume();
-              if (overlap_size == 0)
-                continue;
-              FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-                remainders.find(it->first.first);
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              remainders.find(it->first.first);
 #ifdef DEBUG_LEGION
-              assert(finder != remainders.end());
+            assert(finder != remainders.end());
 #endif
-              finder.filter(it->second);
-              if (!finder->second)
-                remainders.erase(finder);
-              if (overlap_size < it->first.first->get_volume())
-              {
-                if (overlap_size == it->first.second->get_volume())
-                  record_fill(dst_view, fill, it->second, 
-                              it->first.second, tracing_eq, applied);
-                else
-                  record_fill(dst_view, fill, it->second, overlap, 
-                              tracing_eq, applied);
-                // Compute the difference
-                IndexSpaceExpression *diff_expr = 
-                  forest->subtract_index_spaces(it->first.first, overlap); 
-                remainders.insert(diff_expr, it->second);
-              }
-              else // completely covers remainder expression
-              {
-                record_fill(dst_view, fill, it->second, 
-                            it->first.first, tracing_eq, applied);
-                if (remainders.empty())
-                  return;
-                need_tighten = true;
-              }
+            finder.filter(it->second);
+            if (!finder->second)
+              remainders.erase(finder);
+            if (overlap_size < it->first.first->get_volume())
+            {
+              if (overlap_size == it->first.second->get_volume())
+                deferred->flatten(*this, dst_view, it->second, it->first.second,
+                   predicate_guard,trace_info,tracing_eq,applied,across_helper);
+              else
+                deferred->flatten(*this, dst_view, it->second, overlap,
+                   predicate_guard,trace_info,tracing_eq,applied,across_helper);
+              // Compute the difference
+              IndexSpaceExpression *diff_expr = 
+                forest->subtract_index_spaces(it->first.first, overlap); 
+              remainders.insert(diff_expr, it->second);
             }
-            if (need_tighten)
-              remainders.tighten_valid_mask();
+            else // completely covers remainder expression
+            {
+              deferred->flatten(*this, dst_view, it->second, it->first.first,
+                  predicate_guard,trace_info,tracing_eq,applied,across_helper);
+              if (remainders.empty())
+                return;
+              need_tighten = true;
+            }
           }
-          else
-            deferred.push_back(def);
+          if (need_tighten)
+            remainders.tighten_valid_mask();
         }
         else
           instances.push_back(vit->first->as_instance_view());
@@ -4718,67 +4760,6 @@ namespace Legion {
             remainders.tighten_valid_mask();
         }
       }
-      if (!deferred.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(redop == 0);
-#endif
-        for (unsigned idx = 0; idx < deferred.size(); idx++)
-        {
-          DeferredView *def = deferred[idx];
-          LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
-              const_iterator finder = src_views.find(def);
-#ifdef DEBUG_LEGION
-          assert(finder != src_views.end());
-#endif
-          LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-            FieldMask> src_expressions;
-          unique_join_on_field_mask_sets(remainders, finder->second,
-                                         src_expressions);
-          bool need_tighten = false;
-          for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                FieldMask>::const_iterator it = 
-                src_expressions.begin(); it != src_expressions.end(); it++)
-          {
-            IndexSpaceExpression *overlap = 
-              forest->intersect_index_spaces(it->first.first, it->first.second);
-            const size_t overlap_size = overlap->get_volume();
-            if (overlap_size == 0)
-              continue;
-            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-              remainders.find(it->first.first);
-#ifdef DEBUG_LEGION
-            assert(finder != remainders.end());
-#endif
-            finder.filter(it->second);
-            if (!finder->second)
-              remainders.erase(finder);
-            if (overlap_size < it->first.first->get_volume())
-            {
-              if (overlap_size == it->first.second->get_volume())
-                def->flatten(*this, dst_view, it->second, it->first.second,
-                             tracing_eq, applied, across_helper);
-              else
-                def->flatten(*this, dst_view, it->second, overlap,
-                             tracing_eq, applied, across_helper);
-              // Compute the difference
-              IndexSpaceExpression *diff_expr = 
-                forest->subtract_index_spaces(it->first.first, overlap);
-              remainders.insert(diff_expr, it->second);
-            }
-            else // completely covers remainder expression
-            {
-              def->flatten(*this, dst_view, it->second, it->first.first, 
-                           tracing_eq, applied, across_helper);
-              if (remainders.empty())
-                return;
-              need_tighten = true;
-            }
-          }
-          if (need_tighten)
-            remainders.tighten_valid_mask();
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4786,6 +4767,7 @@ namespace Legion {
                                          FillView *src_view,
                                          const FieldMask &fill_mask,
                                          IndexSpaceExpression *expr,
+                                         const PredEvent fill_guard,
                                          EquivalenceSet *tracing_eq,
                                          std::set<RtEvent> &applied,
                                          CopyAcrossHelper *helper /*=NULL*/)
@@ -4798,7 +4780,8 @@ namespace Legion {
       update_fields |= fill_mask;
       record_view(src_view);
       record_view(dst_view);
-      FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
+      FillUpdate *update = 
+        new FillUpdate(src_view, fill_mask, expr, fill_guard, helper); 
       if (helper == NULL)
         sources[dst_view].insert(update, fill_mask);
       else
@@ -5140,7 +5123,8 @@ namespace Legion {
         IndexSpaceExpression *fill_expr = update->expr;
         FillView *fill_view = update->source;
         const ApEvent result = target->fill_from(fill_view,
-                                                 precondition, predicate_guard,
+                                                 precondition,
+                                                 update->fill_guard,
                                                  fill_expr, op, dst_index,
                                                  fill_mask, trace_info, 
                                                  recorded_events, effects,
@@ -5170,7 +5154,10 @@ namespace Legion {
           assert(fills[idx]->across_helper == fills[0]->across_helper);
 #endif
 #endif
-        std::map<FillView*,std::set<IndexSpaceExpression*> > exprs;
+        // Fills can have different predicates because of nested predicated fills
+        // so we can only merge across fills with the same predicates
+        std::map<std::pair<FillView*,PredEvent>,
+                 std::set<IndexSpaceExpression*> > exprs;
         for (std::vector<FillUpdate*>::const_iterator it = 
               fills.begin(); it != fills.end(); it++)
         {
@@ -5180,17 +5167,19 @@ namespace Legion {
           // Should also have the same across helper as the first one
           assert(fills[0]->across_helper == (*it)->across_helper);
 #endif
-          exprs[(*it)->source].insert((*it)->expr);
+          std::pair<FillView*,PredEvent> key((*it)->source, (*it)->fill_guard);
+          exprs[key].insert((*it)->expr);
         }
-        for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
-              const_iterator it = exprs.begin(); it != exprs.end(); it++)
+        for (std::map<std::pair<FillView*,PredEvent>,
+                      std::set<IndexSpaceExpression*> >::const_iterator it = 
+              exprs.begin(); it != exprs.end(); it++)
         {
           IndexSpaceExpression *fill_expr = (it->second.size() == 1) ?
             *(it->second.begin()) : forest->union_index_spaces(it->second);
           // See if we have any work to do for tracing
-          const ApEvent result = target->fill_from(it->first,
+          const ApEvent result = target->fill_from(it->first.first,
                                                    precondition,
-                                                   predicate_guard, fill_expr,
+                                                   it->first.second, fill_expr,
                                                    op, dst_index,
                                                    fill_mask, trace_info,
                                                    recorded_events, effects, 
@@ -8492,13 +8481,13 @@ namespace Legion {
                         IndexSpaceExpression *expr, LogicalView *view, 
                         const FieldMask &mask, const PhysicalTraceInfo &t_info,
                         CollectiveMapping *mapping, const ApEvent pre,
-                        const PredEvent pred, const bool restriction,
-                        const bool first_local)
+                        const PredEvent true_g, const PredEvent false_g,
+                        const bool restriction, const bool first_local)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
                          true/*exclusive*/, mapping, first_local),
-        usage(use), trace_info(t_info), precondition(pre), pred_guard(pred),
-        add_restriction(restriction), output_aggregator(NULL),
-        dummy_arrivals(NULL)
+        usage(use), trace_info(t_info), precondition(pre), true_guard(true_g),
+        false_guard(false_g), add_restriction(restriction),
+        output_aggregator(NULL), dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
       if (view != NULL)
@@ -8515,11 +8504,10 @@ namespace Legion {
                         unsigned idx, const RegionUsage &use,
                         IndexSpaceExpression *expr,
                         const PhysicalTraceInfo &t_info,
-                        const ApEvent pre, const PredEvent pred, 
-                        const bool restriction)
+                        const ApEvent pre, const bool restriction)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
                          true/*exclusive*/), usage(use), trace_info(t_info),
-        precondition(pre), pred_guard(pred), add_restriction(restriction),
+        precondition(pre), add_restriction(restriction),
         output_aggregator(NULL), dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
@@ -8531,11 +8519,10 @@ namespace Legion {
                         IndexSpaceExpression *expr,
                         const FieldMaskSet<LogicalView> &overwrite_views,
                         const PhysicalTraceInfo &t_info,
-                        const ApEvent pre, const PredEvent pred,
-                        const bool restriction)
+                        const ApEvent pre, const bool restriction)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
           true/*exclusive*/), usage(use), trace_info(t_info), precondition(pre),
-        pred_guard(pred), add_restriction(restriction), output_aggregator(NULL),
+        add_restriction(restriction), output_aggregator(NULL),
         dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
@@ -8556,15 +8543,16 @@ namespace Legion {
                         FieldMaskSet<LogicalView> &vws,
                         FieldMaskSet<InstanceView> &reductions,
                         const PhysicalTraceInfo &t_info,
-                        const ApEvent pre, const PredEvent pred,
-                        CollectiveMapping *mapping, const bool first_local,
-                        const bool restriction)
+                        const ApEvent pre, const PredEvent true_g,
+                        const PredEvent false_g, CollectiveMapping *mapping,
+                        const bool first_local, const bool restriction)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
           false/*immutable*/, mapping, true/*exclusive*/, first_local),
         usage(use), trace_info(t_info), views(vws, true/*copy*/),
         reduction_views(reductions, true/*copy*/),
-        precondition(pre), pred_guard(pred), add_restriction(restriction),
-        output_aggregator(NULL), dummy_arrivals(NULL)
+        precondition(pre), true_guard(true_g), false_guard(false_g),
+        add_restriction(restriction), output_aggregator(NULL),
+        dummy_arrivals(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8711,7 +8699,8 @@ namespace Legion {
             }
           }
           trace_info.pack_trace_info(rez, applied_events);
-          rez.serialize(pred_guard);
+          rez.serialize(true_guard);
+          rez.serialize(false_guard);
           rez.serialize(precondition);
           rez.serialize<bool>(add_restriction);
           // We only need to pack the collective mapping once when going
@@ -8823,8 +8812,9 @@ namespace Legion {
       }
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime);
-      PredEvent pred_guard;
-      derez.deserialize(pred_guard);
+      PredEvent true_guard, false_guard;
+      derez.deserialize(true_guard);
+      derez.deserialize(false_guard);
       ApEvent precondition;
       derez.deserialize(precondition);
       bool add_restriction;
@@ -8842,7 +8832,7 @@ namespace Legion {
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
           original_source, previous, op, index, expr, usage, views, 
-          reductions, trace_info, precondition, pred_guard, 
+          reductions, trace_info, precondition, true_guard, false_guard,
           collective_mapping, first_local, add_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
@@ -11326,7 +11316,8 @@ namespace Legion {
                 for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                       fill_exprs.begin(); it != fill_exprs.end(); it++)
                   fill_aggregator->record_fill(red_view, fill_view,
-                                    it->second, it->first, 
+                                    it->second, it->first,
+                                    PredEvent::NO_PRED_EVENT,
                                     analysis.trace_info.recording ? this : NULL,
                                     applied_events);
                 // Record this as a guard for later operations
@@ -13591,8 +13582,8 @@ namespace Legion {
                   new CopyFillAggregator(runtime->forest, op, index,
                                          previous_guard, track_events);
               aggregator->record_update(target, target_manager, *src_it,
-                  overlap, it->first, trace_info.recording ? this : NULL,
-                  applied_events, redop);
+                  overlap, it->first, trace_info, trace_info.recording ?
+                  this : NULL, applied_events, redop);
               it.filter(overlap);
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -13650,12 +13641,12 @@ namespace Legion {
             {
               if (overlap_size == it->first.second->get_volume())
                 aggregator->record_update(target, target_manager,
-                    *src_it, it->second, it->first.second,
+                    *src_it, it->second, it->first.second, trace_info,
                     trace_info.recording ? this : NULL, applied_events, redop);
               else
                 aggregator->record_update(target, target_manager, *src_it,
-                    it->second, overlap, trace_info.recording ? this : NULL,
-                    applied_events, redop);
+                    it->second, overlap, trace_info, trace_info.recording ? 
+                    this : NULL, applied_events, redop);
               // Compute the difference to add to the remainders
               IndexSpaceExpression *diff = 
                 runtime->forest->subtract_index_spaces(it->first.first,overlap);
@@ -13665,7 +13656,7 @@ namespace Legion {
             {
               // Covered the remainder expression
               aggregator->record_update(target, target_manager,
-                  *src_it, it->second, it->first.first,
+                  *src_it, it->second, it->first.first, trace_info,
                   trace_info.recording ? this : NULL, applied_events, redop);
               if (remainders.empty())
                 return;
@@ -13730,13 +13721,13 @@ namespace Legion {
             total_instances.insert(it->first, overlap);
           }
           aggregator->record_updates(target, target_manager, 
-              total_instances, total_fields, expr,
+              total_instances, total_fields, expr, trace_info,
               trace_info.recording ? this : NULL, 
               applied_events, redop, across_helper);
         }
         else // Total valid instances covers everything!
           aggregator->record_updates(target, target_manager,
-              total_valid_instances, total_fields, expr,
+              total_valid_instances, total_fields, expr, trace_info,
               trace_info.recording ? this : NULL, applied_events,
               redop, across_helper); 
         update_mask -= total_fields;
@@ -13806,8 +13797,8 @@ namespace Legion {
                                    previous_guard, track_events);
         aggregator->record_updates(target, target_manager,
             cover_instances, cover_instances.get_valid_mask(), expr, 
-            trace_info.recording ? this : NULL, applied_events, 
-            redop, across_helper);
+            trace_info, trace_info.recording ? this : NULL,
+            applied_events, redop, across_helper);
         update_mask -= cover_instances.get_valid_mask();
         if (!update_mask)
           return;
@@ -13825,9 +13816,9 @@ namespace Legion {
             new CopyFillAggregator(runtime->forest, op, index,
                                    previous_guard, track_events);
         aggregator->record_partial_updates(target, target_manager, 
-                                       partial_instances, update_mask,
-                                       expr, trace_info.recording ? this : NULL,
-                                       applied_events, redop, across_helper);
+                                 partial_instances, update_mask, expr,
+                                 trace_info, trace_info.recording ? this : NULL,
+                                 applied_events, redop, across_helper);
       }
     }
 
@@ -14213,7 +14204,7 @@ namespace Legion {
             aggregator = new CopyFillAggregator(runtime->forest, op, index,
                                   NULL/*no previous guard*/, true/*track*/);
           aggregator->record_update(it->first.first, NULL/*no manager*/,
-              it->first.second, overlap, overlap_expr,
+              it->first.second, overlap, overlap_expr, trace_info,
               trace_info.recording ? this : NULL, applied_events);
         }
       }
@@ -15728,9 +15719,45 @@ namespace Legion {
       if (analysis.output_aggregator != NULL)
         analysis.output_aggregator->clear_update_fields();
       // Two different cases here depending on whether we have a precidate 
-      if (analysis.pred_guard.exists())
+      if (analysis.true_guard.exists())
       {
-        assert(false); 
+        // This case happens with a predicated fill operation
+        // (No other overwrite analyses can be predicated)
+        // We have two options of what we can do here:
+        // 1. Generate a phi view so we can still use the base instances
+        //    just with extra predicated fills done to them
+        // 2. We can eagerly issue fills to all the valid instances for
+        //    this expression masked by the predicate value
+        // Currently we opt for option 2. While phi views still exist
+        // in the code base they are currently not being used. They are
+        // complicated and add nesting to the names of instance views 
+        // that would make them hard to reason about, so we prefer not
+        // to use them if possible if we can avoid it. Hence we do the
+        // second option and just issue predicated fill operations to 
+        // all the total and partially valid instances in the equivalence
+        // set that overlap without needing to change the state of the
+        // equivalence set.
+#ifdef DEBUG_LEGION
+        // There should be no restrictions added for predicated fills
+        assert(!analysis.add_restriction);
+        assert(!analysis.views.empty());
+        assert(analysis.reduction_views.empty());
+#endif
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              analysis.views.begin(); it != analysis.views.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->is_fill_view());
+#endif
+          const FieldMask overlap = it->second & overwrite_mask;
+          if (!overlap)
+            continue;
+          FillView *fill = it->first->as_fill_view();
+          predicate_fill_all(fill, overlap, expr, expr_covers,
+              analysis.true_guard, analysis.false_guard, analysis.op,
+              analysis.index, analysis.trace_info, applied_events,
+              analysis.output_aggregator);
+        }
       }
       else
       {
@@ -15827,6 +15854,257 @@ namespace Legion {
               analysis.views.begin(); it != analysis.views.end(); it++)
           update_tracing_valid_views(it->first, expr, usage,
              it->second, true/*invalidates*/, applied_events);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::predicate_fill_all(FillView *fill_view,
+                                            const FieldMask &fill_mask,
+                                            IndexSpaceExpression *expr,
+                                            const bool expr_covers,
+                                            const PredEvent true_guard,
+                                            const PredEvent false_guard,
+                                            Operation *op, const unsigned index,
+                                            const PhysicalTraceInfo &trace_info,
+                                            std::set<RtEvent> &applied_events,
+                                            CopyFillAggregator *&aggregator)
+    //--------------------------------------------------------------------------
+    {
+      WrapperReferenceMutator mutator(applied_events);
+      // Importantly make sure we hold on to any references from deferred
+      // views and expressions and until after we make the phi views and
+      // have added the necessary references to them
+      std::map<DeferredView*,unsigned> deferred_refs_to_remove;
+      std::map<IndexSpaceExpression*,unsigned> expr_refs_to_remove;
+      LegionMap<IndexSpaceExpression*,FieldMaskSet<DeferredView> > phi_views;
+      // Do the partial valid views first
+      if (!(fill_mask * partial_valid_fields))
+      {
+        std::vector<DeferredView*> to_delete;
+        for (ViewExprMaskSets::iterator vit = partial_valid_instances.begin();
+              vit != partial_valid_instances.end(); vit++)
+        {
+          if (fill_mask * vit->second.get_valid_mask())
+            continue;
+          if (vit->first->is_deferred_view())
+          {
+            DeferredView *deferred = vit->first->as_deferred_view();
+            FieldMaskSet<IndexSpaceExpression> to_add;
+            std::vector<IndexSpaceExpression*> to_remove;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = fill_mask & it->second;
+              if (!overlap)
+                continue;
+              if (expr_covers)
+              {
+                phi_views[it->first].insert(deferred, overlap);
+                it.filter(overlap);
+                if (!it->second)
+                  to_remove.push_back(it->first);
+              }
+              else
+              {
+                IndexSpaceExpression *fill_expr = 
+                  runtime->forest->intersect_index_spaces(it->first, expr);
+                if (fill_expr->is_empty())
+                  continue;
+                phi_views[fill_expr].insert(deferred, overlap); 
+                // remove the fields from this expression no matter what
+                it.filter(overlap);
+                if (!it->second)
+                  to_remove.push_back(it->first);
+                if (fill_expr->get_volume() < it->first->get_volume())
+                {
+                  // if we only had a partial covering then put the
+                  // difference back into the partial expressions
+                  IndexSpaceExpression *diff_expr = 
+                    runtime->forest->subtract_index_spaces(it->first,fill_expr);
+                  to_add.insert(diff_expr, overlap);
+                }
+              }
+            }
+            if (!to_remove.empty())
+            {
+              for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                    to_remove.begin(); it != to_remove.end(); it++)
+              {
+                if (!to_add.empty() && (to_add.find(*it) != to_add.end()))
+                  continue;
+                vit->second.erase(*it);
+                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                  expr_refs_to_remove.find(*it);
+                if (finder == expr_refs_to_remove.end())
+                  expr_refs_to_remove[*it] = 1;
+                else
+                  finder->second++;
+              }
+            }
+            if (!to_add.empty())
+            {
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    to_add.begin(); it != to_add.end(); it++)
+                if (vit->second.insert(it->first, it->second))
+                  it->first->add_nested_expression_reference(did, &mutator);
+            }
+            if (vit->second.empty())
+              to_delete.push_back(deferred);
+            else
+              vit->second.tighten_valid_mask();
+          }
+          else
+          {
+            InstanceView *inst_view = vit->first->as_instance_view();
+            // Physical instance so we can just record the predicated fills
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = fill_mask & it->second;
+              if (!overlap)
+                continue;
+              IndexSpaceExpression *fill_expr = it->first;
+              if (!expr_covers)
+              {
+                fill_expr = 
+                  runtime->forest->intersect_index_spaces(it->first, expr);
+                if (fill_expr->is_empty())
+                  continue;
+              }
+              if (aggregator == NULL)
+                aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                   index, NULL/*no previous guard*/, true/*track*/, true_guard);
+              aggregator->record_fill(inst_view, fill_view, overlap, fill_expr,
+                                      true_guard, this, applied_events);
+            }
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<DeferredView*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            partial_valid_instances.erase(*it);
+            std::map<DeferredView*,unsigned>::iterator finder =
+              deferred_refs_to_remove.find(*it);
+            if (finder == deferred_refs_to_remove.end())
+              deferred_refs_to_remove[*it] = 1;
+            else
+              finder->second++;
+          }
+        }
+        // No need to rebuild the partial valid fields here since we 
+        // didn't actually change them, we might have different sets of
+        // views when we're done, but the same fields are all still represented
+      }
+      // Now do the total valid views
+      bool need_partial_rebuild = false;
+      if (!(fill_mask * total_valid_instances.get_valid_mask()))
+      {
+        std::vector<DeferredView*> to_delete;
+        for (FieldMaskSet<LogicalView>::iterator it = 
+              total_valid_instances.begin(); it != 
+              total_valid_instances.end(); it++)
+        {
+          const FieldMask overlap = it->second & fill_mask;
+          if (!overlap)
+            continue;
+          if (it->first->is_deferred_view())
+          {
+            // Record this in our set of phi views
+            DeferredView *deferred = it->first->as_deferred_view();
+            if (expr_covers)
+              phi_views[set_expr].insert(deferred, overlap);
+            else
+              phi_views[expr].insert(deferred, overlap);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(deferred);
+            if (!expr_covers)
+            {
+              // If the predicated fill isn't covering then we need to
+              // move this deferred view back to the partial valid views
+              IndexSpaceExpression *diff = 
+                runtime->forest->subtract_index_spaces(set_expr, expr);
+              if (record_partial_valid_instance(it->first, diff, overlap,
+                    mutator, false/*check total_valid*/))
+                need_partial_rebuild = true;
+            }
+          }
+          else
+          {
+            // Physical instance so we can just record the predicated fill
+            if (aggregator == NULL)
+              aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                  index, NULL/*no previous guard*/, true/*track*/, true_guard);
+            aggregator->record_fill(it->first->as_instance_view(),
+                fill_view, overlap, expr, true_guard, this, applied_events);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<DeferredView*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            total_valid_instances.erase(*it);
+            std::map<DeferredView*,unsigned>::iterator finder =
+              deferred_refs_to_remove.find(*it);
+            if (finder == deferred_refs_to_remove.end())
+              deferred_refs_to_remove[*it] = 1;
+            else
+              finder->second++;
+          }
+        }
+      }
+      if (!phi_views.empty())
+      {
+        // Create the phi views and record them in the right data structure
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<DeferredView> >::iterator it =
+              phi_views.begin(); it != phi_views.end(); it++)
+        {
+          const FieldMask phi_mask = it->second.get_valid_mask();
+          FieldMaskSet<DeferredView> true_view;
+          true_view.insert(fill_view, phi_mask);
+          PhiView *phi_view = new PhiView(runtime->forest,
+              runtime->get_available_distributed_id(), runtime->address_space,
+              true_guard, false_guard, std::move(true_view), 
+              std::move(it->second));
+          if (it->first == set_expr)
+          {
+            total_valid_instances.insert(phi_view, phi_mask);
+            phi_view->add_nested_valid_ref(did, &mutator);
+          }
+          else if (record_partial_valid_instance(phi_view, it->first,
+                phi_mask, mutator, false/*check total valid*/))
+            need_partial_rebuild = true;
+        }
+      }
+      // Now that we've made our phi views and registered them we 
+      // can remove the references that were being held
+      if (!deferred_refs_to_remove.empty())
+      {
+        for (std::map<DeferredView*,unsigned>::const_iterator it =
+              deferred_refs_to_remove.begin(); it !=
+              deferred_refs_to_remove.end(); it++)
+          if (it->first->remove_nested_valid_ref(did, NULL/*mut*/, it->second))
+            delete it->first;
+      }
+      if (!expr_refs_to_remove.empty())
+      {
+        for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
+              expr_refs_to_remove.begin(); it !=
+              expr_refs_to_remove.end(); it++)
+          if (it->first->remove_nested_expression_reference(did, it->second))
+            delete it->first;
+      }
+      if (need_partial_rebuild)
+      {
+        partial_valid_fields.clear();
+        for (ViewExprMaskSets::const_iterator it =
+              partial_valid_instances.begin(); it !=
+              partial_valid_instances.end(); it++)
+          partial_valid_fields |= it->second.get_valid_mask();
       }
     }
 

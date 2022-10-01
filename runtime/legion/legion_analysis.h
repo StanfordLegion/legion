@@ -236,6 +236,9 @@ namespace Legion {
       virtual void record_merge_events(ApEvent &lhs,
                                        const std::vector<ApEvent>& rhs,
                                        const TraceLocalID &tlid) = 0;
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
+                                       const TraceLocalID &tlid) = 0;
       // This collective barrier is managed by the operations and is auto
       // refreshed by the operations on each replay
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
@@ -339,6 +342,7 @@ namespace Legion {
         REMOTE_TRACE_CREATE_USER_EVENT,
         REMOTE_TRACE_TRIGGER_EVENT,
         REMOTE_TRACE_MERGE_EVENTS,
+        REMOTE_TRACE_MERGE_PRED_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_INSTS,
         REMOTE_TRACE_ISSUE_FILL,
@@ -388,6 +392,9 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::vector<ApEvent>& rhs,
+                                       const TraceLocalID &tlid);
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
@@ -524,6 +531,12 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_trigger_event(result, rhs, tlid);
+        }
+      inline void record_merge_events(PredEvent &result,
+                                      PredEvent e1, PredEvent e2) const
+        {
+          base_sanity_check();
+          rec->record_merge_events(result, e1, e2, tlid);
         }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
@@ -1446,9 +1459,9 @@ namespace Legion {
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
       public:
         FillUpdate(FillView *src, const FieldMask &mask,
-                   IndexSpaceExpression *expr,
+                   IndexSpaceExpression *expr, PredEvent guard,
                    CopyAcrossHelper *helper = NULL)
-          : Update(expr, mask, helper), source(src) { }
+          : Update(expr, mask, helper), source(src), fill_guard(guard) { }
         virtual ~FillUpdate(void) { }
       private:
         FillUpdate(const FillUpdate &rhs) = delete;
@@ -1461,6 +1474,10 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         FillView *const source;
+        // Unlike copies, because of nested predicated fill operations,
+        // then fills can have their own predication guard different
+        // from the base predicate guard for the aggregator
+        const PredEvent fill_guard;
       };
       typedef LegionMap<ApEvent,FieldMaskSet<Update> > EventFieldUpdates;
     public:
@@ -1483,6 +1500,7 @@ namespace Legion {
                           LogicalView *src_view,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
@@ -1492,6 +1510,7 @@ namespace Legion {
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
@@ -1502,6 +1521,7 @@ namespace Legion {
                           FieldMaskSet<IndexSpaceExpression> > &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
@@ -1512,6 +1532,7 @@ namespace Legion {
                        FillView *src_view,
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
+                       const PredEvent fill_guard,
                        EquivalenceSet *tracing_eq,
                        std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
@@ -2442,7 +2463,8 @@ namespace Legion {
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const PredEvent true_guard = PredEvent::NO_PRED_EVENT,
+                        const PredEvent false_guard = PredEvent::NO_PRED_EVENT,
                         const bool add_restriction = false,
                         const bool first_local = true);
       // Also local but with a full set of instances 
@@ -2450,7 +2472,6 @@ namespace Legion {
                         const RegionUsage &usage, IndexSpaceExpression *expr,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                         const bool add_restriction = false);
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
@@ -2458,7 +2479,6 @@ namespace Legion {
                         const FieldMaskSet<LogicalView> &overwrite_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                         const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index,
@@ -2467,7 +2487,8 @@ namespace Legion {
                         FieldMaskSet<InstanceView> &reduction_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const PredEvent pred_guard,
+                        const PredEvent true_guard,
+                        const PredEvent false_guard,
                         CollectiveMapping *mapping,
                         const bool first_local,
                         const bool add_restriction);
@@ -2506,7 +2527,8 @@ namespace Legion {
       FieldMaskSet<LogicalView> views;
       FieldMaskSet<InstanceView> reduction_views;
       const ApEvent precondition;
-      const PredEvent pred_guard;
+      const PredEvent true_guard;
+      const PredEvent false_guard;
       const bool add_restriction;
     public:
       // Can only safely be accessed when analysis is locked
@@ -3050,6 +3072,15 @@ namespace Legion {
                     const PhysicalTraceInfo &trace_info,
                     std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
+      void predicate_fill_all(FillView *fill, const FieldMask &fill_mask,
+                              IndexSpaceExpression *expr,
+                              const bool expr_covers,
+                              const PredEvent true_guard,
+                              const PredEvent false_guard,
+                              Operation *op, const unsigned index,
+                              const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &applied_events,
+                              CopyFillAggregator *&aggregator);
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
                               const FieldMask &restrict_mask,

@@ -3086,6 +3086,7 @@ namespace Legion {
                                        const VersionInfo &version_info,
                                        ApEvent precondition,
                                        PredEvent true_guard, 
+                                       PredEvent false_guard,
                                        const PhysicalTraceInfo &trace_info,
                                        std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -3101,7 +3102,8 @@ namespace Legion {
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
           version_info.get_valid_mask(), trace_info, collective_mapping,
-          precondition, true_guard, false/*add restriction*/, first_local);
+          precondition, true_guard, false_guard, false/*add restriction*/,
+          first_local);
       analysis->add_reference();
       const RtEvent traversal_done = analysis->perform_traversal(
           RtEvent::NO_RT_EVENT, version_info, map_applied_events);
@@ -3145,7 +3147,7 @@ namespace Legion {
       IndexSpaceNode *expr_node = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
             index, RegionUsage(req), expr_node, trace_info,
-            ApEvent::NO_AP_EVENT, PredEvent::NO_PRED_EVENT, restricted);
+            ApEvent::NO_AP_EVENT, restricted);
       analysis->add_reference();
       const RtEvent views_ready =
         analysis->convert_views(req.region, external_instances);
@@ -3223,8 +3225,8 @@ namespace Legion {
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           usage, local_expr, NULL/*view*/, version_info.get_valid_mask(), 
           trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
-          PredEvent::NO_PRED_EVENT, false/*add restriction*/,
-          collective_first_local);
+          PredEvent::NO_PRED_EVENT, PredEvent::NO_PRED_EVENT,
+          false/*add restriction*/, collective_first_local);
       analysis->add_reference();
       const RtEvent traversal_done = analysis->perform_traversal(
           RtEvent::NO_RT_EVENT, version_info, map_applied_events);

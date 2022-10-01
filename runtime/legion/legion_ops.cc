@@ -4355,8 +4355,8 @@ namespace Legion {
       predicate_resolved = false;
       collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
       predicate_references = 0;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      true_guard = PredUserEvent::NO_PRED_USER_EVENT;
+      false_guard = PredUserEvent::NO_PRED_USER_EVENT;
       can_result_future_complete = false;
     }
 
@@ -4576,7 +4576,7 @@ namespace Legion {
       bool need_trigger = true;
       // Make a copy of the waiters since we could get cleaned up in parallel
       std::map<PredicateWaiter*,GenerationID> copy_waiters;
-      PredEvent to_trigger, to_poison;
+      PredUserEvent to_trigger, to_poison;
       {
         AutoLock o_lock(op_lock);
         if ((pred_gen == get_generation()) && !predicate_resolved)
@@ -20570,7 +20570,7 @@ namespace Legion {
     {
       // Always speculate on fill ops, but mapping only since
       // we know that there is an easy way to defer them
-      return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -20656,7 +20656,7 @@ namespace Legion {
         }
         runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                      fill_view, version_info, 
-                                     init_precondition, true_guard,
+                                     init_precondition, true_guard, false_guard,
                                      trace_info, map_applied_conditions);
 #ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
@@ -20730,7 +20730,7 @@ namespace Legion {
         free(result);
       runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                    fill_view, version_info,
-                                   init_precondition, true_guard,
+                                   init_precondition, true_guard, false_guard,
                                    trace_info, map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);

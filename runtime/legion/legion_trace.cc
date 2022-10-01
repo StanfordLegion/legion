@@ -6270,6 +6270,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PredEvent &lhs, PredEvent e1,
+                                         PredEvent e2, const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+      // need support for predicated execution with tracing
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_collective_barrier(ApBarrier bar, 
               ApEvent pre, const std::pair<size_t,size_t> &key, size_t arrivals)
     //--------------------------------------------------------------------------

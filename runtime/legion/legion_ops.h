@@ -1138,7 +1138,7 @@ namespace Legion {
     protected:
       RtUserEvent collect_predicate;
       unsigned predicate_references;
-      PredEvent true_guard, false_guard;
+      PredUserEvent true_guard, false_guard;
     protected:
       Future result_future;
       bool can_result_future_complete;

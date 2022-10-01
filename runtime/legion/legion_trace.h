@@ -996,6 +996,9 @@ namespace Legion {
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::vector<ApEvent>& rhs,
                                        const TraceLocalID &tlid);
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
+                                       const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
       virtual ShardID record_managed_barrier(ApBarrier bar,

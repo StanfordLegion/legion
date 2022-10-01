@@ -1622,14 +1622,19 @@ namespace Legion {
 
     /**
      * \class DeferredView
-     * A DeferredView class is an abstract class the complements
-     * the MaterializedView class. While materialized views are 
-     * actual views onto a real instance, deferred views are 
-     * effectively place holders for non-physical isntances which
-     * contain enough information to perform the necessary 
-     * operations to bring a materialized view up to date for 
-     * specific fields. There are several different flavors of
-     * deferred views and this class is the base type.
+     * A DeferredView class is an abstract class for representing
+     * lazy computation in an equivalence set. At the moment, the
+     * types only allow deferred views to capture other kinds of
+     * lazy evaluation. In particular this is either a fill view
+     * or nested levels of predicated fill views. It could also
+     * support other kinds of lazy evaluation as well. Importantly,
+     * since it only captures lazy computation and not materialized
+     * data there are no InstanceView managers captured in its
+     * representations, which is an important invariant for the
+     * equivalence sets. Think long and hard about what you're
+     * doing if you ever decide that you want to break that 
+     * invariant and capture the names of instance views inside
+     * of a deferred view.
      */
     class DeferredView : public LogicalView {
     public:
@@ -1649,6 +1654,8 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracing_eq,
                            std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper) = 0;
@@ -1710,6 +1717,8 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracing_eq,
                            std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
@@ -1739,19 +1748,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHI_VIEW_ALLOC;
     public:
-      struct DeferPhiViewRefArgs : 
-        public LgTaskArgs<DeferPhiViewRefArgs> {
-      public:
-        static const LgTaskID TASK_ID =
-          LG_DEFER_PHI_VIEW_REF_TASK_ID;
-      public:
-        DeferPhiViewRefArgs(DistributedCollectable *d, DistributedID id)
-          : LgTaskArgs<DeferPhiViewRefArgs>(implicit_provenance),
-            dc(d), did(id) { }
-      public:
-        DistributedCollectable *const dc;
-        const DistributedID did; 
-      };
       struct DeferPhiViewRegistrationArgs : 
         public LgTaskArgs<DeferPhiViewRegistrationArgs> {
       public:
@@ -1767,12 +1763,14 @@ namespace Legion {
     public:
       PhiView(RegionTreeForest *ctx, DistributedID did,
               AddressSpaceID owner_proc, PredEvent true_guard,
-              PredEvent false_guard, InnerContext *owner,
-              bool register_now);
-      PhiView(const PhiView &rhs);
+              PredEvent false_guard,
+              FieldMaskSet<DeferredView> &&true_views,
+              FieldMaskSet<DeferredView> &&false_views,
+              bool register_now = true);
+      PhiView(const PhiView &rhs) = delete;
       virtual ~PhiView(void);
     public:
-      PhiView& operator=(const PhiView &rhs);
+      PhiView& operator=(const PhiView &rhs) = delete;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1784,30 +1782,20 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracign_eq,
                            std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
-      void record_true_view(LogicalView *view, const FieldMask &view_mask,
-                            ReferenceMutator *mutator);
-      void record_false_view(LogicalView *view, const FieldMask &view_mask,
-                             ReferenceMutator *mutator);
-    public:
-      void pack_phi_view(Serializer &rez);
-      void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
-      RtEvent defer_add_reference(DistributedCollectable *dc, 
-                                  RtEvent precondition) const;
+      void add_resource_references(void);
       static void handle_send_phi_view(Runtime *runtime, Deserializer &derez,
                                        AddressSpaceID source);
-      static void handle_deferred_view_ref(const void *args);
       static void handle_deferred_view_registration(const void *args);
     public:
       const PredEvent true_guard;
       const PredEvent false_guard;
-      InnerContext *const owner_context;
-    protected:
-      LegionMap<LogicalView*,FieldMask> true_views;
-      LegionMap<LogicalView*,FieldMask> false_views;
+      const FieldMaskSet<DeferredView> true_views, false_views;
     };
 
     //--------------------------------------------------------------------------

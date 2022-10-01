@@ -652,6 +652,7 @@ namespace Legion {
                        const unsigned index, FillView *fill_view,
                        const VersionInfo &version_info,
                        ApEvent precondition, PredEvent true_guard,
+                       PredEvent false_guard,
                        const PhysicalTraceInfo &trace_info,
                        std::set<RtEvent> &map_applied_events);
       InstanceRef create_external_instance(AttachOp *attach_op,

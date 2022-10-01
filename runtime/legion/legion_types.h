@@ -366,7 +366,6 @@ namespace Legion {
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
-      LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
@@ -491,7 +490,6 @@ namespace Legion {
         "Defer Trigger Task Complete",                            \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
-        "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
@@ -2525,9 +2523,20 @@ namespace Legion {
     public:
       PredEvent(void) noexcept : LgEvent() { } 
       PredEvent(const PredEvent &rhs) = default;
-      explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
+      explicit PredEvent(const Realm::Event &e) : LgEvent(e) { }
     public:
       inline PredEvent& operator=(const PredEvent &rhs) = default;
+    };
+
+    class PredUserEvent : public PredEvent {
+    public:
+      static const PredUserEvent NO_PRED_USER_EVENT;
+    public:
+      PredUserEvent(void) noexcept : PredEvent() { }
+      PredUserEvent(const PredUserEvent &rhs) = default;
+      explicit PredUserEvent(const Realm::UserEvent &e) : PredEvent(e) { }
+    public:
+      inline PredUserEvent& operator=(const PredUserEvent &rhs) = default;
       inline operator Realm::UserEvent() const
         { Realm::UserEvent e; e.id = id; return e; }
     };

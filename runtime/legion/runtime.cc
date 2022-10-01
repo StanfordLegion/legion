@@ -92,6 +92,7 @@ namespace Legion {
     const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
     const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
     const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+    const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = PredUserEvent();
 
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
@@ -31966,11 +31967,6 @@ namespace Legion {
         case LG_DEFER_REDUCTION_VIEW_TASK_ID:
           {
             ReductionView::handle_defer_reduction_view(args, runtime);
-            break;
-          }
-        case LG_DEFER_PHI_VIEW_REF_TASK_ID:
-          {
-            PhiView::handle_deferred_view_ref(args);
             break;
           }
         case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:

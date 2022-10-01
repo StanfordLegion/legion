@@ -4907,13 +4907,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FillView::flatten(CopyFillAggregator &aggregator,
-                         InstanceView *dst_view, const FieldMask &src_mask,
-                         IndexSpaceExpression *expr, EquivalenceSet *tracing_eq, 
-                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
+                InstanceView *dst_view, const FieldMask &src_mask,
+                IndexSpaceExpression *expr, PredEvent pred_guard,
+                const PhysicalTraceInfo &trace_info, EquivalenceSet *tracing_eq,
+                std::set<RtEvent> &applied, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       aggregator.record_fill(dst_view, this, src_mask, expr, 
-                             tracing_eq, applied, helper);
+                             pred_guard, tracing_eq, applied, helper);
     }
 
     //--------------------------------------------------------------------------
@@ -4964,12 +4965,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
                      AddressSpaceID owner_space,
-                     PredEvent tguard, PredEvent fguard, 
-                     InnerContext *owner, bool register_now) 
+                     PredEvent tguard, PredEvent fguard,
+                     FieldMaskSet<DeferredView> &&true_vws,
+                     FieldMaskSet<DeferredView> &&false_vws,
+                     bool register_now) 
       : DeferredView(ctx, encode_phi_did(did), owner_space, register_now),
-        true_guard(tguard), false_guard(fguard), owner_context(owner)
+        true_guard(tguard), false_guard(fguard),
+        true_views(true_vws), false_views(false_vws)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(true_guard.exists());
+      assert(false_guard.exists());
+      assert(true_views.get_valid_mask() == false_views.get_valid_mask());
+#endif
+      if (register_now)
+        add_resource_references();
 #ifdef LEGION_GC
       log_garbage.info("GC Phi View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -4977,69 +4988,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, false),
-        true_guard(PredEvent::NO_PRED_EVENT), 
-        false_guard(PredEvent::NO_PRED_EVENT), owner_context(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     PhiView::~PhiView(void)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
+      for (FieldMaskSet<DeferredView>::const_iterator it = 
             true_views.begin(); it != true_views.end(); it++)
-      {
         if (it->first->remove_nested_resource_ref(did))
           delete it->first;
-      }
-      true_views.clear();
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+      for (FieldMaskSet<DeferredView>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
-      {
         if (it->first->remove_nested_resource_ref(did))
           delete it->first;
-      }
-      false_views.clear();
     }
 
     //--------------------------------------------------------------------------
-    PhiView& PhiView::operator=(const PhiView &rhs)
+    void PhiView::add_resource_references(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
+      for (FieldMaskSet<DeferredView>::const_iterator it = 
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->add_nested_resource_ref(did);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->add_nested_resource_ref(did);
     }
 
     //--------------------------------------------------------------------------
     void PhiView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->add_nested_gc_ref(did, mutator);
+      for (FieldMaskSet<DeferredView>::const_iterator it = 
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->add_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void PhiView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->remove_nested_gc_ref(did, mutator);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->remove_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void PhiView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+      for (FieldMaskSet<DeferredView>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
+      for (FieldMaskSet<DeferredView>::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
     }
@@ -5048,131 +5053,12 @@ namespace Legion {
     void PhiView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+      for (FieldMaskSet<DeferredView>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+      for (FieldMaskSet<DeferredView>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::record_true_view(LogicalView *view, const FieldMask &mask,
-                                   ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      LegionMap<LogicalView*,FieldMask>::iterator finder = 
-        true_views.find(view);
-      if (finder == true_views.end())
-      {
-        true_views[view] = mask;
-        if (view->is_deferred_view())
-        {
-          // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did, mutator);
-          view->add_nested_valid_ref(did, mutator);
-        }
-        else // Otherwise we just need the valid reference
-          view->add_nested_resource_ref(did);
-      }
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::record_false_view(LogicalView *view, const FieldMask &mask,
-                                    ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      LegionMap<LogicalView*,FieldMask>::iterator finder = 
-        false_views.find(view);
-      if (finder == false_views.end())
-      {
-        false_views[view] = mask;
-        if (view->is_deferred_view())
-        {
-          // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did, mutator);
-          view->add_nested_valid_ref(did, mutator);
-        }
-        else // Otherwise we just need the valid reference
-          view->add_nested_resource_ref(did);
-      }
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::pack_phi_view(Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<size_t>(true_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
-            true_views.begin(); it != true_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(false_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
-            false_views.begin(); it != false_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::unpack_phi_view(Deserializer &derez, 
-                                  std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_true_views;
-      derez.deserialize(num_true_views);
-      for (unsigned idx = 0; idx < num_true_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        LogicalView *view = static_cast<LogicalView*>(
-            runtime->find_or_request_logical_view(view_did, ready));
-        derez.deserialize(true_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else // Otherwise we can add the reference now
-          view->add_nested_resource_ref(did);
-      }
-      size_t num_false_views;
-      derez.deserialize(num_false_views);
-      for (unsigned idx = 0; idx < num_false_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        LogicalView *view = static_cast<LogicalView*>(
-            runtime->find_or_request_logical_view(view_did, ready));
-        derez.deserialize(false_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else // Otherwise we can add the reference now
-          view->add_nested_resource_ref(did);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent PhiView::defer_add_reference(DistributedCollectable *dc,
-                                         RtEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-      DeferPhiViewRefArgs args(dc, did);
-      return context->runtime->issue_runtime_meta_task(args,
-          LG_LATENCY_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5190,8 +5076,20 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(true_guard);
         rez.serialize(false_guard);
-        rez.serialize<UniqueID>(owner_context->get_context_uid());
-        pack_phi_view(rez);
+        rez.serialize<size_t>(true_views.size());
+        for (FieldMaskSet<DeferredView>::const_iterator it = 
+              true_views.begin(); it != true_views.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(false_views.size());
+        for (FieldMaskSet<DeferredView>::const_iterator it = 
+              false_views.begin(); it != false_views.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
       }
       runtime->send_phi_view(target, rez);
       update_remote_instances(target);
@@ -5199,13 +5097,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhiView::flatten(CopyFillAggregator &aggregator,
-                         InstanceView *dst_view, const FieldMask &src_mask,
-                         IndexSpaceExpression *expr, EquivalenceSet *tracing_eq,
-                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
+                InstanceView *dst_view, const FieldMask &src_mask,
+                IndexSpaceExpression *expr, PredEvent pred_guard,
+                const PhysicalTraceInfo &trace_info, EquivalenceSet *tracing_eq,
+                std::set<RtEvent> &applied, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(!(src_mask - true_views.get_valid_mask()));
+      assert(!(src_mask - false_views.get_valid_mask()));
+#endif
+      const PredEvent next_true = !pred_guard.exists() ? true_guard :
+        Runtime::merge_events(&trace_info, pred_guard, true_guard);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+      {
+        const FieldMask overlap = src_mask & it->second;
+        if (!overlap)
+          continue;
+        it->first->flatten(aggregator, dst_view, overlap, expr, next_true,
+                           trace_info, tracing_eq, applied, helper);
+      }
+      const PredEvent next_false = !pred_guard.exists() ? false_guard :
+        Runtime::merge_events(&trace_info, pred_guard, false_guard);
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+      {
+        const FieldMask overlap = src_mask & it->second;
+        if (!overlap)
+          continue;
+        it->first->flatten(aggregator, dst_view, overlap, expr, next_false,
+                           trace_info, tracing_eq, applied, helper);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5221,43 +5144,64 @@ namespace Legion {
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
-      UniqueID owner_uid;
-      derez.deserialize(owner_uid);
       std::set<RtEvent> ready_events;
-      RtEvent ctx_ready;
-      InnerContext *owner_context = 
-        runtime->find_context(owner_uid, false, &ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
+      FieldMaskSet<DeferredView> true_views, false_views;
+      size_t num_true_views;
+      derez.deserialize(num_true_views);
+      for (unsigned idx = 0; idx < num_true_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;
+        DeferredView *view = static_cast<DeferredView*>(
+            runtime->find_or_request_logical_view(view_did, ready));
+        FieldMask mask;
+        derez.deserialize(mask);
+        true_views.insert(view, mask);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      size_t num_false_views;
+      derez.deserialize(num_false_views);
+      for (unsigned idx = 0; idx < num_false_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;
+        DeferredView *view = static_cast<DeferredView*>(
+            runtime->find_or_request_logical_view(view_did, ready));
+        FieldMask mask;
+        derez.deserialize(mask);
+        false_views.insert(view, mask);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
       // Make the phi view but don't register it yet
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) PhiView(runtime->forest, did, owner,
-                                     true_guard, false_guard, owner_context, 
+                                     true_guard, false_guard,
+                                     std::move(true_views),
+                                     std::move(false_views),
                                      false/*register_now*/);
       else
         view = new PhiView(runtime->forest, did, owner, true_guard, 
-                           false_guard, owner_context, false/*register now*/);
-      // Unpack all the internal data structures
-      view->unpack_phi_view(derez, ready_events);
+                           false_guard, std::move(true_views),
+                           std::move(false_views), false/*register now*/);
       if (!ready_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferPhiViewRegistrationArgs args(view);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
                                          wait_on);
-        return;
       }
-      view->register_with_runtime();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhiView::handle_deferred_view_ref(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferPhiViewRefArgs *rargs = (const DeferPhiViewRefArgs*)args;
-      rargs->dc->add_nested_resource_ref(rargs->did); 
+      else
+      {
+        // Add the resource references
+        view->add_resource_references();
+        view->register_with_runtime();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5266,6 +5210,7 @@ namespace Legion {
     {
       const DeferPhiViewRegistrationArgs *pargs = 
         (const DeferPhiViewRegistrationArgs*)args;
+      pargs->view->add_resource_references();
       pargs->view->register_with_runtime();
     }
 

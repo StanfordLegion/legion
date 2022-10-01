@@ -4785,9 +4785,11 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
       static inline void poison_event(RtUserEvent to_poison);
     public:
-      static inline PredEvent create_pred_event(void);
-      static inline void trigger_event(PredEvent to_trigger);
-      static inline void poison_event(PredEvent to_poison);
+      static inline PredUserEvent create_pred_event(void);
+      static inline void trigger_event(PredUserEvent to_trigger);
+      static inline void poison_event(PredUserEvent to_poison);
+      static inline PredEvent merge_events(const TraceInfo *info,
+                                           PredEvent e1, PredEvent e2);
     public:
       static inline ApEvent ignorefaults(Realm::Event e);
       static inline RtEvent protect_event(ApEvent to_protect);
@@ -5341,20 +5343,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline PredEvent Runtime::create_pred_event(void)
+    /*static*/ inline PredUserEvent Runtime::create_pred_event(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
-      PredEvent result(Realm::UserEvent::create_user_event());
+      PredUserEvent result(Realm::UserEvent::create_user_event());
       LegionSpy::log_pred_event(result);
       return result;
 #else
-      return PredEvent(Realm::UserEvent::create_user_event());
+      return PredUserEvent(Realm::UserEvent::create_user_event());
 #endif
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::trigger_event(PredEvent to_trigger)
+    /*static*/ inline void Runtime::trigger_event(PredUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       Realm::UserEvent copy = to_trigger;
@@ -5365,7 +5367,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::poison_event(PredEvent to_poison)
+    /*static*/ inline void Runtime::poison_event(PredUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
       Realm::UserEvent copy = to_poison;
@@ -5374,6 +5376,38 @@ namespace Legion {
       // This counts as triggering
       LegionSpy::log_pred_event_trigger(to_poison);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline PredEvent Runtime::merge_events(
+                              const TraceInfo *info, PredEvent e1, PredEvent e2)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(e1.exists());
+      assert(e2.exists());
+#endif
+      PredEvent result(Realm::Event::merge_events(e1, e2));
+#ifdef LEGION_DISABLE_EVENT_PRUNING
+      if (!result.exists() || (result == e1) || (result == e2))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (result == e1)
+          rename.trigger(e1);
+        else if (result == e2)
+          rename.trigger(e2);
+        else
+          rename.trigger();
+        result = PredEvent(rename);
+      }
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(e1, result);
+      LegionSpy::log_event_dependence(e2, result);
+#endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2);
+      return result;
     }
 
     //--------------------------------------------------------------------------
