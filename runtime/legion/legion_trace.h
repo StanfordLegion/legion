@@ -779,7 +779,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             LgEvent src_unique, LgEvent dst_unique);
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs, 
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -807,7 +808,8 @@ namespace Legion {
                              FieldSpace handle, 
                              RegionTreeID tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             LgEvent unique_event);
     public:
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
@@ -1183,7 +1185,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                 FieldSpace handle, RegionTreeID tree_id,
 #endif
-                unsigned precondition_idx);
+                unsigned precondition_idx, LgEvent unique_event);
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1208,6 +1210,7 @@ namespace Legion {
       RegionTreeID tree_id;
 #endif
       unsigned precondition_idx;
+      LgEvent unique_event;
     };
 
     /**
@@ -1229,7 +1232,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                unsigned precondition_idx);
+                unsigned precondition_idx,
+                LgEvent src_unique, LgEvent dst_unique);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1254,6 +1258,7 @@ namespace Legion {
       RegionTreeID dst_tree_id;
 #endif
       unsigned precondition_idx;
+      LgEvent src_unique, dst_unique;
     };
 
     /**

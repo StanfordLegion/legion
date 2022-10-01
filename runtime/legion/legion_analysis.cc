@@ -565,7 +565,9 @@ namespace Legion {
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition, 
-                                             PredEvent pred_guard)
+                                             PredEvent pred_guard,
+                                             LgEvent src_unique,
+                                             LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -602,6 +604,8 @@ namespace Legion {
 #endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);
+          rez.serialize(src_unique);
+          rez.serialize(dst_unique);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -613,7 +617,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                               src_tree_id, dst_tree_id,
 #endif
-                              precondition, pred_guard);
+                              precondition, pred_guard,
+                              src_unique, dst_unique);
     }
 
     //--------------------------------------------------------------------------
@@ -744,7 +749,8 @@ namespace Legion {
                                              RegionTreeID tree_id,
 #endif
                                              ApEvent precondition,
-                                             PredEvent pred_guard)
+                                             PredEvent pred_guard,
+                                             LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -774,6 +780,7 @@ namespace Legion {
 #endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);  
+          rez.serialize(unique_event);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -785,7 +792,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                       handle, tree_id,
 #endif
-                                      precondition, pred_guard);
+                                      precondition, pred_guard, unique_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1209,6 +1216,9 @@ namespace Legion {
             derez.deserialize(precondition);
             PredEvent pred_guard;
             derez.deserialize(pred_guard);
+            LgEvent src_unique, dst_unique;
+            derez.deserialize(src_unique);
+            derez.deserialize(dst_unique);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1217,7 +1227,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                    src_tree_id, dst_tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard,
+                                   src_unique, dst_unique);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1385,6 +1396,8 @@ namespace Legion {
             derez.deserialize(precondition);
             PredEvent pred_guard;
             derez.deserialize(pred_guard);
+            LgEvent unique_event;
+            derez.deserialize(unique_event);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
@@ -1393,7 +1406,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                    handle, tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard, unique_event);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1675,9 +1688,6 @@ namespace Legion {
       rez.serialize(field.subfield_offset);
       rez.serialize(field.indirect_index);
       rez.serialize(field.fill_data.indirect);
-#ifdef LEGION_SPY
-      rez.serialize(field.inst_event);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1695,9 +1705,6 @@ namespace Legion {
       derez.deserialize(field.subfield_offset);
       derez.deserialize(field.indirect_index);
       derez.deserialize(field.fill_data.indirect);
-#ifdef LEGION_SPY
-      derez.deserialize(field.inst_event);
-#endif
     }
 
     /////////////////////////////////////////////////////////////

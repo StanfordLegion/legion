@@ -1851,6 +1851,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::CopySrcDstField CopySrcDstField;
     typedef unsigned long long IndexSpaceExprID;
     typedef std::pair<unsigned, DomainPoint> TraceLocalID;
     // Helper for encoding templates
@@ -2528,26 +2529,6 @@ namespace Legion {
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
     }
-
-#ifdef LEGION_SPY
-    // Need a custom version of these for Legion Spy to track instance events
-    class CopySrcDstField : public Realm::CopySrcDstField {
-    public:
-      CopySrcDstField(void) : Realm::CopySrcDstField() { }
-      CopySrcDstField(const CopySrcDstField &rhs)
-        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
-      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
-      { 
-        Realm::CopySrcDstField::operator = (rhs); 
-        inst_event = rhs.inst_event; 
-        return *this; 
-      }
-    public:
-      ApEvent inst_event;
-    };
-#else
-    typedef Realm::CopySrcDstField CopySrcDstField;
-#endif
 
   }; // namespace Internal 
   
