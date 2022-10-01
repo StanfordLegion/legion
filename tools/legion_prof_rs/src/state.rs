@@ -1760,6 +1760,9 @@ impl State {
         variant_id: VariantID,
         time_range: TimeRange,
     ) -> &mut ProcEntry {
+        // Hack: we have to do this in two places, because we don't know what
+        // order the logger calls are going to come in. If the operation gets
+        // logged first, this will come back Some(_) and we'll store it below.
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
@@ -2756,6 +2759,9 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
                 .set_provenance(provenance);
+            // Hack: we have to do this in two places, because we don't know what
+            // order the logger calls are going to come in. If the task gets
+            // logged first, this will come back Some(_) and we'll store it below.
             if let Some(task) = state.find_task_mut(*op_id) {
                 task.initiation_op = Some(*parent_id);
             }
