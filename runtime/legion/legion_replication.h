@@ -2721,6 +2721,7 @@ namespace Legion {
       };
     public:
       typedef InnerContext::RendezvousKey RendezvousKey;
+      typedef InnerContext::RendezvousResult RendezvousResult;
       typedef InnerContext::CollectiveRendezvous CollectiveRendezvous;
       struct ShardRendezvous {
         std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
@@ -2907,6 +2908,11 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source); 
       void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      void pack_collective_rendezvous(Serializer &rez, 
+          const RendezvousKey &key, const bool done,
+          const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) const;
+      void process_collective_rendezvous(const RendezvousKey &key,
+          std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -2933,6 +2939,7 @@ namespace Legion {
       static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
+      static void handle_collective_rendezvous(Deserializer &derez,Runtime *rt);
 #ifdef NO_EXPLICIT_COLLECTIVES
       static void handle_collective_instance_message(Deserializer &derez,
                                                      Runtime *runtime);

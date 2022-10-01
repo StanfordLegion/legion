@@ -21140,6 +21140,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_collective_rendezvous(
+                     const RendezvousKey &key, 
+                     std::map<LogicalRegion,CollectiveRendezvous> &to_construct)
+    //--------------------------------------------------------------------------
+    {
+      // Very important! Go straight to the base InnerContext method here
+      // since we're done with the collective rendezvous across the shards
+      // No need to give an operation since the base class method implemetation
+      // does not actually need it
+      InnerContext::construct_collective_mapping(key, NULL/*op*/, to_construct);
+    }
+
+    //--------------------------------------------------------------------------
     ApBarrier ReplicateContext::handle_find_trace_shard_event(
                      size_t template_index, ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------

@@ -12024,24 +12024,170 @@ namespace Legion {
       }
       if (mapping != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(!rendezvous.empty());
+#endif
         const unsigned owner_index = key.context_index % mapping->size();
         const AddressSpaceID owner = (*mapping)[owner_index];
         if (owner != runtime->address_space)
         {
-          // Send to the parent
-          //const AddressSpaceID parent = 
-          //  mapping->get_parent(owner, runtime->address_space);
-
+          // Send to the parent to continue the rendezvous
+          const AddressSpaceID parent = 
+            mapping->get_parent(owner, runtime->address_space);
+          Serializer rez;
+          pack_collective_rendezvous(rez, key, false/*done*/, rendezvous);
+          runtime->send_control_replicate_collective_rendezvous(parent, rez);
         }
         else
         {
           // Rendezvous is done so perform it
-
-
+          // Note all rendezvous for the same logical region tree need
+          // to end up on the same shard so the right collective views
+          // can be made for the various instances
+          // All the regions have to be from the same region tree so
+          // they're all going to the same place 
+          const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
+          const AddressSpaceID tid_owner = 
+            RegionTreeNode::get_owner_space(tid, runtime);
+          // Use the collective mapping here!
+          // It doesn't matter how many participants there are in this
+          // particular collective operation, all instances from the same
+          // region tree always need to go to the same shard in all cases
+          const AddressSpaceID target =
+            collective_mapping->contains(tid_owner) ? tid_owner :
+            collective_mapping->find_nearest(tid_owner);
+          if (target != runtime->address_space)
+          {
+            // Send it to the collective node
+            Serializer rez;
+            pack_collective_rendezvous(rez, key, true/*done*/, rendezvous);
+            runtime->send_control_replicate_collective_rendezvous(target, rez);
+          }
+          else
+            // Hey! We're already here so we can just do it
+            process_collective_rendezvous(key, rendezvous);
         }
         if (mapping->remove_reference())
           delete mapping;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::pack_collective_rendezvous(Serializer &rez,
+           const RendezvousKey &key, const bool done,
+           const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(repl_id);
+      rez.serialize(key.context_index);
+      rez.serialize(key.region_index);
+      rez.serialize(key.analysis);
+      rez.serialize<size_t>(rendezvous.size());
+      for (std::map<LogicalRegion,CollectiveRendezvous>::const_iterator
+            rit = rendezvous.begin(); rit != rendezvous.end(); rit++)
+      {
+        rez.serialize(rit->first);
+        rez.serialize(rit->second.results.size());
+        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::
+              const_iterator it = rit->second.results.begin(); it !=
+              rit->second.results.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(rit->second.groups.size());
+        for (LegionMap<DistributedID,FieldMask>::const_iterator it =
+              rit->second.groups.begin(); it != rit->second.groups.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(rit->second.counts.size());
+        for (std::map<DistributedID,size_t>::const_iterator it =
+              rit->second.counts.begin(); it != rit->second.counts.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<bool>(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::process_collective_rendezvous(const RendezvousKey &key,
+                     std::map<LogicalRegion,CollectiveRendezvous> &to_construct)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!to_construct.empty());
+#endif
+      ReplicateContext *context;
+      if (local_shards.size() > 1)
+      {
+        // Round-robin region tree IDs across the local shards
+        const RegionTreeID tid = to_construct.begin()->first.get_tree_id();
+        context =
+         local_shards[tid % local_shards.size()]->get_shard_execution_context();
+      }
+      else
+        context = local_shards.back()->get_shard_execution_context();
+      context->handle_collective_rendezvous(key, to_construct);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_rendezvous(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      RendezvousKey key;
+      derez.deserialize(key.context_index);
+      derez.deserialize(key.region_index);
+      derez.deserialize(key.analysis);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::map<LogicalRegion,CollectiveRendezvous> to_construct;
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        LogicalRegion region;
+        derez.deserialize(region);
+        CollectiveRendezvous &rendezvous = to_construct[region];
+        size_t num_results;
+        derez.deserialize(num_results);
+        rendezvous.results.resize(num_results);
+        for (unsigned idx2 = 0; idx2 < num_results; idx2++)
+        {
+          derez.deserialize(rendezvous.results[idx2].first);
+          derez.deserialize(rendezvous.results[idx2].second);
+        }
+        size_t num_groups;
+        derez.deserialize(num_groups);
+        for (unsigned idx2 = 0; idx2 < num_groups; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          derez.deserialize(rendezvous.groups[did]);
+        }
+        size_t num_counts;
+        derez.deserialize(num_counts);
+        for (unsigned idx2 = 0; idx2 < num_counts; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          derez.deserialize(rendezvous.counts[did]);
+        }
+      }
+      bool done;
+      derez.deserialize<bool>(done);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      if (done)
+        manager->process_collective_rendezvous(key, to_construct);
+      else
+        manager->construct_collective_mapping(key, NULL/*op*/, to_construct);
     }
 
     //--------------------------------------------------------------------------

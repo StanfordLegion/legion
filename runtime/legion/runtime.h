@@ -3290,7 +3290,7 @@ namespace Legion {
                                                    Serializer &rez);
       void send_control_replicate_implicit_response(AddressSpaceID target,
                                                     Serializer &rez);
-      void send_control_replicate_collective_instance_message(
+      void send_control_replicate_collective_rendezvous(
                                   AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3764,6 +3764,7 @@ namespace Legion {
       void handle_control_replicate_implicit_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
+      void handle_control_replicate_collective_rendezvous(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -5894,8 +5895,13 @@ namespace Legion {
           break;
         case SEND_REPL_IMPLICIT_REQUEST:
           break;
+        // This has to go on the task virtual channel so that it is ordered
+        // with respect to any distributions
+        // See Runtime::send_replicate_launch
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
+        case SEND_REPL_COLLECTIVE_RENDEZVOUS:
+          break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
         case SEND_MAPPER_BROADCAST:

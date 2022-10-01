@@ -12545,6 +12545,11 @@ namespace Legion {
               runtime->handle_control_replicate_implicit_response(derez);
               break;
             }
+          case SEND_REPL_COLLECTIVE_RENDEZVOUS:
+            {
+              runtime->handle_control_replicate_collective_rendezvous(derez);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -22413,11 +22418,17 @@ namespace Legion {
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This has to go on the task virtual channel so that it is ordered
-      // with respect to any distributions
-      // See Runtime::send_replicate_launch
       find_messenger(target)->send_message<SEND_REPL_IMPLICIT_RESPONSE>(
                                                       rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_collective_rendezvous(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPL_COLLECTIVE_RENDEZVOUS>(
+                                                          rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24581,6 +24592,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ImplicitShardManager::handle_remote_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_collective_rendezvous(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_collective_rendezvous(derez, this);
     }
 
     //--------------------------------------------------------------------------

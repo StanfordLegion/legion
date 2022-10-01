@@ -1924,7 +1924,7 @@ namespace Legion {
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
-      virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
+      DistributedID find_or_create_collective_view(RegionTreeID tid,
                    const std::vector<DistributedID> &instances, RtEvent &ready);
       void notify_collective_deletion(RegionTreeID tid, DistributedID did);
       // Perform the actual rendezvous to group instances together
@@ -2920,10 +2920,6 @@ namespace Legion {
                                            bool outermost = true);
       virtual void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
-#if 0
-      virtual DistributedID find_or_create_collective_view(RegionTreeID tid,
-                   const std::vector<DistributedID> &instances, RtEvent &ready);
-#endif
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);
@@ -2979,6 +2975,8 @@ namespace Legion {
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
+      void handle_collective_rendezvous(const RendezvousKey &key,
+          std::map<LogicalRegion,CollectiveRendezvous> &to_construct);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
       ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
