@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
     ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
-    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
+    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -52,6 +52,12 @@ impl Serialize for Count {
 
 #[derive(Serialize, Copy, Clone)]
 struct DependencyRecord(u64, u64, u64);
+
+#[derive(Serialize, Copy, Clone)]
+struct CriticalPathRecord {
+    tuple: Option<DependencyRecord>,
+    obj: Option<DependencyRecord>,
+}
 
 #[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
@@ -105,12 +111,22 @@ struct ScaleRecord {
     max_level: u32,
 }
 
+fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord> {
+    let proc_id = state.prof_uid_proc.get(&prof_uid)?;
+    Some(DependencyRecord(
+        proc_id.node_id().0,
+        proc_id.proc_in_node(),
+        prof_uid.0,
+    ))
+}
+
 impl Proc {
     fn emit_tsv_point(
         &self,
         f: &mut csv::Writer<File>,
         point: &ProcPoint,
         state: &State,
+        spy_state: &SpyState,
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
         let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
@@ -184,13 +200,9 @@ impl Proc {
             _ => op_id.map(|id| id.0),
         };
 
-        let render_op = |prof_uid: &ProfUID| {
-            state.prof_uid_proc.get(prof_uid).map(|proc_id| {
-                DependencyRecord(proc_id.node_id().0, proc_id.proc_in_node(), prof_uid.0)
-            })
-        };
+        let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
 
-        let deps = state.spy_op_deps.get(&base.prof_uid);
+        let deps = spy_state.spy_op_deps.get(&base.prof_uid);
 
         let mut in_ = String::new();
         let mut out = String::new();
@@ -302,7 +314,12 @@ impl Proc {
         Ok(())
     }
 
-    fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
+    fn emit_tsv<P: AsRef<Path>>(
+        &self,
+        path: P,
+        state: &State,
+        spy_state: &SpyState,
+    ) -> io::Result<ProcessorRecord> {
         let mut filename = PathBuf::new();
         filename.push("tsv");
         filename.push(format!("Proc_0x{:x}.tsv", self.proc_id));
@@ -312,7 +329,7 @@ impl Proc {
 
         for point in &self.time_points {
             if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
+                self.emit_tsv_point(&mut f, point, state, spy_state)?;
             }
         }
 
@@ -1469,6 +1486,7 @@ fn write_file<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 
 pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
+    spy_state: &SpyState,
     path: P,
     force: bool,
 ) -> io::Result<()> {
@@ -1494,7 +1512,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         .par_iter()
         .filter(|proc| !proc.is_empty())
         .map(|proc| {
-            proc.emit_tsv(&path, state)
+            proc.emit_tsv(&path, state, spy_state)
                 .map(|record| (proc.proc_id, record))
         })
         .collect::<io::Result<_>>()?;
@@ -1638,8 +1656,18 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     {
         let filename = path.join("json").join("critical_path.json");
-        let mut file = File::create(filename)?;
-        write!(file, "[]")?;
+        let file = File::create(filename)?;
+        let render_op = |prof_uid: ProfUID| prof_uid_record(prof_uid, state);
+        let mut critical_path = Vec::new();
+        let mut last = None;
+        for node in &spy_state.critical_path {
+            critical_path.push(CriticalPathRecord {
+                tuple: render_op(*node),
+                obj: last.and_then(render_op),
+            });
+            last = Some(*node);
+        }
+        serde_json::to_writer(file, &critical_path)?;
     }
 
     Ok(())
