@@ -512,7 +512,7 @@ impl Mem {
 
 #[derive(Debug)]
 pub struct MemProcAffinity {
-    mem_id: MemID,
+    _mem_id: MemID,
     bandwidth: u32,
     latency: u32,
     pub best_aff_proc: ProcID,
@@ -521,7 +521,7 @@ pub struct MemProcAffinity {
 impl MemProcAffinity {
     fn new(mem_id: MemID, bandwidth: u32, latency: u32, best_aff_proc: ProcID) -> Self {
         MemProcAffinity {
-            mem_id,
+            _mem_id: mem_id,
             bandwidth,
             latency,
             best_aff_proc,
@@ -827,7 +827,7 @@ impl ISpace {
         self
     }
 
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.is_none());
         self.name = Some(name.to_owned());
         self
@@ -853,7 +853,7 @@ pub struct IPartID(pub u64);
 
 #[derive(Debug)]
 pub struct IPart {
-    ipart_id: IPartID,
+    _ipart_id: IPartID,
     name: Option<String>,
     pub parent: Option<ISpaceID>,
     disjoint: Option<bool>,
@@ -863,14 +863,14 @@ pub struct IPart {
 impl IPart {
     fn new(ipart_id: IPartID) -> Self {
         IPart {
-            ipart_id,
+            _ipart_id: ipart_id,
             name: None,
             parent: None,
             disjoint: None,
             point0: None,
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.as_ref().map_or(true, |x| x == name));
         self.name = Some(name.to_owned());
         self
@@ -910,7 +910,7 @@ impl FSpace {
             fields: BTreeMap::new(),
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         let new_name = Some(name.to_owned());
         assert!(self.name.is_none() || self.name == new_name);
         self.name = new_name;
@@ -923,18 +923,18 @@ pub struct FieldID(pub u32);
 
 #[derive(Debug)]
 pub struct Field {
-    fspace_id: FSpaceID,
-    field_id: FieldID,
-    size: u64,
+    _fspace_id: FSpaceID,
+    _field_id: FieldID,
+    _size: u64,
     pub name: String,
 }
 
 impl Field {
-    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
+    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &str) -> Self {
         Field {
-            fspace_id,
-            field_id,
-            size,
+            _fspace_id: fspace_id,
+            _field_id: field_id,
+            _size: size,
             name: name.to_owned(),
         }
     }
@@ -945,19 +945,19 @@ pub struct TreeID(pub u32);
 
 #[derive(Debug)]
 pub struct Region {
-    ispace_id: ISpaceID,
-    fspace_id: FSpaceID,
-    tree_id: TreeID,
-    name: String,
+    _ispace_id: ISpaceID,
+    _fspace_id: FSpaceID,
+    _tree_id: TreeID,
+    _name: String,
 }
 
 impl Region {
-    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
+    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &str) -> Self {
         Region {
-            ispace_id,
-            fspace_id,
-            tree_id,
-            name: name.to_owned(),
+            _ispace_id: ispace_id,
+            _fspace_id: fspace_id,
+            _tree_id: tree_id,
+            _name: name.to_owned(),
         }
     }
 }
@@ -1013,8 +1013,8 @@ impl SpyOp {
 
 #[derive(Debug)]
 pub struct Align {
-    field_id: FieldID,
-    eqk: u32,
+    _field_id: FieldID,
+    _eqk: u32,
     pub align_desc: u32,
     pub has_align: bool,
 }
@@ -1022,8 +1022,8 @@ pub struct Align {
 impl Align {
     fn new(field_id: FieldID, eqk: u32, align_desc: u32, has_align: bool) -> Self {
         Align {
-            field_id,
-            eqk,
+            _field_id: field_id,
+            _eqk: eqk,
             align_desc,
             has_align,
         }
@@ -1146,7 +1146,7 @@ pub struct MapperCallKind {
 }
 
 impl MapperCallKind {
-    fn new(kind: MapperCallKindID, name: &String) -> Self {
+    fn new(kind: MapperCallKindID, name: &str) -> Self {
         MapperCallKind {
             kind,
             name: name.to_owned(),
@@ -1170,7 +1170,7 @@ pub struct RuntimeCallKind {
 }
 
 impl RuntimeCallKind {
-    fn new(kind: RuntimeCallKindID, name: &String) -> Self {
+    fn new(kind: RuntimeCallKindID, name: &str) -> Self {
         RuntimeCallKind {
             kind,
             name: name.to_owned(),
@@ -1199,7 +1199,7 @@ impl TaskKind {
             name: None,
         }
     }
-    fn set_name(&mut self, name: &String, overwrite: bool) {
+    fn set_name(&mut self, name: &str, overwrite: bool) {
         if self.name.is_none() || overwrite {
             self.name = Some(name.to_owned());
         }
@@ -1220,7 +1220,7 @@ pub struct Variant {
 }
 
 impl Variant {
-    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &String) -> Self {
+    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &str) -> Self {
         Variant {
             variant_id,
             message,
@@ -1503,7 +1503,7 @@ impl From<spy::serialize::EventID> for EventID {
 pub struct CopyInfo {
     src_inst: InstID,
     dst_inst: InstID,
-    fevent: EventID,
+    _fevent: EventID,
     num_fields: u32,
     request_type: u32,
     num_hops: u32,
@@ -1531,12 +1531,12 @@ impl fmt::Display for CopyInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    src: MemID,
-    dst: MemID,
+    _src: MemID,
+    _dst: MemID,
     pub size: u64,
     time_range: TimeRange,
-    fevent: EventID,
-    num_requests: u32,
+    _fevent: EventID,
+    _num_requests: u32,
     pub copy_info: Vec<CopyInfo>,
 }
 
@@ -1553,12 +1553,12 @@ impl Copy {
     ) -> Self {
         Copy {
             base,
-            src,
-            dst,
+            _src: src,
+            _dst: dst,
             size,
             time_range,
-            fevent,
-            num_requests,
+            _fevent: fevent,
+            _num_requests: num_requests,
             copy_info,
         }
     }
@@ -1570,7 +1570,7 @@ impl Copy {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    dst: MemID,
+    _dst: MemID,
     time_range: TimeRange,
 }
 
@@ -1578,7 +1578,7 @@ impl Fill {
     fn new(base: Base, dst: MemID, time_range: TimeRange) -> Self {
         Fill {
             base,
-            dst,
+            _dst: dst,
             time_range,
         }
     }
@@ -1738,14 +1738,6 @@ pub struct State {
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     copy_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
     pub has_prof_data: bool,
-    has_spy_data: bool,
-    spy_ops: BTreeMap<OpID, SpyOp>,
-    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_parent: BTreeMap<OpID, OpID>,
-    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
-    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
-    spy_events: BTreeMap<EventID, SpyEvent>,
 }
 
 impl State {
@@ -1768,6 +1760,9 @@ impl State {
         variant_id: VariantID,
         time_range: TimeRange,
     ) -> &mut ProcEntry {
+        // Hack: we have to do this in two places, because we don't know what
+        // order the logger calls are going to come in. If the operation gets
+        // logged first, this will come back Some(_) and we'll store it below.
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
@@ -1993,44 +1988,6 @@ impl State {
             .or_insert_with(|| FSpace::new(fspace_id))
     }
 
-    fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
-        assert!(pre != post);
-        self.spy_events
-            .entry(post)
-            .or_insert_with(|| SpyEvent::new())
-            .preconditions
-            .insert(pre);
-        self.spy_events
-            .entry(pre)
-            .or_insert_with(|| SpyEvent::new())
-            .postconditions
-            .insert(post);
-    }
-
-    fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        self.spy_ops
-            .entry(op)
-            .or_insert_with(|| SpyOp::new(pre, post));
-        self.spy_op_by_precondition
-            .entry(pre)
-            .or_insert_with(|| BTreeSet::new())
-            .insert(op);
-        self.spy_op_by_postcondition
-            .entry(post)
-            .or_insert_with(|| BTreeSet::new())
-            .insert(op);
-    }
-
-    fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
-        if let Some(old) = self.spy_op_parent.insert(child, parent) {
-            assert!(old == parent);
-        }
-        self.spy_op_children
-            .entry(parent)
-            .or_insert_with(|| BTreeSet::new())
-            .insert(child);
-    }
-
     fn update_last_time(&mut self, value: Timestamp) {
         self.last_time = max(value, self.last_time);
     }
@@ -2055,236 +2012,20 @@ impl State {
         self.has_prof_data = true;
     }
 
-    pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
-        for record in records {
-            process_spy_record(record, self);
-        }
-        assert!(self.has_spy_data, "no Legion Spy logs in logfile");
-    }
-
-    fn compute_event_preconditions(
-        event_id: EventID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-        visited: &mut BTreeSet<EventID>,
-    ) {
-        // This is a DAG, don't bother walking the same node multiple times
-        if visited.get(&event_id).is_some() {
-            return;
-        }
-        visited.insert(event_id);
-
-        if let Some(event) = spy_events.get(&event_id) {
-            for precondition in &event.preconditions {
-                Self::compute_event_preconditions(
-                    *precondition,
-                    deps,
-                    op_prof_uid,
-                    spy_ops,
-                    spy_op_by_postcondition,
-                    spy_events,
-                    visited,
-                );
+    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
+        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
+            let proc = self.procs.get(proc_id).unwrap();
+            let entry = &proc.entry(prof_uid);
+            let mut total = 0;
+            let mut start = entry.time_range.start.unwrap().0;
+            for wait in &entry.waiters.wait_intervals {
+                total += wait.start.0 - start;
+                start = wait.end.0;
             }
+            total += entry.time_range.stop.unwrap().0 - start;
+            return total;
         }
-
-        if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
-            for op_id in op_ids {
-                if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                    deps.in_.insert(*prof_uid);
-                }
-            }
-        }
-    }
-
-    fn compute_event_postconditions(
-        event_id: EventID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-        visited: &mut BTreeSet<EventID>,
-    ) {
-        // This is a DAG, don't bother walking the same node multiple times
-        if visited.get(&event_id).is_some() {
-            return;
-        }
-        visited.insert(event_id);
-
-        if let Some(event) = spy_events.get(&event_id) {
-            for postcondition in &event.postconditions {
-                Self::compute_event_postconditions(
-                    *postcondition,
-                    deps,
-                    op_prof_uid,
-                    spy_ops,
-                    spy_op_by_precondition,
-                    spy_events,
-                    visited,
-                );
-            }
-        }
-
-        if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
-            for op_id in op_ids {
-                if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                    deps.out.insert(*prof_uid);
-                }
-            }
-        }
-    }
-
-    fn compute_op_preconditions(
-        op: &SpyOp,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-    ) {
-        let mut visited = BTreeSet::new();
-        Self::compute_event_preconditions(
-            op.precondition,
-            deps,
-            op_prof_uid,
-            spy_ops,
-            spy_op_by_postcondition,
-            spy_events,
-            &mut visited,
-        );
-    }
-
-    fn compute_op_postconditions(
-        op: &SpyOp,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_ops: &BTreeMap<OpID, SpyOp>,
-        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-    ) {
-        let mut visited = BTreeSet::new();
-        Self::compute_event_postconditions(
-            op.postcondition,
-            deps,
-            op_prof_uid,
-            spy_ops,
-            spy_op_by_precondition,
-            spy_events,
-            &mut visited,
-        );
-    }
-
-    fn compute_op_parent(
-        op_id: OpID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_parent: &BTreeMap<OpID, OpID>,
-    ) {
-        if let Some(parent) = spy_op_parent.get(&op_id) {
-            if let Some(parent_uid) = op_prof_uid.get(parent) {
-                deps.parent.insert(*parent_uid);
-            } else {
-                Self::compute_op_parent(*parent, deps, op_prof_uid, spy_op_parent);
-            }
-        }
-    }
-
-    fn compute_op_children(
-        op_id: OpID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
-    ) {
-        if let Some(children) = spy_op_children.get(&op_id) {
-            for child in children {
-                if let Some(child_uid) = op_prof_uid.get(child) {
-                    deps.children.insert(*child_uid);
-                } else {
-                    Self::compute_op_children(*child, deps, op_prof_uid, spy_op_children);
-                }
-            }
-        }
-    }
-
-    pub fn postprocess_spy_records(&mut self) {
-        if !self.has_spy_data {
-            println!("No Legion Spy data, skipping postprocess step");
-            return;
-        }
-
-        // Process tasks first
-        for op_id in self.tasks.keys() {
-            let prof_uid = self.op_prof_uid.get(op_id).unwrap();
-            let mut deps = self
-                .spy_op_deps
-                .entry(*prof_uid)
-                .or_insert_with(|| Dependencies::new());
-            let op = self
-                .spy_ops
-                .get(&op_id)
-                .expect("missing dependecies for op");
-            Self::compute_op_preconditions(
-                &op,
-                &mut deps,
-                &self.op_prof_uid,
-                &self.spy_ops,
-                &self.spy_op_by_postcondition,
-                &self.spy_events,
-            );
-            Self::compute_op_postconditions(
-                &op,
-                &mut deps,
-                &self.op_prof_uid,
-                &self.spy_ops,
-                &self.spy_op_by_precondition,
-                &self.spy_events,
-            );
-            Self::compute_op_parent(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_parent);
-            Self::compute_op_children(*op_id, &mut deps, &self.op_prof_uid, &self.spy_op_children);
-        }
-
-        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
-        for proc in self.procs.values() {
-            for (uid, entry) in &proc.entries {
-                if let ProcEntryKind::ProfTask = entry.kind {
-                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
-                    // has an op_id not an initiation_op, so we have to work
-                    // around that here
-                    continue;
-                }
-                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
-                    if let Some(task) = self.find_task(initiation_op) {
-                        let task_stop = task.time_range.stop;
-                        let task_uid = task.base.prof_uid;
-                        let before = entry.time_range.stop < task_stop;
-
-                        let task_deps = self
-                            .spy_op_deps
-                            .entry(task_uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            task_deps.in_.insert(*uid);
-                        } else {
-                            task_deps.out.insert(*uid);
-                        }
-
-                        let entry_deps = self
-                            .spy_op_deps
-                            .entry(*uid)
-                            .or_insert_with(|| Dependencies::new());
-                        if before {
-                            entry_deps.out.insert(task_uid);
-                        } else {
-                            entry_deps.in_.insert(task_uid);
-                        }
-                    }
-                }
-            }
-        }
+        0
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
@@ -2409,6 +2150,374 @@ impl State {
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SpyState {
+    has_spy_data: bool,
+    spy_ops: BTreeMap<OpID, SpyOp>,
+    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_parent: BTreeMap<OpID, OpID>,
+    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
+    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
+    spy_events: BTreeMap<EventID, SpyEvent>,
+    pub critical_path: Vec<ProfUID>,
+}
+
+impl SpyState {
+    fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
+        assert!(pre != post);
+        self.spy_events
+            .entry(post)
+            .or_insert_with(|| SpyEvent::new())
+            .preconditions
+            .insert(pre);
+        self.spy_events
+            .entry(pre)
+            .or_insert_with(|| SpyEvent::new())
+            .postconditions
+            .insert(post);
+    }
+
+    fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
+        assert!(self.spy_ops.insert(op, SpyOp::new(pre, post)).is_none());
+        self.spy_op_by_precondition
+            .entry(pre)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(op);
+        self.spy_op_by_postcondition
+            .entry(post)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(op);
+    }
+
+    fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
+        if let Some(old) = self.spy_op_parent.insert(child, parent) {
+            assert!(old == parent);
+        }
+        self.spy_op_children
+            .entry(parent)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(child);
+    }
+
+    pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
+        for record in records {
+            process_spy_record(record, self);
+        }
+        assert!(self.has_spy_data, "no Legion Spy logs in logfile");
+    }
+
+    fn traverse_dag_pre<V, N, F>(root: V, neighbors: N, mut pre: F)
+    where
+        V: std::marker::Copy + Ord,
+        N: Fn(&mut Vec<V>, V),
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        stack.push(root);
+        while let Some(node) = stack.pop() {
+            if visited.contains(&node) {
+                continue;
+            }
+            visited.insert(node);
+
+            neighbors(&mut stack, node);
+
+            pre(node);
+        }
+    }
+
+    fn traverse_dag_post<V, I, J, N, F>(roots: I, neighbors: N, mut post: F)
+    where
+        V: std::marker::Copy + Ord,
+        I: Iterator<Item = V>,
+        J: Iterator<Item = V>,
+        N: Fn(V) -> J,
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            stack.push((root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    stack.push((node, false));
+                    stack.extend(neighbors(node).map(|x| (x, true)));
+                } else {
+                    post(node);
+                }
+            }
+        }
+    }
+
+    fn compute_op_preconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.preconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.in_.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.precondition, neighbors, visit);
+    }
+
+    fn compute_op_postconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.postconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.out.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.postcondition, neighbors, visit);
+    }
+
+    fn compute_op_parent(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_parent: &BTreeMap<OpID, OpID>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(parent) = spy_op_parent.get(&node) {
+                if let Some(parent_uid) = op_prof_uid.get(parent) {
+                    deps.parent.insert(*parent_uid);
+                } else {
+                    stack.push(*parent);
+                }
+            }
+        }
+    }
+
+    fn compute_op_children(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(children) = spy_op_children.get(&node) {
+                for child in children {
+                    if let Some(child_uid) = op_prof_uid.get(child) {
+                        deps.children.insert(*child_uid);
+                    } else {
+                        stack.push(*child);
+                    }
+                }
+            }
+        }
+    }
+
+    fn toposort_graph(&mut self) -> Vec<ProfUID> {
+        let mut postorder = Vec::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            deps.in_.iter().copied()
+        };
+        let visit = |node| {
+            postorder.push(node);
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        postorder
+    }
+
+    fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
+        // TODO: Elliott: legion_spy.py computes this with a bit set,
+        // which may be more efficient.
+        let mut reachable: BTreeMap<ProfUID, BTreeSet<ProfUID>> = BTreeMap::new();
+        for root in toposort {
+            // Compute the reachable sets in topological order to
+            // minimize the size of the graph we have to traverse
+            let mut root_reachable = BTreeSet::new();
+            let deps = self.spy_op_deps.get(root).unwrap();
+            for node in &deps.in_ {
+                // Ok to unwrap here as we're walking in toposort
+                // order to make sure this has been precomputed
+                let node_reachable = reachable.get(&node).unwrap();
+                root_reachable.extend(node_reachable.iter());
+            }
+
+            let mut to_remove = Vec::new();
+            for node in &deps.in_ {
+                if root_reachable.contains(node) {
+                    to_remove.push(*node);
+                } else {
+                    root_reachable.insert(*node);
+                }
+            }
+            reachable.insert(*root, root_reachable);
+
+            for node in to_remove {
+                let root_deps = self.spy_op_deps.get_mut(root).unwrap();
+                assert!(root_deps.in_.remove(&node));
+                let node_deps = self.spy_op_deps.get_mut(&node).unwrap();
+                assert!(node_deps.out.remove(root));
+            }
+        }
+    }
+
+    fn simplify_spy_graph(&mut self) {
+        let toposort = self.toposort_graph();
+
+        self.transitive_reduce_graph(&toposort);
+    }
+
+    fn compute_critical_path(&mut self, state: &State) {
+        // Postorder DFS walking both in and child edges, computing the
+        // longest path at each node based on the sum of the longest input and
+        // longest child
+        type Path = (u64, Vec<ProfUID>);
+        fn path_max<'a>(a: &'a Path, b: &'a Path) -> &'a Path {
+            if a.0 > b.0 {
+                a
+            } else {
+                b
+            }
+        }
+
+        let empty_path = (0, Vec::new());
+
+        let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let children = deps.children.iter().copied();
+            children.chain(deps.in_.iter().copied())
+        };
+        let visit = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let path = |dep| longest_paths.get(dep).unwrap();
+            let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
+            let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
+            let duration = long_in.0 + long_child.0 + state.compute_duration(node);
+            let mut path = long_in.1.to_owned();
+            path.extend(long_child.1.iter());
+            path.push(node);
+            longest_paths.insert(node, (duration, path));
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        self.critical_path = longest_paths
+            .values()
+            .fold(&empty_path, path_max)
+            .1
+            .to_owned();
+    }
+
+    pub fn postprocess_spy_records(&mut self, state: &State) {
+        if !self.has_spy_data {
+            println!("No Legion Spy data, skipping postprocess step");
+            return;
+        }
+
+        // Process tasks first
+        for op_id in state.tasks.keys() {
+            let prof_uid = state.op_prof_uid.get(op_id).unwrap();
+            let mut deps = self
+                .spy_op_deps
+                .entry(*prof_uid)
+                .or_insert_with(|| Dependencies::new());
+            let op = self
+                .spy_ops
+                .get(&op_id)
+                .expect("missing dependecies for op");
+            Self::compute_op_preconditions(
+                &op,
+                &mut deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_postcondition,
+                &self.spy_events,
+            );
+            Self::compute_op_postconditions(
+                &op,
+                &mut deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_precondition,
+                &self.spy_events,
+            );
+            Self::compute_op_parent(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_parent);
+            Self::compute_op_children(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_children);
+        }
+
+        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
+        for proc in state.procs.values() {
+            for (uid, entry) in &proc.entries {
+                if let ProcEntryKind::ProfTask = entry.kind {
+                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
+                    // has an op_id not an initiation_op, so we have to work
+                    // around that here
+                    continue;
+                }
+                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
+                    if let Some(task) = state.find_task(initiation_op) {
+                        let task_stop = task.time_range.stop;
+                        let task_uid = task.base.prof_uid;
+                        let before = entry.time_range.stop < task_stop;
+
+                        let task_deps = self
+                            .spy_op_deps
+                            .entry(task_uid)
+                            .or_insert_with(|| Dependencies::new());
+                        if before {
+                            task_deps.in_.insert(*uid);
+                        } else {
+                            task_deps.out.insert(*uid);
+                        }
+
+                        let entry_deps = self
+                            .spy_op_deps
+                            .entry(*uid)
+                            .or_insert_with(|| Dependencies::new());
+                        if before {
+                            entry_deps.out.insert(task_uid);
+                        } else {
+                            entry_deps.in_.insert(task_uid);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reduce the graph
+        self.simplify_spy_graph();
+
+        self.compute_critical_path(state);
     }
 }
 
@@ -2650,6 +2759,9 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
                 .set_provenance(provenance);
+            // Hack: we have to do this in two places, because we don't know what
+            // order the logger calls are going to come in. If the task gets
+            // logged first, this will come back Some(_) and we'll store it below.
             if let Some(task) = state.find_task_mut(*op_id) {
                 task.initiation_op = Some(*parent_id);
             }
@@ -2771,7 +2883,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let copy_info = CopyInfo {
                 src_inst: *src_inst,
                 dst_inst: *dst_inst,
-                fevent: *fevent,
+                _fevent: *fevent,
                 num_fields: *num_fields,
                 request_type: *request_type,
                 num_hops: *num_hops,
@@ -2886,7 +2998,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
     }
 }
 
-fn process_spy_record(record: &spy::serialize::Record, state: &mut State) {
+fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
     use spy::serialize::Record;
 
     match record {
@@ -2901,19 +3013,14 @@ fn process_spy_record(record: &spy::serialize::Record, state: &mut State) {
         Record::OperationEvents { uid, pre, post } => {
             state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
         }
-        Record::RealmCopy { uid, pre, post, .. } => {
-            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        Record::RealmCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
-        Record::IndirectCopy { uid, pre, post, .. } => {
-            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        Record::IndirectCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
-        Record::RealmFill {
-            fill_uid,
-            pre,
-            post,
-            ..
-        } => {
-            state.create_spy_op((*fill_uid).into(), (*pre).into(), (*post).into());
+        Record::RealmFill { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
 
         Record::TopTask { ctx, uid, .. } => {
