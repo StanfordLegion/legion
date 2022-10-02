@@ -8234,8 +8234,6 @@ class Operation(object):
             return False
         if self.kind is FILL_OP_KIND:
             return False
-        if self.kind is DEP_PART_OP_KIND:
-            return False
         if self.kind is FENCE_OP_KIND:
             return False
         if self.kind is CREATION_OP_KIND:
@@ -10705,7 +10703,7 @@ class RealmDeppart(RealmBase):
         elif kind == 7:
             self.kind = "Compute Differences"
         elif kind == 8:
-            self,kind = "Create Equal"
+            self.kind = "Create Equal"
         elif kind == 9:
             self.kind = "Create by Field"
         elif kind == 10:
