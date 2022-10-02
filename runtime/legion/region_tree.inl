@@ -3160,8 +3160,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, ready, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+                                    ready, result, DEP_PART_EQUAL);
 #endif
       // Enumerate the colors and assign the spaces
       unsigned subspace_index = 0;
@@ -3286,8 +3286,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+                                    precondition, result, DEP_PART_UNIONS);
 #endif
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -3412,8 +3412,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+                      precondition, result, DEP_PART_INTERSECTIONS);
 #endif
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -3539,8 +3539,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+                      precondition, result, DEP_PART_INTERSECTIONS);
 #endif
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -3665,8 +3665,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+                        precondition, result, DEP_PART_DIFFERENCES);
 #endif
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -4008,8 +4008,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, ready, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id, ready,
+                                    result, DEP_PART_WEIGHTS);
 #endif
       for (unsigned idx = 0; idx < count; idx++)
       {
@@ -4096,7 +4096,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                                    precondition, result, DEP_PART_BY_FIELD);
 #endif
       // Update the children with the names of their subspaces 
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -4229,7 +4229,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                                    precondition, result, DEP_PART_BY_IMAGE);
 #endif
       // Update the child subspaces of the image
       if (partition->total_children == partition->max_linearized_color)
@@ -4385,7 +4385,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                      precondition, result, DEP_PART_BY_IMAGE_RANGE);
 #endif
       // Update the child subspaces of the image
       if (partition->total_children == partition->max_linearized_color)
@@ -4540,7 +4540,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                                    precondition, result, DEP_PART_BY_PREIMAGE);
 #endif
       // Update the child subspace of the preimage
       if (partition->total_children == partition->max_linearized_color)
@@ -4696,7 +4696,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                  precondition, result, DEP_PART_BY_PREIMAGE_RANGE);
 #endif
       // Update the child subspace of the preimage
       if (partition->total_children == partition->max_linearized_color)
@@ -4814,7 +4814,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
-                                    precondition, result);
+                                    precondition, result, DEP_PART_ASSOCIATION);
 #endif
       return result;
     }
@@ -5713,7 +5713,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr->expr_id,
-                                    precondition, result);
+                                    precondition, result, DEP_PART_BY_PREIMAGE);
 #endif
       return result;
     }
