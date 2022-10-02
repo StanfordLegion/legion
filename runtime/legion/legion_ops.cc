@@ -2590,10 +2590,7 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_LEGION
-          assert(views[idx]->is_replicated_view());
-#endif
-          ReplicatedView *view = views[idx]->as_replicated_view();
+          CollectiveView *view = views[idx]->as_collective_view();
           collectives.emplace_back(MappingCollective(view));
         }
       }
@@ -16620,9 +16617,6 @@ namespace Legion {
                                          std::set<ApEvent> &tasks_complete)
     //--------------------------------------------------------------------------
     {
-      // Perform the mapping
-      map_tasks();
-      mapping_dependences.clear();
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       for (std::vector<IndividualTask*>::const_iterator it = 
@@ -16637,6 +16631,9 @@ namespace Legion {
         tasks_mapped.insert((*it)->get_mapped_event());
         tasks_complete.insert((*it)->get_completion_event());
       }
+      // Perform the mapping
+      map_tasks();
+      mapping_dependences.clear();
       // Then we can distribute the tasks
       distribute_tasks();
     }

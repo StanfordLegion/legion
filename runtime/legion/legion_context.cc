@@ -11023,6 +11023,16 @@ namespace Legion {
             mapping->find_nearest(runtime->address_space));
       const RtEvent ready = create_collective_view(
           get_context_uid(), collective_did, mapping, instances);
+      // This is a bit subtle, we need to encode the right kind of the 
+      // distributed ID (e.g. whether it is just replicated or allreduce)
+      // The way we determine that is by looking at the distributed IDs of
+      // the instances which also encode whether they are for reductions
+      // instances or not
+      const bool redop = InstanceManager::is_reduction_did(instances.back());
+      if (redop)
+        collective_did = LogicalView::encode_allreduce_did(collective_did);
+      else
+        collective_did = LogicalView::encode_replicated_did(collective_did);
       CollectiveResult *result = 
         new CollectiveResult(instances, collective_did, ready);
       result->add_reference();
@@ -11146,6 +11156,7 @@ namespace Legion {
               rez.serialize(cit->first);
               rez.serialize(cit->second);
             }
+            rez.serialize<size_t>(views.size());
             for (FieldMaskSet<CollectiveResult>::const_iterator vit =
                   views.begin(); vit != views.end(); vit++)
             {
@@ -11452,7 +11463,7 @@ namespace Legion {
           view = new ReplicatedView(runtime->forest, collective_did,
               owner_space, ctx_uid, local_views, individual_dids,
               false/*register now*/, mapping);
-        runtime->register_distributed_collectable(collective_did, view);
+        view->register_with_runtime();
         if (!done_events.empty())
           return Runtime::merge_events(done_events);
         else

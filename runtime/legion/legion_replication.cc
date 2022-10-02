@@ -6105,9 +6105,6 @@ namespace Legion {
                                              std::set<ApEvent> &tasks_complete)
     //--------------------------------------------------------------------------
     {
-      // Perform the mapping
-      map_replicate_tasks();
-      mapping_dependences.clear();
       // We have to exchange mapping and completion events with all the
       // other shards as well
       std::set<RtEvent> local_tasks_mapped;
@@ -6124,6 +6121,9 @@ namespace Legion {
         local_tasks_mapped.insert((*it)->get_mapped_event());
         local_tasks_complete.insert((*it)->get_completion_event());
       }
+      // Perform the mapping
+      map_replicate_tasks();
+      mapping_dependences.clear();
       RtEvent local_mapped = Runtime::merge_events(local_tasks_mapped);
       tasks_mapped.insert(local_mapped);
       ApEvent local_complete = Runtime::merge_events(NULL,local_tasks_complete);
@@ -7376,7 +7376,6 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
-      assert(!collective_map_barrier.exists());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -8977,7 +8976,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(trace == NULL);
       assert(trace != NULL);
 #endif
       // Indicate that we are done capturing this trace

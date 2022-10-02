@@ -2245,7 +2245,7 @@ namespace Legion {
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
-    typedef Internal::ReplicatedView*  CollectiveViewImpl;
+    typedef Internal::CollectiveView*  CollectiveViewImpl;
     // This type import is experimental to facilitate coordination and
     // synchronization between different mappers and may be revoked later
     // as we develop new abstractions for mappers to interact

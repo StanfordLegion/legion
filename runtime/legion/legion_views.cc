@@ -6082,9 +6082,6 @@ namespace Legion {
                                                 PhysicalManager *instance) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(contains(instance));
-#endif
       return instance->owner_space;
     }
 
@@ -8336,7 +8333,8 @@ namespace Legion {
                                  dst_precondition, predicate_guard);
         if (result.exists())
         {
-          ready_events.push_back(result);
+          if (ready_event.exists())
+            ready_events.push_back(result);
           const RtEvent collect_event = inst_info.get_collect_event();
           local_view->add_copy_user(false/*reading*/, 0/*redop*/, result,
               collect_event, fill_mask, fill_expression, op_id, index,
@@ -9997,8 +9995,8 @@ namespace Legion {
                                    const std::vector<IndividualView*> &views,
                                    const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
-      : CollectiveView(ctx, id, owner_proc, owner_context, views, insts,
-                       register_now, mapping)
+      : CollectiveView(ctx, encode_replicated_did(id), owner_proc,
+                       owner_context, views, insts, register_now, mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -10093,8 +10091,8 @@ namespace Legion {
                                  const std::vector<DistributedID> &insts,
                                  bool register_now, CollectiveMapping *mapping,
                                  ReductionOpID redop_id)
-      : CollectiveView(ctx, id, owner_proc, owner_context, views, insts,
-                       register_now, mapping), redop(redop_id),
+      : CollectiveView(ctx, encode_allreduce_did(id), owner_proc, owner_context,
+                       views, insts, register_now, mapping), redop(redop_id),
         reduction_op(runtime->get_reduction_op(redop)),
         fill_view(runtime->find_or_create_reduction_fill_view(redop)),
         unique_allreduce_tag(mapping->contains(local_space) ? 
