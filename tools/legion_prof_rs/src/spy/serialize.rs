@@ -215,7 +215,7 @@ pub enum Record {
     #[serde(rename = "Fill Field")]
     RealmFillField { id: EventID, fid: FieldID, dstid: EventID },
     #[serde(rename = "Deppart Events")]
-    RealmDepPart { uid: UniqueID, ispace: IspaceID, preid: EventID, postid: EventID },
+    RealmDepPart { uid: UniqueID, ispace: IspaceID, preid: EventID, postid: EventID, opkind: u64 },
     #[serde(rename = "Phase Barrier Arrive")]
     BarrierArrive { uid: UniqueID, iid: EventID },
     #[serde(rename = "Phase Barrier Wait")]
