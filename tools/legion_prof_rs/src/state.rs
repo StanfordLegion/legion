@@ -3022,6 +3022,9 @@ fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
         Record::RealmFill { pre, post, .. } => {
             state.create_spy_event_depencence((*pre).into(), (*post).into());
         }
+        Record::RealmDepPart { preid, postid, .. } => {
+            state.create_spy_event_depencence((*preid).into(), (*postid).into());
+        }
 
         Record::TopTask { ctx, uid, .. } => {
             state.create_spy_op_parent((*ctx).into(), (*uid).into());
