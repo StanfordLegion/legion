@@ -3759,8 +3759,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+          precondition, result, DEP_PART_INTERSECTIONS);
 #endif
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -3903,8 +3903,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+          precondition, result, DEP_PART_INTERSECTIONS);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -4151,8 +4151,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+          precondition, result, DEP_PART_INTERSECTIONS);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
@@ -4390,8 +4390,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_deppart_events(op->get_unique_op_id(),
-                                    expr_id, precondition, result);
+      LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
+          precondition, result, DEP_PART_DIFFERENCES);
 #endif
       // Now set the index spaces for the results
       for (unsigned idx = 0; idx < colors.size(); idx++)
