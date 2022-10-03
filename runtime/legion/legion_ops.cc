@@ -23236,7 +23236,7 @@ namespace Legion {
     size_t IndexAttachOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      return launch_space->get_volume();
+      return points.size();
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -24143,7 +24143,7 @@ namespace Legion {
     size_t IndexDetachOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      return launch_space->get_volume();
+      return points.size();
     }
 
     ///////////////////////////////////////////////////////////// 
