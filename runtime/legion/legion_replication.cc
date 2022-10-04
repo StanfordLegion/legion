@@ -7466,16 +7466,16 @@ namespace Legion {
                                                 bool &first_local)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      mapping = &repl_ctx->shard_manager->get_collective_mapping();
-      mapping->add_reference();
-      first_local = is_first_local_shard;
+      // Yes, we want to do a collective analysis, but we'll need to 
+      // construct a collective view here for all the instances
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplMapOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // All the shards are participating
       return true;
     }
 
@@ -7771,6 +7771,14 @@ namespace Legion {
         mapping->add_reference();
         first_local = is_first_local_shard;
       }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplAttachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // All shards are participating
       return true;
     }
 
@@ -8175,6 +8183,14 @@ namespace Legion {
         mapping->add_reference();
         first_local = is_first_local_shard;
       }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDetachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // All shards are participating
       return true;
     }
 

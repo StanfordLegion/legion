@@ -2287,6 +2287,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
       IndexSpace shard_space;
@@ -2328,6 +2329,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       RtBarrier collective_map_barrier;
       size_t exchange_index;
@@ -2402,6 +2404,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       // Help for unordered detachments
       void record_unordered_kind(

@@ -11101,8 +11101,25 @@ namespace Legion {
       {
         FieldMaskSet<CollectiveResult> &result_views = views[rit->first];
         std::sort(rit->second.results.begin(), rit->second.results.end());
-        finalize_collective_mapping(runtime, rit->second.results,
-                                    rit->second.counts, result_views);
+        // First build the collective mapping
+        std::vector<AddressSpaceID> unique_spaces;
+        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+              it = rit->second.results.begin(); 
+              it != rit->second.results.end(); it++)
+        {
+          if (unique_spaces.empty() || (unique_spaces.back() != it->first))
+            unique_spaces.push_back(it->first);
+        }
+        CollectiveMapping *mapping =
+          new CollectiveMapping(unique_spaces, runtime->legion_collective_radix);
+        mapping->add_reference();
+        // Determine the owner for this collective mapping
+        AddressSpaceID owner = mapping->contains(runtime->address_space) ?
+          runtime->address_space : mapping->find_nearest(runtime->address_space);
+        finalize_collective_mapping(runtime, mapping, owner,
+            rit->second.results, rit->second.counts, result_views);
+        if (mapping->remove_reference())
+          delete mapping;
         for (FieldMaskSet<CollectiveResult>::const_iterator it =
               result_views.begin(); it != result_views.end(); it++)
           if (it->first->remove_reference())
@@ -11112,25 +11129,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void InnerContext::finalize_collective_mapping(Runtime *runtime,
+        CollectiveMapping *mapping, AddressSpaceID owner,
         std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
         const std::map<DistributedID,size_t> &counts,
         const FieldMaskSet<CollectiveResult> &views)
     //--------------------------------------------------------------------------
     {
-      // First build the collective mapping
-      std::vector<AddressSpaceID> unique_spaces;
-      for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
-            it = results.begin(); it != results.end(); it++)
-      {
-        if (unique_spaces.empty() || (unique_spaces.back() != it->first))
-          unique_spaces.push_back(it->first);
-      }
-      CollectiveMapping *mapping =
-        new CollectiveMapping(unique_spaces, runtime->legion_collective_radix);
-      mapping->add_reference();
       // Next figure out which targets to send the results to
       std::vector<AddressSpaceID> targets;
-      const AddressSpaceID owner = results.begin()->first;
       if (mapping->contains(runtime->address_space))
         mapping->get_children(owner, runtime->address_space, targets); 
       else
@@ -11149,6 +11155,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             mapping->pack(rez);
+            rez.serialize(owner);
             rez.serialize<size_t>(results.size());
             for (unsigned idx = 0; idx < results.size(); idx++)
             {
@@ -11213,9 +11220,7 @@ namespace Legion {
           if (result_it == results.end())
             break;
         }
-      }
-      if (mapping->remove_reference())
-        delete mapping;
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -11363,6 +11368,8 @@ namespace Legion {
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
       mapping->add_reference();
+      AddressSpaceID owner;
+      derez.deserialize(owner);
       size_t num_results;
       derez.deserialize(num_results);
       std::vector<std::pair<AddressSpaceID,RendezvousResult*> > 
@@ -11402,7 +11409,7 @@ namespace Legion {
         derez.deserialize(mask);
         views.insert(view, mask);
       }
-      finalize_collective_mapping(runtime, results, counts, views);
+      finalize_collective_mapping(runtime, mapping, owner,results,counts,views);
       for (FieldMaskSet<CollectiveResult>::const_iterator it =
             views.begin(); it != views.end(); it++)
         if (it->first->remove_reference())

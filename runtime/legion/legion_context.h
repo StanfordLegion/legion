@@ -1954,6 +1954,7 @@ namespace Legion {
       // This function will distribute out the results of a collective 
       // rendezvous to all the rendezvous result objects
       static void finalize_collective_mapping(Runtime *runtime,
+          CollectiveMapping *mapping, AddressSpaceID owner_space,
           // Can assume that the results are sorted
           std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
           // Instance DID to counts of users

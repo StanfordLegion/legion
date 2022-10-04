@@ -1944,7 +1944,8 @@ namespace Legion {
     inline bool LogicalView::is_instance_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_materialized_did(did) || is_reduction_did(did));
+      return (is_materialized_did(did) || is_reduction_did(did) ||
+              is_replicated_did(did) || is_allreduce_did(did));
     }
 
     //--------------------------------------------------------------------------
