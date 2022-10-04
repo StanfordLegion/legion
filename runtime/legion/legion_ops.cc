@@ -4533,7 +4533,7 @@ namespace Legion {
           if (predicate_value)
             Runtime::poison_event(false_guard);
           else
-            Runtime::trigger_event(true_guard);
+            Runtime::trigger_event(false_guard);
         }
       }
       false_result = false_guard;
