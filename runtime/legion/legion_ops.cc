@@ -20572,12 +20572,19 @@ namespace Legion {
       LocalReferenceMutator mutator;
       fill_view = view;
       fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-      set_view = set;
-      if (future.impl != NULL)
+      if (future.impl == NULL)
+      {
+        // Make sure to set the value before registering any eager fill views
+        if (set)
+          fill_view->set_value(value, value_size);
+        parent_ctx->record_fill_view_creation(fill_view, mutator);
+      }
+      else
+      {
+        set_view = set;
         parent_ctx->record_fill_view_creation(future.impl->did,
                                               fill_view, mutator);
-      else
-        parent_ctx->record_fill_view_creation(fill_view, mutator);
+      }
       return mutator.get_done_event();
     }
 

@@ -17338,7 +17338,7 @@ namespace Legion {
       assert(fresh_did > 0);
       assert(!selected_views.empty());
 #endif
-      if (selected_views.size() > 1)
+      if ((selected_views.size() > 1) || ((*selected_views.begin()) == 0))
       {
         bool set_view = false;
         FillView *fill_view =
