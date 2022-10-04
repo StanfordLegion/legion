@@ -200,7 +200,9 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual ReductionOpID get_redop(void) const = 0;
+      virtual ReductionOpID get_redop(void) const { return 0; }
+      virtual FillView* get_redop_fill_view(void) const 
+        { assert(false); return NULL; }
       virtual AddressSpaceID get_analysis_space(PhysicalManager *man) const = 0;
     public:
       static void handle_view_register_user(Deserializer &derez,
@@ -1059,7 +1061,6 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const;
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
-      virtual ReductionOpID get_redop(void) const { return 0; }
       // Always want users to be full index space expressions
       virtual ApEvent register_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -1213,7 +1214,6 @@ namespace Legion {
       ReplicatedView& operator=(const ReplicatedView &rhs) = delete;
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
-      virtual ReductionOpID get_redop(void) const { return 0; }
       static void handle_send_replicated_view(Runtime *runtime,
                     Deserializer &derez, AddressSpaceID source);
     };
@@ -1262,6 +1262,7 @@ namespace Legion {
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
       virtual ReductionOpID get_redop(void) const; 
+      virtual FillView* get_redop_fill_view(void) const { return fill_view; }
       // Always want users to be full index space expressions
       virtual ApEvent register_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -1349,6 +1350,8 @@ namespace Legion {
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
+    public:
+      FillView *const fill_view;
     protected:
       EventFieldUsers writing_users;
       EventFieldUsers reduction_users;
@@ -1381,6 +1384,7 @@ namespace Legion {
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
       virtual ReductionOpID get_redop(void) const { return redop; }
+      virtual FillView* get_redop_fill_view(void) const { return fill_view; }
     public:
       void perform_collective_reduction(
                                 const std::vector<CopySrcDstField> &dst_fields,
@@ -1671,41 +1675,53 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
-      class FillViewValue : public Collectable {
+      struct DeferIssueFill : public LgTaskArgs<DeferIssueFill> {
       public:
-        FillViewValue(const void *v, size_t size)
-          : value(v), value_size(size) { }
-        FillViewValue(const FillViewValue &rhs)
-          : value(NULL), value_size(0) { assert(false); }
-        ~FillViewValue(void)
-        { free(const_cast<void*>(value)); }
+        static const LgTaskID TASK_ID = LG_DEFER_ISSUE_FILL_TASK_ID;
       public:
-        FillViewValue& operator=(const FillViewValue &rhs)
-        { assert(false); return *this; }
+        DeferIssueFill(FillView *view, Operation *op, 
+                       IndexSpaceExpression *fill_expr,
+                       const PhysicalTraceInfo &trace_info,
+                       const std::vector<CopySrcDstField> &dst_fields,
+#ifdef LEGION_SPY
+                       PhysicalManager *manager,
+#endif
+                       std::set<RtEvent> &applied_events,
+                       ApEvent precondition, PredEvent pred_guard);
       public:
-        inline bool matches(const void *other, const size_t size)
-        {
-          if (value_size != size)
-            return false;
-          // Compare the bytes
-          return (memcmp(other, value, value_size) == 0);
-        }
-      public:
-        const void *const value;
-        const size_t value_size;
+        FillView *const view;
+        Operation *const op;
+        IndexSpaceExpression *const fill_expr;
+        PhysicalTraceInfo *const trace_info;
+        std::vector<CopySrcDstField> *const dst_fields;
+#ifdef LEGION_SPY
+        PhysicalManager *const manager;
+#endif
+        const ApEvent precondition;
+        const PredEvent pred_guard;
+        const ApUserEvent done;
       };
     public:
+      // Don't know the fill value yet, will be set later
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc,
-               FillViewValue *value, bool register_now,
 #ifdef LEGION_SPY
                UniqueID fill_op_uid,
 #endif
+               bool register_now,
                CollectiveMapping *mapping = NULL);
-      FillView(const FillView &rhs);
+      // Already know the fill value
+      FillView(RegionTreeForest *ctx, DistributedID did,
+               AddressSpaceID owner_proc,
+#ifdef LEGION_SPY
+               UniqueID fill_op_uid,
+#endif
+               const void *value, size_t size, bool register_now,
+               CollectiveMapping *mapping = NULL);
+      FillView(const FillView &rhs) = delete;
       virtual ~FillView(void);
     public:
-      FillView& operator=(const FillView &rhs);
+      FillView& operator=(const FillView &rhs) = delete;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1723,13 +1739,30 @@ namespace Legion {
                            std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
+      bool matches(const void *value, size_t size) const;
+      bool set_value(const void *value, size_t size);
+      ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                         const PhysicalTraceInfo &trace_info,
+                         const std::vector<CopySrcDstField> &dst_fields,
+                         std::set<RtEvent> &applied_events,
+#ifdef LEGION_SPY
+                         PhysicalManager *manager,
+#endif
+                         ApEvent precondition, PredEvent pred_guard);
+      static void handle_defer_issue_fill(const void *args);
+    public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
-    public:
-      FillViewValue *const value;
+      static void handle_send_fill_view_value(Runtime *runtime,
+                                              Deserializer &derez);
 #ifdef LEGION_SPY
+    public:
       const UniqueID fill_op_uid;
 #endif
+    protected:
+      std::atomic<void*> value;
+      std::atomic<size_t> value_size;
+      RtUserEvent value_ready;
     };
 
     /**

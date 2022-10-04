@@ -1251,6 +1251,32 @@ namespace Legion {
     };
 
     /**
+     * \class CreateCollectiveFillView
+     * This collective checks to see if all the shards picked the
+     * same fill view, and if not, then will make a new collective
+     * fill view for the shards to use
+     */
+    class CreateCollectiveFillView : public AllGatherCollective<false> {
+    public:
+      CreateCollectiveFillView(ReplicateContext *ctx, CollectiveID id,
+                               FillOp *op, DistributedID fill_view,
+                               ShardID allocator_shard);
+      CreateCollectiveFillView(const CreateCollectiveFillView &rhs) = delete;
+      virtual ~CreateCollectiveFillView(void) { }
+    public:
+      CreateCollectiveFillView& operator=(
+                               const CreateCollectiveFillView &rhs) = delete;
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
+    protected:
+      FillOp *const fill_op;
+      std::set<DistributedID> selected_views;
+      DistributedID fresh_did;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1654,6 +1680,7 @@ namespace Legion {
       ReplFillOp& operator=(const ReplFillOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
+                                  ShardID allocator_shard,
                                   bool is_first_local);
     public:
       virtual void activate(void);
@@ -1667,8 +1694,12 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
+      virtual RtEvent initialize_fill_view(void);
     public:
       RtBarrier collective_map_barrier;
+      CreateCollectiveFillView *collective;
+      CollectiveID collective_id;
+      ShardID fill_view_allocator_shard;
       bool is_first_local_shard;
     };
 
@@ -1693,16 +1724,21 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual RtEvent initialize_fill_view(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx,
+                                  ShardID allocator_shard);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       IndexSpaceNode *shard_points;
       MapperManager *mapper;
+      CreateCollectiveFillView *collective;
+      CollectiveID collective_id;
+      ShardID fill_view_allocator_shard;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2820,7 +2856,7 @@ namespace Legion {
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
                                             DistributedID did, bool &first);
       FillView* deduplicate_fill_view_creation(DistributedID did, FillOp *op,
-          const void *value, const size_t value_size, bool &took_ownership);
+                                               bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space

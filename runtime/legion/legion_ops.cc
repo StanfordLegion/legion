@@ -20343,14 +20343,20 @@ namespace Legion {
       requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
                                       LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
-      value_size = launcher.argument.get_size();
-      if (value_size > 0)
+      if (launcher.future.impl != NULL)
+        future = launcher.future;
+      else if (launcher.argument.get_size() > 0)
       {
+        value_size = launcher.argument.get_size();
         value = malloc(value_size);
         memcpy(value, launcher.argument.get_ptr(), value_size);
       }
       else
-        future = launcher.future;
+        REPORT_LEGION_ERROR(ERROR_MISSING_FILL_VALUE,
+            "Fill operation %lld in task %s (UID %lld) was launched without "
+            "a fill value. All fill operations must be given a non-empty "
+            "argument or a future to use as a fill value.", get_unique_op_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
@@ -20372,7 +20378,7 @@ namespace Legion {
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id, context_index);
-        if ((value_size == 0) && (future.impl != NULL) &&
+        if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
@@ -20384,9 +20390,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_predication();
+      fill_view = NULL;
       value = NULL;
       value_size = 0;
-      fill_view = NULL;
+      set_view = false;
     }
 
     //--------------------------------------------------------------------------
@@ -20396,16 +20403,13 @@ namespace Legion {
       deactivate_predication();
       privilege_path.clear();
       version_info.clear();
-      if (value != NULL) 
-      {
-        free(value);
-        value = NULL;
-      }
-      future = Future();
       map_applied_conditions.clear();
+      future = Future();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      if (value != NULL)
+        free(value);
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -20513,6 +20517,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent FillOp::initialize_fill_view(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fill_view == NULL);
+#endif
+      // Note that this returns a fill view with a reference added to it
+      // We remove the reference in trigger_complete
+      if (future.impl != NULL)
+        fill_view = parent_ctx->find_or_create_fill_view(this, 
+            map_applied_conditions, future, set_view);
+      else
+        fill_view = parent_ctx->find_or_create_fill_view(this,
+            map_applied_conditions, value, value_size);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* FillOp::get_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fill_view != NULL);
+#endif
+      return fill_view;
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::log_fill_requirement(void) const
     //--------------------------------------------------------------------------
     {
@@ -20527,6 +20559,26 @@ namespace Legion {
                                          requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent FillOp::register_fill_view_creation(FillView *view, bool set)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the old reference if we already had it
+      if ((fill_view != NULL) && 
+          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete fill_view;
+      LocalReferenceMutator mutator;
+      fill_view = view;
+      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+      set_view = set;
+      if (future.impl != NULL)
+        parent_ctx->record_fill_view_creation(future.impl->did,
+                                              fill_view, mutator);
+      else
+        parent_ctx->record_fill_view_creation(fill_view, mutator);
+      return mutator.get_done_event();
     }
 
     //--------------------------------------------------------------------------
@@ -20600,13 +20652,10 @@ namespace Legion {
     void FillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (is_replaying())
-      {
-        enqueue_ready_operation();
-        return;
-      }
-
       std::set<RtEvent> preconditions;
+      const RtEvent view_ready = initialize_fill_view();
+      if (view_ready.exists())
+        preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
@@ -20622,116 +20671,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const PhysicalTraceInfo trace_info(this, 0/*index*/);
-      // Tell the region tree forest to fill in this field
-      // Note that the forest takes ownership of the value buffer
-      if (future.impl == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(value != NULL);
-        assert(fill_view == NULL);
-#endif
-        // This is NULL for now until we implement tracing for fills
-        ApEvent init_precondition = compute_sync_precondition(trace_info);
-        // Ask the enclosing context to find or create the fill view
-#ifdef DEBUG_LEGION
-        InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
-        assert(context != NULL);
-#else
-        InnerContext *context = static_cast<InnerContext*>(parent_ctx);
-#endif
-        // This comes back with a reference to prevent collection
-        // that we need to free after we have been mapped
-        bool lost_ownership = true;
-        fill_view = context->find_or_create_fill_view(this, 
-            map_applied_conditions, value, value_size, lost_ownership);
-        // If we lost ownership of the buffer to the context then 
-        // we no longer need to free it
-        if (lost_ownership)
-        {
-          value = NULL;
-          value_size = 0;
-        }
-        runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                     fill_view, version_info, 
-                                     init_precondition, true_guard, false_guard,
-                                     trace_info, map_applied_conditions);
-#ifdef DEBUG_LEGION
-        dump_physical_state(&requirement, 0);
-#endif
-        
-        if (!map_applied_conditions.empty())
-          complete_mapping(finalize_complete_mapping(
-                record_complete_replay(trace_info,
-                  Runtime::merge_events(map_applied_conditions))));
-        else
-          complete_mapping(finalize_complete_mapping(
-                record_complete_replay(trace_info)));
-        // See if we have any arrivals to trigger
-        if (!arrive_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-          {
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                   it->phase_barrier);
-            Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                          get_completion_event());
-          }
-        }
-        complete_execution();
-      }
-      else
-      {
-        // This will make sure we have a mapping locally
-        future.impl->request_internal_buffer(this, false/*eager*/);
-        // If we have a future value see if its event has triggered
-        const RtEvent future_ready_event = future.impl->subscribe(); 
-        if (!future_ready_event.has_triggered())
-          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
-        else
-          trigger_execution(); // can do the completion now
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_execution(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(fill_view == NULL);
-#endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/);
-      // Make a copy of the future value since the region tree
-      // will want to take ownership of the buffer
-      size_t result_size = 0;
-      const void *buffer = 
-        future.impl->find_internal_buffer(parent_ctx, result_size);
-      void *result = malloc(result_size);
-      memcpy(result, buffer, result_size);
       // This is NULL for now until we implement tracing for fills
-      ApEvent init_precondition = compute_sync_precondition(trace_info);
-      // Ask the enclosing context to find or create the fill view
-#ifdef DEBUG_LEGION
-      InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
-      assert(context != NULL);
-#else
-      InnerContext *context = static_cast<InnerContext*>(parent_ctx);
-#endif
-      // This comes back with a reference to prevent collection
-      // that we need to free after we have been mapped
-      bool lost_ownership = false;
-      fill_view = context->find_or_create_fill_view(this,
-          map_applied_conditions, result, result_size, lost_ownership);
-      if (!lost_ownership)
-        free(result);
+      const ApEvent init_precondition = compute_sync_precondition(trace_info);
       runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                   fill_view, version_info,
+                                   get_fill_view(), version_info, 
                                    init_precondition, true_guard, false_guard,
                                    trace_info, map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
+      if (set_view)
+      {
+#ifdef DEBUG_LEGION
+        assert(future.impl != NULL);
+#endif
+        // This will make sure we have a mapping locally
+        const RtEvent buffer_ready = 
+          future.impl->request_internal_buffer(this, false/*eager*/);
+        if (buffer_ready.exists())
+          map_applied_conditions.insert(buffer_ready);
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
               record_complete_replay(trace_info,
@@ -20752,7 +20711,58 @@ namespace Legion {
                                         get_completion_event());
         }
       }
+      if (set_view)
+      {
+        const RtEvent future_ready_event = future.impl->subscribe(); 
+        if (!future_ready_event.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
+        else
+          trigger_execution(); // can do the completion now
+      }
+      else
+        trigger_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      if (set_view)
+      {
+#ifdef DEBUG_LEGION
+        assert(fill_view != NULL);
+#endif
+        size_t value_size = 0;
+        const void *value = 
+          future.impl->find_internal_buffer(parent_ctx, value_size);
+        if (fill_view->set_value(value, value_size))
+          delete fill_view;
+      }
+      // See if we have any arrivals to trigger
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        get_completion_event());
+        }
+      }
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now that we've mapped we can remove the reference on our fill_view
+      if ((fill_view != NULL) && 
+          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete fill_view;
+      complete_operation();
     }
     
     //--------------------------------------------------------------------------
@@ -21088,14 +21098,21 @@ namespace Legion {
                                         launcher.parent);
       }
       requirement.privilege_fields = launcher.fields;
-      value_size = launcher.argument.get_size();
-      if (value_size > 0)
+      // Note that this returns a fill view with a reference added to it
+      if (launcher.future.impl != NULL)
+        future = launcher.future;
+      else if (launcher.argument.get_size() > 0)
       {
+        value_size = launcher.argument.get_size();
         value = malloc(value_size);
         memcpy(value, launcher.argument.get_ptr(), value_size);
       }
       else
-        future = launcher.future;
+        REPORT_LEGION_ERROR(ERROR_MISSING_FILL_VALUE,
+            "Fill operation %lld in task %s (UID %lld) was launched without "
+            "a fill value. All fill operations must be given a non-empty "
+            "argument or a future to use as a fill value.", get_unique_op_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
@@ -21114,7 +21131,7 @@ namespace Legion {
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id, context_index);
-        if ((value_size == 0) && (future.impl != NULL) &&
+        if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
@@ -21238,6 +21255,7 @@ namespace Legion {
     void IndexFillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      const RtEvent view_ready = initialize_fill_view();
       // Enumerate the points
       enumerate_points(false/*replaying*/); 
       // Check for interfering point requirements in debug mode
@@ -21248,21 +21266,44 @@ namespace Legion {
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         mapped_preconditions[idx] = points[idx]->get_mapped_event();
-        points[idx]->launch();
+        points[idx]->launch(view_ready);
+      }
+      // Include any map applied conditions as well
+      if (!map_applied_conditions.empty())
+        mapped_preconditions.insert(mapped_preconditions.end(),
+            map_applied_conditions.begin(), map_applied_conditions.end());
+      if (future.impl != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(future.impl != NULL);
+#endif
+        // This will make sure we have a mapping locally
+        const RtEvent buffer_ready = 
+          future.impl->request_internal_buffer(this, false/*eager*/);
+        if (buffer_ready.exists())
+          mapped_preconditions.push_back(buffer_ready);
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called as this operation doesn't
-      // go through the rest of the queue normally
-      assert(false);
+      if (future.impl != NULL)
+      {
+        RtEvent future_ready = future.impl->subscribe(); 
+        // Make sure both the future and the view are ready
+        if (view_ready.exists() && !view_ready.has_triggered())
+        {
+          if (!future_ready.has_triggered())
+            future_ready = Runtime::merge_events(view_ready, future_ready);
+          else
+            future_ready = view_ready;
+        }
+        if (!future_ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready);
+        else
+          trigger_execution(); // can do the completion now
+      }
+      else
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -21619,7 +21660,6 @@ namespace Legion {
       requirement        = owner->get_requirement();
       grants             = owner->grants;
       wait_barriers      = owner->wait_barriers;
-      arrive_barriers    = owner->arrive_barriers;
       parent_task        = owner->parent_task;
       map_id             = owner->map_id;
       tag                = owner->tag;
@@ -21636,14 +21676,7 @@ namespace Legion {
       parent_req_index   = owner->parent_req_index;
       true_guard         = owner->true_guard;
       false_guard        = owner->false_guard;
-      future             = owner->future;
-      value_size         = owner->value_size;
       version_info       = owner->version_info;
-      if (value_size > 0)
-      {
-        value = malloc(value_size);
-        memcpy(value, owner->value, value_size);
-      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
@@ -21689,11 +21722,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::launch(void)
+    void PointFillOp::launch(RtEvent view_ready)
     //--------------------------------------------------------------------------
     {
       // Perform the version info
       std::set<RtEvent> preconditions;
+      if (view_ready.exists())
+        preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
       if (!preconditions.empty())
@@ -21734,6 +21769,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* PointFillOp::get_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_fill_view();
     }
 
     //--------------------------------------------------------------------------

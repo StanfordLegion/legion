@@ -2283,16 +2283,14 @@ namespace Legion {
       }
       else
         manager->compute_copy_offsets(fill_mask, dst_fields); 
-      const ApEvent result = fill_expression->issue_fill(op, trace_info,
-                                             dst_fields,
-                                             fill_view->value->value,
-                                             fill_view->value->value_size,
+      const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                   trace_info, dst_fields,
+                                                   applied_events,
 #ifdef LEGION_SPY
-                                             fill_view->fill_op_uid,
-                                             manager->field_space_node->handle,
-                                             manager->tree_id,
+                                                   manager,
 #endif
-                                             precondition, predicate_guard);
+                                                   precondition,
+                                                   predicate_guard);
       // Save the result
       if (manage_dst_events && result.exists())
       {
@@ -4800,22 +4798,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc,
-                       FillViewValue *val, bool register_now,
 #ifdef LEGION_SPY
                        UniqueID op_uid,
 #endif
+                       bool register_now,
                        CollectiveMapping *map)
       : DeferredView(ctx, encode_fill_did(did), owner_proc, register_now, map), 
-        value(val)
 #ifdef LEGION_SPY
-        , fill_op_uid(op_uid)
+        fill_op_uid(op_uid),
 #endif
+        value(NULL), value_size(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(value != NULL);
-#endif
-      value->add_reference();
+      // Add an extra reference here until we receive the value update
+      add_base_resource_ref(PENDING_UNBOUND_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -4823,32 +4819,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, false), value(NULL)
+    FillView::FillView(RegionTreeForest *ctx, DistributedID did,
+                       AddressSpaceID owner_proc,
 #ifdef LEGION_SPY
-        , fill_op_uid(0)
+                       UniqueID op_uid,
 #endif
+                       const void *val, size_t size, bool register_now,
+                       CollectiveMapping *map)
+      : DeferredView(ctx, encode_fill_did(did), owner_proc, register_now, map), 
+#ifdef LEGION_SPY
+        fill_op_uid(op_uid),
+#endif
+        value(malloc(size)), value_size(size)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(value_size > 0);
+#endif
+      memcpy(value.load(), val, size);
+#ifdef LEGION_GC
+      log_garbage.info("GC Fill View %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
+#endif
     }
-    
+
     //--------------------------------------------------------------------------
     FillView::~FillView(void)
     //--------------------------------------------------------------------------
     {
-      if (value->remove_reference())
-        delete value;
-    }
-
-    //--------------------------------------------------------------------------
-    FillView& FillView::operator=(const FillView &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
+      if (value.load() != NULL)
+        free(value.load());
     }
 
     //--------------------------------------------------------------------------
@@ -4894,15 +4894,18 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        rez.serialize(value->value_size);
-        rez.serialize(value->value, value->value_size);
 #ifdef LEGION_SPY
         rez.serialize(fill_op_uid);
 #endif
+        AutoLock v_lock(view_lock);
+        size_t size = value_size.load();
+        rez.serialize<size_t>(size);
+        if (size > 0)
+          rez.serialize(value.load(), size);
+        // Update the remote instances while holding the lock
+        update_remote_instances(target);
       }
       runtime->send_fill_view(target, rez);
-      // We've now done the send so record it
-      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -4927,35 +4930,243 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
-      size_t value_size;
-      derez.deserialize(value_size);
-      void *value = malloc(value_size);
-      derez.deserialize(value, value_size);
 #ifdef LEGION_SPY
       UniqueID op_uid;
       derez.deserialize(op_uid);
 #endif
+      size_t value_size;
+      derez.deserialize(value_size);
       
-      FillView::FillViewValue *fill_value = 
-                      new FillView::FillViewValue(value, value_size);
       void *location;
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) FillView(runtime->forest, did,
-                                      owner_space, fill_value,
-                                      false/*register now*/
+      {
+        if (value_size > 0)
+        {
+          const void *value = derez.get_current_pointer();
+          view = new(location) FillView(runtime->forest, did,
+                                        owner_space,
 #ifdef LEGION_SPY
-                                      , op_uid
+                                        op_uid,
 #endif
-                                      );
+                                        value,value_size,false/*register now*/);
+          derez.advance_pointer(value_size);
+        }
+        else
+          view = new(location) FillView(runtime->forest, did,
+                                        owner_space,
+#ifdef LEGION_SPY
+                                        op_uid,
+#endif
+                                        false/*register now*/);
+      }
       else
-        view = new FillView(runtime->forest, did, owner_space,
-                            fill_value, false/*register now*/
+      {
+        if (value_size > 0)
+        {
+          const void *value = derez.get_current_pointer();
+          view = new FillView(runtime->forest, did, owner_space,
 #ifdef LEGION_SPY
-                            , op_uid
+                              op_uid,
 #endif
-                            );
+                              value, value_size, false/*register now*/);
+          derez.advance_pointer(value_size);
+        }
+        else
+          view = new FillView(runtime->forest, did, owner_space,
+#ifdef LEGION_SPY
+                              op_uid,
+#endif
+                              false/*register now*/);
+      }
       view->register_with_runtime();
+    }
+
+    //--------------------------------------------------------------------------
+    bool FillView::matches(const void *other, size_t size) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(value != NULL);
+#endif
+      if (value_size != size)
+        return false;
+      return (memcmp(value, other, value_size) == 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool FillView::set_value(const void *val, size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(val != NULL);
+      assert(value.load() == NULL);
+      assert(value_size.load() == 0);
+#endif
+      void *result = malloc(size);
+      memcpy(result, val, size);
+      // Take the lock and sent out any notifications
+      AutoLock v_lock(view_lock);
+      value.store(result);
+      value_size.store(size);
+      if (value_ready.exists())
+        Runtime::trigger_event(value_ready);
+      if (is_owner() && has_remote_instances())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(size);
+          rez.serialize(val, size);
+        }
+        struct ValueFunctor {
+          ValueFunctor(Serializer &z, Runtime *rt) : rez(z), runtime(rt) { }
+          inline void apply(AddressSpaceID target)
+          {
+            if (target == runtime->address_space)
+              return;
+            runtime->send_fill_view_value(target, rez);
+          }
+          Serializer &rez;
+          Runtime *const runtime;
+        };
+        ValueFunctor functor(rez, runtime);
+        map_over_remote_instances(functor);
+      }
+      return remove_base_resource_ref(PENDING_UNBOUND_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FillView::handle_send_fill_view_value(Runtime *runtime,
+                                                          Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      size_t size;
+      derez.deserialize(size);
+      const void *value = derez.get_current_pointer();
+      derez.advance_pointer(size);
+
+      // This message can arrive out-of-order with respect to the creation
+      // of the fill view on the remote node, so do the normal steps
+      RtEvent ready;
+      FillView *view = static_cast<FillView*>(
+          runtime->find_or_request_logical_view(did, ready));
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+
+      if (view->set_value(value, size))
+        delete view;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FillView::issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 std::set<RtEvent> &applied_events,
+#ifdef LEGION_SPY
+                                 PhysicalManager *manager,
+#endif
+                                 ApEvent precondition, PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      if (value_size.load() == 0)
+      {
+        // We don't know the value yet so we need to launch a task to
+        // actually issue the fill once we know the value
+        AutoLock v_lock(view_lock);
+        if (value_size.load() == 0)
+        {
+          if (!value_ready.exists())
+            value_ready = Runtime::create_rt_user_event();
+          DeferIssueFill args(this, op, fill_expr, trace_info, dst_fields,
+#ifdef LEGION_SPY
+                              manager,
+#endif
+                              applied_events, precondition, pred_guard);
+          const RtEvent issued = runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, value_ready);
+          // If we're recording this, then this needs to be a precondition
+          // for mapping since the trace needs to have all the instructions
+          // before we can consider it mapped
+          // Note! This couples mapping back to the execution since it means
+          // we need to wait for the future value before being mapped
+          if (trace_info.recording)
+            applied_events.insert(issued);
+          return args.done;
+        }
+      }
+      // If we get here the that means we have a value and can issue
+      // the fill from this fill view
+      return fill_expr->issue_fill(op, trace_info, dst_fields,
+                                   value.load(), value_size.load(),
+#ifdef LEGION_SPY
+                                   fill_op_uid,
+                                   manager->field_space_node->handle,
+                                   manager->tree_id,
+#endif
+                                   precondition, pred_guard);
+    }
+
+    //--------------------------------------------------------------------------
+    FillView::DeferIssueFill::DeferIssueFill(FillView *v, Operation *o,
+                                       IndexSpaceExpression *expr,
+                                       const PhysicalTraceInfo &info,
+                                       const std::vector<CopySrcDstField> &dst,
+#ifdef LEGION_SPY
+                                       PhysicalManager *man,
+#endif
+                                       std::set<RtEvent> &applied_events,
+                                       ApEvent pre, PredEvent guard)
+      : LgTaskArgs<DeferIssueFill>(o->get_unique_op_id()),
+        view(v), op(o), fill_expr(expr),
+        trace_info(new PhysicalTraceInfo(info)),
+        dst_fields(new std::vector<CopySrcDstField>(dst)),
+#ifdef LEGION_SPY
+        manager(man),
+#endif
+        precondition(pre), pred_guard(guard),
+        done(Runtime::create_ap_user_event(&info))
+    //--------------------------------------------------------------------------
+    {
+      WrapperReferenceMutator mutator(applied_events);
+      view->add_base_resource_ref(META_TASK_REF);
+      fill_expr->add_base_expression_reference(META_TASK_REF, &mutator);
+#ifdef LEGION_SPY
+      manager->add_base_resource_ref(META_TASK_REF);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FillView::handle_defer_issue_fill(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferIssueFill *dargs = (const DeferIssueFill*)args;
+      std::set<RtEvent> dummy_applied;
+      const ApEvent result = dargs->view->issue_fill(dargs->op,dargs->fill_expr,
+          *(dargs->trace_info), *(dargs->dst_fields), dummy_applied,
+#ifdef LEGION_SPY
+          dargs->manager,
+#endif
+          dargs->precondition, dargs->pred_guard);
+#ifdef DEBUG_LEGION
+      assert(dummy_applied.empty());
+#endif
+      Runtime::trigger_event(dargs->trace_info, dargs->done, result);
+      delete dargs->trace_info;
+      delete dargs->dst_fields;
+      if (dargs->view->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->view;
+      if (dargs->fill_expr->remove_base_expression_reference(META_TASK_REF))
+        delete dargs->fill_expr;
+#ifdef LEGION_SPY
+      if (dargs->manager->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->manager;
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -5225,9 +5436,11 @@ namespace Legion {
                                  PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now, CollectiveMapping *mapping)
       : IndividualView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
-                       own_ctx, register_now, mapping)
+                       own_ctx, register_now, mapping),
+        fill_view(runtime->find_or_create_reduction_fill_view(man->redop))
     //--------------------------------------------------------------------------
     {
+      fill_view->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space,
@@ -5245,6 +5458,8 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
+      if (fill_view->remove_nested_resource_ref(did))
+        delete fill_view;
 #if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(DEBUG_LEGION)
       assert(writing_users.empty());
       assert(reduction_users.empty());
@@ -8321,16 +8536,14 @@ namespace Legion {
         PhysicalManager *local_manager = local_view->get_manager();
         std::vector<CopySrcDstField> dst_fields;
         local_manager->compute_copy_offsets(fill_mask, dst_fields);
-        const ApEvent result = fill_expression->issue_fill(op,
-                                 inst_info, dst_fields,
-                                 fill_view->value->value,
-                                 fill_view->value->value_size,
+        const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                     inst_info, dst_fields,
+                                                     applied_events,
 #ifdef LEGION_SPY
-                                 fill_view->fill_op_uid,
-                                 local_view->manager->field_space_node->handle,
-                                 local_view->manager->tree_id,
+                                                     local_view->manager,
 #endif
-                                 dst_precondition, predicate_guard);
+                                                     dst_precondition,
+                                                     predicate_guard);
         if (result.exists())
         {
           if (ready_event.exists())

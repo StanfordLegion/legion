@@ -3926,6 +3926,8 @@ namespace Legion {
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
+      virtual RtEvent initialize_fill_view(void);
+      virtual FillView* get_fill_view(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -3933,6 +3935,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
+      virtual void trigger_complete(void);
     public:
       // This is a helper method for ReplFillOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
@@ -3948,6 +3951,9 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(const TraceInfo &trace_info) const;
       void log_fill_requirement(void) const;
+      // This call only happens from control replication when we had to 
+      // make a new view because not everyone agreed on which view to use
+      RtEvent register_fill_view_creation(FillView *view, bool set);
     public:
       // From Memoizable
       virtual const VersionInfo& get_version_info(unsigned idx) const
@@ -3965,10 +3971,11 @@ namespace Legion {
       RegionTreePath privilege_path;
       VersionInfo version_info;
       unsigned parent_req_index;
+      FillView *fill_view;
+      Future future;
       void *value;
       size_t value_size;
-      Future future;
-      FillView *fill_view;
+      bool set_view;
       std::set<RtEvent> map_applied_conditions;
     };
     
@@ -3999,7 +4006,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
       // From MemoizableOp
@@ -4038,7 +4044,7 @@ namespace Legion {
       PointFillOp& operator=(const PointFillOp &rhs);
     public:
       void initialize(IndexFillOp *owner, const DomainPoint &point);
-      void launch(void);
+      void launch(RtEvent view_ready);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4051,6 +4057,7 @@ namespace Legion {
       virtual void record_completion_effect(ApEvent effect,
           std::set<RtEvent> &map_applied_events);
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
+      virtual FillView* get_fill_view(void) const;
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

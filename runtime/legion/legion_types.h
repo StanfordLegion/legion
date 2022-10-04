@@ -422,6 +422,7 @@ namespace Legion {
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
+      LG_DEFER_ISSUE_FILL_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -546,6 +547,7 @@ namespace Legion {
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Defer Record Complete Replay",                           \
+        "Defer Issue Fill",                                       \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
@@ -799,6 +801,7 @@ namespace Legion {
       SEND_CREATED_REGION_CONTEXTS,
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
+      SEND_FILL_VIEW_VALUE,
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_REPLICATED_VIEW,
@@ -1047,6 +1050,7 @@ namespace Legion {
         "Send Created Region Contexts",                               \
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
+        "Send Fill View Value",                                       \
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Replicated View",                                       \
@@ -1640,7 +1644,7 @@ namespace Legion {
       COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
-      //COLLECTIVE_LOC_93 = 93,
+      COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,

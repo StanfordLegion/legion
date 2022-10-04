@@ -12209,6 +12209,11 @@ namespace Legion {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
+          case SEND_FILL_VIEW_VALUE:
+            {
+              runtime->handle_send_fill_view_value(derez);
+              break;
+            }
           case SEND_PHI_VIEW:
             {
               runtime->handle_send_phi_view(derez, remote_address_space);
@@ -21883,6 +21888,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_fill_view_value(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_FILL_VIEW_VALUE>(
+                            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_phi_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24139,6 +24152,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FillView::handle_send_fill_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_fill_view_value(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FillView::handle_send_fill_view_value(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -30893,16 +30913,17 @@ namespace Legion {
         return finder->second;
       const ReductionOp *reduction_op = 
         get_reduction_op(redop, true/*has lock*/);
-      void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-      memcpy(fill_buffer, reduction_op->identity, reduction_op->sizeof_rhs);
-      FillView::FillViewValue *fill_value = 
-        new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
-      FillView *fill_view = new FillView(forest, get_available_distributed_id(),
-                                 address_space, fill_value, true/*register now*/
-#ifdef LEGION_SPY
-                                 , 0/*no creator*/
+#ifdef DEBUG_LEGION
+      assert(reduction_op->identity != NULL);
 #endif
-                                 );
+      FillView *fill_view = new FillView(forest, get_available_distributed_id(),
+                                         address_space,
+#ifdef LEGION_SPY
+                                         0/*no creator*/,
+#endif
+                                         reduction_op->identity,
+                                         reduction_op->sizeof_rhs,
+                                         true/*register now*/);
       fill_view->add_base_valid_ref(RUNTIME_REF);
       redop_fill_views[redop] = fill_view;
       return fill_view;
@@ -32224,6 +32245,11 @@ namespace Legion {
         case LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID:
           {
             MemoizableOp::handle_record_complete_replay(args);
+            break;
+          }
+        case LG_DEFER_ISSUE_FILL_TASK_ID:
+          {
+            FillView::handle_defer_issue_fill(args);
             break;
           }
         case LG_YIELD_TASK_ID:

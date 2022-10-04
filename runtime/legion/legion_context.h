@@ -1805,10 +1805,20 @@ namespace Legion {
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
-      virtual FillView* find_or_create_fill_view(FillOp *op, 
+      void record_fill_view_creation(FillView *view, ReferenceMutator &mutator);
+      void record_fill_view_creation(DistributedID future_did, FillView *view,
+                                     ReferenceMutator &mutator);
+      FillView* find_or_create_fill_view(FillOp *op, 
                              std::set<RtEvent> &map_applied_events,
-                             const void *value, const size_t value_size,
-                             bool &took_ownership);
+                             const void *value, size_t value_size);
+      FillView* find_or_create_fill_view(FillOp *op,
+                             std::set<RtEvent> &map_applied_events,
+                             const Future &future, bool &set_value);
+      FillView* find_fill_view(const void *value, size_t value_size,
+                               std::set<RtEvent> &map_applied_events);
+      FillView* find_fill_view(const Future &future,
+                               std::set<RtEvent> &map_applied_events);
+    public:
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void add_subscriber_reference(PhysicalManager *manager) 
         { add_reference(); }
@@ -2168,7 +2178,8 @@ namespace Legion {
     protected:
       // Cache for fill views
       mutable LocalLock     fill_view_lock;            
-      std::list<FillView*>  fill_view_cache;
+      std::list<FillView*>  value_fill_view_cache;
+      std::list<std::pair<FillView*,DistributedID> > future_fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
     protected:
       // Equivalence sets that were invalidated by 
@@ -2559,11 +2570,6 @@ namespace Legion {
                           std::set<RtEvent> &applied_events, size_t num_shards);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
-    public:
-      virtual FillView* find_or_create_fill_view(FillOp *op, 
-                             std::set<RtEvent> &map_applied_events,
-                             const void *value, const size_t value_size,
-                             bool &took_ownership);
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 

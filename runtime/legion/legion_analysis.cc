@@ -11082,6 +11082,7 @@ namespace Legion {
             {
               InstanceView *red_view = rit->first;
               const ReductionOpID view_redop = red_view->get_redop(); 
+              FillView *fill_view = red_view->get_redop_fill_view(); 
 #ifdef DEBUG_LEGION
               assert(view_redop > 0);
               assert(view_redop == analysis.usage.redop);
@@ -11311,8 +11312,6 @@ namespace Legion {
                     fill_aggregator;
                 }
                 // Record the fill operation on the aggregator
-                FillView *fill_view = 
-                  runtime->find_or_create_reduction_fill_view(view_redop);
                 for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                       fill_exprs.begin(); it != fill_exprs.end(); it++)
                   fill_aggregator->record_fill(red_view, fill_view,
