@@ -1574,10 +1574,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            let mut parent_id = None;
-            if !op.parent_id.is_none() {
-                parent_id = Some(op.parent_id.unwrap().0);
-            }
+            let parent_id = op.parent_id.map(|x| x.0);
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
