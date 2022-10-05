@@ -6932,7 +6932,6 @@ namespace Legion {
       implicit_context = top_context;
       task->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
       task->complete_mapping();
-      task->resolve_speculation();
       return task;
     }
 
