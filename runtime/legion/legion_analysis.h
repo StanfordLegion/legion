@@ -2777,14 +2777,14 @@ namespace Legion {
     public:
       struct PendingCollective {
       public:
-        PendingCollective(CollectiveView *refined, CollectiveView *refining);
+        PendingCollective(InstanceView *refined, CollectiveView *refining);
         PendingCollective(CollectiveView *refining,
                           const std::set<IndividualView*> &excluded);
         PendingCollective(CollectiveView *refining,
                           const std::vector<DistributedID> &refined_instances);
       public:
         // The new collective view we're refining for (can be NULL)
-        CollectiveView *refined;
+        InstanceView *refined;
         // The old collective view we're refining (can be NULL)
         CollectiveView *const refining;
         std::vector<DistributedID> instances;
@@ -3260,7 +3260,7 @@ namespace Legion {
       // result in unsoundness (in the case of reductions) or imprecision
       // Note that this data structure must be sound in that it must contain
       // all the collective views currently referenced by the equivalence set
-      // but it can also overapproximate. Periodically we will check to the
+      // but it can also overapproximate. Periodically we will check the
       // set to prune out any collective views not currently in use. We do
       // this infrequently though to ensure that we can get some reuse of
       // collective view checks across uses. The pruning though also allows

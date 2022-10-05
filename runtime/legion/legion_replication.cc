@@ -11844,11 +11844,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID ShardManager::find_collective_owner(RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      // This is the node that made the logical region tree
+      const AddressSpaceID tree_owner = 
+        RegionTreeNode::get_owner_space(tid, runtime);
+      // This is the node in the replicate context that will handle
+      // all the collective instance creations for this region tree
+      const AddressSpaceID target_owner =
+        collective_mapping->contains(tree_owner) ? tree_owner :
+        collective_mapping->find_nearest(tree_owner);
+      return target_owner;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_find_or_create_collective_view(ShardID target,
+                                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        ReplicationID local_repl;
+        derez.deserialize(local_repl);     
+        handle_find_or_create_collective_view(derez);
+      }
+      else
+        runtime->send_control_replicate_find_collective_view(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_find_or_create_collective_view(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          InnerContext *context = (*it)->get_shard_execution_context();
+          RegionTreeID tid;
+          derez.deserialize(tid);
+          size_t num_insts;
+          derez.deserialize(num_insts);
+          std::vector<DistributedID> instances(num_insts);
+          for (unsigned idx = 0; idx < num_insts; idx++)
+            derez.deserialize(instances[idx]);
+          InstanceView **target;
+          derez.deserialize(target);
+          AddressSpaceID source;
+          derez.deserialize(source);
+          RtUserEvent to_trigger;
+          derez.deserialize(to_trigger);
+          context->find_or_create_collective_view(tid, instances, target,
+                                                  source, to_trigger);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);  
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::construct_collective_mapping(const RendezvousKey &key,
         Operation *op, std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
     //--------------------------------------------------------------------------
     {
       CollectiveMapping *mapping = NULL;
+      // Determine the owner for the region tree
+      // We need to end up on the shard that actually owns the collective
+      // instance creation for this region tree
+      const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
+      // This is the node in the replicate context that will handle
+      // all the collective instance creations for this region tree
+      const AddressSpaceID target_owner = find_collective_owner(tid);
       {
         AutoLock m_lock(manager_lock);
         // Check see if this is the first arrival for the rendezvous
@@ -11878,11 +11957,10 @@ namespace Legion {
             if (op->find_shard_participants(participants))
             {
               // Common case where all shards are participating
-              const unsigned owner_index = key.context_index % total_shards;
-              const AddressSpaceID owner = (*collective_mapping)[owner_index];
               finder->second.remaining_local = local_shards.size();
               finder->second.remaining_remote = 
-               collective_mapping->count_children(owner,runtime->address_space);
+               collective_mapping->count_children(target_owner,
+                                                  runtime->address_space);
               finder->second.mapping = collective_mapping;
               finder->second.mapping->add_reference();
             }
@@ -11910,14 +11988,15 @@ namespace Legion {
               std::vector<AddressSpaceID>::iterator end = 
                 std::unique(spaces.begin(), spaces.end());
               spaces.resize(std::distance(spaces.begin(),end));
-              const unsigned owner_index = key.context_index % spaces.size();
-              const AddressSpaceID owner = spaces[owner_index];
               finder->second.mapping =
                 new CollectiveMapping(spaces, runtime->legion_collective_radix);
 #ifdef DEBUG_LEGION
               assert(finder->second.mapping->contains(runtime->address_space));
 #endif
               finder->second.mapping->add_reference();
+              const AddressSpaceID owner = 
+                finder->second.mapping->contains(target_owner) ? target_owner :
+                finder->second.mapping->find_nearest(target_owner);
               finder->second.remaining_remote = 
                 finder->second.mapping->count_children(owner, 
                                       runtime->address_space);
@@ -12066,12 +12145,11 @@ namespace Legion {
             if (op->find_shard_participants(participants))
             {
               // Common case where all shards are participating
-              const unsigned owner_index = key.context_index % total_shards;
-              const AddressSpaceID owner = (*collective_mapping)[owner_index];
               finder->second.remaining_local = local_shards.size();
               // Add here since we might already have counted some remotes
               finder->second.remaining_remote += 
-               collective_mapping->count_children(owner,runtime->address_space);
+               collective_mapping->count_children(target_owner,
+                                                  runtime->address_space);
               finder->second.mapping = collective_mapping;
               finder->second.mapping->add_reference();
             }
@@ -12099,15 +12177,16 @@ namespace Legion {
               std::vector<AddressSpaceID>::iterator end = 
                 std::unique(spaces.begin(), spaces.end());
               spaces.resize(std::distance(spaces.begin(),end));
-              const unsigned owner_index = key.context_index % spaces.size();
-              const AddressSpaceID owner = spaces[owner_index];
               finder->second.mapping =
                 new CollectiveMapping(spaces, runtime->legion_collective_radix);
 #ifdef DEBUG_LEGION
               assert(finder->second.mapping->contains(runtime->address_space));
 #endif
               finder->second.mapping->add_reference();
-              finder->second.remaining_remote += 
+              const AddressSpaceID owner = 
+                finder->second.mapping->contains(target_owner) ? target_owner :
+                finder->second.mapping->find_nearest(target_owner);
+              finder->second.remaining_remote +=
                 finder->second.mapping->count_children(owner, 
                                       runtime->address_space);
             }
@@ -12134,8 +12213,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rendezvous.empty());
 #endif
-        const unsigned owner_index = key.context_index % mapping->size();
-        const AddressSpaceID owner = (*mapping)[owner_index];
+        const AddressSpaceID owner = 
+          mapping->contains(target_owner) ? target_owner :
+          mapping->find_nearest(target_owner);
         if (owner != runtime->address_space)
         {
           // Send to the parent to continue the rendezvous
@@ -12153,22 +12233,13 @@ namespace Legion {
           // can be made for the various instances
           // All the regions have to be from the same region tree so
           // they're all going to the same place 
-          const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
-          const AddressSpaceID tid_owner = 
-            RegionTreeNode::get_owner_space(tid, runtime);
-          // Use the collective mapping here!
-          // It doesn't matter how many participants there are in this
-          // particular collective operation, all instances from the same
-          // region tree always need to go to the same shard in all cases
-          const AddressSpaceID target =
-            collective_mapping->contains(tid_owner) ? tid_owner :
-            collective_mapping->find_nearest(tid_owner);
-          if (target != runtime->address_space)
+          if (target_owner != runtime->address_space)
           {
             // Send it to the collective node
             Serializer rez;
             pack_collective_rendezvous(rez, key, true/*done*/, rendezvous);
-            runtime->send_control_replicate_collective_rendezvous(target, rez);
+            runtime->send_control_replicate_collective_rendezvous(target_owner,
+                                                                  rez);
           }
           else
             // Hey! We're already here so we can just do it
@@ -12240,6 +12311,17 @@ namespace Legion {
       else
         context = local_shards.back()->get_shard_execution_context();
       context->handle_collective_rendezvous(key, to_construct);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_find_collective_view(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_find_or_create_collective_view(derez);
     }
 
     //--------------------------------------------------------------------------

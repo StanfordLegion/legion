@@ -2935,16 +2935,22 @@ namespace Legion {
       void send_trace_event_response(ShardedPhysicalTemplate *physical_template,
                           AddressSpaceID template_source, ApEvent event,
                           ApBarrier result, RtUserEvent done_event);
-      void send_trace_frontier_request(ShardedPhysicalTemplate *physical_template,
+      void send_trace_frontier_request(
+                          ShardedPhysicalTemplate *physical_template,
                           ShardID shard_source, AddressSpaceID template_source, 
                           size_t template_index, ApEvent event, 
                           AddressSpaceID event_space, unsigned frontier,
                           RtUserEvent done_event);
-      void send_trace_frontier_response(ShardedPhysicalTemplate *physical_template,
+      void send_trace_frontier_response(
+                          ShardedPhysicalTemplate *physical_template,
                           AddressSpaceID template_source, unsigned frontier,
                           ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source); 
+    public:
+      AddressSpaceID find_collective_owner(RegionTreeID tid) const;
+      void send_find_or_create_collective_view(ShardID target, Serializer &rez);
+      void handle_find_or_create_collective_view(Deserializer &derez);
       void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       void pack_collective_rendezvous(Serializer &rez, 
@@ -2978,6 +2984,7 @@ namespace Legion {
       static void handle_trace_frontier_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
+      static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
       static void handle_collective_rendezvous(Deserializer &derez,Runtime *rt);
 #ifdef NO_EXPLICIT_COLLECTIVES
       static void handle_collective_instance_message(Deserializer &derez,

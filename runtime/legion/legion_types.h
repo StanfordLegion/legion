@@ -405,6 +405,7 @@ namespace Legion {
       LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
+      LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
@@ -530,6 +531,7 @@ namespace Legion {
         "Defer Physical Manager Deletion",                        \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
+        "Defer Find or Create Collective View",                   \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \
@@ -864,6 +866,7 @@ namespace Legion {
       SEND_REPL_TRACE_UPDATE,
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
+      SEND_REPL_FIND_COLLECTIVE_VIEW,
       SEND_REPL_COLLECTIVE_RENDEZVOUS,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
@@ -886,6 +889,8 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+      SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
+      SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
@@ -1113,6 +1118,7 @@ namespace Legion {
         "Send Replicate Trace Update",                                \
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
+        "Send Replicate Find or Create Collective View",              \
         "Send Replicate Collective Rendezvous",                       \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
@@ -1135,6 +1141,8 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
+        "Send Remote Context Find Collective View Request",           \
+        "Send Remote Context Find Collective View Response",          \
         "Send Remote Context Collective Rendezvous",                  \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \

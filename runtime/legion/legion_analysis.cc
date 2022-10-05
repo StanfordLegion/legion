@@ -9438,6 +9438,15 @@ namespace Legion {
         }
         released_instances.clear();
       }
+      if (!collective_instances.empty())
+      {
+        for (FieldMaskSet<CollectiveView>::const_iterator it =
+              collective_instances.begin(); it != 
+              collective_instances.end(); it++)
+          if (it->first->remove_nested_resource_ref(did))
+            delete it->first;
+        collective_instances.clear();
+      }
       if (tracing_preconditions != NULL)
       {
         delete tracing_preconditions;
@@ -9581,6 +9590,10 @@ namespace Legion {
           {
             total_valid_instances.insert(view, view_mask);
             view->add_nested_valid_ref(did, &mutator);
+            // Check if this is a collective view we need to track
+            if (view->is_collective_view() && collective_instances.insert(
+                                    view->as_collective_view(), view_mask))
+              view->add_nested_resource_ref(did);
           }
           else
             finder.merge(view_mask);
@@ -9604,6 +9617,10 @@ namespace Legion {
           {
             total_valid_instances.insert(view, view_mask);
             view->add_nested_valid_ref(did, &mutator);
+            // Check if this is a collective view we need to track
+            if (view->is_collective_view() && collective_instances.insert(
+                  view->as_collective_view(), view_mask))
+              view->add_nested_resource_ref(did);
           }
           else
             finder.merge(view_mask);
@@ -10023,14 +10040,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::PendingCollective::PendingCollective(CollectiveView *ed,
+    EquivalenceSet::PendingCollective::PendingCollective(InstanceView *ed,
                                                          CollectiveView *ing)
-      : refined(ed), refining(ing), instances(refined->instances)
+      : refined(ed), refining(ing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(refined != NULL);
 #endif
+      if (refined->is_collective_view())
+        instances = refined->as_collective_view()->instances;
+      else
+        instances.push_back(refined->as_individual_view()->get_manager()->did);
     }
 
     //--------------------------------------------------------------------------
@@ -10410,17 +10431,28 @@ namespace Legion {
         // Make a new collective view if we don't have a name for it yet
         if (it->first->refined == NULL)
         {
-          RtEvent ready;
-          const DistributedID collective_did = 
-            context->find_or_create_collective_view(
-                region_node->handle.get_tree_id(), it->first->instances, ready);
-          // Wait if it hasn't been registered everywhere yet
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
-          it->first->refined = static_cast<CollectiveView*>(
-              runtime->find_or_request_logical_view(collective_did, ready));
-          if (ready.exists())
-            pending_ready.push_back(ready);
+          if (it->first->instances.size() > 1)
+          {
+            const RtEvent ready = context->find_or_create_collective_view(
+                region_node->handle.get_tree_id(), it->first->instances,
+                &it->first->refined, runtime->address_space);
+            if (ready.exists())
+              pending_ready.push_back(ready);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(!it->first->instances.empty());
+#endif
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(
+                  it->first->instances.back(), ready);
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            it->first->refined =
+              context->create_instance_top_view(manager,runtime->address_space);
+          }
         }
         // If views were refined then record it
         if (views_refined)
@@ -10468,17 +10500,28 @@ namespace Legion {
         // Make a new collective view if we don't have a name for it yet
         if (it->first->refined == NULL)
         {
-          RtEvent ready;
-          const DistributedID collective_did = 
-            context->find_or_create_collective_view(
-                region_node->handle.get_tree_id(), it->first->instances, ready);
-          // Wait if it hasn't been registered everywhere yet
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
-          it->first->refined = static_cast<CollectiveView*>(
-              runtime->find_or_request_logical_view(collective_did, ready));
-          if (ready.exists())
-            pending_ready.push_back(ready);
+          if (it->first->instances.size() > 1)
+          {
+            const RtEvent ready = context->find_or_create_collective_view(
+                region_node->handle.get_tree_id(), it->first->instances,
+                &it->first->refined, runtime->address_space);
+            if (ready.exists())
+              pending_ready.push_back(ready);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(!it->first->instances.empty());
+#endif
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(
+                  it->first->instances.back(), ready);
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            it->first->refined =
+              context->create_instance_top_view(manager,runtime->address_space);
+          }
         }
         // Record the invalidations if necessary
         if (it->first->refining != NULL)
@@ -10508,7 +10551,9 @@ namespace Legion {
             overlapping_refinements.begin(); it != 
             overlapping_refinements.end(); it++)
       {
-        if (collective_instances.insert(it->first->refined, it->second))
+        if (it->first->refined->is_collective_view() &&
+            collective_instances.insert(
+              it->first->refined->as_collective_view(), it->second))
           it->first->refined->add_nested_resource_ref(did);
         delete it->first;
       }
@@ -10516,7 +10561,9 @@ namespace Legion {
             independent_refinements.begin(); it != 
             independent_refinements.end(); it++)
       {
-        if (collective_instances.insert(it->first->refined, it->second))
+        if (it->first->refined->is_collective_view() &&
+            collective_instances.insert(
+              it->first->refined->as_collective_view(), it->second))
           it->first->refined->add_nested_resource_ref(did);
         delete it->first;
       }
@@ -10596,7 +10643,14 @@ namespace Legion {
             if (!overlap)
               continue;
             if (total_valid_instances.insert(it->first, overlap))
+            {
               it->first->add_nested_valid_ref(did, &mutator);
+              // If the new entry is a collective we still need to record it
+              if (it->first->is_collective_view() &&
+                  collective_instances.insert(it->first->as_collective_view(),
+                                              overlap))
+                it->first->add_nested_resource_ref(did);
+            }
           }
         }
       }
@@ -10638,6 +10692,11 @@ namespace Legion {
               if (expr_finder->second.insert(it->first, overlap))
                 it->first->add_nested_expression_reference(did, &mutator);
             }
+            // If the new view is a collective we still need to record it
+            if (vit->first->is_collective_view() &&
+                collective_instances.insert(vit->first->as_collective_view(),
+                                            view_overlap))
+              vit->first->add_nested_resource_ref(did);
           }
           // Now remove any expressions from the old view
           std::vector<IndexSpaceExpression*> to_delete;
@@ -10706,6 +10765,13 @@ namespace Legion {
             }
             fidx = reduce_mask.find_next_set(fidx+1);
           }
+          // Check for any collectives we still need to track
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                cit->second.begin(); it != cit->second.end(); it++)
+            if (it->first->is_collective_view() &&
+                collective_instances.insert(it->first->as_collective_view(),
+                                            it->second))
+              it->first->add_nested_resource_ref(did);
         }
       }
       if (!(invalidate_mask * restricted_fields))
@@ -11081,6 +11147,11 @@ namespace Legion {
                   red_views.begin(); rit != red_views.end(); rit++)
             {
               InstanceView *red_view = rit->first;
+              // Check if this is a collective we need to track
+              if (red_view->is_collective_view() &&
+                  collective_instances.insert(red_view->as_collective_view(),
+                                              rit->second))
+                red_view->add_nested_resource_ref(did);
               const ReductionOpID view_redop = red_view->get_redop(); 
               FillView *fill_view = red_view->get_redop_fill_view(); 
 #ifdef DEBUG_LEGION
@@ -12356,7 +12427,14 @@ namespace Legion {
                 target_insts.begin(); it != target_insts.end(); it++)
           {
             if (total_valid_instances.insert(it->first, it->second))
+            {
               it->first->add_nested_valid_ref(did, &mutator);
+              // Check if this is a collective view we need to track
+              if (it->first->is_collective_view() &&
+                  collective_instances.insert(it->first->as_collective_view(),
+                                              it->second))
+                it->first->add_nested_resource_ref(did);
+            }
             // Check to see if there are any copies of this to filter
             // from the partially valid instances
             ViewExprMaskSets::iterator finder =
@@ -12418,7 +12496,14 @@ namespace Legion {
               continue;
             // Add it to the set
             if (total_valid_instances.insert(it->first, valid_mask))
+            {
               it->first->add_nested_valid_ref(did, &mutator);
+              // Check if this is a collective view we need to track
+              if (it->first->is_collective_view() &&
+                  collective_instances.insert(it->first->as_collective_view(),
+                                              valid_mask))
+                it->first->add_nested_resource_ref(did);
+            }
             // Check to see if there are any copies of this to filter
             // from the partially valid instances
             ViewExprMaskSets::iterator finder = 
@@ -12656,6 +12741,8 @@ namespace Legion {
                 to_delete.push_back(it->first);
               if (total_valid_instances.insert(target, overlap))
                 target->add_nested_valid_ref(did, &mutator);
+              // No need for a collective instance check here since it
+              // was already recorded in the partial valid instances
               need_tighten = true;
             }
             else if (union_size == expr->get_volume())
@@ -12720,6 +12807,11 @@ namespace Legion {
         partial_valid_instances[target].insert(expr, valid_mask);
         target->add_nested_valid_ref(did, &mutator);
         expr->add_nested_expression_reference(did, &mutator);
+        // Check to see if this is a collective view we need to record
+        if (target->is_collective_view() &&
+            collective_instances.insert(target->as_collective_view(),
+                                        valid_mask))
+          target->add_nested_resource_ref(did);
       }
       return need_rebuild;
     }
@@ -14801,6 +14893,14 @@ namespace Legion {
         if (it->second->get_volume() == volume)
           it->second = set_expr;
         it->second->add_nested_expression_reference(did, &mutator);
+        // Check if this is a collective instance that we need to track
+        if (it->first->is_collective_view())
+        {
+          FieldMask mask;
+          mask.set_bit(fidx);
+          if (collective_instances.insert(it->first->as_collective_view(),mask))
+            it->first->add_nested_resource_ref(did);
+        }
       }
       std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &current =
         reduction_instances[fidx];
@@ -15815,6 +15915,11 @@ namespace Legion {
               expr->add_nested_expression_reference(did, &mutator);
               fidx = it->second.find_next_set(fidx+1);
             }
+            // Check if this is a collective instance to track or not
+            if (it->first->is_collective_view() &&
+                collective_instances.insert(it->first->as_collective_view(),
+                                            it->second))
+              it->first->add_nested_resource_ref(did);
           }
           reduction_fields |= analysis.reduction_views.get_valid_mask();
         }

@@ -3291,6 +3291,8 @@ namespace Legion {
                                                    Serializer &rez);
       void send_control_replicate_implicit_response(AddressSpaceID target,
                                                     Serializer &rez);
+      void send_control_replicate_find_collective_view(AddressSpaceID target,
+                                                       Serializer &rez);
       void send_control_replicate_collective_rendezvous(
                                   AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -3328,6 +3330,12 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_remote_context_find_collective_view_request(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_remote_context_find_collective_view_response(
+                                                  AddressSpaceID target,
+                                                  Serializer &rez);
       void send_remote_context_collective_rendezvous(AddressSpaceID target,
                                                      Serializer &rez);
       void send_compute_equivalence_sets_request(AddressSpaceID target, 
@@ -3663,6 +3671,11 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
+      void handle_remote_context_find_collective_view_request(
+                                                      Deserializer &derez,
+                                                      AddressSpaceID source);
+      void handle_remote_context_find_collective_view_response(
+                                                      Deserializer &derez);
       void handle_remote_context_collective_rendezvous(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
@@ -3766,6 +3779,7 @@ namespace Legion {
       void handle_control_replicate_implicit_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
+      void handle_control_replicate_find_collective_view(Deserializer &derez);
       void handle_control_replicate_collective_rendezvous(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
@@ -5904,6 +5918,8 @@ namespace Legion {
         // See Runtime::send_replicate_launch
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
+        case SEND_REPL_FIND_COLLECTIVE_VIEW:
+          break;
         case SEND_REPL_COLLECTIVE_RENDEZVOUS:
           break;
         case SEND_MAPPER_MESSAGE:
@@ -5947,6 +5963,10 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
           break;
         case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST:
+          break;
+        case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
           break;
         case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
           break;

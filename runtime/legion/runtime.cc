@@ -12549,6 +12549,10 @@ namespace Legion {
               runtime->handle_control_replicate_implicit_response(derez);
               break;
             }
+          case SEND_REPL_FIND_COLLECTIVE_VIEW:
+            {
+              runtime->handle_control_replicate_find_collective_view(derez);
+            }
           case SEND_REPL_COLLECTIVE_RENDEZVOUS:
             {
               runtime->handle_control_replicate_collective_rendezvous(derez);
@@ -12672,6 +12676,18 @@ namespace Legion {
           case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
             {
               runtime->handle_remote_context_physical_response(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST:
+            {
+              runtime->handle_remote_context_find_collective_view_request(
+                                              derez, remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
+            {
+              runtime->handle_remote_context_find_collective_view_response(
+                                                                    derez);
               break;
             }
           case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
@@ -22440,6 +22456,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_find_collective_view(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPL_FIND_COLLECTIVE_VIEW>(
+                                                          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_collective_rendezvous(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22634,6 +22659,25 @@ namespace Legion {
     {
       find_messenger(target)->send_message<
           SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE>(rez,
+              true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_collective_view_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+          SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_find_collective_view_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+          SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE>(rez, 
               true/*flush*/, true/*response*/);
     }
 
@@ -24619,6 +24663,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_find_collective_view(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_find_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_collective_rendezvous(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -24873,6 +24925,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_physical_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_collective_view_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_collective_view_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_find_collective_view_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_find_collective_view_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -32163,6 +32231,11 @@ namespace Legion {
         case LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID:
           {
             InnerContext::handle_remove_remote_references(args);
+            break;
+          }
+        case LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID:
+          {
+            InnerContext::handle_defer_find_collective_view(args, runtime);
             break;
           }
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:

@@ -1028,6 +1028,18 @@ namespace Legion {
       public:
         std::vector<DistributedCollectable*> *const to_remove;
       };
+      struct DeferFindCollectiveViewArgs :
+        public LgTaskArgs<DeferFindCollectiveViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID;
+      public:
+        DeferFindCollectiveViewArgs(InstanceView **target, DistributedID did,
+                                    RtUserEvent to_trigger);
+      public:
+        InstanceView **const target;
+        const DistributedID did;
+        const RtUserEvent to_trigger;
+      };
       template<typename T>
       struct QueueEntry {
       public:
@@ -1892,6 +1904,8 @@ namespace Legion {
       static void handle_trigger_commit_queue(const void *args);
       static void handle_deferred_commit_queue(const void *args);
       static void handle_post_end_task(const void *args);
+      static void handle_defer_find_collective_view(const void *args,
+                                                     Runtime *runtime);
     public:
       void clear_instance_top_views(void); 
     public:
@@ -1934,8 +1948,10 @@ namespace Legion {
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
-      DistributedID find_or_create_collective_view(RegionTreeID tid,
-                   const std::vector<DistributedID> &instances, RtEvent &ready);
+      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, 
+          InstanceView **target, AddressSpaceID source,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       void notify_collective_deletion(RegionTreeID tid, DistributedID did);
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
@@ -1966,7 +1982,7 @@ namespace Legion {
           const CollectiveResult *collective, const FieldMask &invalid_mask,
           const FieldMaskSet<CollectiveResult> &replacements);
       CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
-          const std::vector<DistributedID> &instances, bool need_lock = true);
+          const std::vector<DistributedID> &instances);
       RtEvent create_collective_view(UniqueID ctx_uid,
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
@@ -2925,6 +2941,10 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,
                                            bool outermost = true);
+      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, 
+          InstanceView **target, AddressSpaceID source,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       virtual void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     public:
@@ -3383,6 +3403,10 @@ namespace Legion {
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, 
+          InstanceView **target, AddressSpaceID source,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       virtual void rendezvous_collective_mapping(Operation *op,
                                   unsigned requirement_index,
                                   unsigned analysis_index,
@@ -3415,6 +3439,10 @@ namespace Legion {
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
       static void defer_physical_response(const void *args);
+      static void handle_find_collective_view_request(Deserializer &derez,
+                                  Runtime *runtime, AddressSpaceID source);
+      static void handle_find_collective_view_response(Deserializer &derez,
+                                                       Runtime *runtime);
     protected:
       UniqueID parent_context_uid;
       InnerContext *parent_ctx;
