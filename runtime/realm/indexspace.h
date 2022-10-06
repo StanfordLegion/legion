@@ -353,18 +353,21 @@ namespace Realm {
     Event fill(const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
                const void *fill_value, size_t fill_value_size,
-               Event wait_on = Event::NO_EVENT) const;
+               Event wait_on = Event::NO_EVENT,
+               int priority = 0) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
 	       const std::vector<CopySrcDstField> &dsts,
 	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT) const;
+	       Event wait_on = Event::NO_EVENT,
+	       int priority = 0) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
 	       const std::vector<CopySrcDstField> &dsts,
 	       const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
 	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT) const;
+	       Event wait_on = Event::NO_EVENT,
+	       int priority = 0) const;
 
     // partitioning operations
 
@@ -700,14 +703,16 @@ namespace Realm {
     Event copy(const std::vector<CopySrcDstField> &srcs,
 	       const std::vector<CopySrcDstField> &dsts,
 	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT) const;
+	       Event wait_on = Event::NO_EVENT,
+	       int priority = 0) const;
 
     template <int N, typename T>
     Event copy(const std::vector<CopySrcDstField> &srcs,
 	       const std::vector<CopySrcDstField> &dsts,
 	       const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
 	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT) const;
+	       Event wait_on = Event::NO_EVENT,
+	       int priority = 0) const;
 
     // "public" but not useful to application code
     IndexSpaceGenericImpl *impl;

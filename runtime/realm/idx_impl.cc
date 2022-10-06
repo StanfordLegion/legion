@@ -141,9 +141,10 @@ namespace Realm {
   Event IndexSpaceGeneric::copy(const std::vector<CopySrcDstField> &srcs,
 				const std::vector<CopySrcDstField> &dsts,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/) const
+				Event wait_on /*= Event::NO_EVENT*/,
+				int priority  /*= 0*/) const
   {
-    return impl->copy(srcs, dsts, 0, 0, requests, wait_on);
+    return impl->copy(srcs, dsts, 0, 0, requests, wait_on, priority);
   }
 
   template <int N, typename T>
@@ -151,13 +152,15 @@ namespace Realm {
 				const std::vector<CopySrcDstField> &dsts,
 				const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/) const
+				Event wait_on /*= Event::NO_EVENT*/,
+ 				int priority  /*= 0*/) const
   {
     return impl->copy(srcs, dsts,
 		      &indirects[0],
 		      indirects.size(),
 		      requests,
-		      wait_on);
+		      wait_on,
+		      priority);
   }
 
 
@@ -190,11 +193,12 @@ namespace Realm {
 					      const void *indirects_data,
 					      size_t indirect_len,
 					      const ProfilingRequestSet &requests,
-					      Event wait_on) const
+					      Event wait_on,
+					      int priority) const
   {
     // TODO: move to transfer.cc for indirection goodness
     assert(indirect_len == 0);
-    return space.copy(srcs, dsts, requests, wait_on);
+    return space.copy(srcs, dsts, requests, wait_on, priority);
   }
 
   template <int N, typename T>
@@ -286,7 +290,8 @@ namespace Realm {
                                               const std::vector<CopySrcDstField>&, \
 					      const std::vector<const CopyIndirection<N,T>::Base *>&, \
 					      const ProfilingRequestSet&, \
-					      Event) const; \
+					      Event,                      \
+					      int) const; \
   template class IndexSpaceGenericImplTyped<N,T>;
 
   FOREACH_NT(DOIT)

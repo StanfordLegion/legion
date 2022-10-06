@@ -187,6 +187,9 @@ PIXELS_PER_LEVEL = 40
 # Pixels per tick mark
 PIXELS_PER_TICK = 200
 
+# UINT_MAX
+UINT_MAX = (1 << 64) - 1
+
 # prof_uid counter
 prof_uid_ctr = 0
 
@@ -210,13 +213,10 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
     ) -> str:
     # replace None with ''
     def xstr(s: Union[None, float, int, str]) -> str:
-        return str(s or '')
-    if (op_id == None):
-        str_op_id = ""
-    else:
-        str_op_id = str(op_id)
-    # if initiation == None:
-    #     print(op_id, initiation)
+        if s is None:
+            return ""
+        else:
+            return str(s)
     return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
            xstr('%.3f' % ready if ready else ready) + "\t" + \
            xstr('%.3f' % start if start else start) + "\t" + \
@@ -224,7 +224,7 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
-           str_op_id + "\n"
+           xstr(op_id) + "\n"
 
 def dump_json(value: Union[Set, List]) -> str:
     return json.dumps(value, separators=(',', ':'))
@@ -379,7 +379,7 @@ class HasDependencies(Dependencies):
     def __init__(self) -> None:
         Dependencies.__init__(self)
         self.initiation_op = None
-        self.initiation = ''
+        self.initiation: Optional[int] = None
     
     @typeassert(op_dependencies=dict, transitive_map=dict)
     def add_initiation_dependencies(self, 
@@ -1164,7 +1164,7 @@ class HasWaiters(ABC):
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
         title = repr(self)
-        initiation = str(self.initiation)
+        initiation = self.initiation
         color = self.get_color()
 
         def by_prof_uid(k: List[int]) -> int: return k[2]
@@ -1334,7 +1334,7 @@ class Operation(ProcOperation):
         self.task_kind = None
         self.color: Optional[str] = None
         self.owner = None
-        self.parent_id = -1
+        self.parent_id: Optional[int] = None
         self.provenance = None
 
     @typecheck
@@ -1411,7 +1411,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
 
         self.base_op = op
         self.variant = variant
-        self.initiation = ""
+        self.initiation = None
         self.is_task = True
         # make sure set the parent_id and provenance as we create a new task instance to replace the original operation
         self.parent_id = op.parent_id
@@ -1437,7 +1437,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
                  level_ready: int
     ) -> None:
         # update the initiation
-        self.initiation = str(self.parent_id)
+        self.initiation = self.parent_id
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
@@ -3462,17 +3462,21 @@ class State(object):
 
     # OperationInstance
     @typecheck
-    def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: Union[str, None]=None) -> None:
+    def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: str) -> None:
         op = self.find_op(op_id)
-        op.parent_id = parent_id
+        if parent_id == UINT_MAX:
+            op.parent_id = None
+        else:
+            op.parent_id = parent_id
         assert kind in self.op_kinds
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
         # the provenance is passed as "" by binary serializer
         #   when it is not set
         if provenance == "":
-            provenance = None
-        op.provenance = provenance
+            op.provenance = None
+        else:
+            op.provenance = provenance
 
     # MultiTask
     @typecheck
@@ -4690,13 +4694,11 @@ class State(object):
         return list(simplified_critical_path)
 
     @typecheck
-    def check_operation_parent_id(self, verbose: bool) -> None:
+    def check_operation_parent_id(self) -> None:
         self.operations = OrderedDict(sorted(self.operations.items()))
         for op_id, operation in self.operations.items():
-            if operation.parent_id not in self.operations.keys():
-                if verbose:
-                    print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
-                operation.parent_id = 0
+            if operation.parent_id is not None and operation.parent_id not in self.operations.keys():
+                print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
 
     @typecheck
     def emit_interactive_visualization(self, 
@@ -4771,8 +4773,12 @@ class State(object):
                 level = str(operation.level+1)
             if (operation.provenance is not None):
                 provenance = operation.provenance
-            ops_file.write("%d\t%d\t%s\t%s\t%s\t%s\n" % \
-                            (op_id, operation.parent_id, str(operation), proc_str, level, provenance))
+            if operation.parent_id is None:
+                parent_id = ""
+            else:
+                parent_id = str(operation.parent_id)
+            ops_file.write("%d\t%s\t%s\t%s\t%s\t%s\n" % \
+                            (op_id, parent_id, str(operation), proc_str, level, provenance))
         ops_file.close()
 
         if show_procs:
@@ -5066,7 +5072,7 @@ def main() -> None:
     state.check_message_latencies(args.message_threshold, args.message_percentage)
 
     # sort operations and check parent_id
-    state.check_operation_parent_id(verbose)
+    state.check_operation_parent_id()
 
     if print_stats:
         state.print_stats(verbose)

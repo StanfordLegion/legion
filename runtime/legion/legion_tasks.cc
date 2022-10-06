@@ -1058,6 +1058,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& TaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::activate_outstanding_task(void)
     //--------------------------------------------------------------------------
     {
@@ -2075,6 +2086,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent_ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteTaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -3341,7 +3363,6 @@ namespace Legion {
         }
       }
 #endif
-
       std::map<FieldID, std::pair<EqualityKind, size_t> > alignments;
       std::map<FieldID, off_t> offsets;
 
