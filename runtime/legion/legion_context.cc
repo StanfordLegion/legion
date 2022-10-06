@@ -3533,6 +3533,11 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      Provenance *provenance = owner_task->get_provenance();
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -11027,6 +11032,17 @@ namespace Legion {
         parent_task = owner->get_parent_task();
       return parent_task;
     }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteTask::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = owner->get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
     
     //--------------------------------------------------------------------------
     const char* RemoteTask::get_task_name(void) const
@@ -11052,7 +11068,7 @@ namespace Legion {
       : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
           context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
-        parent_ctx(NULL), top_level_context(false), 
+        parent_ctx(NULL), provenance(NULL), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -11094,6 +11110,8 @@ namespace Legion {
         }
         local_field_infos.clear();
       } 
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -11345,6 +11363,9 @@ namespace Legion {
         derez.deserialize(coordinate.first);
         derez.deserialize(coordinate.second);
       }
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       

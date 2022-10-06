@@ -1881,6 +1881,7 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;
@@ -1954,6 +1955,7 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       const Task* get_parent_task(void);
+      inline Provenance* get_provenance(void) { return provenance; }
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
@@ -1969,6 +1971,7 @@ namespace Legion {
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
+      Provenance *provenance;
     protected:
       bool top_level_context;
       RemoteTask remote_task;
