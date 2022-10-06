@@ -984,13 +984,18 @@ namespace Legion {
             "requested type is %zd bytes. (UID %lld)", 
             future_size, extent_in_bytes, (producer_op == NULL) ? 0 :
             producer_op->get_unique_op_id())
-      bool dummy_owner = true;
-      const PhysicalInstance result =
-        instance->get_instance(instance->size, dummy_owner);
+      PhysicalInstance result;
+      {
+        bool dummy_owner = true;
+        // Need to hold the lock when creating the instance since 
+        // the future instance object is not thread safe
+        AutoLock f_lock(future_lock);
+        result = instance->get_instance(instance->size, dummy_owner);
 #ifdef DEBUG_LEGION
-      // Should never be set to true here
-      assert(!dummy_owner);
+        // Should never be set to true here
+        assert(!dummy_owner);
 #endif
+      }
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
       {
@@ -2374,6 +2379,8 @@ namespace Legion {
       {
         if (!canonical_instance->pack_instance(rez,false/*move ownership*/))
         {
+          // If we didn't pack by value, pack the other options as well
+          // so that we can choose to copy from them as well
           rez.serialize<size_t>(instances.size());
           for (std::map<Memory,FutureInstance*>::const_iterator it =
                 instances.begin(); it != instances.end(); it++)
@@ -2637,7 +2644,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureInstance::FutureInstance(const void *d, size_t s, ApEvent r,
                               Runtime *rt, bool eager, bool external, bool own,
-                              PhysicalInstance inst, Processor p, RtEvent use)
+                              PhysicalInstance inst, Processor p, RtEvent use,
+                              ApUserEvent remote_read)
       : runtime(rt), size(s),
         memory(inst.exists() ? inst.get_location() : rt->runtime_system_memory),
         ready_event(r), resource(inst.exists() ? NULL : 
@@ -2647,7 +2655,7 @@ namespace Legion {
         eager_allocation(eager), external_allocation(external),
         is_meta_visible(check_meta_visible(rt, memory, !external || !own)),
         own_allocation(own), data(d), instance(inst), use_event(use),
-        own_instance(false)
+        own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2656,9 +2664,16 @@ namespace Legion {
       assert((freefunc == NULL) || freeproc.exists());
       assert((freefunc == NULL) || external_allocation);
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
-      assert(instance.load().exists() || external_allocation);
-      assert((data.load() != NULL) || instance.load().exists());
+      assert(instance.exists() || external_allocation);
+      assert((data != NULL) || instance.exists());
 #endif
+      if (remote_read.exists())
+      {
+        if (own_instance)
+          read_events.push_back(remote_read);
+        else
+          remote_reads_done = remote_read;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2666,14 +2681,15 @@ namespace Legion {
                           Runtime *rt, bool own,
                           const Realm::ExternalInstanceResource *allocation,
                           void (*func)(const Realm::ExternalInstanceResource&),
-                          Processor proc, PhysicalInstance inst, RtEvent use)
+                          Processor proc, PhysicalInstance inst, RtEvent use,
+                          ApUserEvent remote_read)
       : runtime(rt), size(s), memory(inst.exists() ?
           inst.get_location() : allocation->suggested_memory()), ready_event(r),
         resource(allocation), freefunc(func), freeproc(proc),
         eager_allocation(false), external_allocation(true),
         is_meta_visible(check_meta_visible(rt, memory, !own)), 
         own_allocation(own), data(d), instance(inst), use_event(use),
-        own_instance(false)
+        own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2682,64 +2698,128 @@ namespace Legion {
       assert((freefunc == NULL) || freeproc.exists());
       assert((freefunc == NULL) || external_allocation);
       assert(!freeproc.exists() || (freeproc.kind() != Processor::UTIL_PROC));
-      assert(instance.load().exists() || external_allocation);
-      assert((data.load() != NULL) || instance.load().exists());
+      assert(instance.exists() || external_allocation);
+      assert((data != NULL) || instance.exists());
       assert((resource != NULL) || inst.exists());
 #endif
+      if (remote_read.exists())
+      {
+        if (own_instance)
+          read_events.push_back(remote_read);
+        else
+          remote_reads_done = remote_read;
+      }
     }
 
     //--------------------------------------------------------------------------
     FutureInstance::~FutureInstance(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure our instance is valid before we try to delete it
+      if (instance.exists() && use_event.exists() && !use_event.has_triggered())
+        use_event.wait();
       // Only need to free resources if we own the allocation
       if (own_allocation)
       {
+#ifdef DEBUG_LEGION
+        assert(!remote_reads_done.exists());
+#endif
         if (external_allocation)
         {
-          void *tofree = const_cast<void*>(data.load());
-          // Check to see if we have a freefunc or not
-          if (freefunc == NULL)
+          // See if there is a precondition to doing the free
+          ApEvent precondition;
+          if (!read_events.empty())
           {
-            if (memory.address_space() != runtime->address_space)
-            {
-              // Send this to the target node with a NO_PROC which will
-              // be the sign it can delete it immediately
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(Processor::NO_PROC);
-                rez.serialize(tofree);
-              }
-              runtime->send_free_external_allocation(memory.address_space(), 
-                                                     rez);
-            }
-            else // this has to be a local allocation so we can free it
-              free(tofree);
-            // Destroy the external instance if it exists
-            const PhysicalInstance inst = instance.load();
-            if (inst.exists())
-              inst.destroy(ready_event);
+            if (ready_event.exists())
+              read_events.push_back(ready_event);
+            precondition = Runtime::merge_events(NULL, read_events);
           }
           else
-            free_external_allocation(runtime, freeproc, freefunc, instance,
-                                     use_event, ready_event, resource);
+            precondition = ready_event;
+          const AddressSpaceID target_space = memory.address_space();
+          if (target_space != runtime->address_space)
+          {
+#ifdef DEBUG_LEGION
+            assert(freefunc != NULL);
+            assert(instance.exists());
+            assert(freeproc.exists());
+            assert(freeproc.address_space() == target_space);
+#endif
+            // Send the message to the remote node to do the free
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(freeproc);
+              rez.serialize(freefunc);
+              rez.serialize(instance);
+              rez.serialize(precondition);
+            }
+            runtime->send_free_external_allocation(target_space, rez);
+          }
+          else
+          {
+            // We're already local, see if we need to launch a task
+            if (precondition.exists() || freeproc.exists())
+            {
+              FreeExternalArgs args(resource, 
+                  (freefunc != NULL) ? freefunc : free_host_memory, instance);
+              runtime->issue_application_processor_task(args,
+                  LG_THROUGHPUT_WORK_PRIORITY, freeproc, 
+                  Runtime::protect_event(precondition));
+            }
+            else
+            {
+              // We can do the free now
+              free(const_cast<void*>(data.load()));
+              if (instance.exists())
+                instance.destroy();
+            }
+          }
         }
         else
         {
+#ifdef DEBUG_LEGION
+          assert(instance.exists());
+          assert(own_instance);
+#endif
           // Free the future instance through the memory manager
           MemoryManager *manager = runtime->find_memory_manager(memory);
-          manager->free_future_instance(instance, size, 
-              Runtime::protect_event(ready_event), eager_allocation);
+          if (!read_events.empty())
+          {
+            if (ready_event.exists())
+              read_events.push_back(ready_event);
+            manager->free_future_instance(instance, size, 
+                Runtime::protect_event(
+                  Runtime::merge_events(NULL, read_events)), eager_allocation);
+          }
+          else
+            manager->free_future_instance(instance, size, 
+                Runtime::protect_event(ready_event), eager_allocation);
         }
       }
       else if (own_instance)
       {
-        const PhysicalInstance inst = instance.load();
 #ifdef DEBUG_LEGION
-        assert(inst.exists());
+        assert(instance.exists());
+        assert(!remote_reads_done.exists());
 #endif
-        inst.destroy(ready_event);
+        if (!read_events.empty())
+        {
+          if (ready_event.exists())
+            read_events.push_back(ready_event);
+          instance.destroy(Runtime::protect_event(
+                Runtime::merge_events(NULL, read_events)));
+        }
+        else
+          instance.destroy(Runtime::protect_event(ready_event));
+      }
+      if (remote_reads_done.exists())
+      {
+        if (!read_events.empty())
+          Runtime::trigger_event(NULL, remote_reads_done,
+              Runtime::merge_events(NULL, read_events));
+        else
+          Runtime::trigger_event(NULL, remote_reads_done);
       }
       if (resource != NULL)
         delete resource;
@@ -2750,15 +2830,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if this is visible or not
-      const RtEvent use = use_event.load();
-      if (!is_meta_visible || (use.exists() && !use.has_triggered()))
+      if (!is_meta_visible || !read_events.empty())
       {
-        void *buffer = malloc(size); 
-        memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
-        src.set_fill(buffer, size);
+        src.set_fill(redop->identity, redop->sizeof_rhs);
         bool own_inst = false;
         PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_inst);
+#ifdef DEBUG_LEGION
+        // Should only be writing to instances that this future instance owns
+        assert(own_instance);
+#endif
         dst.set_field(dst_inst, 0/*field id*/, size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
@@ -2767,8 +2848,13 @@ namespace Legion {
           runtime->profiler->add_fill_request(requests, op);
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
-        ApEvent result(rect.copy(srcs, dsts, requests, use_event));
-        free(buffer);
+        ApEvent result;
+        if (!read_events.empty())
+          // Make sure we don't overwrite any readers
+          result = ApEvent(rect.copy(srcs, dsts, requests, 
+                Runtime::merge_events(NULL, read_events)));
+        else
+          result = ApEvent(rect.copy(srcs, dsts, requests));
         if (own_inst)
         {
           if (result.exists())
@@ -2794,17 +2880,19 @@ namespace Legion {
       // safe, but it's how we deal with upper bound instances so we're
       // just trusing that the caller code is correct
       const size_t copy_size = std::min(size, source->size);
-      const RtEvent use = use_event.load();
-      if (!is_meta_visible || !source->is_meta_visible || 
-          (use.exists() && !use.has_triggered()) ||
+      if (!is_meta_visible || !source->is_meta_visible ||
           (precondition.exists() && !precondition.has_triggered_faultignorant())
-          || !source->is_ready(check_source_ready))
+          || !source->is_ready(check_source_ready) || !read_events.empty())
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
         bool own_src = false, own_dst = false;
         PhysicalInstance src_inst = source->get_instance(copy_size, own_src);
         PhysicalInstance dst_inst = get_instance(copy_size, own_dst);
+#ifdef DEBUG_LEGION
+        // Should only be writing to instances that this future instance owns
+        assert(own_instance);
+#endif
         src.set_field(src_inst, 0/*field id*/, copy_size);
         dst.set_field(dst_inst, 0/*field id*/, copy_size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
@@ -2815,10 +2903,16 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
-        if (use.exists() && !use.has_triggered())
+        if (!read_events.empty())
+        {
+          // Make sure we don't overwrite any readers
+          read_events.push_back(precondition);
+          read_events.push_back(source->get_ready(check_source_ready));
           result = ApEvent(rect.copy(srcs, dsts, requests,
-              Runtime::merge_events(NULL, source->get_ready(check_source_ready),
-                    precondition, ApEvent(use_event))));
+            Runtime::merge_events(NULL, read_events)));
+          read_events.pop_back();
+          read_events.pop_back();
+        }
         else if (precondition.exists())
           result = ApEvent(rect.copy(srcs, dsts, requests,
             Runtime::merge_events(NULL, precondition,
@@ -2826,6 +2920,7 @@ namespace Legion {
         else
           result = ApEvent(rect.copy(srcs, dsts, requests, 
                   source->get_ready(check_source_ready)));
+        source->record_read_event(result);
         RtEvent protect;
         if (own_src)
         {
@@ -2864,11 +2959,9 @@ namespace Legion {
                        bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
-      const RtEvent use = use_event.load();
       if (!is_meta_visible || !source->is_meta_visible || 
-          (use.exists() && !use.has_triggered()) ||
           (precondition.exists() && !precondition.has_triggered_faultignorant())
-          || !source->is_ready())
+          || !source->is_ready() || !read_events.empty())
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
@@ -2876,6 +2969,10 @@ namespace Legion {
         PhysicalInstance src_inst = 
           source->get_instance(redop->sizeof_rhs, own_src);
         PhysicalInstance dst_inst = get_instance(redop->sizeof_rhs, own_dst);
+#ifdef DEBUG_LEGION
+        // Should only be reducing to instances that this future instance owns
+        assert(own_instance);
+#endif
         src.set_field(src_inst, 0/*field id*/, size);
         dst.set_field(dst_inst, 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/, exclusive);
@@ -2887,15 +2984,22 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
-        if (use.exists() && !use.has_triggered())
+        if (!read_events.empty())
+        {
+          // Make sure we don't overwrite any readers
+          read_events.push_back(precondition);
+          read_events.push_back(source->get_ready());
           result = ApEvent(rect.copy(srcs, dsts, requests,
-                  Runtime::merge_events(NULL, source->get_ready(),
-                    precondition, ApEvent(use_event))));
+                  Runtime::merge_events(NULL, read_events)));
+          read_events.pop_back();
+          read_events.pop_back();
+        }
         else if (precondition.exists())
           result = ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(), precondition)));
         else
           result = ApEvent(rect.copy(srcs, dsts, requests,source->get_ready()));
+        source->record_read_event(result);
         RtEvent protect;
         if (own_src)
         {
@@ -2945,6 +3049,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureInstance::record_read_event(ApEvent read_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(own_allocation || own_instance || remote_reads_done.exists());
+#endif
+      if (read_event.exists())
+        read_events.push_back(read_event);
+    }
+
+    //--------------------------------------------------------------------------
     const void* FutureInstance::get_data(void)
     //--------------------------------------------------------------------------
     {
@@ -2953,14 +3068,15 @@ namespace Legion {
       const void *result = data.load();
       if (result != NULL)
         return result;
-      RtEvent ready = use_event.load();
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      PhysicalInstance inst = instance.load();
+      if (use_event.exists() && !use_event.has_triggered())
+      {
+        use_event.wait();
+        use_event = RtEvent::NO_RT_EVENT;
+      }
 #ifdef DEBUG_LEGION
-      assert(inst.exists());
+      assert(instance.exists());
 #endif
-      result = inst.pointer_untyped(0, size);
+      result = instance.pointer_untyped(0, size);
       data.store(result);
       return result;
     }
@@ -2969,9 +3085,6 @@ namespace Legion {
     bool FutureInstance::is_ready(bool check_ready_event) const
     //--------------------------------------------------------------------------
     {
-      const RtEvent use = use_event.load();
-      if (use.exists() && !use.has_triggered())
-        return false;
       if (!check_ready_event)
         return true;
       if (!ready_event.exists())
@@ -2980,17 +3093,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FutureInstance::get_ready(bool check_ready_event)
+    ApEvent FutureInstance::get_ready(bool check_ready_event) const
     //--------------------------------------------------------------------------
     {
-      const RtEvent use = use_event.load();
-      if (use.exists() && !use.has_triggered())
-      {
-        if (check_ready_event && ready_event.exists())
-          return Runtime::merge_events(NULL, ready_event, ApEvent(use));
-        return ApEvent(use);
-      }
-      else if (check_ready_event)
+      if (use_event.exists() && !use_event.has_triggered())
+        use_event.wait();
+      if (check_ready_event)
         return ready_event;
       else
         return ApEvent::NO_AP_EVENT;
@@ -3015,10 +3123,12 @@ namespace Legion {
         if (alt_resource == NULL)
         {
           const PhysicalInstance inst = get_instance(size, own_inst); 
-          const RtEvent wait_on = use_event.load();
           // Need to make sure the instance is valid before we use it
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+          if (use_event.exists() && !use_event.has_triggered())
+          {
+            use_event.wait();
+            use_event = RtEvent::NO_RT_EVENT;
+          }
           alt_resource =
             inst.generate_resource_info(rect_space,0/*fid*/,false/*read only*/);
 #ifdef DEBUG_LEGION
@@ -3045,91 +3155,36 @@ namespace Legion {
           inst_ready.wait();
         return result;
       }
-      else if (!instance.load().exists())
+      else if (!instance.exists())
       {
 #ifdef DEBUG_LEGION
+        assert(!own_instance);
         assert(external_allocation);
         assert(resource != NULL);
 #endif
         RtEvent wait_on;
-        const RtUserEvent ready_event = Runtime::create_rt_user_event();
-        // Do a strong compare and exchange to see if we're the first
-        // ones here to make the instance
-        if (use_event.compare_exchange_strong(wait_on, ready_event))
-        {
-          // Make our instance and see if we lost the race
-          const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-          const std::vector<size_t> sizes(1, size);
-          const int dim_order[1] = { 0 };
-          const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-          const Point<1,coord_t> zero(0);
-          const Realm::IndexSpace<1,coord_t> rect_space(
-                        Realm::Rect<1,coord_t>(zero, zero));
-          Realm::InstanceLayoutGeneric *ilg =
-            Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
-                rect_space, constraints, dim_order);
-          PhysicalInstance result;
-          RtEvent inst_ready(PhysicalInstance::create_external_instance(
-                result, memory, ilg, *resource, Realm::ProfilingRequestSet()));
-          instance.store(result);
-          own_instance.store(true);
-          Runtime::trigger_event(ready_event, inst_ready);
-          if (!ready_event.has_triggered())
-            ready_event.wait();
-        }
-        else
-        {
-          // Trigger our temporary event that we don't need
-          Runtime::trigger_event(ready_event);
-          // Wait for the result to be ready
-#ifdef DEBUG_LEGION
-          assert(wait_on.exists());
-#endif
-          if (!wait_on.has_triggered())
-            wait_on.wait(); 
-        }
+        // Make our instance and see if we lost the race
+        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+        const std::vector<size_t> sizes(1, size);
+        const int dim_order[1] = { 0 };
+        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+        const Point<1,coord_t> zero(0);
+        const Realm::IndexSpace<1,coord_t> rect_space(
+                      Realm::Rect<1,coord_t>(zero, zero));
+        Realm::InstanceLayoutGeneric *ilg =
+          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+              rect_space, constraints, dim_order);
+        use_event = RtEvent(PhysicalInstance::create_external_instance(
+              instance, memory, ilg, *resource, Realm::ProfilingRequestSet()));
+        own_instance = true;
       }
       own_inst = false;
-      return instance.load();
-    }
-
-    //--------------------------------------------------------------------------
-    bool FutureInstance::deferred_delete(Operation *op, ApEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out of there is nothing to defer
-      if (!done_event.exists())
-        return true;
-      const RtEvent done = Runtime::protect_event(done_event);
-      if (done.has_triggered())
-        return true;
-      if (own_allocation)
+      if (use_event.exists() && !use_event.has_triggered())
       {
-        if (external_allocation)
-        {
-          // Have to defer freeing the actual allocation until safe
-          DeferDeleteFutureInstanceArgs args(op->get_unique_op_id(), this);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,done);
-          return false;
-        }
-        else
-        {
-          // Free the future instance through the memory manager
-          MemoryManager *manager = runtime->find_memory_manager(memory);
-          manager->free_future_instance(instance, size, done, eager_allocation); 
-          own_allocation = false;
-        }
+        use_event.wait();
+        use_event = RtEvent::NO_RT_EVENT;
       }
-      else if (own_instance.load())
-      {
-        const PhysicalInstance inst = instance.load();
-#ifdef DEBUG_LEGION
-        assert(inst.exists());
-#endif
-        inst.destroy(done);
-        own_instance.store(false);
-      }
-      return true;
+      return instance;
     }
 
     //--------------------------------------------------------------------------
@@ -3154,16 +3209,14 @@ namespace Legion {
         // We can just pass this future by value because we can
         // see it here, it's tiny, and it's ready to be read
         rez.serialize<bool>(true); // by value
-        rez.serialize(data, size);
-        // No need to do anything else, don't even move the ownership because
-        // we have everything we need to make the future on the destination node
-        // We packed by value so return true
+        rez.serialize(data.load(), size);
+        // We packed this by value so return true
         return true;
       }
       else
       {
         rez.serialize<bool>(false); // by value
-        rez.serialize(data);
+        rez.serialize(data.load());
         bool dummy_owner = true;
         rez.serialize(get_instance(size, dummy_owner));
 #ifdef DEBUG_LEGION
@@ -3177,13 +3230,24 @@ namespace Legion {
         if (pack_ownership)
         {
 #ifdef DEBUG_LEGION
+          assert(own_instance);
           assert(own_allocation);
+          assert(!remote_reads_done.exists());
 #endif
           rez.serialize<bool>(true); // own the allocation on the destination
           own_allocation = false;
+          // we no longer own this instance either
+          own_instance = false;
+          remote_reads_done = Runtime::create_ap_user_event(NULL);
+          rez.serialize(remote_reads_done);
         }
         else
+        {
           rez.serialize<bool>(false); // do not own allocation on destination
+          ApUserEvent reads_done = Runtime::create_ap_user_event(NULL);
+          rez.serialize(reads_done);
+          read_events.push_back(reads_done);
+        }
         if (external_allocation)
         {
           rez.serialize<bool>(true); // external allocation
@@ -3195,6 +3259,7 @@ namespace Legion {
           rez.serialize<bool>(false); // external allocation
           rez.serialize<bool>(eager_allocation);
         }
+        // Not packed by value
         return false;
       }
     }
@@ -3229,6 +3294,8 @@ namespace Legion {
       derez.deserialize(ready);
       bool own_allocation, external_allocation;
       derez.deserialize<bool>(own_allocation);
+      ApUserEvent remote_reads;
+      derez.deserialize(remote_reads);
       derez.deserialize<bool>(external_allocation);
       if (external_allocation)
       {
@@ -3237,7 +3304,7 @@ namespace Legion {
         Processor proc;
         derez.deserialize(proc);
         return new FutureInstance(data, size, ready, runtime, own_allocation,
-                      NULL/*resource*/, freefunc, proc, instance, use_event);
+           NULL/*resource*/, freefunc, proc, instance, use_event, remote_reads);
       }
       else
       {
@@ -3245,7 +3312,7 @@ namespace Legion {
         derez.deserialize<bool>(eager_alloc);
         return new FutureInstance(data, size, ready, runtime,
                     eager_alloc, false/*external*/, own_allocation,
-                    instance, Processor::NO_PROC, use_event);
+                    instance, Processor::NO_PROC, use_event, remote_reads);
       }
     }
 
@@ -3297,49 +3364,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void FutureInstance::free_external_allocation(
-                       Runtime *runtime, Processor proc,
-                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
-                       const Realm::ExternalInstanceResource *resource)
+    /*static*/ void FutureInstance::handle_free_external(Deserializer &derez,
+                                                         Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(freefunc != NULL);
-#endif
-      // Check see if this is local, if not, send a message
-      const AddressSpaceID target_space = proc.address_space();
-      if (target_space != runtime->address_space)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(proc);
-          rez.serialize(freefunc);
-          rez.serialize(inst);
-          rez.serialize(precondition);
-        }
-        runtime->send_free_external_allocation(target_space, rez);
-      }
-      else
-      {
-        // Dispatch this on the target processor
-        FreeExternalArgs args(resource, freefunc, inst, precondition);
-        runtime->issue_application_processor_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, proc, use); 
-      }
+      DerezCheck z(derez);
+      Processor freeproc;
+      derez.deserialize(freeproc);
+      void (*freefunc)(const Realm::ExternalInstanceResource&);
+      derez.deserialize(freefunc);
+      PhysicalInstance instance;
+      derez.deserialize(instance);
+      ApEvent precondition;
+      derez.deserialize(precondition);
+      const RtEvent use_event(instance.fetch_metadata(freeproc));
+      FreeExternalArgs args(NULL/*no resource*/, freefunc, instance);
+      runtime->issue_application_processor_task(args,
+                  LG_THROUGHPUT_WORK_PRIORITY, freeproc, 
+                  Runtime::merge_events(use_event,
+                    Runtime::protect_event(precondition)));
     }
 
     //--------------------------------------------------------------------------
     FutureInstance::FreeExternalArgs::FreeExternalArgs(
                           const Realm::ExternalInstanceResource *r,
                           void (*func)(const Realm::ExternalInstanceResource&),
-                          PhysicalInstance inst, ApEvent pre)
+                          PhysicalInstance inst)
       : LgTaskArgs<FreeExternalArgs>(implicit_provenance),
-        resource((r == NULL) ? r : r->clone()), freefunc(func),
-        instance(inst), precondition(pre)
+        resource((r == NULL) ? r : r->clone()), freefunc(func), instance(inst)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((resource != NULL) || instance.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3358,18 +3415,9 @@ namespace Legion {
       }
       (*(fargs->freefunc))(*resource);
       if (fargs->instance.exists())
-        fargs->instance.destroy(fargs->precondition);
+        fargs->instance.destroy();
       if (fargs->resource == NULL)
         delete resource;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void FutureInstance::handle_deferred_delete(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferDeleteFutureInstanceArgs *dargs =
-        (const DeferDeleteFutureInstanceArgs*)args;
-      delete dargs->instance;
     }
 
     //--------------------------------------------------------------------------
@@ -13420,29 +13468,7 @@ namespace Legion {
     void Runtime::handle_free_external_allocation(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      Processor proc;
-      derez.deserialize(proc);
-      // handle the special case where the processor does not exist
-      // which means we can just free this here now
-      if (proc.exists())
-      {
-        void (*freefunc)(const Realm::ExternalInstanceResource&);
-        derez.deserialize(freefunc);
-        PhysicalInstance instance;
-        derez.deserialize(instance);
-        ApEvent precondition;
-        derez.deserialize(precondition);
-        const RtEvent use_event(instance.fetch_metadata(proc));
-        FutureInstance::free_external_allocation(this, proc, freefunc,
-            instance, use_event, precondition, NULL/*resource*/);
-      }
-      else
-      {
-        void *data;
-        derez.deserialize(data);
-        free(data);
-      }
+      FutureInstance::handle_free_external(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -31528,11 +31554,6 @@ namespace Legion {
         case LG_FUTURE_BROADCAST_TASK_ID:
           {
             FutureImpl::handle_broadcast(args);
-            break;
-          }
-        case LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID:
-          {
-            FutureInstance::handle_deferred_delete(args);
             break;
           }
         case LG_TOP_FINISH_TASK_ID:
