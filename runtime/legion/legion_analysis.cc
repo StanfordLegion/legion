@@ -10074,10 +10074,9 @@ namespace Legion {
       std::vector<DistributedID>::const_iterator first = 
         refining->instances.begin();
       std::vector<DistributedID>::const_iterator second = to_exclude.begin(); 
-      while ((first != refining->instances.end()) && 
-             (second != to_exclude.end()))
+      while (first != refining->instances.end())
       {
-        if (*first < *second)
+        if ((second == to_exclude.end()) || (*first < *second))
           instances.push_back(*first++);
         else if (*second < *first)
           second++;
@@ -10117,7 +10116,19 @@ namespace Legion {
                                                  ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
-      if (collective_instances.empty())
+      // If there are no collective instances and no collective target views
+      // then we don't need to perform any refinements
+      bool has_collectives = false;
+      for (typename FieldMaskSet<T>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+      {
+        if (!it->first->is_collective_view())
+          continue;
+        has_collectives = true;
+        break;
+      }
+      if (!has_collectives && (collective_instances.empty() ||
+            (collective_instances.get_valid_mask() * views.get_valid_mask())))
         return false;
       // We don't track when the collective instances data structure goes
       // stale because we don't look at collective views when we remove them
@@ -10238,8 +10249,6 @@ namespace Legion {
         // reset the timeout counter
         collective_timeout = 0;
       }
-      if (collective_instances.get_valid_mask() * views.get_valid_mask())
-        return false;
 #ifdef DEBUG_LEGION
       // This code relies on the assumption that all the views are field
       // disjoint from each other, if they're not we're in a bad place
@@ -10259,10 +10268,10 @@ namespace Legion {
 #endif
         if (!vit->first->is_instance_view())
           continue;
-        if (vit->second * collective_instances.get_valid_mask())
-          continue;
         if (vit->first->is_individual_view())
         {
+          if (vit->second * collective_instances.get_valid_mask())
+            continue;
           // Do a quick check to see if we're independent of all 
           // the collective views and therefore don't need to refine
           IndividualView *individual = vit->first->as_individual_view();
