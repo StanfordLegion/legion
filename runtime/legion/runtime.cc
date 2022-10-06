@@ -2763,9 +2763,14 @@ namespace Legion {
             {
               FreeExternalArgs args(resource, 
                   (freefunc != NULL) ? freefunc : free_host_memory, instance);
-              runtime->issue_application_processor_task(args,
-                  LG_THROUGHPUT_WORK_PRIORITY, freeproc, 
-                  Runtime::protect_event(precondition));
+              if (freeproc.exists())
+                runtime->issue_application_processor_task(args,
+                    LG_THROUGHPUT_WORK_PRIORITY, freeproc, 
+                    Runtime::protect_event(precondition));
+              else
+                runtime->issue_runtime_meta_task(args,
+                    LG_THROUGHPUT_WORK_PRIORITY,
+                    Runtime::protect_event(precondition));
             }
             else
             {
@@ -31980,6 +31985,11 @@ namespace Legion {
         case LG_DEFER_COLLECTIVE_TASK_ID:
           {
             ShardCollective::handle_deferred_collective(args);
+            break;
+          }
+        case LG_FREE_EXTERNAL_TASK_ID:
+          {
+            FutureInstance::handle_free_external(args);
             break;
           }
         case LG_YIELD_TASK_ID:
