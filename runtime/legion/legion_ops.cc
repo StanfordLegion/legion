@@ -33,6 +33,8 @@ namespace Legion {
     // Provenance
     /////////////////////////////////////////////////////////////
 
+    /*static*/ const std::string Provenance::no_provenance;
+
     //--------------------------------------------------------------------------
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
@@ -1540,6 +1542,10 @@ namespace Legion {
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
       rez.serialize(parent_ctx->get_unique_id());
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       rez.serialize<bool>(tracing);
     }
 
@@ -3394,6 +3400,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& MapOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -5776,6 +5793,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& CopyOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -9337,6 +9365,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& CloseOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* CloseOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -10627,6 +10666,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& AcquireOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const RegionRequirement& AcquireOp::get_requirement(void) const
     //--------------------------------------------------------------------------
     {
@@ -11538,6 +11588,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& ReleaseOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -15437,6 +15498,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& DependentPartitionOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     Mappable* DependentPartitionOp::get_mappable(void)
     //--------------------------------------------------------------------------
     {
@@ -16373,6 +16445,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& FillOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -20586,6 +20669,7 @@ namespace Legion {
         profiling_reports(0)
     //--------------------------------------------------------------------------
     {
+      provenance = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -20617,6 +20701,8 @@ namespace Legion {
         else
           Runtime::trigger_event(profiling_response);
       }
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -20649,6 +20735,10 @@ namespace Legion {
       rez.serialize(source);
       rez.serialize(unique_op_id);
       rez.serialize(parent_ctx->get_unique_id());
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       rez.serialize<bool>(tracing);
     }
 
@@ -20664,6 +20754,9 @@ namespace Legion {
       parent_ctx = runtime->find_context(parent_uid, false, &ready);
       if (ready.exists())
         ready_events.insert(ready);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       derez.deserialize<bool>(tracing);
     }
 
@@ -20994,6 +21087,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& RemoteMapOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteMapOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -21121,6 +21225,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteCopyOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -21287,6 +21402,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& RemoteCloseOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -21418,6 +21544,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& RemoteAcquireOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteAcquireOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -21531,6 +21668,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteReleaseOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -21664,6 +21812,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& RemoteFillOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteFillOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -21776,6 +21935,17 @@ namespace Legion {
       if (parent_task == NULL)
         parent_task = parent_ctx->get_task();
       return parent_task;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemotePartitionOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------

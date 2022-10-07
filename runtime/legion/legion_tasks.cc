@@ -1029,6 +1029,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& TaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* TaskOp::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -2811,6 +2822,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent_ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteTaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
