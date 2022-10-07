@@ -780,7 +780,8 @@ namespace Legion {
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard,
-                             LgEvent src_unique, LgEvent dst_unique);
+                             LgEvent src_unique, LgEvent dst_unique, 
+                             int priority);
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs, 
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -809,7 +810,7 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard,
-                             LgEvent unique_event);
+                             LgEvent unique_event, int priority);
     public:
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
@@ -1185,7 +1186,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                 FieldSpace handle, RegionTreeID tree_id,
 #endif
-                unsigned precondition_idx, LgEvent unique_event);
+                unsigned precondition_idx, LgEvent unique_event,
+                int priority);
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1211,6 +1213,7 @@ namespace Legion {
 #endif
       unsigned precondition_idx;
       LgEvent unique_event;
+      int priority;
     };
 
     /**
@@ -1233,7 +1236,7 @@ namespace Legion {
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                 unsigned precondition_idx,
-                LgEvent src_unique, LgEvent dst_unique);
+                LgEvent src_unique, LgEvent dst_unique, int priority);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1259,6 +1262,7 @@ namespace Legion {
 #endif
       unsigned precondition_idx;
       LgEvent src_unique, dst_unique;
+      int priority;
     };
 
     /**
