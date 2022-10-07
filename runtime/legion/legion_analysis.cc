@@ -9816,6 +9816,8 @@ namespace Legion {
           FieldMaskSet<T> &overlapping_views) const
     //--------------------------------------------------------------------------
     {
+      // Compute the overlap between the new view 'instances' and the currently
+      // registered 'collective' view instances
       std::vector<DistributedID> overlap;
       {
         std::vector<DistributedID>::const_iterator first = 
@@ -9848,6 +9850,7 @@ namespace Legion {
       if (overlap.size() < instances.size())
       {
         refined = true;
+        // We'll need to 
         if (overlap.size() < collective->instances.size())
           overlapping_refinements.insert(
               new PendingCollective(collective, overlap), mask);
@@ -10255,9 +10258,17 @@ namespace Legion {
       FieldMask disjoint_check;
 #endif
       bool views_refined = false;
+      // Collective views to erase from collective_instances
       std::vector<CollectiveView*> to_delete;
+      // Either currently registered collective views that need to be refined 
+      // because they overlap with a new collective view, or a collective view
+      // that needs to be refined to not overlap with existing individual or
+      // collective instances already in the equivalence set
       FieldMaskSet<PendingCollective> overlapping_refinements;
+      // Currently registered collective views that need to be refined
+      // because they have some remaining independent sets of instances
       FieldMaskSet<PendingCollective> independent_refinements;
+      // Collective views to remove because they overlap with individual views
       LegionMap<CollectiveView*,FieldMaskSet<IndividualView> > to_subtract;
       for (typename FieldMaskSet<T>::const_iterator vit =
             views.begin(); vit != views.end(); vit++)
@@ -10448,11 +10459,8 @@ namespace Legion {
             if (ready.exists())
               pending_ready.push_back(ready);
           }
-          else
+          else if (!it->first->instances.empty())
           {
-#ifdef DEBUG_LEGION
-            assert(!it->first->instances.empty());
-#endif
             RtEvent ready;
             PhysicalManager *manager = 
               runtime->find_or_request_instance_manager(
@@ -10462,6 +10470,10 @@ namespace Legion {
             it->first->refined =
               context->create_instance_top_view(manager,runtime->address_space);
           }
+          else
+            // This case happens when we have a collective view in the targets
+            // that needs to be exploded into all its individual views
+            continue;
         }
         // If views were refined then record it
         if (views_refined)
@@ -10560,7 +10572,8 @@ namespace Legion {
             overlapping_refinements.begin(); it != 
             overlapping_refinements.end(); it++)
       {
-        if (it->first->refined->is_collective_view() &&
+        if ((it->first->refined != NULL) &&
+            it->first->refined->is_collective_view() &&
             collective_instances.insert(
               it->first->refined->as_collective_view(), it->second))
           it->first->refined->add_nested_resource_ref(did);
