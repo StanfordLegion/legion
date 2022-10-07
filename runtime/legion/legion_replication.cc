@@ -1616,19 +1616,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      if (launched)
-        return;
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
-#endif
-      IndividualTask::resolve_false(speculated, launched);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
@@ -1639,7 +1626,7 @@ namespace Legion {
 #endif
       complete_mapping(mapped_precondition);
       if ((must_epoch == NULL) && !elide_future_return &&
-          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+          ((predication_state != RESOLVE_FALSE_STATE)))
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -1701,7 +1688,7 @@ namespace Legion {
       // the future result, can skip this though if we're part of a must epoch
       // We should also skip this if we were predicated false
       if ((must_epoch == NULL) && !elide_future_return &&
-          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists())
+          (predication_state != RESOLVE_FALSE_STATE)
           && (owner_shard == repl_ctx->owner_shard->shard_id))
       {
 #ifdef DEBUG_LEGION
@@ -2104,7 +2091,7 @@ namespace Legion {
       assert(redop != 0);
 #endif
       // Set the future if we actually ran the task or we speculated
-      if ((predication_state == RESOLVE_FALSE_STATE) && !false_guard.exists())
+      if (predication_state == RESOLVE_FALSE_STATE)
         return;
       if (serdez_redop_fns != NULL)
       {
@@ -2181,7 +2168,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((output_size_collective != NULL) &&
-          ((predication_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
+          (predication_state != RESOLVE_FALSE_STATE))
       {
         // Make a copy of the output sizes before we perform all-gather
         local_output_sizes = all_output_sizes;
@@ -2235,8 +2222,6 @@ namespace Legion {
                 launch_space, launch_space->handle, get_provenance());
       }
 #ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
 #endif
@@ -3393,18 +3378,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      if (launched)
-        return;
-#ifdef DEBUG_LEGION
-      assert(!collective_map_barrier.exists());
-#endif
-      FillOp::resolve_false(speculated, launched);
-    }
-
-    //--------------------------------------------------------------------------
     bool ReplFillOp::perform_collective_analysis(CollectiveMapping *&mapping,
                                                  bool &first_local)
     //--------------------------------------------------------------------------
@@ -3691,19 +3664,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexFillOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      if (launched)
-        return;
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
-#endif
-      IndexFillOp::resolve_false(speculated, launched);
-    }
-
-    //--------------------------------------------------------------------------
     bool ReplIndexFillOp::find_shard_participants(std::vector<ShardID> &shards)
     //--------------------------------------------------------------------------
     {
@@ -3927,19 +3887,6 @@ namespace Legion {
       }
       else // We own it, so do the base call
         CopyOp::trigger_replay();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplCopyOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      if (launched)
-        return;
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
-#endif
-      CopyOp::resolve_false(speculated, launched);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4294,19 +4241,6 @@ namespace Legion {
         std::vector<ApBarrier> copy_pre_barriers, copy_post_barriers;
         IndexCopyOp::trigger_replay();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      if (launched)
-        return;
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
-#endif
-      IndexCopyOp::resolve_false(speculated, launched);
     }
 
     //--------------------------------------------------------------------------

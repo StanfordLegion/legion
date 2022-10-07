@@ -1498,7 +1498,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
       virtual void handle_future_size(size_t return_type_size,
@@ -1688,7 +1687,6 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void resolve_false(bool speculated, bool launched);
       virtual bool is_collective_first_local_shard(void) const
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
@@ -1723,7 +1721,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual void resolve_false(bool speculated, bool launched);
       virtual RtEvent initialize_fill_view(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
@@ -1769,7 +1766,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1805,7 +1801,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual void resolve_false(bool speculated, bool launched);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
