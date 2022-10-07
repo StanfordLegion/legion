@@ -304,7 +304,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::log_instance_layout(ApEvent inst_event) const
+    void LayoutDescription::log_instance_layout(LgEvent inst_event) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -318,9 +318,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                            const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                           const ApEvent inst_event,
-#endif
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -377,9 +374,6 @@ namespace Legion {
         field.inst = instance;
         // We'll start looking again at the next index after this one
         next_start = index + 1;
-#ifdef LEGION_SPY
-        field.inst_event = inst_event;
-#endif
       }
     } 
 
@@ -387,9 +381,6 @@ namespace Legion {
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
                                    const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                   const ApEvent inst_event,
-#endif
                                    std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -407,9 +398,6 @@ namespace Legion {
         // Since instances are annonymous in layout descriptions we
         // have to fill them in when we add the field info
         info.inst = instance;
-#ifdef LEGION_SPY
-        info.inst_event = inst_event;
-#endif
       }
     }
 
@@ -737,7 +725,7 @@ namespace Legion {
                                      FieldSpaceNode *node, 
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
-                                     RegionTreeID tree_id, ApEvent u_event,
+                                     RegionTreeID tree_id, LgEvent u_event,
                                      bool register_now, bool output)
       : InstanceManager(ctx, owner_space, did, layout, node,
           // If we're on the owner node we need to produce the expression
@@ -780,7 +768,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(runtime->legion_spy_enabled);
 #endif
-      const ApEvent inst_event = get_unique_event();
+      const LgEvent inst_event = get_unique_event();
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
         LegionSpy::log_physical_instance_creation_region(inst_event, 
@@ -2441,7 +2429,8 @@ namespace Legion {
                                                  field_space_node->handle,
                                                  tree_id,
 #endif
-                                                 precondition, predicate_guard);
+                                                 precondition, predicate_guard,
+                                                 unique_event);
       // Save the result
       if (manage_dst_events && result.exists())
       {
@@ -2538,7 +2527,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
 #endif
-                                         precondition, predicate_guard);
+                                         precondition, predicate_guard,
+                                         source_manager->get_unique_event(),
+                                         unique_event);
       if (result.exists())
       {
         const RtEvent collect_event = trace_info.get_collect_event();
@@ -2575,11 +2566,7 @@ namespace Legion {
       assert(instance.exists());
 #endif
       // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_mask, instance, 
-#ifdef LEGION_SPY
-                                   unique_event,
-#endif
-                                   fields);
+      layout->compute_copy_offsets(copy_mask, instance, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -2596,11 +2583,7 @@ namespace Legion {
       assert(src_indexes.size() == dst_indexes.size());
 #endif
       std::vector<CopySrcDstField> dst_fields;
-      layout->compute_copy_offsets(dst_mask, instance, 
-#ifdef LEGION_SPY
-                                   unique_event,
-#endif
-                                   dst_fields);
+      layout->compute_copy_offsets(dst_mask, instance, dst_fields);
 #ifdef DEBUG_LEGION
       assert(dst_fields.size() == dst_indexes.size());
 #endif
@@ -3126,7 +3109,7 @@ namespace Legion {
                                 FieldSpaceNode *node, RegionTreeID tree_id,
                                 LayoutDescription *desc, ReductionOpID redop_id,
                                 bool register_now, size_t footprint,
-                                ApEvent u_event, bool external_instance)
+                                LgEvent u_event, bool external_instance)
       : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
             (redop_id != 0), true/*collective*/),
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
@@ -4156,10 +4139,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent VirtualManager::get_unique_event(void) const
+    LgEvent VirtualManager::get_unique_event(void) const
     //--------------------------------------------------------------------------
     {
-      return ApEvent::NO_AP_EVENT;
+      return LgEvent::NO_LG_EVENT;
     }
 
     //--------------------------------------------------------------------------

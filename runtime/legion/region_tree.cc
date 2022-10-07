@@ -2797,11 +2797,8 @@ namespace Legion {
       across->initialize_source_indirections(this, src_records,
           src_req, idx_req, idx_target, op->index_point, gather_is_range, 
           possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif
-      
       // Initialize the destination fields
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
@@ -2958,10 +2955,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -3114,10 +3109,8 @@ namespace Legion {
       across->initialize_source_indirections(this, src_records,
           src_req, src_idx_req, src_idx_target, op->index_point, 
           both_are_range, possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         src_idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -3127,10 +3120,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         dst_idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -7291,6 +7282,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       src_fields.reserve(indexes.size());
+      src_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7306,6 +7298,8 @@ namespace Legion {
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
           views[idx]->copy_from(copy_mask, src_fields);
+          src_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -7331,6 +7325,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       dst_fields.reserve(indexes.size());
+      dst_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7346,6 +7341,8 @@ namespace Legion {
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
           views[idx]->copy_to(copy_mask, dst_fields);
+          dst_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif

@@ -100,7 +100,8 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
@@ -124,12 +125,6 @@ namespace Legion {
       op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, op);
-#ifdef LEGION_SPY
-      // Have to convert back to Realm data structures because C++ is dumb
-      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
-      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-        realm_dst_fields[idx] = dst_fields[idx];
-#endif
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -138,23 +133,13 @@ namespace Legion {
         if (trace_info.recording)
           trace_info.record_merge_events(pred_pre, precondition,
                                           ApEvent(pred_guard));
-#ifdef LEGION_SPY
-        result = Runtime::ignorefaults(space.fill(realm_dst_fields, requests, 
-                                              fill_value, fill_size, pred_pre));
-#else
         result = Runtime::ignorefaults(space.fill(dst_fields, requests, 
                                               fill_value, fill_size, pred_pre));
-#endif                               
       }
       else
       {
-#ifdef LEGION_SPY
-        result = ApEvent(space.fill(realm_dst_fields, requests, 
-                                    fill_value, fill_size, precondition));
-#else
         result = ApEvent(space.fill(dst_fields, requests, 
                                     fill_value, fill_size, precondition));
-#endif
       }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
@@ -169,7 +154,7 @@ namespace Legion {
           expr_id, handle, tree_id, precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
-                                  dst_fields[idx].inst_event);
+                                  unique_event);
 #endif
       if (trace_info.recording)
         trace_info.record_issue_fill(result, this, dst_fields,
@@ -177,7 +162,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
 #endif
-                                     precondition, pred_guard);
+                                     precondition, pred_guard, unique_event);
       return result;
     }
 
@@ -194,7 +179,8 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent src_unique, LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
@@ -206,15 +192,6 @@ namespace Legion {
       op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, op);
-#ifdef LEGION_SPY
-      // Have to convert back to Realm structures because C++ is dumb  
-      std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
-      for (unsigned idx = 0; idx < src_fields.size(); idx++)
-        realm_src_fields[idx] = src_fields[idx];
-      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
-      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-        realm_dst_fields[idx] = dst_fields[idx];
-#endif 
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -238,13 +215,8 @@ namespace Legion {
           pred_pre =
             Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
         }
-#ifdef LEGION_SPY
-        result = Runtime::ignorefaults(space.copy(realm_src_fields,
-                            realm_dst_fields, requests, pred_pre));
-#else
         result = Runtime::ignorefaults(space.copy(src_fields, dst_fields,
                             requests, pred_pre));
-#endif
       }
       else
       {
@@ -254,13 +226,8 @@ namespace Legion {
               reservations.begin(); it != reservations.end(); it++)
           copy_pre = Runtime::acquire_ap_reservation(*it, 
                                           true/*exclusive*/, copy_pre);
-#ifdef LEGION_SPY
-        result = ApEvent(space.copy(realm_src_fields, realm_dst_fields, 
-                         requests, copy_pre));
-#else
         result = ApEvent(space.copy(src_fields, dst_fields, 
                          requests, copy_pre));
-#endif
       }
       // Release any reservations
       for (std::vector<Reservation>::const_iterator it =
@@ -272,7 +239,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, pred_guard);
+                                     precondition, pred_guard,
+                                     src_unique, dst_unique);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -286,10 +254,10 @@ namespace Legion {
           expr_id, src_tree_id, dst_tree_id, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
-                                  src_fields[idx].inst_event,
+                                  src_unique,
                                   dst_fields[idx].field_id,
-                                  dst_fields[idx].inst_event,
-                                  dst_fields[idx].redop_id);
+                                  dst_unique,
+				  dst_fields[idx].redop_id);
 #endif
       return result;
     }
@@ -1306,7 +1274,8 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1318,21 +1287,21 @@ namespace Legion {
             fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard);
+            pred_guard, unique_event);
       else if (space_ready.exists())
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard);
+                                   space_ready, pred_guard, unique_event);
       else
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard, unique_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1346,7 +1315,8 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent src_unique, LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1358,21 +1328,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard);
+            pred_guard, src_unique, dst_unique);
       else if (space_ready.exists())
         return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard);
+                space_ready, pred_guard, src_unique, dst_unique);
       else
         return issue_copy_internal(context, op, local_space, trace_info,
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard);
+                precondition, pred_guard, src_unique, dst_unique);
     }
 
     //--------------------------------------------------------------------------
@@ -5762,7 +5732,8 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -5774,21 +5745,21 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard);
+            pred_guard, unique_event);
       else if (space_ready.exists())
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard);
+                                   space_ready, pred_guard, unique_event);
       else
         return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard, unique_event);
     }
 
     //--------------------------------------------------------------------------
@@ -5802,7 +5773,8 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent src_unique, LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -5814,21 +5786,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard);
+            pred_guard, src_unique, dst_unique);
       else if (space_ready.exists())
         return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard);
+                space_ready, pred_guard, src_unique, dst_unique);
       else
         return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard);
+                precondition, pred_guard, src_unique, dst_unique);
     }
 
     //--------------------------------------------------------------------------
@@ -6736,13 +6708,6 @@ namespace Legion {
             has_empty_preimages = true;
         }
 #ifdef LEGION_SPY
-        // Have to convert back to Realm structures because C++ is dumb  
-        realm_src_fields.resize(src_fields.size());
-        for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          realm_src_fields[idx] = src_fields[idx];
-        realm_dst_fields.resize(dst_fields.size());
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          realm_dst_fields[idx] = dst_fields[idx];
         // This part isn't necessary for correctness but it helps Legion Spy
         // see the dependences between the preimages and copy operations
         if (current_src_preimage_precondition.exists() ||
@@ -6762,10 +6727,14 @@ namespace Legion {
                 unique_indirections_identifier, copy_precondition, last_copy);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_indirect_field(last_copy, src_fields[idx].field_id,
-                                        src_fields[idx].inst_event,
+                                        (idx < src_unique_events.size()) ? 
+                                          src_unique_events[idx] :
+                                          LgEvent::NO_LG_EVENT,
                                         src_fields[idx].indirect_index,
                                         dst_fields[idx].field_id,
-                                        dst_fields[idx].inst_event, 
+                                        (idx < dst_unique_events.size()) ? 
+                                          dst_unique_events[idx] : 
+                                          LgEvent::NO_LG_EVENT,
                                         dst_fields[idx].indirect_index,
                                         dst_fields[idx].redop_id);
         return last_copy;
@@ -6807,14 +6776,6 @@ namespace Legion {
           pred_pre =
             Runtime::merge_events(NULL, pred_pre, ApEvent(pred_guard));
         }
-#ifdef LEGION_SPY
-        if (!indirections.empty())
-          last_copy = Runtime::ignorefaults(copy_domain.copy(realm_src_fields, 
-                          realm_dst_fields, indirections, requests, pred_pre));
-        else
-          last_copy = Runtime::ignorefaults(copy_domain.copy(realm_src_fields,
-                          realm_dst_fields, requests, pred_pre));
-#else
         if (!indirections.empty())
         {
           if (!individual_field_indexes.empty())
@@ -6827,7 +6788,6 @@ namespace Legion {
         else
           last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields,
                             dst_fields, requests, pred_pre));
-#endif
       }
       else
       {
@@ -6836,14 +6796,6 @@ namespace Legion {
               reservations.begin(); it != reservations.end(); it++)
           copy_precondition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, copy_precondition);
-#ifdef LEGION_SPY
-        if (!indirections.empty())
-          last_copy = ApEvent(copy_domain.copy(realm_src_fields, 
-                realm_dst_fields, indirections, requests, copy_precondition));
-        else
-          last_copy = ApEvent(copy_domain.copy(realm_src_fields,
-                realm_dst_fields, requests, copy_precondition));
-#else
         if (!indirections.empty())
         {
           if (!individual_field_indexes.empty())
@@ -6855,7 +6807,6 @@ namespace Legion {
         else
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
                 requests, copy_precondition));
-#endif
       }
       // Release any reservations
       if (!reservations.empty())
@@ -6880,9 +6831,9 @@ namespace Legion {
                   src_tree_id, dst_tree_id, copy_precondition, last_copy);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_copy_field(last_copy, src_fields[idx].field_id,
-                                    src_fields[idx].inst_event,
+                                    src_unique_events[idx],
                                     dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event, 
+                                    dst_unique_events[idx],
                                     dst_fields[idx].redop_id);
       }
       else
@@ -6891,10 +6842,14 @@ namespace Legion {
                 unique_indirections_identifier, copy_precondition, last_copy);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_indirect_field(last_copy, src_fields[idx].field_id,
-                                        src_fields[idx].inst_event,
+                                        (idx < src_unique_events.size()) ?
+                                          src_unique_events[idx] :
+                                          LgEvent::NO_LG_EVENT,
                                         src_fields[idx].indirect_index,
                                         dst_fields[idx].field_id,
-                                        dst_fields[idx].inst_event, 
+                                        (idx < dst_unique_events.size()) ?
+                                          dst_unique_events[idx] :
+                                          LgEvent::NO_LG_EVENT,
                                         dst_fields[idx].indirect_index,
                                         dst_fields[idx].redop_id);
       }

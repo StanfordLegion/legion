@@ -6265,7 +6265,9 @@ namespace Legion {
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition,
-                                             PredEvent pred_guard)
+                                             PredEvent pred_guard,
+                                             LgEvent src_unique,
+                                             LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -6288,7 +6290,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            rhs_)); 
+            rhs_, src_unique, dst_unique)); 
     }
 
     //--------------------------------------------------------------------------
@@ -6304,7 +6306,8 @@ namespace Legion {
                                              RegionTreeID tree_id,
 #endif
                                              ApEvent precondition,
-                                             PredEvent pred_guard)
+                                             PredEvent pred_guard,
+                                             LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -6326,7 +6329,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        fill_uid, handle, tree_id,
 #endif
-                                       rhs_));
+                                       rhs_, unique_event));
     }
 
     //--------------------------------------------------------------------------
@@ -7298,7 +7301,8 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent src_unique, LgEvent dst_unique)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -7318,7 +7322,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                           src_tree_id, dst_tree_id,
 #endif
-                                          precondition, pred_guard); 
+                                          precondition, pred_guard,
+                                          src_unique, dst_unique); 
     } 
     
     //--------------------------------------------------------------------------
@@ -7330,7 +7335,8 @@ namespace Legion {
                                  UniqueID fill_uid, FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -7350,7 +7356,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                           fill_uid, handle, tree_id,
 #endif
-                                          precondition, pred_guard);
+                                          precondition, pred_guard, 
+                                          unique_event);
     }
 
     //--------------------------------------------------------------------------
@@ -8894,13 +8901,13 @@ namespace Legion {
 #ifdef LEGION_SPY
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
-                         unsigned pi)
+                         unsigned pi, LgEvent src_uni, LgEvent dst_uni)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
         reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
-        precondition_idx(pi)
+        precondition_idx(pi), src_unique(src_uni), dst_unique(dst_uni)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8941,7 +8948,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT);
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     src_unique, dst_unique);
     }
 
     //--------------------------------------------------------------------------
@@ -9056,12 +9064,12 @@ namespace Legion {
 #ifdef LEGION_SPY
                          UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
-                         unsigned pi)
+                         unsigned pi, LgEvent unique)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
         fill_uid(uid), handle(h), tree_id(tid),
 #endif
-        precondition_idx(pi)
+        precondition_idx(pi), unique_event(unique)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9103,7 +9111,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT);
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     unique_event);
     }
 
     //--------------------------------------------------------------------------
