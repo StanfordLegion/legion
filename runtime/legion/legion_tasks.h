@@ -559,7 +559,7 @@ namespace Legion {
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -672,6 +672,7 @@ namespace Legion {
       std::vector<SingleProfilingInfo>                  profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
 #ifdef DEBUG_LEGION
@@ -1073,7 +1074,7 @@ namespace Legion {
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1149,6 +1150,7 @@ namespace Legion {
       std::vector<IndexProfilingInfo>                   profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
     protected:

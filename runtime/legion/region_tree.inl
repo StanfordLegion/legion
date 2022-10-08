@@ -101,7 +101,7 @@ namespace Legion {
                                  RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent unique_event)
+                                 LgEvent unique_event, int priority,bool replay)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
@@ -123,7 +123,8 @@ namespace Legion {
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(trace_info, requests, true);
+        priority =
+          trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, trace_info.op);
       ApEvent result;
@@ -134,13 +135,13 @@ namespace Legion {
         if (trace_info.recording)
           trace_info.record_merge_events(pred_pre, precondition,
                                           ApEvent(pred_guard));
-        result = Runtime::ignorefaults(space.fill(dst_fields, requests, 
-                                              fill_value, fill_size, pred_pre));
+        result = Runtime::ignorefaults(space.fill(dst_fields, requests,
+              fill_value, fill_size, pred_pre, priority));
       }
       else
       {
-        result = ApEvent(space.fill(dst_fields, requests, 
-                                    fill_value, fill_size, precondition));
+        result = ApEvent(space.fill(dst_fields, requests,
+              fill_value, fill_size, precondition, priority));
       }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
@@ -164,7 +165,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      handle, tree_id,
 #endif
-                                     precondition, pred_guard, unique_event);
+                                     precondition, pred_guard,
+                                     unique_event, priority);
       return result;
     }
 
@@ -182,7 +184,8 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent src_unique, LgEvent dst_unique)
+                                 LgEvent src_unique, LgEvent dst_unique,
+                                 int priority, bool replay)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
@@ -192,7 +195,8 @@ namespace Legion {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
+        priority =
+          trace_info.op->add_copy_profiling_request(trace_info, requests,false);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
       ApEvent result;
@@ -219,7 +223,7 @@ namespace Legion {
             Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
         }
         result = Runtime::ignorefaults(space.copy(src_fields, dst_fields, 
-                                requests, pred_pre));
+                                requests, pred_pre, priority));
       }
       else
       {
@@ -230,7 +234,7 @@ namespace Legion {
           copy_pre = Runtime::acquire_ap_reservation(*it, 
                                           true/*exclusive*/, copy_pre);
         result = ApEvent(space.copy(src_fields, dst_fields, requests, 
-                          copy_pre));
+                          copy_pre, priority));
       }
       // Release any reservations
       for (std::vector<Reservation>::const_iterator it =
@@ -243,7 +247,7 @@ namespace Legion {
                                      src_tree_id, dst_tree_id,
 #endif
                                      precondition, pred_guard,
-                                     src_unique, dst_unique);
+                                     src_unique, dst_unique, priority);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -1269,7 +1273,7 @@ namespace Legion {
                                  RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent unique_event)
+                                 LgEvent unique_event, int priority,bool replay)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1281,21 +1285,23 @@ namespace Legion {
             fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, unique_event);
+            pred_guard, unique_event, priority, replay);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard, unique_event);
+                                   space_ready, pred_guard, unique_event,
+                                   priority, replay);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard, unique_event);
+                                   precondition, pred_guard, unique_event,
+                                   priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -1310,7 +1316,8 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent src_unique, LgEvent dst_unique)
+                                 LgEvent src_unique, LgEvent dst_unique,
+                                 int priority, bool replay)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1322,21 +1329,23 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, src_unique, dst_unique);
+            pred_guard, src_unique, dst_unique, priority, replay);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, src_unique, dst_unique);
+                space_ready, pred_guard, src_unique, dst_unique,
+                priority, replay);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, src_unique, dst_unique);
+                precondition, pred_guard, src_unique, dst_unique,
+                priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -4906,7 +4915,7 @@ namespace Legion {
                                  RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent unique_event)
+                                 LgEvent unique_event, int priority,bool replay)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4918,21 +4927,23 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, unique_event);
+            pred_guard, unique_event, priority, replay);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard, unique_event);
+                                   space_ready, pred_guard, unique_event,
+                                   priority, replay);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard, unique_event);
+                                   precondition, pred_guard, unique_event,
+                                   priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -4947,7 +4958,8 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent src_unique, LgEvent dst_unique)
+                                 LgEvent src_unique, LgEvent dst_unique,
+                                 int priority, bool replay)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4959,21 +4971,23 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, src_unique, dst_unique);
+            pred_guard, src_unique, dst_unique, priority, replay);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, src_unique, dst_unique);
+                space_ready, pred_guard, src_unique, dst_unique,
+                priority, replay);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, src_unique, dst_unique);
+                precondition, pred_guard, src_unique, dst_unique,
+                priority, replay);
     }
 
     //--------------------------------------------------------------------------
@@ -5206,8 +5220,8 @@ namespace Legion {
     ApEvent CopyAcrossUnstructuredT<DIM,T>::execute(Operation *op, 
           PredEvent pred_guard, ApEvent copy_precondition, 
           ApEvent src_indirect_precondition, ApEvent dst_indirect_precondition,
-          const PhysicalTraceInfo &trace_info, const bool recurrent_replay,
-          const unsigned stage)
+          const PhysicalTraceInfo &trace_info, const bool replay,
+          const bool recurrent_replay, const unsigned stage)
     //--------------------------------------------------------------------------
     {
       if (stage == 0)
@@ -5257,7 +5271,7 @@ namespace Legion {
               src_preimages_ready, dst_preimages_ready);
           DeferCopyAcrossArgs args(this, op, pred_guard, copy_precondition,
               src_indirect_precondition, dst_indirect_precondition,
-              trace_info, recurrent_replay, stage);
+              trace_info, replay, recurrent_replay, stage);
           prev_done = runtime->issue_runtime_meta_task(args,
               LG_LATENCY_DEFERRED_PRIORITY, defer);
           return args.done_event;
@@ -5389,9 +5403,9 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       const unsigned total_copies =
         individual_field_indexes.empty() ? 1 : individual_field_indexes.size();
-      if (op != NULL)
-        op->add_copy_profiling_request(trace_info, requests,
-                                       false/*fill*/, total_copies);
+      if (!replay)
+        priority = op->add_copy_profiling_request(trace_info, requests,
+                                          false/*fill*/, total_copies);
       if (runtime->profiler != NULL)
         runtime->profiler->add_copy_request(requests, op, total_copies);
       if (pred_guard.exists())
@@ -5422,12 +5436,12 @@ namespace Legion {
             last_copy = Runtime::ignorefaults(
                 issue_individual_copies(pred_pre, requests));
           else
-            last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields, 
-                              dst_fields, indirections, requests, pred_pre));
+            last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields,
+                  dst_fields, indirections, requests, pred_pre, priority));
         }
         else
           last_copy = Runtime::ignorefaults(copy_domain.copy(src_fields,
-                            dst_fields, requests, pred_pre));
+                            dst_fields, requests, pred_pre, priority));
       }
       else
       {
@@ -5442,11 +5456,11 @@ namespace Legion {
             last_copy = issue_individual_copies(copy_precondition, requests);
           else
             last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
-                  indirections, requests, copy_precondition));
+                  indirections, requests, copy_precondition, priority));
         }
         else
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
-                requests, copy_precondition));
+                requests, copy_precondition, priority));
       }
       // Release any reservations
       if (!reservations.empty())
@@ -5543,7 +5557,7 @@ namespace Legion {
         for (unsigned fidx = 0; fidx < fields.size(); fidx++)
           fields[fidx].indirect_index = individual_field_indexes[idx][fidx];
         const ApEvent post(preimages[idx].copy(src_fields, dst_fields, 
-                                indirections, requests, precondition));
+                            indirections, requests, precondition, priority));
         if (post.exists())
           postconditions.push_back(post);
       }
