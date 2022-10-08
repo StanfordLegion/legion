@@ -15734,9 +15734,6 @@ namespace Legion {
       AutoLock a_lock(analysis);
       check_for_uninitialized_data(analysis, expr, expr_covers, 
                                    src_mask, applied_events); 
-      // TODO: Handle the case where we are predicated
-      if (analysis.pred_guard.exists())
-        assert(false);
       // See if there are any other predicate guard fields that we need
       // to have as preconditions before applying our owner updates
       if (!read_only_guards.empty() && 
