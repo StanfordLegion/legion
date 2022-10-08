@@ -1481,11 +1481,11 @@ namespace Legion {
       };
       typedef LegionMap<ApEvent,FieldMaskSet<Update> > EventFieldUpdates;
     public:
-      CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
+      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis *analysis,
                          CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
-      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
-                         unsigned src_idx, unsigned dst_idx,
+      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis *analysis,
+                         unsigned src_index, unsigned dst_idx,
                          CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                          // Used only in the case of copy-across analyses
@@ -1614,7 +1614,7 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
-      Operation *const op;
+      PhysicalAnalysis *const analysis;
       const unsigned src_index;
       const unsigned dst_index;
       const RtEvent guard_precondition;
@@ -2976,7 +2976,7 @@ namespace Legion {
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
                                CopyFillGuard *previous_guard,
-                               Operation *op, const unsigned index,
+                               PhysicalAnalysis *analysis,
                                const RegionUsage &usage,
                                IndexSpaceExpression *expr, 
                                const bool expr_covers,
@@ -2990,7 +2990,7 @@ namespace Legion {
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                CopyFillGuard *previous_guard,
-                               Operation *op, const unsigned index,
+                               PhysicalAnalysis *analysis,
                                const bool track_events,
                                IndexSpaceExpression *expr,
                                const bool expr_covers,
@@ -3002,7 +3002,6 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_events,
                                const bool skip_check = false,
-                               const int dst_index = -1,
                                const ReductionOpID redop = 0,
                                CopyAcrossHelper *across_helper = NULL);
       void issue_update_copies_and_fills(InstanceView *target,
@@ -3010,14 +3009,13 @@ namespace Legion {
                                const std::vector<IndividualView*> &source_views,
                                          CopyFillAggregator *&aggregator,
                                          CopyFillGuard *previous_guard,
-                                         Operation *op, const unsigned index,
+                                         PhysicalAnalysis *analysis, 
                                          const bool track_events,
                                          IndexSpaceExpression *expr,
                                          const bool expr_covers,
                                          FieldMask update_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &applied_events,
-                                         const int dst_index,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
       void apply_reductions(const std::vector<PhysicalManager*> &targets,
@@ -3027,7 +3025,7 @@ namespace Legion {
                             const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index,
+                            PhysicalAnalysis *analysis,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
@@ -3039,7 +3037,7 @@ namespace Legion {
                             const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index,
+                            PhysicalAnalysis *analysis,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
@@ -3049,7 +3047,7 @@ namespace Legion {
                             const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index,
+                            PhysicalAnalysis *analysis,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
@@ -3060,7 +3058,7 @@ namespace Legion {
                     const std::vector<PhysicalManager*> &target_instances,
                     const LegionVector<
                                FieldMaskSet<InstanceView> > &target_views,
-                    Operation *op, const unsigned index,
+                    PhysicalAnalysis *analysis,
                     const PhysicalTraceInfo &trace_info,
                     std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
@@ -3068,7 +3066,7 @@ namespace Legion {
       void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
                     const FieldMask &restricted_mask,
                     const FieldMaskSet<T> &src_views,
-                    Operation *op, const unsigned index,
+                    PhysicalAnalysis *analysis,
                     const PhysicalTraceInfo &trace_info,
                     std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
@@ -3077,7 +3075,7 @@ namespace Legion {
                               const bool expr_covers,
                               const PredEvent true_guard,
                               const PredEvent false_guard,
-                              Operation *op, const unsigned index,
+                              PhysicalAnalysis *analysis,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &applied_events,
                               CopyFillAggregator *&aggregator);

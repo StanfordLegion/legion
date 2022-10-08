@@ -4191,8 +4191,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o, 
-                                           unsigned idx,CopyFillGuard *previous,
+    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
+                                           PhysicalAnalysis *a, 
+                                           CopyFillGuard *previous,
                                            bool t, PredEvent p)
       : WrapperReferenceMutator(effects),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
@@ -4201,8 +4202,8 @@ namespace Legion {
 #else
         CopyFillGuard(Runtime::create_rt_user_event()), 
 #endif
-        forest(f), local_space(f->runtime->address_space), op(o), 
-        src_index(idx), dst_index(idx),
+        forest(f), local_space(f->runtime->address_space), analysis(a), 
+        src_index(analysis->index), dst_index(analysis->index),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? RtEvent::NO_RT_EVENT :
                             RtEvent(previous->guard_postcondition)),
@@ -4213,6 +4214,7 @@ namespace Legion {
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
+      analysis->add_reference();
       // Need to transitively chain effects across aggregators since they
       // each need to summarize all the ones that came before
       if (previous != NULL)
@@ -4221,7 +4223,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
-                                Operation *o, unsigned src_idx, unsigned dst_idx,
+                                PhysicalAnalysis *a,
+                                unsigned src_idx, unsigned dst_idx,
                                 CopyFillGuard *previous, bool t, PredEvent p, 
                                 RtEvent alternative_precondition)
       : WrapperReferenceMutator(effects),
@@ -4231,7 +4234,7 @@ namespace Legion {
 #else
         CopyFillGuard(Runtime::create_rt_user_event()),
 #endif
-        forest(f), local_space(f->runtime->address_space), op(o), 
+        forest(f), local_space(f->runtime->address_space), analysis(a),
         src_index(src_idx), dst_index(dst_idx),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         guard_precondition((previous == NULL) ? alternative_precondition :
@@ -4246,6 +4249,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((previous == NULL) || !alternative_precondition.exists());
 #endif
+      analysis->add_reference();
       // Need to transitively chain effects across aggregators since they
       // each need to summarize all the ones that came before
       if (previous != NULL)
@@ -4262,6 +4266,8 @@ namespace Legion {
 #endif
       assert(effects_applied.has_triggered());
 #endif
+      if (analysis->remove_reference())
+        delete analysis;
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
@@ -4457,7 +4463,7 @@ namespace Legion {
       std::vector<unsigned> ranking;
       std::map<unsigned,PhysicalManager*> points;
       // Always use the source index for selecting sources
-      op->select_sources(src_index, dst_man, src_views ,ranking, points);
+      analysis->op->select_sources(src_index, dst_man,src_views,ranking,points);
       // Check to make sure that the ranking has sound output
       unsigned count = 0;
       std::vector<bool> unique_indexes(src_views.size(), false);
@@ -4904,8 +4910,8 @@ namespace Legion {
           summary_event = Runtime::create_ap_user_event(&trace_info);
         CopyFillAggregation args(this, trace_info, precondition,
                                  manage_dst_events, restricted_output,
-                                 op->get_unique_op_id(), dst_events);
-        op->runtime->issue_runtime_meta_task(args, 
+                                 analysis->op->get_unique_op_id(), dst_events);
+        analysis->runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return summary_event;
       }
@@ -5124,9 +5130,9 @@ namespace Legion {
         FillView *fill_view = update->source;
         const ApEvent result = target->fill_from(fill_view,
                                                  precondition,
-                                                 update->fill_guard,
-                                                 fill_expr, op, dst_index,
-                                                 fill_mask, trace_info, 
+                                                 update->fill_guard, fill_expr,
+                                                 analysis->op, dst_index,
+                                                 fill_mask, trace_info,
                                                  recorded_events, effects,
                                                  fills[0]->across_helper,
                                                  manage_dst_events,
@@ -5180,7 +5186,7 @@ namespace Legion {
           const ApEvent result = target->fill_from(it->first.first,
                                                    precondition,
                                                    it->first.second, fill_expr,
-                                                   op, dst_index,
+                                                   analysis->op, dst_index,
                                                    fill_mask, trace_info,
                                                    recorded_events, effects, 
                                                    fills[0]->across_helper,
@@ -5245,7 +5251,7 @@ namespace Legion {
           IndexSpaceExpression *copy_expr = update->expr;
           const ApEvent result = target->copy_from(source, precondition,
                                     predicate_guard, update->redop, copy_expr,
-                                    op, manage_dst_events ? dst_index
+                                    analysis->op, manage_dst_events ? dst_index
                                       : src_index, copy_mask, update->src_man,
                                     trace_info, recorded_events, effects, 
                                     cit->second[0]->across_helper, 
@@ -5301,7 +5307,7 @@ namespace Legion {
                 *(it->second.begin()) : forest->union_index_spaces(it->second);
             const ApEvent result = target->copy_from(it->first.first, 
                                     precondition, predicate_guard, redop,
-                                    copy_expr, op, manage_dst_events ? 
+                                    copy_expr, analysis->op, manage_dst_events ?
                                       dst_index : src_index, copy_mask, 
                                     it->first.second, trace_info, 
                                     recorded_events, effects,
@@ -8093,7 +8099,7 @@ namespace Legion {
         assert(!aggregator_guard.exists());
 #endif
         aggregator_guard = Runtime::create_rt_user_event();
-        across_aggregator = new CopyFillAggregator(runtime->forest, op, 
+        across_aggregator = new CopyFillAggregator(runtime->forest, this,
             src_index, dst_index, NULL/*no previous guard*/, true/*track*/,
             pred_guard, aggregator_guard);
       }
@@ -11455,8 +11461,7 @@ namespace Legion {
                   // Fill aggregators never need to wait for any other
                   // aggregators since we know they won't depend on each other
                   fill_aggregator = new CopyFillAggregator(runtime->forest,
-                      analysis.op, analysis.index, analysis.index,
-                      NULL/*no previous guard*/, false/*track events*/);
+                   &analysis, NULL/*no previous guard*/, false/*track events*/);
                   analysis.input_aggregators[RtEvent::NO_RT_EVENT] = 
                     fill_aggregator;
                 }
@@ -11531,13 +11536,13 @@ namespace Legion {
                   if (rit->first->get_volume() == set_expr->get_volume())
                     apply_restricted_reductions(rit->second, set_expr, 
                         true/*covers*/, overlap, analysis.output_aggregator,
-                        NULL/*no guard*/, analysis.op, analysis.index, 
+                        NULL/*no guard*/, &analysis,
                         true/*track events*/, analysis.trace_info,
                         applied_events, NULL/*no applied expr tracking*/);
                   else
                     apply_restricted_reductions(rit->second, rit->first, 
                         false/*covers*/, overlap, analysis.output_aggregator,
-                        NULL/*no guard*/, analysis.op, analysis.index,
+                        NULL/*no guard*/, &analysis,
                         true/*track events*/, analysis.trace_info,
                         applied_events, NULL/*no applied expr tracking*/);
                 }
@@ -11546,9 +11551,8 @@ namespace Legion {
                   // Restriction covers the full expression
                   apply_restricted_reductions(rit->second, expr, expr_covers,
                       overlap, analysis.output_aggregator, NULL/*no guard*/,
-                      analysis.op, analysis.index, true/*track events*/,
-                      analysis.trace_info, applied_events,
-                      NULL/*no applied expr tracking*/);
+                      &analysis, true/*track events*/, analysis.trace_info,
+                      applied_events, NULL/*no applied expr tracking*/);
                 }
                 else
                 {
@@ -11560,15 +11564,14 @@ namespace Legion {
                   if (expr_overlap->get_volume() == expr->get_volume())
                     apply_restricted_reductions(rit->second, expr, expr_covers,
                         overlap, analysis.output_aggregator, NULL/*no guard*/,
-                        analysis.op, analysis.index, true/*track events*/,
-                        analysis.trace_info, applied_events,
-                        NULL/*no applied expr tracking*/);
+                        &analysis, true/*track events*/, analysis.trace_info,
+                        applied_events, NULL/*no applied expr tracking*/);
                   else
                     apply_restricted_reductions(rit->second, expr_overlap,
                         false/*covers*/, overlap, analysis.output_aggregator,
-                        NULL/*no guard*/, analysis.op, analysis.index,
-                        true/*track events*/, analysis.trace_info,
-                        applied_events, NULL/*no applied expr tracking*/);
+                        NULL/*no guard*/, &analysis, true/*track events*/,
+                        analysis.trace_info, applied_events,
+                        NULL/*no applied expr tracking*/);
                 }
               }
             }
@@ -11621,8 +11624,8 @@ namespace Legion {
             record_unrestricted_instances(expr, expr_covers, restricted_mask,
                                           new_instances, mutator);
             copy_out(expr, expr_covers, restricted_mask, new_instances,
-                analysis.op, analysis.index, analysis.trace_info,
-                applied_events, analysis.output_aggregator);
+                     &analysis, analysis.trace_info, applied_events,
+                     analysis.output_aggregator);
           }
         }
       }
@@ -11663,8 +11666,7 @@ namespace Legion {
               input_aggregator->clear_update_fields();
           } 
           // Use this to see if any new updates are recorded
-          update_set_internal(input_aggregator, it->first, 
-                              analysis.op, analysis.index,
+          update_set_internal(input_aggregator, it->first, &analysis,
                               analysis.usage, expr, expr_covers, 
                               guard_mask, analysis.target_instances,
                               analysis.target_views, analysis.source_views,
@@ -11714,8 +11716,7 @@ namespace Legion {
               input_aggregator->clear_update_fields();
           }
           update_set_internal(input_aggregator, NULL/*no previous guard*/,
-                              analysis.op, analysis.index,
-                              analysis.usage, expr, expr_covers,
+                              &analysis, analysis.usage, expr, expr_covers,
                               user_mask, analysis.target_instances,
                               analysis.target_views, analysis.source_views,
                               analysis.trace_info, applied_events, 
@@ -11753,7 +11754,7 @@ namespace Legion {
             input_aggregator->clear_update_fields();
         }
         update_set_internal(input_aggregator, NULL/*no previous guard*/,
-                            analysis.op, analysis.index, analysis.usage,
+                            &analysis, analysis.usage,
                             expr, expr_covers, user_mask, 
                             analysis.target_instances, analysis.target_views,
                             analysis.source_views, analysis.trace_info,
@@ -11768,8 +11769,8 @@ namespace Legion {
             if (!!restricted_mask)
               copy_out(expr, expr_covers, restricted_mask,
                        analysis.target_instances, analysis.target_views,
-                       analysis.op, analysis.index, analysis.trace_info,
-                       applied_events, analysis.output_aggregator);
+                       &analysis, analysis.trace_info, applied_events,
+                       analysis.output_aggregator);
           }
         }
         // If we made the input aggregator then store it
@@ -13411,7 +13412,7 @@ namespace Legion {
     void EquivalenceSet::update_set_internal(
                   CopyFillAggregator *&input_aggregator,
                   CopyFillGuard *previous_guard,
-                  Operation *op, const unsigned index,
+                  PhysicalAnalysis *analysis,
                   const RegionUsage &usage,
                   IndexSpaceExpression *expr, 
                   const bool expr_covers,
@@ -13426,7 +13427,7 @@ namespace Legion {
     {
       // Read-write or read-only
       // Issue fills and or copies to bring the target instances up to date
-      make_instances_valid(input_aggregator, previous_guard, op, index, 
+      make_instances_valid(input_aggregator, previous_guard, analysis,
                            false/*track*/, expr, expr_covers, user_mask, 
                            target_instances, target_views, source_views,
                            trace_info, applied_events);
@@ -13439,9 +13440,9 @@ namespace Legion {
         // Apply any reductions 
         FieldMaskSet<IndexSpaceExpression> applied_reductions;  
         apply_reductions(target_instances, target_views, expr, expr_covers,
-                         reduce_mask, input_aggregator, previous_guard, op,
-                         index, false/*track*/, trace_info, applied_events,
-                         is_write ? NULL : &applied_reductions);
+                         reduce_mask, input_aggregator, previous_guard,
+                         analysis, false/*track*/, trace_info,
+                         applied_events, is_write ? NULL : &applied_reductions);
         // If we're writing we're going to do an invalidation there anyway
         // so no need to bother with doing the invalidation based on the
         // reductions that have been applied
@@ -13562,7 +13563,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::make_instances_valid(CopyFillAggregator *&aggregator,
                   CopyFillGuard *previous_guard,
-                  Operation *op, const unsigned index,
+                  PhysicalAnalysis *analysis,
                   const bool track_events,
                   IndexSpaceExpression *expr,
                   const bool expr_covers,
@@ -13573,7 +13574,6 @@ namespace Legion {
                   const PhysicalTraceInfo &trace_info,
                   std::set<RtEvent> &applied_events,
                   const bool skip_check,
-                  const int dst_index /*= -1*/,
                   const ReductionOpID redop /*= 0*/,
                   CopyAcrossHelper *across_helper/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -13684,9 +13684,9 @@ namespace Legion {
                     if (!diff_expr->is_empty())
                       issue_update_copies_and_fills(target,
                          target_instances[idx], source_views, aggregator,
-                         previous_guard, op, index, track_events, diff_expr,
-                         false/*expr covers*/, it->second, trace_info,
-                         applied_events, dst_index, redop, across_helper); 
+                         previous_guard, analysis, track_events,
+                         diff_expr, false/*expr covers*/, it->second,trace_info,
+                         applied_events, redop, across_helper); 
                   }
                   inst_mask -= partial_exprs.get_valid_mask();
                 }
@@ -13696,9 +13696,9 @@ namespace Legion {
           // Whatever fields we have left here need updates for the whole expr
           if (!!inst_mask)
             issue_update_copies_and_fills(target, target_instances[idx],
-                source_views, aggregator, previous_guard, op, index, 
+                source_views, aggregator, previous_guard, analysis,
                 track_events, expr, expr_covers, inst_mask, trace_info,
-                applied_events, dst_index, redop, across_helper);
+                applied_events, redop, across_helper);
         }
       }
     }
@@ -13709,14 +13709,13 @@ namespace Legion {
                                const std::vector<IndividualView*> &source_views,
                                           CopyFillAggregator *&aggregator,
                                           CopyFillGuard *previous_guard,
-                                          Operation *op, const unsigned index,
+                                          PhysicalAnalysis *analysis,
                                           const bool track_events,
                                           IndexSpaceExpression *expr,
                                           const bool expr_covers,
                                           FieldMask update_mask,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &applied_events,
-                                          const int dst_index,
                                           const ReductionOpID redop,
                                           CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
@@ -13745,11 +13744,8 @@ namespace Legion {
               if (!overlap)
                 continue;
               if (aggregator == NULL)
-                aggregator = (dst_index >= 0) ?
-                  new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                         previous_guard, track_events) :
-                  new CopyFillAggregator(runtime->forest, op, index,
-                                         previous_guard, track_events);
+                aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                                 previous_guard, track_events);
               aggregator->record_update(target, target_manager, *src_it,
                   overlap, it->first, trace_info, trace_info.recording ?
                   this : NULL, applied_events, redop);
@@ -13801,11 +13797,8 @@ namespace Legion {
             if (!finder->second)
               remainders.erase(finder);
             if (aggregator == NULL)
-              aggregator = (dst_index >= 0) ?
-                new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                       previous_guard, track_events) :
-                new CopyFillAggregator(runtime->forest, op, index,
-                                       previous_guard, track_events);
+              aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                                  previous_guard, track_events);
             if (overlap_size < it->first.first->get_volume())
             {
               if (overlap_size == it->first.second->get_volume())
@@ -13850,9 +13843,9 @@ namespace Legion {
           {
             const std::vector<IndividualView*> empty_sources;
             issue_update_copies_and_fills(target, target_manager, empty_sources, 
-                            aggregator, previous_guard, op, index, track_events,
-                            it->first, false/*covers*/, it->second, trace_info, 
-                            applied_events, dst_index, redop, across_helper);
+                      aggregator, previous_guard, analysis, track_events,
+                      it->first, false/*covers*/, it->second, trace_info, 
+                      applied_events, redop, across_helper);
           }
           else // same expression so just keep the fields we need
             update_mask &= it->second;
@@ -13871,11 +13864,8 @@ namespace Legion {
       if (!!total_fields)
       {
         if (aggregator == NULL)
-          aggregator = (dst_index >= 0) ?
-            new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                   previous_guard, track_events) :
-            new CopyFillAggregator(runtime->forest, op, index,
-                                   previous_guard, track_events);
+          aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                              previous_guard, track_events);
         if (total_fields != total_valid_instances.get_valid_mask())
         {
           // Compute selected instances that are valid for us
@@ -13959,11 +13949,8 @@ namespace Legion {
       if (!cover_instances.empty())
       {
         if (aggregator == NULL)
-          aggregator = (dst_index >= 0) ?
-            new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                   previous_guard, track_events) :
-            new CopyFillAggregator(runtime->forest, op, index,
-                                   previous_guard, track_events);
+          aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                              previous_guard, track_events);
         aggregator->record_updates(target, target_manager,
             cover_instances, cover_instances.get_valid_mask(), expr, 
             trace_info, trace_info.recording ? this : NULL,
@@ -13979,11 +13966,8 @@ namespace Legion {
       if (!partial_instances.empty())
       {
         if (aggregator == NULL)
-          aggregator = (dst_index >= 0) ?
-            new CopyFillAggregator(runtime->forest, op, index, dst_index,
-                                   previous_guard, track_events) :
-            new CopyFillAggregator(runtime->forest, op, index,
-                                   previous_guard, track_events);
+          aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                              previous_guard, track_events);
         aggregator->record_partial_updates(target, target_manager, 
                                  partial_instances, update_mask, expr,
                                  trace_info, trace_info.recording ? this : NULL,
@@ -13999,7 +13983,7 @@ namespace Legion {
                   const FieldMask &reduction_mask,
                   CopyFillAggregator *&aggregator,
                   CopyFillGuard *previous_guard,
-                  Operation *op, const unsigned index, 
+                  PhysicalAnalysis *analysis,
                   const bool track_events,
                   const PhysicalTraceInfo &trace_info,
                   std::set<RtEvent> &applied_events,
@@ -14020,8 +14004,8 @@ namespace Legion {
           if (!inst_mask)
             continue;
           apply_reduction(it->first, target_instances[idx], expr, expr_covers,
-              inst_mask, aggregator, previous_guard, op, index, track_events,
-              trace_info, applied_events, applied_exprs, across_helper);
+            inst_mask, aggregator, previous_guard, analysis, track_events,
+            trace_info, applied_events, applied_exprs, across_helper);
         }
       }
     }
@@ -14033,7 +14017,7 @@ namespace Legion {
                             const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index, 
+                            PhysicalAnalysis *analysis,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
@@ -14051,8 +14035,10 @@ namespace Legion {
         if (!inst_mask)
           continue;
         apply_reduction(it->first, NULL/*no manager since this is restricted*/,
-          expr, expr_covers, inst_mask, aggregator, previous_guard, op, index,
-          track_events,trace_info,applied_events,applied_exprs,NULL/*across*/);
+                        expr, expr_covers, inst_mask, aggregator,
+                        previous_guard, analysis, track_events,
+                        trace_info, applied_events, 
+                        applied_exprs, NULL/*across*/);
       }
     }
 
@@ -14064,7 +14050,7 @@ namespace Legion {
                               const FieldMask &reduction_mask,
                               CopyFillAggregator *&aggregator,
                               CopyFillGuard *previous_guard,
-                              Operation *op, const unsigned index, 
+                              PhysicalAnalysis *analysis,
                               const bool track_events,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &applied_events,
@@ -14118,8 +14104,8 @@ namespace Legion {
             }
           }
           if (aggregator == NULL)
-            aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                              previous_guard, track_events);
+            aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                                previous_guard, track_events);
           aggregator->record_reductions(target, target_manager, 
               finder->second, fidx, (across_helper == NULL) ? fidx : 
               across_helper->convert_src_to_dst(fidx),
@@ -14246,8 +14232,8 @@ namespace Legion {
           if (!to_record.empty())
           {
             if (aggregator == NULL)
-              aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                                previous_guard, track_events);
+              aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                                  previous_guard, track_events);
             aggregator->record_reductions(target, target_manager, to_record,
                                     fidx, (across_helper == NULL) ? fidx : 
                                       across_helper->convert_src_to_dst(fidx),
@@ -14297,7 +14283,7 @@ namespace Legion {
                      const FieldMask &restricted_mask, 
                      const std::vector<PhysicalManager*> &src_insts,
                      const LegionVector<FieldMaskSet<InstanceView> > &src_views,
-                     Operation *op, const unsigned index,
+                     PhysicalAnalysis *analysis,
                      const PhysicalTraceInfo &trace_info,
                      std::set<RtEvent> &applied_events,
                      CopyFillAggregator *&aggregator)
@@ -14312,7 +14298,7 @@ namespace Legion {
         const FieldMask overlap = sources.get_valid_mask() & restricted_mask;
         if (!overlap)
           continue;
-        copy_out(expr, expr_covers, restricted_mask, sources, op, index,
+        copy_out(expr, expr_covers, restricted_mask, sources, analysis,
                  trace_info, applied_events, aggregator);
       }
     }
@@ -14323,7 +14309,7 @@ namespace Legion {
                                   const bool expr_covers,
                                   const FieldMask &restricted_mask, 
                                   const FieldMaskSet<T> &src_insts,
-                                  Operation *op, const unsigned index,
+                                  PhysicalAnalysis *analysis, 
                                   const PhysicalTraceInfo &trace_info,
                                   std::set<RtEvent> &applied_events,
                                   CopyFillAggregator *&aggregator)
@@ -14370,8 +14356,8 @@ namespace Legion {
           if (it->first.first == it->first.second)
             continue;
           if (aggregator == NULL)
-            aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                  NULL/*no previous guard*/, true/*track*/);
+            aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                                NULL/*no previous guard*/, true/*track*/);
           aggregator->record_update(it->first.first, NULL/*no manager*/,
               it->first.second, overlap, overlap_expr, trace_info,
               trace_info.recording ? this : NULL, applied_events);
@@ -14759,7 +14745,7 @@ namespace Legion {
             targets[index] = view->get_manager();
             views[index].insert(vit->first, vit->second);
             update_set_internal(analysis.release_aggregator, NULL/*no guard*/,
-                                analysis.op, analysis.index, release_usage,
+                                &analysis, release_usage,
                                 it->first, (it->first == set_expr),
                                 it->second.get_valid_mask(), targets, views, 
                                 analysis.source_views, analysis.trace_info,
@@ -14804,11 +14790,11 @@ namespace Legion {
           analysis.release_aggregator->clear_update_fields();
         const RegionUsage release_usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
         update_set_internal(analysis.release_aggregator, NULL/*no guard*/,
-                            analysis.op, analysis.index, release_usage,
-                            expr, expr_covers, release_mask,  
-                            analysis.target_instances, analysis.target_views,
-                            analysis.source_views, analysis.trace_info,
-                            applied_events, true/*record valid*/);
+                            &analysis, release_usage, expr, expr_covers, 
+                            release_mask, analysis.target_instances, 
+                            analysis.target_views, analysis.source_views,
+                            analysis.trace_info, applied_events, 
+                            true/*record valid*/);
       }
     }
 
@@ -15835,11 +15821,11 @@ namespace Legion {
               target_across.begin(); it != target_across.end(); it++)
         {
           make_instances_valid(across_aggregator, NULL/*no guard*/,
-              analysis.op, analysis.src_index, true/*track events*/, expr,
+              &analysis, true/*track events*/, expr,
               expr_covers, it->second, analysis.target_instances, 
               converted_target_views, analysis.source_views, 
               analysis.trace_info, applied_events, true/*skip check*/,
-              analysis.dst_index, analysis.redop, it->first);
+              analysis.redop, it->first);
           // Only need to check for reductions if we're not reducing since
           // the runtime prevents reductions-across with different reduction ops
           if ((analysis.redop == 0) && !!reduction_fields)
@@ -15848,9 +15834,9 @@ namespace Legion {
             if (!!reduction_mask)
               apply_reductions(analysis.target_instances, converted_target_views,
                   expr, expr_covers, reduction_mask, across_aggregator, 
-                  NULL/*no guard*/, analysis.op, analysis.index, 
-                  true/*track events*/, analysis.trace_info, 
-                  applied_events, NULL/*no applied exprs*/, it->first);
+                  NULL/*no guard*/, &analysis, true/*track events*/, 
+                  analysis.trace_info, applied_events, 
+                  NULL/*no applied exprs*/, it->first);
           }
         }
       }
@@ -15858,11 +15844,10 @@ namespace Legion {
       {
         // Fields align when doing this copy across so use the general path
         make_instances_valid(across_aggregator, NULL/*no guard*/,
-            analysis.op, analysis.src_index, true/*track events*/, expr, 
-            expr_covers, src_mask, analysis.target_instances,
-            analysis.target_views, analysis.source_views,
-            analysis.trace_info, applied_events, true/*skip check*/, 
-            analysis.dst_index, analysis.redop);
+            &analysis, true/*track events*/, expr, expr_covers, src_mask,
+            analysis.target_instances, analysis.target_views,
+            analysis.source_views, analysis.trace_info, applied_events,
+            true/*skip check*/, analysis.redop);
         // Only need to check for reductions if we're not reducing since
         // the runtime prevents reductions-across with different reduction ops
         if ((analysis.redop == 0) && !!reduction_fields)
@@ -15871,8 +15856,8 @@ namespace Legion {
           if (!!reduction_mask)
             apply_reductions(analysis.target_instances, analysis.target_views,
                 expr, expr_covers, reduction_mask, across_aggregator, 
-                NULL/*no guard*/, analysis.op, analysis.index,
-                true/*track events*/, analysis.trace_info, applied_events,
+                NULL/*no guard*/, &analysis, true/*track events*/,
+                analysis.trace_info, applied_events,
                 NULL/*no need to track applied exprs*/);
         }
       }
@@ -15931,9 +15916,8 @@ namespace Legion {
             continue;
           FillView *fill = it->first->as_fill_view();
           predicate_fill_all(fill, overlap, expr, expr_covers,
-              analysis.true_guard, analysis.false_guard, analysis.op,
-              analysis.index, analysis.trace_info, applied_events,
-              analysis.output_aggregator);
+              analysis.true_guard, analysis.false_guard, &analysis,
+              analysis.trace_info, applied_events, analysis.output_aggregator);
         }
       }
       else
@@ -15966,8 +15950,8 @@ namespace Legion {
             record_unrestricted_instances(expr, expr_covers, restricted_mask,
                                           analysis.views, mutator);
             copy_out(expr, expr_covers, restricted_mask, analysis.views,
-                     analysis.op, analysis.index, analysis.trace_info,
-                     applied_events, analysis.output_aggregator);
+                     &analysis, analysis.trace_info, applied_events,
+                     analysis.output_aggregator);
             if (!!non_restricted)
               record_instances(expr, expr_covers, non_restricted, 
                                analysis.views, mutator);
@@ -16046,7 +16030,7 @@ namespace Legion {
                                             const bool expr_covers,
                                             const PredEvent true_guard,
                                             const PredEvent false_guard,
-                                            Operation *op, const unsigned index,
+                                            PhysicalAnalysis *analysis,
                                             const PhysicalTraceInfo &trace_info,
                                             std::set<RtEvent> &applied_events,
                                             CopyFillAggregator *&aggregator)
@@ -16154,8 +16138,8 @@ namespace Legion {
                   continue;
               }
               if (aggregator == NULL)
-                aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                   index, NULL/*no previous guard*/, true/*track*/, true_guard);
+                aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                        NULL/*no previous guard*/, true/*track*/, true_guard);
               aggregator->record_fill(inst_view, fill_view, overlap, fill_expr,
                                       true_guard, this, applied_events);
             }
@@ -16217,8 +16201,8 @@ namespace Legion {
           {
             // Physical instance so we can just record the predicated fill
             if (aggregator == NULL)
-              aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                  index, NULL/*no previous guard*/, true/*track*/, true_guard);
+              aggregator = new CopyFillAggregator(runtime->forest, analysis,
+                      NULL/*no previous guard*/, true/*track*/, true_guard);
             aggregator->record_fill(it->first->as_instance_view(),
                 fill_view, overlap, expr, true_guard, this, applied_events);
           }

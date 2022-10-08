@@ -1871,6 +1871,7 @@ namespace Legion {
 
     class ProjectionEpoch;
     class LogicalState;
+    class PhysicalAnalysis;
     class EquivalenceSet;
     class PendingEquivalenceSet;
     class EqSetTracker;
