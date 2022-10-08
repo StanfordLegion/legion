@@ -2135,6 +2135,7 @@ namespace Legion {
   typedef ::legion_projection_type_t HandleType;
   typedef ::legion_address_space_t AddressSpace;
   typedef ::legion_task_priority_t TaskPriority;
+  typedef ::legion_task_priority_t RealmPriority;
   typedef ::legion_garbage_collection_priority_t GCPriority;
   typedef ::legion_color_t Color;
   typedef ::legion_field_id_t FieldID;

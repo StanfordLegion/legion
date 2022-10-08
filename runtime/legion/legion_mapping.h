@@ -527,7 +527,9 @@ namespace Legion {
        * field. This will allow the task to be re-ordered ahead of lower
        * priority tasks and behind higher priority tasks by the runtime
        * as it's being dynamically scheduled. Negative priorities are lower
-       * and positive priorities are higher.
+       * and positive priorities are higher. The 'copy_fill_priority' field
+       * can control the probabilities of any copies and fills performed on 
+       * behalf of the task. 
        *
        * The mapper can request profiling information about this
        * task as part of its execution. The mapper can specify a task
@@ -558,7 +560,8 @@ namespace Legion {
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
-        TaskPriority                                profiling_priority;
+        RealmPriority                               copy_fill_priority;
+        RealmPriority                               profiling_priority;
         ProfilingRequest                            task_prof_requests;
         ProfilingRequest                            copy_prof_requests;
         bool                                        postmap_task; // = false
@@ -810,7 +813,8 @@ namespace Legion {
        * in the vector that has space for each field. If this is a read-only 
        * inline mapping, the mapper can request that the runtime not track the 
        * validity of the instance(s) used for the inline mapping by setting 
-       * 'track_valid_region' to 'false'. 
+       * 'track_valid_region' to 'false'. The 'copy_fill_priority' field will
+       * control the priorities of any copies or fills needed for the mapping.
        *
        * The mapper can also request profiling information for any copies 
        * issued by filling in the 'profiling_requests' set. The mapper can 
@@ -823,8 +827,9 @@ namespace Legion {
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
         std::vector<PhysicalInstance>           source_instances;
+        RealmPriority                           copy_fill_priority;
         ProfilingRequest                        profiling_requests;
-        TaskPriority                            profiling_priority;
+        RealmPriority                           profiling_priority;
         bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
@@ -915,7 +920,9 @@ namespace Legion {
        * can optionally select to use a virtual mapping if the copy is not
        * a reduction copy. If the copy is a gather or a scatter copy then 
        * the mapper must also create instances for the source and/or destination
-       * indirection region requirements as well.
+       * indirection region requirements as well. The mapper can specify the
+       * priority of any copies or fills required for executing this copy
+       * operation using the 'copy_fill_priority' field.
        *
        * The mapper can optionally choose not to have the runtime track any
        * of the instances made for the copy as valid for the source or 
@@ -956,7 +963,8 @@ namespace Legion {
         std::set<unsigned>                            untracked_valid_ind_srcs;
         std::set<unsigned>                            untracked_valid_ind_dsts;
         ProfilingRequest                              profiling_requests;
-        TaskPriority                                  profiling_priority;
+        RealmPriority                                 profiling_priority;
+        RealmPriority                                 copy_fill_priority;
         bool                                          compute_preimages;
       };
       //------------------------------------------------------------------------
@@ -1087,7 +1095,7 @@ namespace Legion {
       struct MapCloseOutput {
         std::vector<PhysicalInstance>               chosen_instances;
         ProfilingRequest                            profiling_requests;
-        TaskPriority                                profiling_priority;
+        RealmPriority                               profiling_priority;
       };
 
       /**
@@ -1187,7 +1195,8 @@ namespace Legion {
       };
       struct MapAcquireOutput {
         ProfilingRequest                            profiling_requests;
-        TaskPriority                                profiling_priority;
+        RealmPriority                               profiling_priority;
+        RealmPriority                               copy_fill_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_acquire(const MapperContext         ctx,
@@ -1264,7 +1273,9 @@ namespace Legion {
        * they are explicitly associated with a physical instance when they
        * are launched by the application. Thereforefore the only output
        * currently neecessary is whether the mapper would like profiling
-       * information for this release operation.
+       * information for this release operation. The mapper can control
+       * the priority of any copies or fills needed for flushing data back
+       * to the restricted instances using the 'copy_fill_priority' field.
        */
       struct MapReleaseInput {
         // Nothing
@@ -1272,7 +1283,8 @@ namespace Legion {
       struct MapReleaseOutput {
         std::vector<PhysicalInstance>               source_instances;
         ProfilingRequest                            profiling_requests;
-        TaskPriority                                profiling_priority;
+        RealmPriority                               profiling_priority;
+        RealmPriority                               copy_fill_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_release(const MapperContext         ctx,
@@ -1427,7 +1439,9 @@ namespace Legion {
        * partitioning operations have read-only privileges on their input
        * regions, the mapper can request that the runtime not track the 
        * validity of the instance(s) used for the dependent parititoning
-       * operation by setting 'track_valid_region' to 'false'. 
+       * operation by setting 'track_valid_region' to 'false'. The 
+       * 'copy_fill_priority' field specifies the priorities of any copy
+       * or fills needed to bring the 'chosen_instances' up to date.
        *
        * The mapper can also request profiling information for any copies 
        * issued by filling in the 'profiling_requests' set. The mapper can 
@@ -1441,7 +1455,8 @@ namespace Legion {
         std::vector<PhysicalInstance>           chosen_instances;
         std::vector<PhysicalInstance>           source_instances;
         ProfilingRequest                        profiling_requests;
-        TaskPriority                            profiling_priority;
+        RealmPriority                           profiling_priority;
+        RealmPriority                           copy_fill_priority;
         bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------

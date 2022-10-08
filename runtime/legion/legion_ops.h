@@ -564,7 +564,7 @@ namespace Legion {
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, 
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
@@ -1206,7 +1206,7 @@ namespace Legion {
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances,
                          std::vector<PhysicalManager*> &source_instances);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1239,6 +1239,7 @@ namespace Legion {
       std::vector<MapProfilingInfo>                     profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
     };
@@ -1418,7 +1419,7 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1467,6 +1468,7 @@ namespace Legion {
       std::vector<CopyProfilingInfo>                  profiling_info;
       RtUserEvent                                 profiling_reported;
       int                                         profiling_priority;
+      int                                         copy_fill_priority;
       std::atomic<int>                outstanding_profiling_requests;
       std::atomic<int>                outstanding_profiling_reported;
     public:
@@ -2058,7 +2060,7 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2321,7 +2323,7 @@ namespace Legion {
       void compute_parent_index(void);
       void invoke_mapper(void);
       void log_acquire_requirement(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2350,6 +2352,7 @@ namespace Legion {
       std::vector<AcquireProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
+      int                                            copy_fill_priority;
       std::atomic<int>                   outstanding_profiling_requests;
       std::atomic<int>                   outstanding_profiling_reported;
     };
@@ -2438,7 +2441,7 @@ namespace Legion {
       void compute_parent_index(void);
       void invoke_mapper(std::vector<PhysicalManager*> &source_instances);
       void log_release_requirement(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2468,6 +2471,7 @@ namespace Legion {
       std::vector<ReleaseProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
+      int                                            copy_fill_priority;
       std::atomic<int>                   outstanding_profiling_requests;
       std::atomic<int>                   outstanding_profiling_reported;
     };
@@ -3483,7 +3487,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
@@ -3555,6 +3559,7 @@ namespace Legion {
       std::vector<PartitionProfilingInfo>                  profiling_info;
       RtUserEvent                                      profiling_reported;
       int                                              profiling_priority;
+      int                                              copy_fill_priority;
       std::atomic<int>                     outstanding_profiling_requests;
       std::atomic<int>                     outstanding_profiling_reported;
     };
@@ -3663,7 +3668,7 @@ namespace Legion {
       virtual const std::string& get_provenance_string(void) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
     public:
@@ -4015,7 +4020,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -4299,7 +4304,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void report_uninitialized_usage(const unsigned index,
@@ -4333,6 +4338,7 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
+      int                                 copy_fill_priority;
       Processor                           profiling_target;
       RtUserEvent                         profiling_response;
       std::atomic<int>                    profiling_reports;
