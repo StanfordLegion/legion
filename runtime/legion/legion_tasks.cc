@@ -4857,6 +4857,7 @@ namespace Legion {
                                              std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(copy_fill_priority);
       rez.serialize<size_t>(copy_profiling_requests.size());
       if (!copy_profiling_requests.empty())
       {
