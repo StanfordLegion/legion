@@ -10253,8 +10253,11 @@ namespace Legion {
         collective_timeout = 0;
       }
 #ifdef DEBUG_LEGION
-      // This code relies on the assumption that all the views are field
-      // disjoint from each other, if they're not we're in a bad place
+      // This code relise on the assumption that all the views are either
+      // field-disjoint from each other, or if they are overlapping on fields
+      // then they are not overlapping on instances. If they're not then we
+      // would need to have an additional check for refining against themselves
+      // which we don't currently do. Try to avoid that case if possible.
       FieldMask disjoint_check;
 #endif
       bool views_refined = false;
@@ -10273,12 +10276,64 @@ namespace Legion {
       for (typename FieldMaskSet<T>::const_iterator vit =
             views.begin(); vit != views.end(); vit++)
       {
-#ifdef DEBUG_LEGION
-        assert(disjoint_check * vit->second);
-        disjoint_check |= vit->second;
-#endif
         if (!vit->first->is_instance_view())
           continue;
+#ifdef DEBUG_LEGION
+        if (!(disjoint_check * vit->second))
+        {
+          // Check that the instances that overlap on fields are already
+          // disjoint on their instances so refinements won't interfere
+          if (vit->first->is_individual_view())
+          {
+            IndividualView *individual = vit->first->as_individual_view();
+            const DistributedID inst_did = individual->get_manager()->did;
+            for (typename FieldMaskSet<T>::const_iterator vit2 =
+                  views.begin(); vit2 != vit; vit2++)
+            {
+              if (!vit2->first->is_instance_view())
+                continue;
+              if (vit2->second * vit->second)
+                continue;
+              if (!vit2->first->is_individual_view())
+              {
+                CollectiveView *collective = vit2->first->as_collective_view();
+                assert(!std::binary_search(collective->instances.begin(),
+                      collective->instances.end(), inst_did));
+              }
+              // Else can't be the same instance if their both individual views
+            }
+          }
+          else
+          {
+            CollectiveView *collective = vit->first->as_collective_view();
+            const std::vector<DistributedID> &inst_dids = collective->instances;
+            for (typename FieldMaskSet<T>::const_iterator vit2 =
+                  views.begin(); vit2 != vit; vit2++)
+            {
+              if (!vit2->first->is_instance_view())
+                continue;
+              if (vit2->second * vit->second)
+                continue;
+              if (vit2->first->is_individual_view())
+              {
+                IndividualView *individual = vit2->first->as_individual_view();
+                const DistributedID inst_did = individual->get_manager()->did;
+                assert(!std::binary_search(inst_dids.begin(),
+                      inst_dids.end(), inst_did));
+              }
+              else
+              {
+                CollectiveView *c2 = vit2->first->as_collective_view();
+                for (std::vector<DistributedID>::const_iterator it =
+                      c2->instances.begin(); it != c2->instances.end(); it++)
+                  assert(!std::binary_search(inst_dids.begin(),
+                        inst_dids.end(), *it));
+              }
+            }
+          }
+        }
+        disjoint_check |= vit->second;
+#endif
         if (vit->first->is_individual_view())
         {
           if (vit->second * collective_instances.get_valid_mask())
@@ -10509,8 +10564,9 @@ namespace Legion {
           cit->second.compute_field_sets(FieldMask(), field_sets);
           for (LegionList<FieldSet<IndividualView*> >::const_iterator it =
                 field_sets.begin(); it != field_sets.end(); it++)
-            independent_refinements.insert(
-                new PendingCollective(cit->first, it->elements), it->set_mask);
+            if (it->elements.size() < cit->first->instances.size())
+              independent_refinements.insert(
+                 new PendingCollective(cit->first, it->elements), it->set_mask);
         }
       }
       // Create new collective views for the independent refinements
