@@ -5235,13 +5235,14 @@ namespace Legion {
                 {
                   incoming[term_finder->second->lhs].push_back(replay->post);
                   outgoing[replay->post].push_back(term_finder->second->lhs);
+                  term_insts.erase(term_finder);
                 }
                 else if (replay->pre != 0)
                 {
                   incoming[term_finder->second->lhs].push_back(replay->pre);
                   outgoing[replay->pre].push_back(term_finder->second->lhs);
+                  term_insts.erase(term_finder);
                 }
-                term_insts.erase(term_finder);
               }
               break;
             }
