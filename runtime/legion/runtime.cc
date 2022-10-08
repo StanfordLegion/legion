@@ -32324,6 +32324,11 @@ namespace Legion {
             FillView::handle_defer_issue_fill(args);
             break;
           }
+        case LG_DEFER_MUST_EPOCH_RETURN_TASK_ID:
+          {
+            ReplMustEpochOp::handle_defer_return_resources(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:

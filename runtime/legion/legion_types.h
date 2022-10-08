@@ -424,6 +424,7 @@ namespace Legion {
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
       LG_DEFER_ISSUE_FILL_TASK_ID,
+      LG_DEFER_MUST_EPOCH_RETURN_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -550,6 +551,7 @@ namespace Legion {
         "Defer Collective Async",                                 \
         "Defer Record Complete Replay",                           \
         "Defer Issue Fill",                                       \
+        "Defer Must Epoch Return Resources",                      \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \

@@ -6288,10 +6288,33 @@ namespace Legion {
       if (!has_return_resources())
         return;
       if (!resource_return_barrier.has_triggered())
-        resource_return_barrier.wait();
+      {
+        DeferMustEpochReturnResourcesArgs args(this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_DEFERRED_PRIORITY, resource_return_barrier);
+        preconditions.insert(args.done);
+        return;
+      }
       // If we get here then we can finally do the return to the parent context
       // because we've received resources from all of our constituent operations
       return_resources(parent_ctx, context_index, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplMustEpochOp::handle_defer_return_resources(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMustEpochReturnResourcesArgs *dargs =
+        (const DeferMustEpochReturnResourcesArgs*)args;
+      std::set<RtEvent> preconditions;
+      dargs->op->return_resources(dargs->op->get_context(),
+          dargs->op->get_context_index(), preconditions);
+      if (!preconditions.empty())
+        Runtime::trigger_event(dargs->done,
+            Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(dargs->done);
     }
 
     //--------------------------------------------------------------------------
