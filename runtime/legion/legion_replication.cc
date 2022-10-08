@@ -1609,7 +1609,6 @@ namespace Legion {
         LegionSpy::log_replay_operation(unique_op_id);
 #endif
         shard_off(RtEvent::NO_RT_EVENT);
-        resolve_speculation();
       }
       else
         IndividualTask::trigger_replay();
@@ -2025,7 +2024,6 @@ namespace Legion {
           finish_index_task_reduction();
         }
         complete_execution(finish_index_task_complete());
-        resolve_speculation();
         trigger_children_complete();
         trigger_children_committed();
       }
@@ -3650,7 +3648,6 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
-        resolve_speculation();
       }
       else
       {
@@ -3880,7 +3877,6 @@ namespace Legion {
 #endif
         complete_mapping();
         complete_execution();
-        resolve_speculation();
       }
       else // We own it, so do the base call
         CopyOp::trigger_replay();
@@ -4229,7 +4225,6 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
-        resolve_speculation();
       }
       else
       {
