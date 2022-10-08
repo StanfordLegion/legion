@@ -567,7 +567,8 @@ namespace Legion {
                                              ApEvent precondition, 
                                              PredEvent pred_guard,
                                              LgEvent src_unique,
-                                             LgEvent dst_unique)
+                                             LgEvent dst_unique,
+                                             int priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -606,6 +607,7 @@ namespace Legion {
           rez.serialize(pred_guard);
           rez.serialize(src_unique);
           rez.serialize(dst_unique);
+          rez.serialize(priority);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -618,7 +620,7 @@ namespace Legion {
                               src_tree_id, dst_tree_id,
 #endif
                               precondition, pred_guard,
-                              src_unique, dst_unique);
+                              src_unique, dst_unique, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -750,7 +752,8 @@ namespace Legion {
 #endif
                                              ApEvent precondition,
                                              PredEvent pred_guard,
-                                             LgEvent unique_event)
+                                             LgEvent unique_event,
+                                             int priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -781,6 +784,7 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(pred_guard);  
           rez.serialize(unique_event);
+          rez.serialize(priority);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -792,7 +796,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                       handle, tree_id,
 #endif
-                                      precondition, pred_guard, unique_event);
+                                      precondition, pred_guard,
+                                      unique_event, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -1219,6 +1224,8 @@ namespace Legion {
             LgEvent src_unique, dst_unique;
             derez.deserialize(src_unique);
             derez.deserialize(dst_unique);
+            int priority;
+            derez.deserialize(priority);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1228,7 +1235,7 @@ namespace Legion {
                                    src_tree_id, dst_tree_id,
 #endif
                                    precondition, pred_guard,
-                                   src_unique, dst_unique);
+                                   src_unique, dst_unique, priority);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1398,6 +1405,8 @@ namespace Legion {
             derez.deserialize(pred_guard);
             LgEvent unique_event;
             derez.deserialize(unique_event);
+            int priority;
+            derez.deserialize(priority);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
@@ -1406,7 +1415,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                    handle, tree_id,
 #endif
-                                   precondition, pred_guard, unique_event);
+                                   precondition, pred_guard,
+                                   unique_event, priority);
             if (lhs != lhs_copy)
             {
               Serializer rez;

@@ -1069,6 +1069,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(0);
       rez.serialize<size_t>(0);
     }
 
@@ -2934,6 +2935,7 @@ namespace Legion {
       task_effects_complete = ApEvent::NO_AP_EVENT;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
       selected_variant = 0;
@@ -3937,6 +3939,7 @@ namespace Legion {
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.copy_fill_priority = 0;
       // Initialize the mapping input which also does all the traversal
       // down to the target nodes
       std::vector<InstanceSet> valid_instances(regions.size());
@@ -3946,6 +3949,7 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_map_task(this, &input, &output);
+      copy_fill_priority = output.copy_fill_priority;
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
       // Sort out any profiling requests that we need to perform
@@ -4868,6 +4872,7 @@ namespace Legion {
                                              std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(copy_fill_priority);
       rez.serialize<size_t>(copy_profiling_requests.size());
       if (!copy_profiling_requests.empty())
       {
@@ -4883,13 +4888,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+    int SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
                 Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
-        return;
+        return copy_fill_priority;
       OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -4899,6 +4904,7 @@ namespace Legion {
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
       handle_profiling_update(count);
+      return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
@@ -7511,6 +7517,7 @@ namespace Legion {
       need_intra_task_alias_analysis = true;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
     }
@@ -8192,7 +8199,9 @@ namespace Legion {
       // Now invoke the mapper call
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
+      output.copy_fill_priority = 0;
       mapper->invoke_premap_task(this, &input, &output);
+      copy_fill_priority = output.copy_fill_priority;
       // See if we need to update the new target processor
       if (output.new_target_proc.exists())
         this->target_proc = output.new_target_proc;
@@ -8716,6 +8725,7 @@ namespace Legion {
                                             std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(copy_fill_priority);
       rez.serialize<size_t>(copy_profiling_requests.size());
       if (!copy_profiling_requests.empty())
       {
@@ -8731,13 +8741,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+    int IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
                 Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
-        return;
+        return copy_fill_priority;
       OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -8747,6 +8757,7 @@ namespace Legion {
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
       handle_profiling_update(count);
+      return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------

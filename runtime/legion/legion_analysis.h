@@ -159,7 +159,8 @@ namespace Legion {
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent src_unique, LgEvent dst_unique) = 0;
+                           LgEvent src_unique, LgEvent dst_unique, 
+                           int priority) = 0;
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -188,7 +189,7 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event) = 0;
+                           LgEvent unique_event, int priority) = 0;
       virtual void record_post_fill_view(FillView *view, 
                                          const FieldMask &mask) = 0;
       virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
@@ -283,7 +284,7 @@ namespace Legion {
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent src_unique, LgEvent dst_unique);
+                           LgEvent src_unique, LgEvent dst_unique,int priority);
       virtual void record_issue_across(Memoizable *memo, ApEvent &lhs, 
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -312,7 +313,7 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event);
+                           LgEvent unique_event, int priority);
       virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
       virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
                            unsigned idx, IndexSpaceExpression *expr, 
@@ -493,7 +494,8 @@ namespace Legion {
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                           ApEvent precondition, PredEvent pred_guard,
-                          LgEvent src_unique, LgEvent dst_unique) const
+                          LgEvent src_unique, LgEvent dst_unique,
+                          int priority) const
         {
           sanity_check();
           rec->record_issue_copy(memo, result, expr, src_fields, 
@@ -502,7 +504,7 @@ namespace Legion {
                                  src_tree_id, dst_tree_id,
 #endif
                                  precondition, pred_guard,
-                                 src_unique, dst_unique);
+                                 src_unique, dst_unique, priority);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -513,7 +515,7 @@ namespace Legion {
                           RegionTreeID tree_id,
 #endif
                           ApEvent precondition, PredEvent pred_guard,
-                          LgEvent unique_event) const
+                          LgEvent unique_event, int priority) const
         {
           sanity_check();
           rec->record_issue_fill(memo, result, expr, fields, 
@@ -521,7 +523,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  handle, tree_id,
 #endif
-                                 precondition, pred_guard, unique_event);
+                                 precondition, pred_guard,
+                                 unique_event, priority);
         }
       inline void record_post_fill_view(FillView *view, 
                                         const FieldMask &mask) const

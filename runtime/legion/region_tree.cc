@@ -6606,13 +6606,13 @@ namespace Legion {
     CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
         CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
         ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
-        bool recurrent, unsigned s)
+        bool repl, bool recurrent, unsigned s)
       : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
         executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
         copy_precondition(copy_pre), src_indirect_precondition(src_pre),
         dst_indirect_precondition(dst_pre), 
         done_event(Runtime::create_ap_user_event(trace_info)),
-        stage(s+1), recurrent_replay(recurrent)
+        stage(s+1), replay(repl), recurrent_replay(recurrent)
     //--------------------------------------------------------------------------
     {
       executor->add_reference();
@@ -6628,7 +6628,7 @@ namespace Legion {
           dargs->executor->execute(dargs->op, dargs->guard, 
             dargs->copy_precondition, dargs->src_indirect_precondition, 
             dargs->dst_indirect_precondition, *dargs->trace_info,
-            dargs->recurrent_replay, dargs->stage));
+            dargs->replay, dargs->recurrent_replay, dargs->stage));
       if (dargs->executor->remove_reference())
         delete dargs->executor;
       delete dargs->trace_info;
