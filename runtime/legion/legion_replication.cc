@@ -2197,20 +2197,17 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        if (sharding_function == NULL)
-        {
-          select_sharding_function(repl_ctx);
 #ifdef DEBUG_LEGION
-          assert(future_map.impl != NULL);
-          ReplFutureMapImpl *impl = 
-            dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
-          assert(impl != NULL);
+        assert(sharding_function != NULL);
+        assert(future_map.impl != NULL);
+        ReplFutureMapImpl *impl =
+          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+        assert(impl != NULL);
 #else
-          ReplFutureMapImpl *impl = 
-            static_cast<ReplFutureMapImpl*>(future_map.impl);
+        ReplFutureMapImpl *impl =
+          static_cast<ReplFutureMapImpl*>(future_map.impl);
 #endif
-          impl->set_sharding_function(sharding_function);
-        }
+        impl->set_sharding_function(sharding_function);
         // Compute the local index space of points for this shard
         if (sharding_space.exists())
           internal_space = 
