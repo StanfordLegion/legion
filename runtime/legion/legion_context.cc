@@ -3912,8 +3912,8 @@ namespace Legion {
         const FieldMask overlap = request_mask & it->second;
         if (!overlap)
           continue;
-        EquivalenceSet *new_set = 
-          it->first->compute_refinement(source, this, runtime, applied_events);
+        EquivalenceSet *new_set =
+          it->first->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
         target->record_refinement(new_set,overlap,dummy_parent,applied_events);
         it.filter(overlap);
@@ -10392,8 +10392,8 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(req.region);
       EquivalenceSet *result =
         new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, runtime->address_space, node, this,
-            true/*register now*/);
+            runtime->address_space, runtime->address_space, node,
+            find_parent_physical_context(idx), true/*register now*/);
       // Add a context ref that will be removed after this is registered
       result->add_base_valid_ref(CONTEXT_REF);
       return result;
@@ -10760,12 +10760,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent InnerContext::convert_collective_views(Operation *op, unsigned index,
                         unsigned analysis, LogicalRegion region, 
-                        const InstanceSet &targets,
+                        const InstanceSet &targets, InnerContext *physical_ctx,
                         CollectiveMapping *&analysis_mapping, bool &first_local,
                         LegionVector<FieldMaskSet<InstanceView> > &target_views,
                         std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // This must be called on the immediate context of the operation
+      // for the rendezvous to work
+      assert(this == op->get_context());
+#endif
       target_views.resize(targets.size());
       RendezvousResult *result = NULL;
       // Find or create a rendezvous result and record for this context
@@ -10783,7 +10788,7 @@ namespace Legion {
         }
         if (result == NULL)
         {
-          result = new RendezvousResult(this, key, targets);
+          result = new RendezvousResult(this, key, targets, physical_ctx);
           // Reference for pending_rendezvous
           result->add_reference();
           pending.push_back(result);
@@ -10806,12 +10811,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::RendezvousResult::RendezvousResult(InnerContext *own,
-        const PendingRendezvousKey &k, const InstanceSet &insts)
-      : owner(own), key(k), instances(init_instances(insts)),
+     const PendingRendezvousKey &k, const InstanceSet &insts, InnerContext *ctx)
+      : owner(own), physical_ctx(ctx), key(k), instances(init_instances(insts)),
         ready(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
-      owner->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -10833,8 +10837,6 @@ namespace Legion {
     InnerContext::RendezvousResult::~RendezvousResult(void)
     //--------------------------------------------------------------------------
     {
-      if (owner->remove_reference())
-        delete owner;
     }
 
     //--------------------------------------------------------------------------
@@ -10942,7 +10944,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult::CollectiveResult(
        const std::vector<DistributedID> &dids, DistributedID did, RtEvent ready)
-      : collective_did(did), individual_dids(dids.begin(), dids.end()),
+      : individual_dids(dids.begin(), dids.end()), collective_did(did),
         ready_event(ready)
     //--------------------------------------------------------------------------
     {
@@ -10951,14 +10953,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult::CollectiveResult(
             std::vector<DistributedID> &&dids, DistributedID did, RtEvent ready)
-      : collective_did(did), individual_dids(dids), ready_event(ready)
+      : individual_dids(dids), collective_did(did), ready_event(ready)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InnerContext::CollectiveResult::CollectiveResult(DistributedID inst_did)
-      : collective_did(0), individual_dids(1, inst_did)
+      : individual_dids(1, inst_did), collective_did(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::CollectiveResult::CollectiveResult(
+            const std::vector<DistributedID> &dids)
+      : individual_dids(dids), collective_did(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -10977,74 +10987,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext::DeferFindCollectiveViewArgs::DeferFindCollectiveViewArgs(
-                               InstanceView **v, DistributedID d, RtUserEvent t)
-      : LgTaskArgs<DeferFindCollectiveViewArgs>(implicit_provenance),
-        target(v), did(d), to_trigger(t)
+    InnerContext::CollectiveResult* 
+      InnerContext::find_or_create_collective_view(RegionTreeID tid, 
+          const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent InnerContext::find_or_create_collective_view(RegionTreeID tid,
-                                  const std::vector<DistributedID> &instances,
-                                  InstanceView **target, AddressSpaceID source,
-                                  RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveResult *result = find_or_create_collective_view(tid, instances);
-      RtEvent ready;
-      if (source != runtime->address_space)
-      {
-#ifdef DEBUG_LEGION
-        assert(to_trigger.exists());
-#endif
-        ready = to_trigger;
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize(result->collective_did);
-          rez.serialize(result->ready_event);
-          rez.serialize(to_trigger);
-        }
-        runtime->send_remote_context_find_collective_view_response(source, rez);
-      }
-      else
-      {
-        if (result->ready_event.exists() && 
-            !result->ready_event.has_triggered())
-        {
-          if (!to_trigger.exists())
-            to_trigger = Runtime::create_rt_user_event();
-          ready = to_trigger;
-          // Defer getting the collective view until the ready event triggers
-          DeferFindCollectiveViewArgs args(target, 
-              result->collective_did, to_trigger);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, result->ready_event);
-        }
-        else
-          *target = static_cast<InstanceView*>(
-              runtime->find_or_request_logical_view(result->collective_did,
-                                                    ready));
-      }
-      if (result->remove_reference())
-        delete result;
-      return ready;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_defer_find_collective_view(
-                                             const void *args, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      const DeferFindCollectiveViewArgs *dargs = 
-        (const DeferFindCollectiveViewArgs*)args;
-      RtEvent ready;
-      *(dargs->target) = static_cast<InstanceView*>(
-          runtime->find_or_request_logical_view(dargs->did, ready));
-      Runtime::trigger_event(dargs->to_trigger, ready);
+      // Just ignore the ready event since the result will be ready now
+      return find_or_create_collective_view(tid, instances);
     }
 
     //--------------------------------------------------------------------------
@@ -11109,6 +11058,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
+      InnerContext *physical_ctx = op->find_physical_context(key.region_index);
       for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
             rendezvous.begin(); rit != rendezvous.end(); rit++)
       {
@@ -11119,6 +11069,7 @@ namespace Legion {
         LegionList<FieldSet<DistributedID> > field_sets;
         compute_field_sets(FieldMask(), rit->second.groups, field_sets);
         FieldMaskSet<CollectiveResult> results;
+        std::vector<RtEvent> ready_events;
         for (LegionList<FieldSet<DistributedID> >::const_iterator it =
               field_sets.begin(); it != field_sets.end(); it++)
         {
@@ -11129,8 +11080,13 @@ namespace Legion {
           {
             const std::vector<DistributedID> instances(it->elements.begin(),
                                                        it->elements.end());
-            CollectiveResult *result =
-              find_or_create_collective_view(tid, instances);
+            // Use the right physical context to find or create the collective
+            // view in case there have been any virtual mappings
+            RtEvent ready;
+            CollectiveResult *result = 
+              physical_ctx->find_or_create_collective_view(tid,instances,ready);
+            if (ready.exists())
+              ready_events.push_back(ready);
             // References already added by method so deduplicate references
             if (!results.insert(result, it->set_mask))
               result->remove_reference();
@@ -11163,6 +11119,13 @@ namespace Legion {
         // Determine the owner for this collective mapping
         AddressSpaceID owner = mapping->contains(runtime->address_space) ?
           runtime->address_space : mapping->find_nearest(runtime->address_space);
+        // Make sure all the results are ready before we send them out
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         finalize_collective_mapping(runtime, mapping, owner,
             rit->second.results, rit->second.counts, results);
         if (mapping->remove_reference())
@@ -11347,7 +11310,7 @@ namespace Legion {
                 runtime->find_distributed_collectable(inst_did));
             std::vector<PhysicalManager*> instances(1, manager);
             std::vector<IndividualView*> views;
-            owner->convert_individual_views(instances, views);
+            physical_ctx->convert_individual_views(instances, views);
             IndividualView *view = views.back();
             result_views[idx].insert(view, overlap);
             // Note we don't use the count of the instance uses here
@@ -14057,7 +14020,8 @@ namespace Legion {
                                      unsigned idx, const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      return shard_manager->get_initial_equivalence_set(idx, req.region);
+      return shard_manager->get_initial_equivalence_set(idx, req.region,
+                                      find_parent_physical_context(idx));
     }
 
     //--------------------------------------------------------------------------
@@ -20610,17 +20574,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplicateContext::find_or_create_collective_view(RegionTreeID tid,
-           const std::vector<DistributedID> &instances, 
-           InstanceView **target, AddressSpaceID source, RtUserEvent to_trigger)
+    InnerContext::CollectiveResult* 
+      ReplicateContext::find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       // Find which shard is the owner
       const ShardID tid_shard = shard_manager->find_collective_owner(tid);
       if (tid_shard != owner_shard->shard_id)
       {
-        if (!to_trigger.exists())
-          to_trigger = Runtime::create_rt_user_event();
+        const RtUserEvent to_trigger = Runtime::create_rt_user_event();
+        CollectiveResult *result = new CollectiveResult(instances);
+        result->add_reference();
         Serializer rez;
         rez.serialize(shard_manager->repl_id);
         rez.serialize(tid_shard);
@@ -20628,15 +20593,16 @@ namespace Legion {
         rez.serialize<size_t>(instances.size());
         for (unsigned idx = 0; idx < instances.size(); idx++)
           rez.serialize(instances[idx]);
-        rez.serialize(target);
-        rez.serialize(source);
+        rez.serialize(result);
+        rez.serialize(runtime->address_space);
         rez.serialize(to_trigger);
         shard_manager->send_find_or_create_collective_view(tid_shard, rez);
-        return to_trigger;
+        ready = to_trigger;
+        return result;
       }
       else
-        return InnerContext::find_or_create_collective_view(tid, instances,
-                                                target, source, to_trigger);
+        return InnerContext::find_or_create_collective_view(tid, 
+                                                instances, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -21339,7 +21305,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_collective_rendezvous(
-                     const RendezvousKey &key, 
+                     const RendezvousKey &key, Operation *op, 
                      std::map<LogicalRegion,CollectiveRendezvous> &to_construct)
     //--------------------------------------------------------------------------
     {
@@ -21347,7 +21313,7 @@ namespace Legion {
       // since we're done with the collective rendezvous across the shards
       // No need to give an operation since the base class method implemetation
       // does not actually need it
-      InnerContext::construct_collective_mapping(key, NULL/*op*/, to_construct);
+      InnerContext::construct_collective_mapping(key, op, to_construct);
     }
 
     //--------------------------------------------------------------------------
@@ -23134,16 +23100,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RemoteContext::find_or_create_collective_view(RegionTreeID tid,
-          const std::vector<DistributedID> &instances,
-          InstanceView **target, AddressSpaceID source, RtUserEvent to_trigger)
+    InnerContext::CollectiveResult* 
+      RemoteContext::find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!to_trigger.exists());
-      assert(source == runtime->address_space);
-#endif
-      to_trigger = Runtime::create_rt_user_event();
+      const RtUserEvent to_trigger = Runtime::create_rt_user_event();
+      CollectiveResult *result = new CollectiveResult(instances);
+      result->add_reference();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -23152,12 +23116,13 @@ namespace Legion {
         rez.serialize<size_t>(instances.size());
         for (unsigned idx = 0; idx < instances.size(); idx++)
           rez.serialize(instances[idx]);
-        rez.serialize(target);
+        rez.serialize(result);
         rez.serialize(to_trigger);
       }
       const AddressSpaceID owner = runtime->get_runtime_owner(context_uid);
       runtime->send_remote_context_find_collective_view_request(owner, rez);
-      return to_trigger;
+      ready = to_trigger;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -23572,15 +23537,29 @@ namespace Legion {
       std::vector<DistributedID> instances(num_insts);
       for (unsigned idx = 0; idx < num_insts; idx++)
         derez.deserialize(instances[idx]);
-      InstanceView **target;
+      CollectiveResult *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
 
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
-      local->find_or_create_collective_view(tid, instances, 
-                                            target, source, to_trigger);
+      RtEvent result_ready;
+      CollectiveResult *result = local->find_or_create_collective_view(tid, 
+                                                  instances, result_ready);
+      if (result_ready.exists() && !result_ready.has_triggered())
+        result_ready.wait();
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(target);
+        rez.serialize(result->collective_did);
+        rez.serialize(result->ready_event);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_remote_context_find_collective_view_response(source, rez);
+      if (result->remove_reference())
+        delete result;
     }
 
     //--------------------------------------------------------------------------
@@ -23589,31 +23568,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      InstanceView **target;
+      CollectiveResult *target;
       derez.deserialize(target);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      derez.deserialize(ready_event);
+      derez.deserialize(target->collective_did);
+      derez.deserialize(target->ready_event);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
 #ifdef DEBUG_LEGION
       assert(to_trigger.exists());
 #endif
-      if (ready_event.exists() && !ready_event.has_triggered())
-      {
-        // Defer getting the collective view until the ready event triggers
-        DeferFindCollectiveViewArgs args(target, did, to_trigger);
-        runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, ready_event);
-      }
-      else
-      {
-        RtEvent ready;
-        *target = static_cast<InstanceView*>(
-            runtime->find_or_request_logical_view(did, ready));
-        Runtime::trigger_event(to_trigger, ready);
-      }
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

@@ -6092,10 +6092,14 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
         target_instances[idx] = targets[idx].get_physical_manager();
       if (collective_rendezvous)
-        return context->convert_collective_views(op, index, analysis_index,
-                                  region, targets, collective_mapping, 
+      {
+        // Rendezvous must be done in the immediate parent context
+        InnerContext *parent_ctx = op->get_context();
+        return parent_ctx->convert_collective_views(op, index, analysis_index,
+                                  region, targets, context, collective_mapping,
                                   collective_first_local, target_views,
                                   collective_arrivals);
+      }
       else if (op->perform_collective_analysis(collective_mapping,
                                                collective_first_local))
       {
@@ -6109,10 +6113,14 @@ namespace Legion {
                 targets[idx].get_valid_fields());
         }
         else
-          return context->convert_collective_views(op, index, analysis_index,
-                                  region, targets, collective_mapping,
+        {
+          // Rendezvous must be done in the immediate parent context
+          InnerContext *parent_ctx = op->get_context();
+          return parent_ctx->convert_collective_views(op, index, analysis_index,
+                                  region, targets, context, collective_mapping,
                                   collective_first_local, target_views,
                                   collective_arrivals);
+        }
       }
       else
         context->convert_analysis_views(targets, target_views);
@@ -8593,8 +8601,10 @@ namespace Legion {
         else
         {
           dummy_arrivals = new std::map<InstanceView*,size_t>();
-          return context->convert_collective_views(op, index, analysis_index,
-                      region, targets, collective_mapping, 
+          // Rendezvous must be done in the immediate parent context
+          InnerContext *parent_ctx = op->get_context();
+          return parent_ctx->convert_collective_views(op, index, analysis_index,
+                      region, targets, context, collective_mapping,
                       collective_first_local, target_views, *dummy_arrivals);
         }
       }
@@ -10505,6 +10515,7 @@ namespace Legion {
       // Create the new collective views for the overlapping views to get
       // them in flight while we do other things
       std::vector<RtEvent> pending_ready;
+      const RegionTreeID tid = region_node->handle.get_tree_id();
       for (FieldMaskSet<PendingCollective>::iterator it =
             overlapping_refinements.begin(); it != 
             overlapping_refinements.end(); it++)
@@ -10514,11 +10525,26 @@ namespace Legion {
         {
           if (it->first->instances.size() > 1)
           {
-            const RtEvent ready = context->find_or_create_collective_view(
-                region_node->handle.get_tree_id(), it->first->instances,
-                &it->first->refined, runtime->address_space);
+            RtEvent ready;
+            InnerContext::CollectiveResult *result =
+              context->find_or_create_collective_view(tid,
+                  it->first->instances, ready);
+            // At some point in the future we might want to stop doing
+            // all this waiting here and turn these into continuations
+            // Wait for the collective did to be ready
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            // Then wait for the collective view to be registered
+            if (result->ready_event.exists() && 
+                !result->ready_event.has_triggered())
+              result->ready_event.wait();
+            it->first->refined = static_cast<InstanceView*>(
+                runtime->find_or_request_logical_view(
+                  result->collective_did, ready));
             if (ready.exists())
               pending_ready.push_back(ready);
+            if (result->remove_reference())
+              delete result;
           }
           else if (!it->first->instances.empty())
           {
@@ -10585,11 +10611,26 @@ namespace Legion {
         {
           if (it->first->instances.size() > 1)
           {
-            const RtEvent ready = context->find_or_create_collective_view(
-                region_node->handle.get_tree_id(), it->first->instances,
-                &it->first->refined, runtime->address_space);
+            RtEvent ready;
+            InnerContext::CollectiveResult *result =
+              context->find_or_create_collective_view(tid,
+                  it->first->instances, ready);
+            // At some point in the future we might want to stop doing
+            // all this waiting here and turn these into continuations
+            // Wait for the collective did to be ready
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            // Then wait for the collective view to be registered
+            if (result->ready_event.exists() && 
+                !result->ready_event.has_triggered())
+              result->ready_event.wait();
+            it->first->refined = static_cast<InstanceView*>(
+                runtime->find_or_request_logical_view(
+                  result->collective_did, ready));
             if (ready.exists())
               pending_ready.push_back(ready);
+            if (result->remove_reference())
+              delete result;
           }
           else
           {
@@ -18779,21 +18820,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node) 
-      : region_node(node), new_set(NULL)
+    PendingEquivalenceSet::PendingEquivalenceSet(RegionNode *node, 
+                                                 InnerContext *ctx) 
+      : region_node(node), context(ctx), new_set(NULL)
     //--------------------------------------------------------------------------
     {
       region_node->add_base_resource_ref(PENDING_REFINEMENT_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PendingEquivalenceSet::PendingEquivalenceSet(
-                                               const PendingEquivalenceSet &rhs)
-      : region_node(rhs.region_node)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -18809,16 +18841,6 @@ namespace Legion {
           delete it->first;
       if (region_node->remove_base_resource_ref(PENDING_REFINEMENT_REF))
         delete region_node;
-    }
-
-    //--------------------------------------------------------------------------
-    PendingEquivalenceSet& PendingEquivalenceSet::operator=(
-                                               const PendingEquivalenceSet &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -18855,7 +18877,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet* PendingEquivalenceSet::compute_refinement(
                                         AddressSpaceID suggested_owner, 
-                                        InnerContext *context, Runtime *runtime,
+                                        Runtime *runtime,
                                         std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {

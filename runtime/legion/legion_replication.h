@@ -2866,9 +2866,9 @@ namespace Legion {
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
-                                                  LogicalRegion region);
+                      LogicalRegion region, InnerContext *context);
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                                            DistributedID did, bool &first);
+                      InnerContext *context, DistributedID did, bool &first);
       FillView* deduplicate_fill_view_creation(DistributedID did, FillOp *op,
                                                bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
@@ -2965,10 +2965,8 @@ namespace Legion {
       void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
       void pack_collective_rendezvous(Serializer &rez, 
-          const RendezvousKey &key, const bool done,
+          const RendezvousKey &key,
           const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) const;
-      void process_collective_rendezvous(const RendezvousKey &key,
-          std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);

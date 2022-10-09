@@ -1028,18 +1028,6 @@ namespace Legion {
       public:
         std::vector<DistributedCollectable*> *const to_remove;
       };
-      struct DeferFindCollectiveViewArgs :
-        public LgTaskArgs<DeferFindCollectiveViewArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID;
-      public:
-        DeferFindCollectiveViewArgs(InstanceView **target, DistributedID did,
-                                    RtUserEvent to_trigger);
-      public:
-        InstanceView **const target;
-        const DistributedID did;
-        const RtUserEvent to_trigger;
-      };
       template<typename T>
       struct QueueEntry {
       public:
@@ -1147,17 +1135,20 @@ namespace Legion {
                          DistributedID collective_did, RtEvent ready);
         // No-collective instance result
         CollectiveResult(DistributedID instance_did);
+        // Temporary result pending response message
+        CollectiveResult(const std::vector<DistributedID> &dids);
       public:
         bool matches(const std::vector<DistributedID> &dids) const;
       public:
-        const DistributedID collective_did;
         const std::vector<DistributedID> individual_dids;
-        const RtEvent ready_event;
+        // Not const so they can be updated by response messages
+        DistributedID collective_did;
+        RtEvent ready_event;
       };
       struct RendezvousResult : public Collectable {
       public:
-        RendezvousResult(InnerContext *owner, const PendingRendezvousKey &key,
-                         const InstanceSet &insts);
+        RendezvousResult(InnerContext *context, const PendingRendezvousKey &key,
+                         const InstanceSet &insts, InnerContext *physical_ctx);
         ~RendezvousResult(void);
       public:
         bool matches(const InstanceSet &insts) const;
@@ -1169,6 +1160,7 @@ namespace Legion {
                                  Runtime *runtime, bool first);
       public:
         InnerContext *const owner;
+        InnerContext *const physical_ctx;
         const PendingRendezvousKey key;
         // These are the instances represented for this particular result
         const LegionVector<std::pair<DistributedID,FieldMask> > instances;
@@ -1904,8 +1896,6 @@ namespace Legion {
       static void handle_trigger_commit_queue(const void *args);
       static void handle_deferred_commit_queue(const void *args);
       static void handle_post_end_task(const void *args);
-      static void handle_defer_find_collective_view(const void *args,
-                                                     Runtime *runtime);
     public:
       void clear_instance_top_views(void); 
     public:
@@ -1918,6 +1908,9 @@ namespace Legion {
       // because we need to guarantee the invariant that for every given 
       // physical instance in a context it has at most one logical view
       // that represents its state in the physical analysis.
+      // Be careful here! These methods should be called on a context
+      // that is the result of find_parent_physical_context to account
+      // for virtual mappings
       void convert_individual_views(const std::vector<PhysicalManager*> &srcs,
                                     std::vector<IndividualView*> &views,
                                     CollectiveMapping *mapping = NULL);
@@ -1939,19 +1932,22 @@ namespace Legion {
       // The view collective arrivals say how many different arrivals can be
       // expected on the logical owner space node for the view of each instance
       // Return true if we are the first local participant in analysis mapping
+      // Be careful here! This method must be called on the immediate parent
+      // context of the operation. If it's not then the rendezvous doesn't work.
+      // The 'physical_ctx' should be the right context in which to create
+      // the views for this particular conversion.
       RtEvent convert_collective_views(Operation *op, unsigned index, 
                        unsigned analysis_index, LogicalRegion region,
-                       const InstanceSet &targets,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
-      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
-          const std::vector<DistributedID> &instances, 
-          InstanceView **target, AddressSpaceID source,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+      virtual CollectiveResult* find_or_create_collective_view(
+          RegionTreeID tid, const std::vector<DistributedID> &instances, 
+          RtEvent &ready);
       void notify_collective_deletion(RegionTreeID tid, DistributedID did);
       // Perform the actual rendezvous to group instances together
       virtual void rendezvous_collective_mapping(Operation *op,
@@ -2941,10 +2937,9 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,
                                            bool outermost = true);
-      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
-          const std::vector<DistributedID> &instances, 
-          InstanceView **target, AddressSpaceID source,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+      virtual CollectiveResult* find_or_create_collective_view(
+          RegionTreeID tid, const std::vector<DistributedID> &instances, 
+          RtEvent &ready);
       virtual void construct_collective_mapping(const RendezvousKey &key,
         Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
     public:
@@ -3002,11 +2997,12 @@ namespace Legion {
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
-      void handle_collective_rendezvous(const RendezvousKey &key,
+      void handle_collective_rendezvous(const RendezvousKey &key, Operation *op,
           std::map<LogicalRegion,CollectiveRendezvous> &to_construct);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
-      ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
+      ApBarrier handle_find_trace_shard_frontier(size_t temp_index, 
+                                              ApEvent event,
                                               ShardID remote_shard);
       void record_intra_space_dependence(size_t context_index, 
           const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
@@ -3403,10 +3399,9 @@ namespace Legion {
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
-      virtual RtEvent find_or_create_collective_view(RegionTreeID tid,
-          const std::vector<DistributedID> &instances, 
-          InstanceView **target, AddressSpaceID source,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+      virtual CollectiveResult* find_or_create_collective_view(
+          RegionTreeID tid, const std::vector<DistributedID> &instances, 
+          RtEvent &ready);
       virtual void rendezvous_collective_mapping(Operation *op,
                                   unsigned requirement_index,
                                   unsigned analysis_index,

@@ -405,7 +405,6 @@ namespace Legion {
       LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
-      LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
@@ -532,7 +531,6 @@ namespace Legion {
         "Defer Physical Manager Deletion",                        \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
-        "Defer Find or Create Collective View",                   \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \

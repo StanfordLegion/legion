@@ -2629,7 +2629,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         std::set<RtEvent> map_applied_conditions;
-        const ContextID ctx = parent_ctx->get_context().get_id();
+        InnerContext *context = find_physical_context(0/*index*/);
+        const ContextID ctx = context->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region); 
 #ifdef DEBUG_LEGION
         assert(refinement_barrier.exists());
@@ -2639,7 +2640,7 @@ namespace Legion {
         const DistributedID did = did_collective->get_value(false/*block*/);
         EquivalenceSet *set = 
           repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                region_node, did, first);
+                                        region_node, context, did, first);
         // Merge the state from the old equivalence sets if not overwriting
         if (first && !refinement_overwrite)
         {
@@ -2653,7 +2654,7 @@ namespace Legion {
         }
         // Invalidate the old refinement
         region_node->invalidate_refinement(ctx, refinement_mask,
-            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
+            false/*self*/, *context, map_applied_conditions, to_release);
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask, 
                                        map_applied_conditions);
@@ -3027,6 +3028,7 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      InnerContext *context = find_physical_context(0/*index*/);
       std::set<RtEvent> map_applied_conditions;
       // First we go through and make the pending refinements for any regions
       // which are sharded to us so that we can add valid references before we
@@ -3046,28 +3048,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != sharded_region_version_infos.end());
 #endif
-            PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
+            PendingEquivalenceSet *pending =
+              new PendingEquivalenceSet(*rit, context);
             pending->record_all(finder->second, map_applied_conditions);
             // Context takes ownership at this point
-            parent_ctx->record_pending_disjoint_complete_set(pending, 
-                                                             pit->second);
+            context->record_pending_disjoint_complete_set(pending, 
+                                                          pit->second);
           }
         }
       }
       // Now go through and invalidate the current refinements for
       // the regions that we are updating
-      const ContextID ctx = parent_ctx->get_context().get_id();
+      const ContextID ctx = context->get_context().get_id();
       if (!!uninitialized_fields)
       {
         const FieldMask invalidate_mask = 
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask, false/*self*/,
-                                 *repl_ctx, map_applied_conditions, to_release);
+                                  *context, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, *repl_ctx, map_applied_conditions, to_release);
+            false/*self*/, *context, map_applied_conditions, to_release);
       // First propagate the refinements for the sharded regions and partitions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             sharded_partitions.begin(); it != sharded_partitions.end(); it++)
@@ -3126,7 +3129,7 @@ namespace Legion {
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                            child, did, first);
+                                                    child, context, did, first);
               // If we're the first shard of the owner we initialize the state
               if (first && set->is_owner())
                 initialize_replicated_set(set, mask, map_applied_conditions);
@@ -3149,7 +3152,7 @@ namespace Legion {
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                            child, did, first);
+                                                    child, context, did, first);
               // If we're the first shard of the owner we initialize the state
               if (first && set->is_owner())
                 initialize_replicated_set(set, mask, map_applied_conditions);
@@ -3182,7 +3185,7 @@ namespace Legion {
 #endif
           EquivalenceSet *set = 
             repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                  it->second, did, first);
+                                          it->second, context, did, first);
           // If we're the first shard of the owner we initialize the state
           if (first && set->is_owner())
             initialize_replicated_set(set, mask, map_applied_conditions);
@@ -10464,7 +10467,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
-                                                           LogicalRegion handle)
+                                    LogicalRegion handle, InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10472,13 +10475,14 @@ namespace Legion {
 #endif
       RegionNode *region = runtime->forest->get_node(handle);
       bool dummy_first;
-      return deduplicate_equivalence_set_creation(region, 
-              mapped_equivalence_dids[idx], dummy_first);
+      return deduplicate_equivalence_set_creation(region, context,
+                        mapped_equivalence_dids[idx], dummy_first);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
-                        RegionNode *region_node, DistributedID did, bool &first)
+                                RegionNode *region_node, InnerContext *context,
+                                DistributedID did, bool &first)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10504,7 +10508,6 @@ namespace Legion {
           return result;
         }
         // Didn't find it so make it
-        InnerContext *context = find_local_context();
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
               region_node, context, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
@@ -10517,7 +10520,6 @@ namespace Legion {
       }
       else // Only one shard here on this node so just make it
       {
-        InnerContext *context = find_local_context();
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
               region_node, context, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
@@ -11839,14 +11841,29 @@ namespace Legion {
           std::vector<DistributedID> instances(num_insts);
           for (unsigned idx = 0; idx < num_insts; idx++)
             derez.deserialize(instances[idx]);
-          InstanceView **target;
+          InnerContext::CollectiveResult *target;
           derez.deserialize(target);
           AddressSpaceID source;
           derez.deserialize(source);
           RtUserEvent to_trigger;
           derez.deserialize(to_trigger);
-          context->find_or_create_collective_view(tid, instances, target,
-                                                  source, to_trigger);
+          RtEvent ready;
+          InnerContext::CollectiveResult *result =
+            context->find_or_create_collective_view(tid, instances, ready);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize(result->collective_did);
+            rez.serialize(result->ready_event);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_remote_context_find_collective_view_response(source,
+                                                                     rez);
+          if (result->remove_reference())
+            delete result;
           return;
         }
       }
@@ -11866,6 +11883,12 @@ namespace Legion {
       const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
       // This is the node in the replicate context that will handle
       // all the collective instance creations for this region tree
+      // if we're the enclosing physical context. That is a common
+      // case so we use that as a hueristic to guide where the outcome
+      // of the rendezvous ends up, but in the case of virtual mappings
+      // where we'll find or create the view on an ancestor context then
+      // we'll still end up doing the right thing later just with 
+      // additional communication required.
       const AddressSpaceID target_owner = find_collective_owner(tid);
       {
         AutoLock m_lock(manager_lock);
@@ -12143,6 +12166,8 @@ namespace Legion {
         {
           // We've seen all the arrivals so we can break perform them now
           mapping = finder->second.mapping;
+          if (op == NULL)
+            op = finder->second.local_op;
           rendezvous.swap(finder->second.rendezvous);
           collective_rendezvous.erase(finder);
         }
@@ -12150,6 +12175,7 @@ namespace Legion {
       if (mapping != NULL)
       {
 #ifdef DEBUG_LEGION
+        assert(op != NULL);
         assert(!rendezvous.empty());
 #endif
         const AddressSpaceID owner = 
@@ -12161,28 +12187,25 @@ namespace Legion {
           const AddressSpaceID parent = 
             mapping->get_parent(owner, runtime->address_space);
           Serializer rez;
-          pack_collective_rendezvous(rez, key, false/*done*/, rendezvous);
+          pack_collective_rendezvous(rez, key, rendezvous);
           runtime->send_control_replicate_collective_rendezvous(parent, rez);
         }
         else
         {
-          // Rendezvous is done so perform it
-          // Note all rendezvous for the same logical region tree need
-          // to end up on the same shard so the right collective views
-          // can be made for the various instances
-          // All the regions have to be from the same region tree so
-          // they're all going to the same place 
-          if (target_owner != runtime->address_space)
+          // Rendezvous is done so perform it here
+#ifdef DEBUG_LEGION
+          assert(!rendezvous.empty());
+#endif
+          ReplicateContext *context;
+          if (local_shards.size() > 1)
           {
-            // Send it to the collective node
-            Serializer rez;
-            pack_collective_rendezvous(rez, key, true/*done*/, rendezvous);
-            runtime->send_control_replicate_collective_rendezvous(target_owner,
-                                                                  rez);
+            // Round-robin region tree IDs across the local shards
+            const unsigned sid = tid % local_shards.size();
+            context = local_shards[sid]->get_shard_execution_context();
           }
           else
-            // Hey! We're already here so we can just do it
-            process_collective_rendezvous(key, rendezvous);
+            context = local_shards.back()->get_shard_execution_context();
+          context->handle_collective_rendezvous(key, op, rendezvous);
         }
         if (mapping->remove_reference())
           delete mapping;
@@ -12191,7 +12214,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::pack_collective_rendezvous(Serializer &rez,
-           const RendezvousKey &key, const bool done,
+           const RendezvousKey &key,
            const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) const
     //--------------------------------------------------------------------------
     {
@@ -12228,28 +12251,6 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      rez.serialize<bool>(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::process_collective_rendezvous(const RendezvousKey &key,
-                     std::map<LogicalRegion,CollectiveRendezvous> &to_construct)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!to_construct.empty());
-#endif
-      ReplicateContext *context;
-      if (local_shards.size() > 1)
-      {
-        // Round-robin region tree IDs across the local shards
-        const RegionTreeID tid = to_construct.begin()->first.get_tree_id();
-        context =
-         local_shards[tid % local_shards.size()]->get_shard_execution_context();
-      }
-      else
-        context = local_shards.back()->get_shard_execution_context();
-      context->handle_collective_rendezvous(key, to_construct);
     }
 
     //--------------------------------------------------------------------------
@@ -12308,14 +12309,9 @@ namespace Legion {
           derez.deserialize(rendezvous.counts[did]);
         }
       }
-      bool done;
-      derez.deserialize<bool>(done);
 
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      if (done)
-        manager->process_collective_rendezvous(key, to_construct);
-      else
-        manager->construct_collective_mapping(key, NULL/*op*/, to_construct);
+      manager->construct_collective_mapping(key, NULL/*op*/, to_construct);
     }
 
     //--------------------------------------------------------------------------

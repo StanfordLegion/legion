@@ -32233,11 +32233,6 @@ namespace Legion {
             InnerContext::handle_remove_remote_references(args);
             break;
           }
-        case LG_DEFER_FIND_COLLECTIVE_VIEW_TASK_ID:
-          {
-            InnerContext::handle_defer_find_collective_view(args, runtime);
-            break;
-          }
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:
           {
             Operation::handle_deferred_release(args);

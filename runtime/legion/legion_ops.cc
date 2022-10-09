@@ -12125,13 +12125,14 @@ namespace Legion {
         assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         std::set<RtEvent> map_applied_conditions;
-        const ContextID ctx = parent_ctx->get_context().get_id();
+        InnerContext *context = find_physical_context(0/*idx*/);
+        const ContextID ctx = context->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         // Make a new equivalence set and record it at this node
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), local_space, local_space, 
-            region_node, parent_ctx, true/*register now*/);
+            region_node, context, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {
@@ -12148,7 +12149,7 @@ namespace Legion {
                 it->second, false/*forward*/, map_applied_conditions);
         }
         region_node->invalidate_refinement(ctx, refinement_mask, 
-            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
+            false/*self*/, *context, map_applied_conditions, to_release);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -12949,6 +12950,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       FieldMaskSet<PartitionNode> refinement_partitions;
       std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
+      InnerContext *context = find_physical_context(0/*idx*/);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
@@ -12967,40 +12969,43 @@ namespace Legion {
             sit->first->project_refinement(it->first, regions);
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
-              initialize_region(*rit, sit->second, refinement_regions,
+              initialize_region(*rit, sit->second, context, refinement_regions,
                                 refinement_partitions, map_applied_conditions);
           }
           const FieldMask remaining = it->second - summaries.get_valid_mask();
           if (!!remaining)
           {
             if (it->first->is_region())
-              initialize_region(it->first->as_region_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+              initialize_region(it->first->as_region_node(), remaining, context,
+                  refinement_regions, refinement_partitions,
+                  map_applied_conditions);
             else
               initialize_partition(it->first->as_partition_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+                  context, refinement_regions, refinement_partitions,
+                  map_applied_conditions);
           }
         }
         else if (it->first->is_region())
-          initialize_region(it->first->as_region_node(), it->second,
+          initialize_region(it->first->as_region_node(), it->second, context,
              refinement_regions, refinement_partitions, map_applied_conditions);
         else
           initialize_partition(it->first->as_partition_node(), it->second,
-             refinement_regions, refinement_partitions, map_applied_conditions);
+              context, refinement_regions, refinement_partitions, 
+              map_applied_conditions);
       }
       // Now we can invalidate the previous refinement
-      const ContextID ctx = parent_ctx->get_context().get_id();
+      const ContextID ctx = context->get_context().get_id();
       if (!!uninitialized_fields)
       {
         const FieldMask invalidate_mask = 
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask,
-              false/*self*/, *parent_ctx, map_applied_conditions, to_release);
+              false/*self*/, *context, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
+            false/*self*/, *context, map_applied_conditions, to_release);
       // Finally propagate the new refinements up from the regions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             refinement_partitions.begin(); it !=
@@ -13020,7 +13025,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::initialize_region(RegionNode *node,const FieldMask &mask, 
+    void RefinementOp::initialize_region(RegionNode *node,
+         const FieldMask &mask, InnerContext *context, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
          std::set<RtEvent> &map_applied_conditions)
@@ -13029,7 +13035,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node->parent != NULL); // should always have a parent
 #endif
-      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
+      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node, context);
       initialize_pending(pending, mask, map_applied_conditions);
       // Parent context takes ownership here
       parent_ctx->record_pending_disjoint_complete_set(pending, mask);
@@ -13054,7 +13060,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_partition(PartitionNode *node,
-         const FieldMask &mask, 
+         const FieldMask &mask, InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
          std::set<RtEvent> &map_applied_conditions)
@@ -13075,7 +13081,8 @@ namespace Legion {
               color < index_part->total_children; color++)
         {
           RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          PendingEquivalenceSet *pending =
+            new PendingEquivalenceSet(child, context);
           initialize_pending(pending, mask, map_applied_conditions);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
@@ -13102,7 +13109,8 @@ namespace Legion {
         {
           const LegionColor color = itr->yield_color();
           RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          PendingEquivalenceSet *pending =
+            new PendingEquivalenceSet(child, context);
           initialize_pending(pending, mask, map_applied_conditions);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);

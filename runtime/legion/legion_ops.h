@@ -2358,10 +2358,12 @@ namespace Legion {
 #endif
     protected:
       void initialize_region(RegionNode *node, const FieldMask &mask,
+                             InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
                             FieldMaskSet<PartitionNode> &refinement_partitions,
                             std::set<RtEvent> &map_applied_conditions);
       void initialize_partition(PartitionNode *node, const FieldMask &mask,
+                            InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
                             FieldMaskSet<PartitionNode> &refinement_partitions,
                             std::set<RtEvent> &map_applied_conditions);

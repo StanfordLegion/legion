@@ -3225,6 +3225,12 @@ namespace Legion {
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
     public:
+      // Note this context refers to the context from which the views are
+      // created in. Normally this is the same as the context in which the
+      // equivalence set is made, but it can be from an ancestor task
+      // higher up in the task tree in the presencce of virtual mappings.
+      // It's crucial to correctness that all views stored in an equivalence
+      // set come from the same context.
       InnerContext *const context;
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
@@ -3335,11 +3341,11 @@ namespace Legion {
         PendingEquivalenceSet *const pending;
       };
     public:
-      PendingEquivalenceSet(RegionNode *region_node);
-      PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
+      PendingEquivalenceSet(RegionNode *region_node, InnerContext *context);
+      PendingEquivalenceSet(const PendingEquivalenceSet &rhs) = delete;
       ~PendingEquivalenceSet(void);
     public:
-      PendingEquivalenceSet& operator=(const PendingEquivalenceSet &rhs);
+      PendingEquivalenceSet& operator=(const PendingEquivalenceSet&) = delete;
     public:
       void record_previous(EquivalenceSet *set, const FieldMask &mask,
                            std::set<RtEvent> &applied_events);
@@ -3347,11 +3353,12 @@ namespace Legion {
                       std::set<RtEvent> &applied_events);
     public:
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
-          InnerContext *ctx, Runtime *runtime, std::set<RtEvent> &ready_events);
+                      Runtime *runtime, std::set<RtEvent> &ready_events);
       bool finalize(void);
       static void handle_defer_finalize(const void *args);
     public:
       RegionNode *const region_node;
+      InnerContext *const context;
     protected:
       EquivalenceSet *new_set;
       RtEvent clone_event;
