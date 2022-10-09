@@ -12125,14 +12125,14 @@ namespace Legion {
         assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         std::set<RtEvent> map_applied_conditions;
-        InnerContext *context = find_physical_context(0/*idx*/);
-        const ContextID ctx = context->get_context().get_id();
+        InnerContext *physical_context = find_physical_context(0/*idx*/);
+        const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         // Make a new equivalence set and record it at this node
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), local_space, local_space, 
-            region_node, context, true/*register now*/);
+            region_node, physical_context, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {
@@ -12149,7 +12149,7 @@ namespace Legion {
                 it->second, false/*forward*/, map_applied_conditions);
         }
         region_node->invalidate_refinement(ctx, refinement_mask, 
-            false/*self*/, *context, map_applied_conditions, to_release);
+            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
         region_node->record_refinement(ctx, set, refinement_mask,
                                        map_applied_conditions);
         if (!map_applied_conditions.empty())
@@ -12994,18 +12994,18 @@ namespace Legion {
               map_applied_conditions);
       }
       // Now we can invalidate the previous refinement
-      const ContextID ctx = context->get_context().get_id();
+      const ContextID ctx = parent_ctx->get_context().get_id();
       if (!!uninitialized_fields)
       {
         const FieldMask invalidate_mask = 
           get_internal_mask() - uninitialized_fields;
         if (!!invalidate_mask)
           to_refine->invalidate_refinement(ctx, invalidate_mask,
-              false/*self*/, *context, map_applied_conditions, to_release);
+              false/*self*/, *parent_ctx, map_applied_conditions, to_release);
       }
       else
         to_refine->invalidate_refinement(ctx, get_internal_mask(),
-            false/*self*/, *context, map_applied_conditions, to_release);
+            false/*self*/, *parent_ctx, map_applied_conditions, to_release);
       // Finally propagate the new refinements up from the regions
       for (FieldMaskSet<PartitionNode>::const_iterator it =
             refinement_partitions.begin(); it !=
