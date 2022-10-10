@@ -621,6 +621,8 @@ namespace Legion {
       info.op_id = prof_info->op_id;
       info.src = usage.source.id;
       info.dst = usage.target.id;
+      info.src_inst_uid.id = prof_info->id;
+      info.dst_inst_uid.id = prof_info->id2;
       info.size = usage.size;
       info.create = timeline.create_time;
       info.ready = timeline.ready_time;
@@ -637,8 +639,6 @@ namespace Legion {
         {
           info.requests.emplace_back(CopyInstInfo());
           CopyInstInfo& inst_info = info.requests.back();
-          inst_info.src_inst_id = cpinfo.inst_info[idx].src_inst_id.id;
-          inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
           inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
           inst_info.request_type = cpinfo.inst_info[idx].request_type;
           inst_info.num_hops = cpinfo.inst_info[idx].num_hops;
@@ -676,6 +676,7 @@ namespace Legion {
       FillInfo &info = fill_infos.back();
       info.op_id = prof_info->op_id;
       info.dst = usage.target.id;
+      info.dst_inst_uid.id = prof_info->id;
       info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
@@ -691,7 +692,6 @@ namespace Legion {
         {
           info.requests.emplace_back(FillInstInfo());
           FillInstInfo& inst_info = info.requests.back();
-          inst_info.dst_inst_id = cpinfo.inst_info[idx].dst_inst_id.id;
           inst_info.num_fields = cpinfo.inst_info[idx].num_fields;
         }
       }

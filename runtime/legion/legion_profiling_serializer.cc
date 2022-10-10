@@ -337,9 +337,8 @@ namespace Legion {
 
       ss << "CopyInstInfo {"
          << "id:" << COPY_INST_INFO_ID                           << delim
-         << "op_id:UniqueID:"          << sizeof(UniqueID)       << delim
-         << "src_inst:InstID:"         << sizeof(InstID)         << delim
-         << "dst_inst:InstID:"         << sizeof(InstID)         << delim
+         << "src_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
+         << "dst_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)      << delim
          << "num_fields:unsigned:"       << sizeof(unsigned)     << delim
          << "request_type:unsigned:"     << sizeof(unsigned)     << delim
@@ -364,8 +363,7 @@ namespace Legion {
 
       ss << "FillInstInfo {"
          << "id:" << FILL_INST_INFO_ID                           << delim
-         << "op_id:UniqueID:"          << sizeof(UniqueID)       << delim
-         << "dst_inst:InstID:"         << sizeof(InstID)         << delim
+         << "dst_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)      << delim
          << "num_fields:unsigned:"       << sizeof(unsigned)
          << "}" << std::endl;
@@ -921,9 +919,10 @@ namespace Legion {
     {
       int ID = COPY_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(copy_info.op_id),     sizeof(copy_info.op_id));
-      lp_fwrite(f, (char*)&(copy_inst.src_inst_id),sizeof(copy_inst.src_inst_id));
-      lp_fwrite(f, (char*)&(copy_inst.dst_inst_id),sizeof(copy_inst.dst_inst_id));
+      lp_fwrite(f, (char*)&(copy_info.src_inst_uid.id),
+          sizeof(copy_info.src_inst_uid.id));
+      lp_fwrite(f, (char*)&(copy_info.dst_inst_uid.id),
+          sizeof(copy_info.dst_inst_uid.id));
       lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
       lp_fwrite(f, (char*)&(copy_inst.num_fields),sizeof(copy_inst.num_fields));
       lp_fwrite(f, (char*)&(copy_inst.request_type),sizeof(copy_inst.request_type));
@@ -959,8 +958,8 @@ namespace Legion {
     {
       int ID = FILL_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(fill_info.op_id),     sizeof(fill_info.op_id));
-      lp_fwrite(f, (char*)&(fill_inst.dst_inst_id),sizeof(fill_inst.dst_inst_id));
+      lp_fwrite(f, (char*)&(fill_info.dst_inst_uid.id),
+          sizeof(fill_info.dst_inst_uid.id));
       lp_fwrite(f, (char*)&(fill_info.fevent),sizeof(fill_info.fevent.id));
       lp_fwrite(f, (char*)&(fill_inst.num_fields),sizeof(fill_inst.num_fields));
     }
@@ -1730,9 +1729,10 @@ namespace Legion {
                           const LegionProfInstance::CopyInfo& copy_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Copy Inst Info %llu " IDFMT " " IDFMT " " IDFMT " %u %u %u",
-                     copy_info.op_id, copy_inst.src_inst_id, copy_inst.dst_inst_id,
-                     copy_info.fevent.id, copy_inst.num_fields, copy_inst.request_type, copy_inst.num_hops);
+      log_prof.print("Prof Copy Inst Info " IDFMT " " IDFMT " " IDFMT " %u %u %u",
+                     copy_info.src_inst_uid.id, copy_info.dst_inst_uid.id,
+                     copy_info.fevent.id, copy_inst.num_fields, 
+                     copy_inst.request_type, copy_inst.num_hops);
     }
 
     //--------------------------------------------------------------------------
@@ -1758,9 +1758,8 @@ namespace Legion {
                           const LegionProfInstance::FillInfo& fill_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Fill Inst Info %llu " IDFMT " " IDFMT " %u",
-                     fill_info.op_id, fill_inst.dst_inst_id,
-                     fill_info.fevent.id, fill_inst.num_fields);
+      log_prof.print("Prof Fill Inst Info " IDFMT " " IDFMT " %u",
+          fill_info.dst_inst_uid.id, fill_info.fevent.id, fill_inst.num_fields);
     }
 
     //--------------------------------------------------------------------------

@@ -256,8 +256,6 @@ namespace Legion {
       };
       struct CopyInstInfo {
       public:
-        InstID src_inst_id;
-        InstID dst_inst_id;
         unsigned num_fields;
         unsigned num_hops;
         unsigned request_type;
@@ -266,6 +264,7 @@ namespace Legion {
       public:
         UniqueID op_id;
         MemID src, dst;
+        LgEvent src_inst_uid, dst_inst_uid;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
@@ -277,13 +276,13 @@ namespace Legion {
       };
       struct FillInstInfo {
       public:
-        InstID dst_inst_id;
         unsigned num_fields;
       };
       struct FillInfo {
       public:
         UniqueID op_id;
         MemID dst;
+        LgEvent dst_inst_uid;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
         unsigned num_requests;
