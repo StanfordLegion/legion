@@ -2256,6 +2256,7 @@ namespace Legion {
           // for every single dimension so do things untyped
           if (has_transform)
           {
+            if (r.empty()) return true;
             for (PointInRectIterator<N,T> itr(r); itr(); itr++)
               if (!bounds.contains_bounds_only(transform[DomainPoint(*itr)]))
                 return false;
@@ -2274,6 +2275,7 @@ namespace Legion {
             const DomainT<N,T> b = bounds;
             return b.contains_all(r);
           }
+          if (r.empty()) return true;
           // If we have a transform then we have to do each point separately
           switch (M)
           {
