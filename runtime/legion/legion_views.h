@@ -1763,6 +1763,13 @@ namespace Legion {
       std::atomic<void*> value;
       std::atomic<size_t> value_size;
       RtUserEvent value_ready;
+      // To help with reference counting creation on collective fill views
+      // we don't need to actually send the updates on our first active call
+      // Note that this only works the fill view will eventually becomes
+      // active on all the nodes of the collective mapping, which currently
+      // it does, but that is a higher-level invariant maintained by the
+      // fill view creation and not the fill view itself
+      bool collective_first_active;
     };
 
     /**

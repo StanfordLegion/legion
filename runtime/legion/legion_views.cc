@@ -4807,7 +4807,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         fill_op_uid(op_uid),
 #endif
-        value(NULL), value_size(0)
+        value(NULL), value_size(0), collective_first_active((map != NULL) &&
+            map->contains(local_space))
     //--------------------------------------------------------------------------
     {
       // Add an extra reference here until we receive the value update
@@ -4816,6 +4817,14 @@ namespace Legion {
       log_garbage.info("GC Fill View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        const int children = 
+          collective_mapping->count_children(owner_space, local_space);
+        if (children > 0)
+          add_base_gc_ref(REMOTE_DID_REF, NULL/*mutator*/, children);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4830,7 +4839,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         fill_op_uid(op_uid),
 #endif
-        value(malloc(size)), value_size(size)
+        value(malloc(size)), value_size(size), collective_first_active(
+          (map != NULL) && map->contains(local_space))
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4841,6 +4851,14 @@ namespace Legion {
       log_garbage.info("GC Fill View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
+      {
+        const int children = 
+          collective_mapping->count_children(owner_space, local_space);
+        if (children > 0)
+          add_base_gc_ref(REMOTE_DID_REF, NULL/*mutator*/, children);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4855,8 +4873,20 @@ namespace Legion {
     void FillView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
+      if (!collective_first_active)
+      {
+        if (!is_owner())
+        {
+          if ((collective_mapping != NULL) && 
+              collective_mapping->contains(local_space))
+            send_remote_gc_increment(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+          else
+            send_remote_gc_increment(owner_space, mutator);
+        }
+      }
+      else
+        collective_first_active = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4864,7 +4894,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
+      {
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          send_remote_gc_increment(
+             collective_mapping->get_parent(owner_space, local_space), mutator);
+        else
+          send_remote_gc_decrement(owner_space, mutator);
+      }
     }
     
     //--------------------------------------------------------------------------
