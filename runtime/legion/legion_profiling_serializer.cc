@@ -188,8 +188,6 @@ namespace Legion {
       ss << "PhysicalInstLayoutDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
          << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
-         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
-         << "inst_id:InstID:"           << sizeof(InstID)     << delim
          << "field_id:unsigned:"        << sizeof(unsigned)   << delim
          << "fspace_id:unsigned:"       << sizeof(unsigned)   << delim
          << "has_align:bool:"           << sizeof(bool)       << delim
@@ -373,7 +371,7 @@ namespace Legion {
          << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "inst_id:InstID:"          << sizeof(InstID)   << delim
          << "mem_id:MemID:"            << sizeof(MemID)    << delim
-         << "size:unsigned long long:" << sizeof(unsigned long long)
+         << "size:unsigned long long:" << sizeof(unsigned long long) << delim
          << "op_id:UniqueID:"       << sizeof(UniqueID) << delim
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
@@ -1768,7 +1766,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Inst Timeline " IDFMT " " IDFMT " " IDFMT 
-                     "%llu %llu %llu %llu %llu",
+                     " %llu %llu %llu %llu %llu",
          inst_timeline_info.inst_uid.id, inst_timeline_info.inst_id,
          inst_timeline_info.mem_id, inst_timeline_info.size,
          inst_timeline_info.op_id, inst_timeline_info.create,

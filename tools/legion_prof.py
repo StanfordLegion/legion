@@ -193,6 +193,10 @@ UINT_MAX = (1 << 64) - 1
 # prof_uid counter
 prof_uid_ctr = 0
 
+# create an empty for creating instance without initiation_op
+#  will init it with Operation(-1) later
+EMPTY_OP = None
+
 def get_prof_uid() -> int:
     global prof_uid_ctr
     prof_uid_ctr += 1
@@ -1320,11 +1324,46 @@ class ProcOperation(Base):
         cur_level = self.proc.max_levels - self.level
         return (self.proc.node_id, self.proc.proc_in_node, self.prof_uid)
 
+class OperationInstInfo(object):
+    __slots__ = ['inst_uid', 'index', 'field_id', 'instance']
+
+    @typecheck
+    def __init__(self, 
+                 inst_uid: int, index: int, 
+                 field_id: int
+    ) -> None:
+        self.inst_uid = inst_uid
+        self.index = index # which region requirement is using the instance
+        self.field_id = field_id
+        self.instance: Optional["Instance"] = None
+
+    # add instance by instance_uid
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        flag = False
+        for key, instance in instances.items():
+            if  self.inst_uid == key:
+                self.instance = instance
+                flag = True
+                break
+        if flag == False:
+            assert 0, "Operation can not find inst:" + str(hex(self.inst_uid))
+
+    # TODO: they are not used now
+    @typecheck
+    def get_short_text(self) -> str:
+        assert self.instance is not None
+        return 'inst=%s, rr index=%s, field_id=%s' % (hex(self.instance.inst_id), self.index, self.field_id)
+
+    @typecheck
+    def __repr__(self) -> str:
+        return self.get_short_text()
+
 class Operation(ProcOperation):
     __slots__ = [
         'op_id', 'kind_num', 'kind', 'is_task', 'is_meta', 'is_multi',
         'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner',
-        'parent_id', 'provenance', 'instances'
+        'parent_id', 'provenance', 'operation_inst_infos'
     ]
 
     @typecheck
@@ -1344,7 +1383,7 @@ class Operation(ProcOperation):
         self.owner = None
         self.parent_id: Optional[int] = None
         self.provenance = None
-        self.instances: List[Tuple[int, int, int, Union[None, Instance]]] = [] # inst_id, index_id, field_id and Instance
+        self.operation_inst_infos: List[OperationInstInfo] = [] # inst_uid, index_id, field_id and Instance
 
     @typecheck
     def assign_color(self, color_map: Dict[int, str]) -> None:
@@ -1379,29 +1418,23 @@ class Operation(ProcOperation):
         return False
 
     @typecheck
-    def add_instance_id(self, inst_id: int, index_id: int, field_id: int) -> None:
-        self.instances.append((inst_id, index_id, field_id, None))
+    def add_operation_inst_info(self, entry: OperationInstInfo) -> None:
+        self.operation_inst_infos.append(entry)
 
-    # add instance by instance_id
     @typeassert(instances=dict)
-    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
-        for idx, inst in enumerate(self.instances):
-            instance_obj = None
-            for key, instance in instances.items():
-                if inst[0] == key[0]:
-                    instance_obj = instance
-                    break
-            assert instance_obj is not None
-            self.instances[idx] = (inst[0], inst[1], inst[2], instance_obj)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.operation_inst_infos:
+            node.link_instance(instances)
 
     @typecheck
     def _dump_instances(self) -> Union[str, None]:
-        if len(self.instances) > 0:
-            # tmp = (str(hex(inst[0])) + "(" + str(inst[3].prof_uid) + ")" for inst in self.instances) #type: ignore
-            tmp = (str(inst[3].prof_uid) for inst in self.instances) #type: ignore
-            instances = "|".join(tmp)
-        else:
-            instances = None
+        instances = ""
+        instances_list = []
+        for node in self.operation_inst_infos:
+            assert node.instance is not None
+            instances_list.append(str(hex(node.instance.inst_id)) + "(" + str(node.instance.prof_uid) + ")")
+            # instances_list.append(str(node.instance.prof_uid))
+        instances = "|".join(instances_list)
         return instances
 
     @typecheck
@@ -1452,7 +1485,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.parent_id = op.parent_id
         if op.provenance is not None:
             self.provenance = op.provenance
-        self.instances = op.instances
+        self.operation_inst_infos = op.operation_inst_infos
 
     @typecheck
     def assign_color(self, color: Dict[int, str]) -> None:
@@ -1944,18 +1977,18 @@ class ChanOperation(Base):
 
 class CopyInstInfo(object):
     __slots__ = [
-        'src_inst_id', 'dst_inst_id', 'fevent', 'num_fields', 'request_type', 'num_hops',
+        'src_inst_uid', 'dst_inst_uid', 'fevent', 'num_fields', 'request_type', 'num_hops',
         'src_instance', 'dst_instance'
         ]
 
     @typecheck
     def __init__(self, 
-                 src_inst_id: int, dst_inst_id: int, 
+                 src_inst_uid: int, dst_inst_uid: int, 
                  fevent: int, num_fields: int, 
                  request_type: int, num_hops: int
     ) -> None:
-        self.src_inst_id = src_inst_id
-        self.dst_inst_id = dst_inst_id
+        self.src_inst_uid = src_inst_uid
+        self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
         self.num_fields = num_fields
         self.request_type = request_type
@@ -1965,33 +1998,34 @@ class CopyInstInfo(object):
 
     # add instance by instance_id
     @typeassert(instances=dict)
-    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
         src_flag = False
         dst_flag = False
         for key, instance in instances.items():
-            if  self.src_inst_id == key[0]:
+            if  self.src_inst_uid == key:
                 self.src_instance = instance
                 src_flag = True
-            if  self.dst_inst_id == key[0]:
+            if  self.dst_inst_uid == key:
                 self.dst_instance = instance
                 dst_flag = True
             if src_flag and dst_flag:
                 break
         if src_flag == False:
-            assert 0, "Copy can not find src_inst:" + str(hex(self.src_inst_id))
+            assert 0, "Copy can not find src_inst:" + str(hex(self.src_inst_uid))
         if dst_flag == False:
-            assert 0, "Copy can not find dst_inst:" + str(hex(self.dst_inst_id))
+            assert 0, "Copy can not find dst_inst:" + str(hex(self.dst_inst_uid))
 
     @typecheck
     def get_short_text(self) -> str:
-        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_inst_id), hex(self.dst_inst_id), self.num_fields, request[self.request_type], self.num_hops)
+        assert (self.src_instance is not None) and (self.dst_instance is not None) 
+        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_instance.inst_id), hex(self.dst_instance.inst_id), self.num_fields, request[self.request_type], self.num_hops)
 
     @typecheck
     def __repr__(self) -> str:
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'fevent', 'src_inst', 'dst_inst', 'num_requests', 'copy_info']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'fevent', 'src_inst', 'dst_inst', 'num_requests', 'copy_inst_infos']
     
     # FIXME: fix for python 3.8
     @typeassert(initiation_op=Operation, size=int,
@@ -2011,11 +2045,11 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.size = size
         self.fevent = fevent
         self.num_requests = num_requests
-        self.copy_info: List[CopyInstInfo] = list()
+        self.copy_inst_infos: List[CopyInstInfo] = list()
 
     @typecheck
-    def add_copy_info(self, entry: CopyInstInfo) -> None:
-        self.copy_info.append(entry)
+    def add_copy_inst_info(self, entry: CopyInstInfo) -> None:
+        self.copy_inst_infos.append(entry)
 
     @typecheck
     def get_color(self) -> str:
@@ -2024,29 +2058,29 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
+        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
         cnt = 0
-        for node in self.copy_info:
+        for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
             cnt = cnt+1
         return val
 
     @typeassert(instances=dict)
-    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
-        for node in self.copy_info:
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.copy_inst_infos:
             node.link_instance(instances)
 
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
         instances_list = []
-        for node in self.copy_info:
+        for node in self.copy_inst_infos:
             assert node.src_instance is not None
-            # instances_list.append(str(hex(node.src_inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
-            instances_list.append(str(node.src_instance.prof_uid))
+            instances_list.append(str(hex(node.src_instance.inst_id)) + "(" + str(node.src_instance.prof_uid) + ")")
+            # instances_list.append(str(node.src_instance.prof_uid))
             assert node.dst_instance is not None
-            # instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
-            instances_list.append(str(node.dst_instance.prof_uid))
+            instances_list.append(str(hex(node.dst_instance.inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            # instances_list.append(str(node.dst_instance.prof_uid))
         instances = "|".join(instances_list)
         return instances
 
@@ -2090,81 +2124,84 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
 class FillInstInfo(object):
     __slots__ = [
-        'dst_inst_id', 'fevent', 'num_fields', 'dst_instance'
+        'dst_inst_uid', 'fevent', 'num_fields', 'dst_instance'
         ]
 
     @typecheck
     def __init__(self, 
-                 dst_inst_id: int, 
+                 dst_inst_uid: int, 
                  fevent: int, num_fields: int
     ) -> None:
-        self.dst_inst_id = dst_inst_id
+        self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
         self.num_fields = num_fields
         self.dst_instance: Optional["Instance"] = None
 
     # add instance by instance_id
     @typeassert(instances=dict)
-    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
         dst_flag = False
         for key, instance in instances.items():
-            if  self.dst_inst_id == key[0]:
+            if  self.dst_inst_uid == key:
                 self.dst_instance = instance
                 dst_flag = True
-            if dst_flag:
                 break
         if dst_flag == False:
-           assert 0, "Fill can not find dst_inst:" + str(hex(self.dst_inst_id))
+           assert 0, "Fill can not find dst_inst:" + str(hex(self.dst_inst_uid))
 
     @typecheck
     def get_short_text(self) -> str:
-        return 'dst_inst=%s, fields=%s' % (hex(self.dst_inst_id), self.num_fields)
+        assert self.dst_instance is not None
+        return 'dst_inst=%s, fields=%s' % (hex(self.dst_instance.inst_id), self.num_fields)
 
     @typecheck
     def __repr__(self) -> str:
         return self.get_short_text()
 
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'fill_info']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'fevent', 'num_requests', 'fill_inst_infos']
 
     # FIXME: fix for python 3.8
     @typeassert(initiation_op=Operation,
                 create=float, ready=float, start=float, stop=float)
     def __init__(self, dst: "Memory", initiation_op: Operation, 
                  create: float, ready: float, 
-                 start: float, stop: float
+                 start: float, stop: float,
+                 fevent: int, num_requests: int
     ) -> None:
         ChanOperation.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, create, ready, start, stop)
         self.dst = dst
-        self.fill_info: List[FillInstInfo] = list()
+        self.fevent = fevent
+        self.num_requests = num_requests
+        self.fill_inst_infos: List[FillInstInfo] = list()
 
     @typecheck
-    def add_fill_info(self, entry: FillInstInfo) -> None:
-        self.fill_info.append(entry)
+    def add_fill_inst_info(self, entry: FillInstInfo) -> None:
+        self.fill_inst_infos.append(entry)
 
     def __repr__(self) -> str:
-        val = 'Fill: num reqs=' + str(len(self.fill_info))
+        val = 'Fill: num reqs=' + str(len(self.fill_inst_infos))
         cnt = 0
-        for node in self.fill_info:
+        for node in self.fill_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
             cnt = cnt+1
         return val
 
     @typeassert(instances=dict)
-    def link_instance(self, instances: Dict[Tuple[int, int], "Instance"]) -> None:
-        for node in self.fill_info:
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.fill_inst_infos:
             node.link_instance(instances)
 
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
         instances_list = []
-        for node in self.fill_info:
+        for node in self.fill_inst_infos:
             assert node.dst_instance is not None
-            # instances_list.append(str(hex(node.dst_inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
-            instances_list.append(str(node.dst_instance.prof_uid))
+            instances_list.append(str(hex(node.dst_instance.inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
+            # instances_list.append(str(node.dst_instance.prof_uid))
         instances = "|".join(instances_list)
         return instances
 
@@ -2275,23 +2312,39 @@ class MemOperation(Base):
 
 class Instance(MemOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + [
-        'inst_id', 'size', 'ispace', 'fspace', 'tree_id', 'fields',
-        'align_desc', 'dim_order_desc'
+        'inst_uid', 'inst_id', 'size', 'ispace', 'fspace', 'tree_id', 'fields',
+        'align_desc', 'dim_order_desc', 'ready'
     ]
     @typecheck
-    def __init__(self, inst_id: int, initiation_op: Operation) -> None:
+    def __init__(self, inst_uid: int) -> None:
         MemOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
 
-        self.inst_id = inst_id
-        self.size = None
+        self.inst_uid = inst_uid
+        self.inst_id = 0
+        self.size = 0
         self.ispace: List[IndexSpace] = []
         self.fspace: List[FieldSpace] = []
         self.tree_id = None
         self.fields: Dict[FieldSpace, List[Field]] = {}
         self.align_desc: Dict[FieldSpace, List[Align]] = {}
         self.dim_order_desc: List[int] = []
+
+    def add_instance_info(self, inst_id: int, 
+                          mem: "Memory", size: int,
+                          create: float, ready: float, destroy: float, 
+                          initiation_op: Operation) -> None:
+        self.inst_id = inst_id
+        self.mem = mem
+        self.size = size
+        self.create = create
+        self.ready = ready
+        self.start = ready
+        self.stop = destroy
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
 
     @typecheck
     def emit_tsv(self, 
@@ -2308,6 +2361,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         assert self.ready is not None
         assert self.create is not None
         assert self.ready == self.start
+        assert self.initiation_op is not EMPTY_OP
         inst_name = repr(self)
 
         _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
@@ -2633,7 +2687,7 @@ class Processor(object):
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
     @typecheck
-    def link_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+    def link_instances(self, instances: Dict[int, Instance]) -> None:
         for point in self.time_points:
             if point.first:
                 if isinstance(point.thing, Operation):
@@ -3075,7 +3129,7 @@ class Channel(object):
                 free_levels.add(point.thing.level)
 
     @typecheck
-    def link_instances(self, instances: Dict[Tuple[int, int], Instance]) -> None:
+    def link_instances(self, instances: Dict[int, Instance]) -> None:
         for point in self.time_points:
             if point.first:
                 if isinstance(point.thing, (Copy, Fill)):
@@ -3268,7 +3322,7 @@ class State(object):
         self.mapper_calls: Dict[int, MapperCall] = {}
         self.runtime_call_kinds: Dict[int, RuntimeCallKind] = {}
         self.runtime_calls: Dict[int, RuntimeCall] = {}
-        self.instances: Dict[Tuple[int, int], Instance] = {}
+        self.instances: Dict[int, Instance] = {}
         self.index_spaces: Dict[int, IndexSpace] = {}
         self.partitions: Dict[int, Partition] = {}
         self.logical_regions: Dict[Tuple[int, int], LogicalRegion] = {}
@@ -3299,8 +3353,6 @@ class State(object):
             "CopyInstInfo": self.log_copy_inst_info,
             "FillInfo": self.log_fill_info,
             "FillInstInfo": self.log_fill_inst_info,
-            "InstCreateInfo": self.log_inst_create,
-            "InstUsageInfo": self.log_inst_usage,
             "InstTimelineInfo": self.log_inst_timeline,
             "PartitionInfo": self.log_partition_info,
             "MapperCallInfo": self.log_mapper_call_info,
@@ -3398,22 +3450,6 @@ class State(object):
         index_part_parent = self.find_partition(parent_id)
         index_space.set_parent(index_part_parent)
 
-    # PhysicalInstRegionDesc
-    @typecheck
-    def log_physical_inst_region_desc(self, op_id: int, inst_id: int, 
-                                      ispace_id: int, fspace_id: int, 
-                                      tree_id: int
-    ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        fspace = self.find_field_space(fspace_id)
-        inst.ispace.append(self.find_index_space(ispace_id))
-        inst.fspace.append(fspace)
-        if fspace not in inst.fields:
-            inst.fields[fspace] = []
-            inst.align_desc[fspace] = []
-        inst.tree_id = tree_id
-
     # IndexSpaceSizeDesc
     @typecheck
     def log_index_space_size_desc(self, unique_id: int, 
@@ -3424,24 +3460,29 @@ class State(object):
         index_space = self.find_index_space(unique_id)
         index_space.set_size(dense_size, sparse_size, is_sparse)
 
-    # PhysicalInstDimOrderDesc
+    # PhysicalInstRegionDesc
     @typecheck
-    def log_physical_inst_layout_dim_desc(self, op_id: int, inst_id: int, 
-                                          dim: int, dim_kind: int
+    def log_physical_inst_region_desc(self, inst_uid: int, 
+                                      ispace_id: int, fspace_id: int, 
+                                      tree_id: int
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        inst.dim_order_desc.insert(dim, dim_kind)
+        inst = self.create_instance(inst_uid)
+        fspace = self.find_field_space(fspace_id)
+        inst.ispace.append(self.find_index_space(ispace_id))
+        inst.fspace.append(fspace)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
+            inst.align_desc[fspace] = []
+        inst.tree_id = tree_id
 
     # PhysicalInstLayoutDesc
     @typecheck
-    def log_physical_inst_layout_desc(self, op_id: int, inst_id: int, 
+    def log_physical_inst_layout_desc(self, inst_uid: int, 
                                       field_id: int, fspace_id: int,
                                       has_align: Union[bool, int], 
                                       eqk: int, align_desc: int
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
+        inst = self.create_instance(inst_uid)
         field = self.find_field(fspace_id, field_id)
         fspace = self.find_field_space(fspace_id)
         if fspace not in inst.fields:
@@ -3451,13 +3492,22 @@ class State(object):
         align_elem = Align(field_id, eqk, align_desc, bool(has_align))
         inst.align_desc[fspace].append(align_elem)
 
+    # PhysicalInstDimOrderDesc
+    @typecheck
+    def log_physical_inst_layout_dim_desc(self, inst_uid: int, 
+                                          dim: int, dim_kind: int
+    ) -> None:
+        inst = self.create_instance(inst_uid)
+        inst.dim_order_desc.insert(dim, dim_kind)
+
     # PhysicalInstanceUsage
     @typecheck
-    def log_physical_inst_usage(self, inst_id: int, op_id: int, 
+    def log_physical_inst_usage(self, inst_uid: int, op_id: int, 
                                 index_id: int, field_id: int
     ) -> None:
         op = self.find_op(op_id)
-        op.add_instance_id(inst_id, index_id, field_id)
+        entry = self.create_operation_inst_info(inst_uid, index_id, field_id)
+        op.add_operation_inst_info(entry)
         # assert instance is not None
         # print("log inst usage", hex(inst_id), op_id, index_id, field_id)
 
@@ -3532,13 +3582,15 @@ class State(object):
 
     # CopyInstInfo
     @typecheck
-    def log_copy_inst_info(self, op_id: int, src_inst: int, dst_inst: int, 
+    def log_copy_inst_info(self, src_inst: int, dst_inst: int, 
                            fevent: int, num_fields: int, 
                            request_type: int, num_hops: int
     ) -> None:
+        # src_inst and dst_inst are inst_uid
         cpy = self.find_copy(fevent)
+        assert(src_inst != 0) and (dst_inst != 0)
         entry = self.create_copy_inst_info(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
-        cpy.add_copy_info(entry)
+        cpy.add_copy_inst_info(entry)
 
     @typecheck
     def add_fill_map(self, fevent: int, fill: Fill) -> None:
@@ -3555,7 +3607,7 @@ class State(object):
     ) -> None:
         op = self.find_op(op_id)
         dst = self.find_memory(dst)
-        fill = self.create_fill(dst, op, create, ready, start, stop)
+        fill = self.create_fill(dst, op, create, ready, start, stop, fevent, num_requests)
         self.add_fill_map(fevent,fill)
         if stop > self.last_time:
             self.last_time = stop
@@ -3564,50 +3616,27 @@ class State(object):
 
     # FillInstInfo
     @typecheck
-    def log_fill_inst_info(self, op_id: int, dst_inst: int, 
+    def log_fill_inst_info(self, dst_inst: int, 
                            fevent: int, num_fields: int
     ) -> None:
+        # src_inst and dst_inst are inst_uid
         fill = self.find_fill(fevent)
         entry = self.create_fill_inst_info(dst_inst, fevent, num_fields)
-        fill.add_fill_info(entry)
-
-    # InstCreateInfo
-    @typecheck
-    def log_inst_create(self, op_id: int, inst_id: int, 
-                        create: float
-    ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        # don't overwrite if we have already captured the (more precise)
-        #  timeline info
-        if inst.stop is None:
-            inst.start = create
-
-    # InstUsageInfo
-    @typecheck
-    def log_inst_usage(self, op_id: int, inst_id: int, 
-                       mem_id: int, size: int
-    ) -> None:
-        op = self.find_op(op_id)
-        mem = self.find_memory(mem_id)
-        inst = self.create_instance(inst_id, op)
-        inst.mem = mem
-        inst.size = size
-        mem.add_instance(inst)
+        fill.add_fill_inst_info(entry)
 
     # InstTimelineInfo
     @typecheck
-    def log_inst_timeline(self, op_id: int, inst_id: int, 
+    def log_inst_timeline(self, inst_uid: int, inst_id: int,
+                          mem_id: int, size: int, op_id: int,
                           create: float, ready: float, destroy: float
     ) -> None:
         op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        inst.create = create
-        inst.ready = ready
-        inst.start = ready
-        inst.stop = destroy
+        inst = self.create_instance(inst_uid)
+        mem = self.find_memory(mem_id)
+        inst.add_instance_info(inst_id, mem, size, create, ready, destroy, op)
         if destroy > self.last_time:
-            self.last_time = destroy 
+            self.last_time = destroy
+        mem.add_instance(inst)
 
     # PartitionInfo
     @typecheck
@@ -4062,6 +4091,13 @@ class State(object):
         return meta
 
     @typecheck
+    def create_operation_inst_info(self, inst_uid: int, 
+                                   index_id: int, field_id: int
+    ) -> OperationInstInfo:
+      operation_inst_info = OperationInstInfo(inst_uid, index_id, field_id)
+      return operation_inst_info  
+
+    @typecheck
     def create_copy(self, src: Memory, dst: Memory, 
                     op: Operation, size: int, 
                     create: float, ready: float, 
@@ -4078,15 +4114,16 @@ class State(object):
                               fevent: int, num_fields: int, 
                               request_type: int, num_hops: int
     ) -> CopyInstInfo:
-        copyinfo =  CopyInstInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
-        return copyinfo
+        copy_inst_info =  CopyInstInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
+        return copy_inst_info
 
     @typecheck
     def create_fill(self, dst: Memory, op: Operation, 
                     create: float, ready: float, 
-                    start: float, stop: float
+                    start: float, stop: float,
+                    fevent: int, num_requests: int
     ) -> Fill:
-        fill = Fill(dst, op, create, ready, start, stop)
+        fill = Fill(dst, op, create, ready, start, stop, fevent, num_requests)
         # update prof_uid map
         self.prof_uid_map[fill.prof_uid] = fill
         return fill
@@ -4095,8 +4132,8 @@ class State(object):
     def create_fill_inst_info(self, dst_inst: int, 
                               fevent: int, num_fields: int
     ) -> FillInstInfo:
-        fillinfo =  FillInstInfo(dst_inst, fevent, num_fields)
-        return fillinfo
+        fill_inst_info =  FillInstInfo(dst_inst, fevent, num_fields)
+        return fill_inst_info
 
     @typecheck
     def create_deppart(self, part_op: int, op: Operation, 
@@ -4109,11 +4146,11 @@ class State(object):
         return deppart
 
     @typecheck
-    def create_instance(self, inst_id: int, op: Operation) -> Instance:
-        # neither instance id nor op id are unique on their own
-        key = (inst_id, op.op_id)
+    def create_instance(self, inst_uid: int) -> Instance:
+        # neither instance uid is unique
+        key = inst_uid
         if key not in self.instances:
-            inst = Instance(inst_id, op)
+            inst = Instance(inst_uid)
             self.instances[key] = inst
             # update prof_uid map
             self.prof_uid_map[inst.prof_uid] = inst
@@ -4123,8 +4160,8 @@ class State(object):
 
     # Not used?
     @typecheck
-    def find_instance(self, inst_id: int, op_id: int) -> Union[Instance, None]:
-        key = (inst_id, op_id)
+    def find_instance(self, inst_uid: int) -> Union[Instance, None]:
+        key = inst_uid
         if key not in self.instances:
             return None
         return self.instances[key]
@@ -5320,6 +5357,9 @@ def main() -> None:
             state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
+    EMPTY_OP = Operation(-1)
+    # reset prof_uid to 0
+    prof_uid_ctr = 0
     start = time.time()
     main()
     end = time.time()
