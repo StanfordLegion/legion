@@ -5408,10 +5408,14 @@ namespace Legion {
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
                                           false/*fill*/, total_copies);
-      // TODO: need to log unique IDs for instances here
+      // TODO: need to log unique IDs for instances here for copy indirections
+      // The code right now is only correct for straight copy across
       if (runtime->profiler != NULL)
         runtime->profiler->add_copy_request(requests, op,
-            LgEvent::NO_LG_EVENT, LgEvent::NO_LG_EVENT, total_copies);
+             src_unique_events.empty() ? LgEvent::NO_LG_EVENT :
+             src_unique_events.back(),
+             dst_unique_events.empty() ? LgEvent::NO_LG_EVENT :
+             dst_unique_events.back(), total_copies);
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations
