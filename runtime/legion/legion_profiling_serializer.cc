@@ -649,7 +649,8 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_REGION_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_uid.id), sizeof(LgEvent));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_uid.id), 
+                sizeof(phy_instance_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.ispace_id), sizeof(IDType));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.fspace_id), sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.tree_id), sizeof(unsigned));
@@ -664,7 +665,7 @@ namespace Legion {
       int ID = PHYSICAL_INST_LAYOUT_DIM_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_uid.id),
-                sizeof(LgEvent));
+                sizeof(phy_instance_dim_order_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.dim),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.k),
@@ -680,7 +681,7 @@ namespace Legion {
       int ID = PHYSICAL_INST_LAYOUT_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_uid.id),
-                sizeof(LgEvent));
+                sizeof(phy_instance_layout_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.fspace_id),
@@ -700,7 +701,7 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_USAGE_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(usage.inst_uid.id), sizeof(LgEvent));
+      lp_fwrite(f, (char*)&(usage.inst_uid.id), sizeof(usage.inst_uid.id));
       lp_fwrite(f, (char*)&(usage.index), sizeof(unsigned));
       lp_fwrite(f, (char*)&(usage.field), sizeof(unsigned));
     }
@@ -987,6 +988,8 @@ namespace Legion {
                 sizeof(inst_create_info.op_id));
       lp_fwrite(f, (char*)&(inst_create_info.inst_id), 
                 sizeof(inst_create_info.inst_id));
+      lp_fwrite(f, (char*)&(inst_create_info.inst_uid.id), 
+                sizeof(inst_create_info.inst_uid.id));
       lp_fwrite(f, (char*)&(inst_create_info.create),  
                 sizeof(inst_create_info.create));
 #ifdef LEGION_PROF_PROVENANCE
@@ -1003,7 +1006,7 @@ namespace Legion {
       int ID = INST_USAGE_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(inst_usage_info.inst_uid.id),
-                sizeof(inst_usage_info.inst_uid));
+                sizeof(inst_usage_info.inst_uid.id));
       lp_fwrite(f, (char*)&(inst_usage_info.mem_id),  
                 sizeof(inst_usage_info.mem_id));
       lp_fwrite(f, (char*)&(inst_usage_info.size),    
@@ -1806,13 +1809,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Inst Create %llu " IDFMT " %llu " IDFMT "", 
-                     inst_create_info.op_id, inst_create_info.inst_id, 
+      log_prof.print("Prof Inst Create %llu " IDFMT " " IDFMT " %llu " IDFMT "", 
+                     inst_create_info.op_id, inst_create_info.inst_id,
+                     inst_create_info.inst_uid.id,
                      inst_create_info.create, inst_create_info.provenance.id);
 #else
-      log_prof.print("Prof Inst Create %llu " IDFMT " %llu", 
+      log_prof.print("Prof Inst Create %llu " IDFMT " " IDFMT " %llu", 
                      inst_create_info.op_id, inst_create_info.inst_id, 
-                     inst_create_info.create);
+                     inst_create_info.inst_uid.id, inst_create_info.create);
 #endif
     }
 
