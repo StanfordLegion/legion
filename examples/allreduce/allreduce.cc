@@ -152,15 +152,17 @@ public:
   CollectiveInstanceMapper(Mapping::MapperRuntime *rt, Machine machine, 
                            Processor local, const char *mapper_name)
     : DefaultMapper(rt, machine, local, mapper_name) { }
-  virtual void default_policy_select_constraints(Mapping::MapperContext ctx,
-      LayoutConstraintSet &constraints, Memory target_memory,
-      const RegionRequirement &req)
+
+  virtual void map_task(const Mapping::MapperContext ctx,
+                        const Task& task,
+                        const Mapping::Mapper::MapTaskInput& input,
+                              Mapping::Mapper::MapTaskOutput& output)
   {
-    // Do the base call, and then make all instances collective instances
-    DefaultMapper::default_policy_select_constraints(ctx, constraints,
-                                                     target_memory, req);
-    // Now make this a collective instance
-    constraints.specialized_constraint.collective = true;
+    // Do the base mapper call and look for collective instances
+    DefaultMapper::map_task(ctx, task, input, output);
+    if ((task.task_id == REDUCE_FIELD_TASK_ID) ||
+        (task.task_id == READ_FIELD_TASK_ID))
+      output.check_collective_regions.insert(0);
   }
 };
 

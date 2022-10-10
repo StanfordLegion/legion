@@ -90,7 +90,7 @@ namespace Legion {
       virtual bool initialize_op_tracing(Operation *op,
                      const std::vector<StaticDependence> *dependences,
                      const LogicalTraceInfo *trace_info) = 0;
-      virtual void register_operation(Operation *op, GenerationID gen) = 0; 
+      virtual size_t register_operation(Operation *op, GenerationID gen) = 0;
       virtual void record_dependence(Operation *target, GenerationID target_gen,
                                 Operation *source, GenerationID source_gen) = 0;
       virtual void record_region_dependence(
@@ -113,7 +113,6 @@ namespace Legion {
     public:
       bool has_physical_trace(void) { return physical_trace != NULL; }
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
-      void register_physical_only(Operation *op);
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
@@ -154,8 +153,6 @@ namespace Legion {
       std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
-      size_t last_memoized;
-      size_t physical_op_count;
       bool blocking_call_observed;
       bool has_intermediate_ops;
       bool fixed;
@@ -191,7 +188,7 @@ namespace Legion {
       virtual bool initialize_op_tracing(Operation *op,
                               const std::vector<StaticDependence> *dependences,
                               const LogicalTraceInfo *trace_info);
-      virtual void register_operation(Operation *op, GenerationID gen); 
+      virtual size_t register_operation(Operation *op, GenerationID gen);
       virtual void record_dependence(Operation *target,GenerationID target_gen,
                                      Operation *source,GenerationID source_gen);
       virtual void record_region_dependence(
@@ -255,7 +252,7 @@ namespace Legion {
                           const LogicalTraceInfo *trace_info);
       virtual bool handles_region_tree(RegionTreeID tid) const;
       // Called by analysis thread
-      virtual void register_operation(Operation *op, GenerationID gen);
+      virtual size_t register_operation(Operation *op, GenerationID gen);
       virtual void record_dependence(Operation *target,GenerationID target_gen,
                                      Operation *source,GenerationID source_gen);
       virtual void record_region_dependence(
@@ -314,9 +311,7 @@ namespace Legion {
     public:
       TraceOp& operator=(const TraceOp &rhs);
     public:
-      virtual void execute_dependence_analysis(void);
-    protected:
-      LegionTrace *local_trace;
+      virtual bool is_tracing_fence(void) const override { return true; }
     };
 
     /**
@@ -483,6 +478,8 @@ namespace Legion {
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs) = delete;
     public:
+      bool check_memoize_consensus(size_t index);
+      void reset_last_memoized(void);
       void clear_cached_template(void) { current_template = NULL; }
       void check_template_preconditions(TraceReplayOp *op,
                                         std::set<RtEvent> &applied_events);
@@ -493,8 +490,9 @@ namespace Legion {
                                  std::vector<int> &viable_templates);
       void select_template(unsigned template_index);
     public:
-      PhysicalTemplate* get_current_template(void) { return current_template; }
-      bool has_any_templates(void) const { return !templates.empty(); }
+      inline PhysicalTemplate* get_current_template(void) 
+        { return current_template; }
+      inline bool has_any_templates(void) const { return !templates.empty(); }
     public:
       void record_previous_template_completion(ApEvent template_completion)
         { previous_template_completion = template_completion; }
@@ -530,6 +528,7 @@ namespace Legion {
       std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
       unsigned new_template_count;
+      size_t last_memoized;
     private:
       ApEvent previous_template_completion;
       ApEvent execution_fence_event;
@@ -570,7 +569,7 @@ namespace Legion {
                       const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
-      void invalidate_all_but(LogicalView *except,
+      void invalidate_all_but(LogicalView*except,
                               IndexSpaceExpression *expr,
                               const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
@@ -923,7 +922,7 @@ namespace Legion {
       void apply_postcondition(ReplTraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
     public:
-      void register_operation(Operation *op);
+      void register_operation(MemoizableOp *op);
       void execute_slice(unsigned slice_idx, bool recurrent_replay);
     public:
       virtual void issue_summary_operations(InnerContext* context,
@@ -944,6 +943,7 @@ namespace Legion {
       inline bool is_replayable(void) const { return replayable.replayable; }
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
+      inline void record_no_consensus(void) { has_no_consensus = true; }
     public:
       virtual bool is_recording(void) const { return recording.load(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
@@ -952,7 +952,7 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
                                  std::set<RtEvent> &applied);
     public:
-      void record_premap_output(Memoizable *memo,
+      void record_premap_output(MemoizableOp *memo,
                                 const Mapper::PremapTaskOutput &output,
                                 std::set<RtEvent> &applied_events);
       void get_premap_output(IndexTask *task,
@@ -974,8 +974,10 @@ namespace Legion {
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
     public:
-      virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
-                                         const TraceLocalID &tlid);
+      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
+                                           const TraceLocalID &tlid);
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                          const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
@@ -993,6 +995,9 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::vector<ApEvent>& rhs,
+                                       const TraceLocalID &tlid);
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
@@ -1075,8 +1080,9 @@ namespace Legion {
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs,
                                             const TraceLocalID &tlid);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
-      virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
+      virtual void record_complete_replay(const TraceLocalID &tlid,
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied_events);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events); 
@@ -1161,7 +1167,7 @@ namespace Legion {
     protected:
       static constexpr unsigned NO_INDEX = UINT_MAX;
     protected:
-      std::deque<std::map<TraceLocalID,Memoizable*> > operations;
+      std::deque<std::map<TraceLocalID,MemoizableOp*> > operations;
       std::deque<std::pair<ApEvent,bool/*recurrent*/> > pending_replays;
       // Pair in memo_entries is <entry index, Operation::Kind>
       std::map<TraceLocalID,std::pair<unsigned,unsigned> > memo_entries;
@@ -1170,6 +1176,7 @@ namespace Legion {
       CachedMappings cached_mappings;
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       bool has_virtual_mapping;
+      bool has_no_consensus;
     protected:
       GetTermEvent                    *last_fence;
     protected:
@@ -1208,7 +1215,7 @@ namespace Legion {
       std::map<unsigned,InstUsers>     src_indirect_insts;
       std::map<unsigned,InstUsers>     dst_indirect_insts;
       std::vector<IssueAcross*>        across_copies;
-      std::map<DistributedID,InstanceView*> recorded_views;
+      std::map<DistributedID,IndividualView*> recorded_views;
       std::set<IndexSpaceExpression*>  recorded_expressions;
     protected:
       // Capture the names of all the instances that are mutated by this trace
@@ -1231,6 +1238,7 @@ namespace Legion {
       friend class Instruction;
 #ifdef DEBUG_LEGION
       friend class GetTermEvent;
+      friend class ReplayMapping;
       friend class CreateApUserEvent;
       friend class TriggerEvent;
       friend class MergeEvent;
@@ -1239,7 +1247,6 @@ namespace Legion {
       friend class IssueFill;
       friend class IssueAcross;
       friend class SetOpSyncEvent;
-      friend class SetEffects;
       friend class CompleteReplay;
       friend class AcquireReplay;
       friend class ReleaseReplay;
@@ -1491,6 +1498,7 @@ namespace Legion {
     enum InstructionKind
     {
       GET_TERM_EVENT = 0,
+      REPLAY_MAPPING,
       CREATE_AP_USER_EVENT,
       TRIGGER_EVENT,
       MERGE_EVENT,
@@ -1515,13 +1523,14 @@ namespace Legion {
       virtual ~Instruction(void) {};
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay) = 0;
       typedef std::map<TraceLocalID,std::pair<unsigned,unsigned> > MemoEntries;
       virtual std::string to_string(const MemoEntries &memo_entires) = 0;
 
       virtual InstructionKind get_kind(void) = 0;
       virtual GetTermEvent* as_get_term_event(void) { return NULL; }
+      virtual ReplayMapping* as_replay_mapping(void) { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void) { return NULL; }
       virtual TriggerEvent* as_trigger_event(void) { return NULL; }
       virtual MergeEvent* as_merge_event(void) { return NULL; }
@@ -1550,13 +1559,38 @@ namespace Legion {
                    const TraceLocalID& rhs, bool fence);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
       virtual InstructionKind get_kind(void)
         { return GET_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      friend class ShardedPhysicalTemplate;
+      unsigned lhs;
+    };
+
+    /**
+     * \class ReplayMapping
+     * This instruction has the following semantics:
+     *   events[lhs] = operations[owner].replay_mapping()
+     */
+    class ReplayMapping : public Instruction {
+    public:
+      ReplayMapping(PhysicalTemplate& tpl, unsigned lhs,
+                    const TraceLocalID& rhs);
+      virtual void execute(std::vector<ApEvent> &events,
+                           std::map<unsigned,ApUserEvent> &user_events,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
+                           const bool recurrent_replay);
+      virtual std::string to_string(const MemoEntries &memo_entires);
+
+      virtual InstructionKind get_kind(void)
+        { return REPLAY_MAPPING; }
+      virtual ReplayMapping* as_replay_mapping(void)
         { return this; }
     private:
       friend class PhysicalTemplate;
@@ -1575,7 +1609,7 @@ namespace Legion {
                         const TraceLocalID &owner);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1599,7 +1633,7 @@ namespace Legion {
                    const TraceLocalID &owner);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1625,7 +1659,7 @@ namespace Legion {
                  const TraceLocalID &owner);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1650,7 +1684,7 @@ namespace Legion {
                             const TraceLocalID &owner);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1685,7 +1719,7 @@ namespace Legion {
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1731,7 +1765,7 @@ namespace Legion {
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1771,7 +1805,7 @@ namespace Legion {
       virtual ~IssueAcross(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1800,7 +1834,7 @@ namespace Legion {
                      const TraceLocalID& rhs);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1814,29 +1848,6 @@ namespace Legion {
     };
 
     /**
-     * \class SetEffects
-     * This instruction has the following semantics:
-     *   operations[lhs].set_effects_postcondition(events[rhs])
-     */
-    class SetEffects : public Instruction {
-    public:
-      SetEffects(PhysicalTemplate& tpl, const TraceLocalID& lhs, unsigned rhs);
-      virtual void execute(std::vector<ApEvent> &events,
-                           std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
-                           const bool recurrent_replay);
-      virtual std::string to_string(const MemoEntries &memo_entires);
-
-      virtual InstructionKind get_kind(void)
-        { return SET_EFFECTS; }
-      virtual SetEffects* as_set_effects(void)
-        { return this; }
-    private:
-      friend class PhysicalTemplate;
-      unsigned rhs;
-    };
-
-    /**
      * \class CompleteReplay
      * This instruction has the following semantics:
      *   operations[lhs]->complete_replay(events[rhs])
@@ -1844,10 +1855,10 @@ namespace Legion {
     class CompleteReplay : public Instruction {
     public:
       CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
-                     unsigned rhs);
+                     unsigned pre, unsigned post);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1857,7 +1868,7 @@ namespace Legion {
         { return this; }
     private:
       friend class PhysicalTemplate;
-      unsigned rhs;
+      unsigned pre, post;
     };
 
     /**
@@ -1872,7 +1883,7 @@ namespace Legion {
                      size_t arrival_count, bool managed);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 
@@ -1903,7 +1914,7 @@ namespace Legion {
       virtual ~BarrierAdvance(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
-                           std::map<TraceLocalID,Memoizable*> &operations,
+                           std::map<TraceLocalID,MemoizableOp*> &operations,
                            const bool recurrent_replay);
       virtual std::string to_string(const MemoEntries &memo_entires);
 

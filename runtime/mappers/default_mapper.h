@@ -483,8 +483,6 @@ namespace Legion {
       MemoryConstraint find_memory_constraint(const MapperContext ctx,
                                               const Task& task, VariantID vid,
                                               unsigned index);
-      static void filter_collective_instances(
-                                    std::vector<PhysicalInstance> &instances);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>

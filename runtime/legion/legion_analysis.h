@@ -167,32 +167,33 @@ namespace Legion {
      */
     struct UniqueInst {
     public:
-      UniqueInst(void) : view_did(0) { }
-      UniqueInst(InstanceView *v, const DomainPoint &point);
-      UniqueInst(DistributedID did, const DomainPoint &point);
+      UniqueInst(void);
+      UniqueInst(IndividualView *v);
     public:
       inline bool operator<(const UniqueInst &rhs) const
       {
-        if (view_did < rhs.view_did) return true;
-        if (view_did > rhs.view_did) return false;
-        return (collective_point < rhs.collective_point);
+        return (inst_did < rhs.inst_did);
       }
       inline bool operator==(const UniqueInst &rhs) const
       {
-        if (view_did != rhs.view_did) return false;
-        return (collective_point == rhs.collective_point);
+        return (inst_did == rhs.inst_did);
       }
       inline bool operator!=(const UniqueInst &rhs) const
         { return !this->operator==(rhs); }
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-      AddressSpaceID get_analysis_space(Runtime *runtime) const;
+      AddressSpaceID get_analysis_space(void) const;
     public:
+      // Distributed ID for the physical manager
+      DistributedID inst_did;
       // Distributed ID for the view to the instance
       DistributedID view_did;
-      // Point for the case of collective instances
-      DomainPoint collective_point;
+      // Logical owner space for the view
+      AddressSpaceID analysis_space;
+#ifdef LEGION_SPY
+      RegionTreeID tid;
+#endif
     };
 
     /**
@@ -213,8 +214,10 @@ namespace Legion {
                                  std::set<RtEvent> &applied) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
     public:
-      virtual void record_get_term_event(ApEvent lhs,
+      virtual void record_completion_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                           const TraceLocalID &tlid, bool register_memo) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid) = 0;
@@ -232,6 +235,9 @@ namespace Legion {
                                        const TraceLocalID &tlid) = 0;
       virtual void record_merge_events(ApEvent &lhs,
                                        const std::vector<ApEvent>& rhs,
+                                       const TraceLocalID &tlid) = 0;
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
                                        const TraceLocalID &tlid) = 0;
       // This collective barrier is managed by the operations and is auto
       // refreshed by the operations on each replay
@@ -313,10 +319,9 @@ namespace Legion {
                          const std::vector<size_t> &future_size_bounds,
                          const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
-      virtual void record_set_effects(const TraceLocalID &tlid, 
-                                      ApEvent &rhs) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
-                                          ApEvent rhs) = 0;
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied) = 0;
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events) = 0;
@@ -331,18 +336,19 @@ namespace Legion {
                                 public Collectable {
     public:
       enum RemoteTraceKind {
-        REMOTE_TRACE_RECORD_GET_TERM,
+        REMOTE_TRACE_RECORD_COMPLETION_EVENT,
+        REMOTE_TRACE_RECORD_REPLAY_MAPPING,
         REMOTE_TRACE_REQUEST_TERM_EVENT,
         REMOTE_TRACE_CREATE_USER_EVENT,
         REMOTE_TRACE_TRIGGER_EVENT,
         REMOTE_TRACE_MERGE_EVENTS,
+        REMOTE_TRACE_MERGE_PRED_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_INSTS,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_INST,
         REMOTE_TRACE_RECORD_OP_INST,
         REMOTE_TRACE_SET_OP_SYNC,
-        REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
         REMOTE_TRACE_ACQUIRE_RELEASE,
@@ -365,8 +371,10 @@ namespace Legion {
                                  std::set<RtEvent> &applied);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
-      virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
-                                         const TraceLocalID &tlid);
+      virtual void record_completion_event(ApEvent lhs, unsigned op_kind,
+                                           const TraceLocalID &tlid);
+      virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                           const TraceLocalID &tlid, bool register_memo);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &hs, 
                                                const TraceLocalID &tlid);
@@ -384,6 +392,9 @@ namespace Legion {
                                        const TraceLocalID &tlid);
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::vector<ApEvent>& rhs,
+                                       const TraceLocalID &tlid);
+      virtual void record_merge_events(PredEvent &lhs,
+                                       PredEvent e1, PredEvent e2,
                                        const TraceLocalID &tlid);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
@@ -460,8 +471,9 @@ namespace Legion {
                           const std::vector<size_t> &future_size_bounds,
                           const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
-      virtual void record_set_effects(const TraceLocalID &tlid, ApEvent &rhs);
-      virtual void record_complete_replay(const TraceLocalID &tlid,ApEvent rhs);
+      virtual void record_complete_replay(const TraceLocalID &tlid,
+                                          ApEvent pre, ApEvent post,
+                                          std::set<RtEvent> &applied);
       virtual void record_reservations(const TraceLocalID &tlid,
                                 const std::map<Reservation,bool> &locks,
                                 std::set<RtEvent> &applied_events);
@@ -491,16 +503,21 @@ namespace Legion {
      */
     struct TraceInfo {
     public:
-      explicit TraceInfo(Operation *op, bool initialize = false);
-      TraceInfo(SingleTask *task, RemoteTraceRecorder *rec, 
-                bool initialize = false); 
+      explicit TraceInfo(Operation *op);
+      TraceInfo(SingleTask *task, RemoteTraceRecorder *rec); 
       TraceInfo(const TraceInfo &info);
       ~TraceInfo(void);
     protected:
       TraceInfo(PhysicalTraceRecorder *rec,
                 const TraceLocalID &tlid);
     public:
-      inline void request_term_event(ApUserEvent &term_event)
+      inline void record_replay_mapping(ApEvent lhs, unsigned op_kind,
+                                        bool register_memo) const
+        {
+          base_sanity_check();
+          rec->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+        }
+      inline void request_term_event(ApUserEvent &term_event) const
         {
           base_sanity_check();
           rec->request_term_event(term_event);
@@ -514,6 +531,12 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_trigger_event(result, rhs, tlid);
+        }
+      inline void record_merge_events(PredEvent &result,
+                                      PredEvent e1, PredEvent e2) const
+        {
+          base_sanity_check();
+          rec->record_merge_events(result, e1, e2, tlid);
         }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
@@ -573,15 +596,11 @@ namespace Legion {
           rec->record_mapper_output(tlid, output, physical_instances,
                             future_size_bounds, coordinates, applied);
         }
-      inline void record_set_effects(ApEvent &rhs) const
+      inline void record_complete_replay(ApEvent pre, ApEvent post,
+                                         std::set<RtEvent> &applied) const
         {
           base_sanity_check();
-          rec->record_set_effects(tlid, rhs);
-        }
-      inline void record_complete_replay(ApEvent ready_event) const
-        {
-          base_sanity_check();
-          rec->record_complete_replay(tlid, ready_event);
+          rec->record_complete_replay(tlid, pre, post, applied);
         }
       inline void record_reservations(const TraceLocalID &tlid,
                       const std::map<Reservation,bool> &reservations,
@@ -607,7 +626,6 @@ namespace Legion {
           assert(rec->is_recording());
 #endif
         }
-      void record_get_term_event(Memoizable *memo);
       static PhysicalTraceRecorder* init_recorder(Operation *op);
       static TraceLocalID init_tlid(Operation *op);
     protected:
@@ -624,7 +642,7 @@ namespace Legion {
      */
     struct PhysicalTraceInfo : public TraceInfo {
     public:
-      PhysicalTraceInfo(Operation *op, unsigned index, bool init);
+      PhysicalTraceInfo(Operation *op, unsigned index);
       PhysicalTraceInfo(const TraceInfo &info, unsigned index,
                         bool update_validity = true);
       // Weird argument order to help the compiler avoid ambiguity
@@ -1168,8 +1186,7 @@ namespace Legion {
     public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
-      InstanceRef(InstanceManager *manager, const FieldMask &valid_fields,
-                  ApEvent ready_event = ApEvent::NO_AP_EVENT);
+      InstanceRef(InstanceManager *manager, const FieldMask &valid_fields);
       ~InstanceRef(void);
     public:
       InstanceRef& operator=(const InstanceRef &rhs);
@@ -1178,8 +1195,6 @@ namespace Legion {
       bool operator!=(const InstanceRef &rhs) const;
     public:
       inline bool has_ref(void) const { return (manager != NULL); }
-      inline ApEvent get_ready_event(void) const { return ready_event; }
-      inline void set_ready_event(ApEvent ready) { ready_event = ready; }
       inline InstanceManager* get_manager(void) const { return manager; }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
@@ -1197,7 +1212,7 @@ namespace Legion {
       void remove_valid_reference(ReferenceSource source,
                                   ReferenceMutator *mutator) const;
     public:
-      Memory get_memory(const DomainPoint &point) const;
+      Memory get_memory(void) const;
       PhysicalManager* get_physical_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;
@@ -1212,7 +1227,6 @@ namespace Legion {
       void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
     protected:
       FieldMask valid_fields; 
-      ApEvent ready_event;
       InstanceManager *manager;
       bool local;
     };
@@ -1282,8 +1296,6 @@ namespace Legion {
                                 ReferenceMutator *mutator) const;
       void remove_valid_references(ReferenceSource source,
                                    ReferenceMutator *mutator) const;
-    public:
-      void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -1422,20 +1434,17 @@ namespace Legion {
       };
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
-        CopyUpdate(InstanceView *src, const FieldMask &mask,
-                   const DomainPoint &src_point,
+        CopyUpdate(InstanceView *src, PhysicalManager *man,
+                   const FieldMask &mask,
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
                    CopyAcrossHelper *helper = NULL)
           : Update(expr, mask, helper), 
-            source(src), point(src_point), redop(red) { }
+            source(src), src_man(man), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
-        CopyUpdate(const CopyUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
-            source(rhs.source), redop(rhs.redop) { assert(false); }
-        CopyUpdate& operator=(const CopyUpdate &rhs)
-          { assert(false); return *this; }
+        CopyUpdate(const CopyUpdate &rhs) = delete;
+        CopyUpdate& operator=(const CopyUpdate &rhs) = delete;
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
@@ -1444,22 +1453,19 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
-        const DomainPoint point; // which point instance in collective instance
+        PhysicalManager *const src_man; // which source manager for collectives
         const ReductionOpID redop;
       };
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
       public:
         FillUpdate(FillView *src, const FieldMask &mask,
-                   IndexSpaceExpression *expr,
+                   IndexSpaceExpression *expr, PredEvent guard,
                    CopyAcrossHelper *helper = NULL)
-          : Update(expr, mask, helper), source(src) { }
+          : Update(expr, mask, helper), source(src), fill_guard(guard) { }
         virtual ~FillUpdate(void) { }
       private:
-        FillUpdate(const FillUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper),
-            source(rhs.source) { assert(false); }
-        FillUpdate& operator=(const FillUpdate &rhs)
-          { assert(false); return *this; }
+        FillUpdate(const FillUpdate &rhs) = delete;
+        FillUpdate& operator=(const FillUpdate &rhs) = delete;
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
@@ -1468,44 +1474,54 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         FillView *const source;
+        // Unlike copies, because of nested predicated fill operations,
+        // then fills can have their own predication guard different
+        // from the base predicate guard for the aggregator
+        const PredEvent fill_guard;
       };
       typedef LegionMap<ApEvent,FieldMaskSet<Update> > EventFieldUpdates;
     public:
-      CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
+      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis *analysis,
                          CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
-      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
-                         unsigned src_idx, unsigned dst_idx,
+      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis *analysis,
+                         unsigned src_index, unsigned dst_idx,
                          CopyFillGuard *previous, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                          // Used only in the case of copy-across analyses
                          RtEvent alternate_pre = RtEvent::NO_RT_EVENT);
-      CopyFillAggregator(const CopyFillAggregator &rhs);
+      CopyFillAggregator(const CopyFillAggregator &rhs) = delete;
       virtual ~CopyFillAggregator(void);
     public:
-      CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
+      CopyFillAggregator& operator=(const CopyFillAggregator &rhs) = delete;
     public:
       void record_update(InstanceView *dst_view,
+                          PhysicalManager *dst_man,
                           LogicalView *src_view,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL); 
       void record_updates(InstanceView *dst_view, 
+                          PhysicalManager *dst_man,
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_partial_updates(InstanceView *dst_view,
+                          PhysicalManager *dst_man,
                           const LegionMap<LogicalView*,
                           FieldMaskSet<IndexSpaceExpression> > &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
+                          const PhysicalTraceInfo &trace_info,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
@@ -1516,28 +1532,29 @@ namespace Legion {
                        FillView *src_view,
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
+                       const PredEvent fill_guard,
                        EquivalenceSet *tracing_eq,
                        std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
-                             const std::list<std::pair<ReductionView*,
+                             PhysicalManager *dst_man,
+                             const std::list<std::pair<InstanceView*,
                                     IndexSpaceExpression*> > &src_views,
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
                              EquivalenceSet *tracing_eq,
                              std::set<RtEvent> &applied,
                              CopyAcrossHelper *across_helper = NULL);
-      void issue_updates(const PhysicalTraceInfo &trace_info, 
-                         ApEvent precondition,
-                         const bool restricted_output = false,
-                         // Next args are used for across-copies
-                         // to indicate that the precondition already
-                         // describes the precondition for the 
-                         // destination instance
-                         const bool manage_dst_events = true,
-                         std::map<InstanceView*,
-                                  std::vector<ApEvent> > *dst_events = NULL);
-      ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
+      ApEvent issue_updates(const PhysicalTraceInfo &trace_info, 
+                            ApEvent precondition,
+                            const bool restricted_output = false,
+                            // Next args are used for across-copies
+                            // to indicate that the precondition already
+                            // describes the precondition for the 
+                            // destination instance
+                            const bool manage_dst_events = true,
+                            std::map<InstanceView*,
+                                     std::vector<ApEvent> > *dst_events = NULL);
     protected:
       void record_view(LogicalView *new_view);
       void resize_reductions(size_t new_size);
@@ -1547,8 +1564,8 @@ namespace Legion {
             std::set<RtEvent> &applied_events) const;
       void record_instance_update(InstanceView *dst_view,
                           InstanceView *src_view,
+                          PhysicalManager *src_man,
                           const FieldMask &src_mask,
-                          const DomainPoint &src_point,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
                           std::set<RtEvent> &applied,
@@ -1556,6 +1573,7 @@ namespace Legion {
                           CopyAcrossHelper *across_helper);
       struct SelectSourcesResult;
       const SelectSourcesResult& select_sources(InstanceView *target,
+                          PhysicalManager *target_manager,
                           const std::vector<InstanceView*> &sources);
       void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
@@ -1596,7 +1614,7 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
-      Operation *const op;
+      PhysicalAnalysis *const analysis;
       const unsigned src_index;
       const unsigned dst_index;
       const RtEvent guard_precondition;
@@ -1617,15 +1635,17 @@ namespace Legion {
       std::set<RtEvent> effects; 
       // Events for the completion of our copies if we are supposed
       // to be tracking them
-      std::set<ApEvent> events;
+      std::vector<ApEvent> events;
+      // An event to represent the merge of all the events above
+      ApUserEvent summary_event;
     protected:
       struct SelectSourcesResult {
       public:
         SelectSourcesResult(void) { }
         SelectSourcesResult(std::vector<InstanceView*> &&srcs,
                             std::vector<unsigned> &&rank,
-                            std::map<unsigned,DomainPoint> &&keys)
-          : sources(srcs), ranking(rank), collective_keys(keys) { }
+                            std::map<unsigned,PhysicalManager*> &&pts)
+          : sources(srcs), ranking(rank), points(pts) { }
       public:
         inline bool matches(const std::vector<InstanceView*> &srcs) const
           {
@@ -1639,10 +1659,11 @@ namespace Legion {
       public:
         std::vector<InstanceView*> sources;
         std::vector<unsigned> ranking;
-        std::map<unsigned,DomainPoint> collective_keys;
+        std::map<unsigned,PhysicalManager*> points;
       };
       // Cached calls to the mapper for selecting sources
-      std::map<InstanceView*,std::vector<SelectSourcesResult> > mapper_queries;
+      std::map<std::pair<InstanceView*,PhysicalManager*>,
+               std::vector<SelectSourcesResult> > mapper_queries;
     };
 
     /**
@@ -1651,19 +1672,30 @@ namespace Legion {
      * equivalence set trees to perform physical analyses
      */
     class PhysicalAnalysis : public Collectable, public LocalLock {
-    public:
+    private:
       struct DeferPerformTraversalArgs :
         public LgTaskArgs<DeferPerformTraversalArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_TRAVERSAL_TASK_ID;
       public:
-        DeferPerformTraversalArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
+        DeferPerformTraversalArgs(PhysicalAnalysis *ana,
+                                  const VersionInfo &info);
+      public:
+        PhysicalAnalysis *const analysis;
+        const VersionInfo *const version_info;
+        RtUserEvent done_event;
+      };
+      struct DeferPerformAnalysisArgs :
+        public LgTaskArgs<DeferPerformAnalysisArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PERFORM_ANALYSIS_TASK_ID;
+      public:
+        DeferPerformAnalysisArgs(PhysicalAnalysis *ana, EquivalenceSet *set,
          const FieldMask &mask, RtUserEvent done, bool already_deferred = true);
       public:
         PhysicalAnalysis *const analysis;
         EquivalenceSet *const set;
         FieldMask *const mask;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
         const bool already_deferred;
       };
@@ -1675,7 +1707,6 @@ namespace Legion {
         DeferPerformRemoteArgs(PhysicalAnalysis *ana); 
       public:
         PhysicalAnalysis *const analysis;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
       };
       struct DeferPerformUpdateArgs : 
@@ -1686,35 +1717,52 @@ namespace Legion {
         DeferPerformUpdateArgs(PhysicalAnalysis *ana);
       public:
         PhysicalAnalysis *const analysis;
-        const RtUserEvent applied_event;
         const RtUserEvent done_event;
+      };
+      struct DeferPerformRegistrationArgs :
+        public LgTaskArgs<DeferPerformRegistrationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PERFORM_REGISTRATION_TASK_ID;
+      public:
+        DeferPerformRegistrationArgs(PhysicalAnalysis *ana,
+            const RegionUsage &use, const PhysicalTraceInfo &trace_info,
+            ApEvent init_precondition, ApEvent termination, bool symbolic);
+      public:
+        PhysicalAnalysis *const analysis;
+        const RegionUsage usage;
+        const PhysicalTraceInfo *trace_info;
+        const ApEvent precondition;
+        const ApEvent termination;
+        const ApUserEvent instances_ready;
+        const RtUserEvent done_event;
+        const bool symbolic;
       };
       struct DeferPerformOutputArgs : 
         public LgTaskArgs<DeferPerformOutputArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_OUTPUT_TASK_ID;
       public:
-        DeferPerformOutputArgs(PhysicalAnalysis *ana, 
+        DeferPerformOutputArgs(PhysicalAnalysis *ana, bool track,
                                const PhysicalTraceInfo &trace_info);
       public:
         PhysicalAnalysis *const analysis;
         const PhysicalTraceInfo *trace_info;
-        const RtUserEvent applied_event;
         const ApUserEvent effects_event;
       };
     public:
       // Local physical analysis
       PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,
                        IndexSpaceExpression *expr, bool on_heap,
-                       bool immutable, CollectiveMapping *mapping = NULL,
-                       bool exclusive = false, bool first_local = true);
+                       bool immutable, bool exclusive = false,
+                       CollectiveMapping *mapping = NULL,
+                       bool first_local = true);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
                        Operation *op, unsigned index, 
                        IndexSpaceExpression *expr, bool on_heap,
                        bool immutable = false,CollectiveMapping *mapping = NULL,
                        bool exclusive = false, bool first_local = true);
-      PhysicalAnalysis(const PhysicalAnalysis &rhs);
+      PhysicalAnalysis(const PhysicalAnalysis &rhs) = delete;
       virtual ~PhysicalAnalysis(void);
     public:
       inline bool has_remote_sets(void) const
@@ -1725,31 +1773,58 @@ namespace Legion {
         { return (collective_mapping != NULL); }
       inline CollectiveMapping* get_replicated_mapping(void) const
         { return collective_mapping; }
+      inline bool is_collective_first_local(void) const
+        { return collective_first_local; }
     public:
-      void traverse(EquivalenceSet *set, const FieldMask &mask, 
-                    std::set<RtEvent> &deferral_events,
-                    std::set<RtEvent> &applied_events,
-                    RtEvent precondition = RtEvent::NO_RT_EVENT,
-                    const bool already_deferred = false);
-      void defer_traversal(RtEvent precondition, EquivalenceSet *set,
+      void analyze(EquivalenceSet *set, const FieldMask &mask, 
+                   std::set<RtEvent> &deferral_events,
+                   std::set<RtEvent> &applied_events,
+                   RtEvent precondition = RtEvent::NO_RT_EVENT,
+                   const bool already_deferred = false);
+      RtEvent defer_traversal(RtEvent precondition, const VersionInfo &info,
+                              std::set<RtEvent> &applied_events);
+      void defer_analysis(RtEvent precondition, EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &deferral_events, 
               std::set<RtEvent> &applied_events,
               RtUserEvent deferral_event = RtUserEvent::NO_RT_USER_EVENT,
               const bool already_deferred = true);
+      RtEvent defer_remote(RtEvent precondition, std::set<RtEvent> &applied);
+      RtEvent defer_updates(RtEvent precondition, std::set<RtEvent> &applied);
+      RtEvent defer_registration(RtEvent precondition,
+                                 const RegionUsage &usage,
+                                 std::set<RtEvent> &applied_events,
+                                 const PhysicalTraceInfo &trace_info,
+                                 ApEvent init_precondition,
+                                 ApEvent termination_event,
+                                 ApEvent &instances_ready,
+                                 bool symbolic);
+      ApEvent defer_output(RtEvent precondition, const PhysicalTraceInfo &info,
+                           bool track, std::set<RtEvent> &applied_events);
+      void record_deferred_applied_events(std::set<RtEvent> &applied);
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false) = 0;
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
       virtual RtEvent perform_updates(RtEvent precondition, 
                                       std::set<RtEvent> &applied_events,
                                       const bool already_deferred = false);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1772,15 +1847,17 @@ namespace Legion {
     public:
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
       static void handle_deferred_traversal(const void *args);
+      static void handle_deferred_analysis(const void *args);
       static void handle_deferred_remote(const void *args);
       static void handle_deferred_update(const void *args);
+      static void handle_deferred_registration(const void *args);
       static void handle_deferred_output(const void *args);
     public:
       const AddressSpaceID previous;
       const AddressSpaceID original_source;
       Runtime *const runtime;
       IndexSpaceExpression *const analysis_expr;
-      CollectiveMapping *const collective_mapping;
+    public:
       Operation *const op;
       const unsigned index;
       const bool owns_op;
@@ -1789,8 +1866,9 @@ namespace Legion {
       const bool exclusive; 
       // whether this is an immutable analysis (e.g. only reading eq set)
       const bool immutable;
+    protected:
       // whether this is the first collective analysis on this address space
-      const bool collective_first_local;
+      bool collective_first_local;
     private:
       // This tracks whether this analysis is being used 
       // for parallel traversals or not
@@ -1800,6 +1878,124 @@ namespace Legion {
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> > remote_sets; 
       FieldMaskSet<LogicalView> *recorded_instances;
+    protected:
+      CollectiveMapping *collective_mapping;
+    private:
+      // We don't want to make a separate "applied" event for every single
+      // deferred task that we need to launch. Therefore, we just make one
+      // for each analysis on the first deferred task that is launched for
+      // an analysis and record it. We then accumulate all the applied 
+      // events for all the deferred stages and when the analysis is deleted
+      // then we close the loop and merge all the accumulated events
+      // into the deferred_applied_event
+      RtUserEvent deferred_applied_event;
+      std::set<RtEvent> deferred_applied_events;
+    };
+
+    /**
+     * \class RegistrationAnalysis
+     * A registration analysis is a kind of physical analysis that
+     * also supports performing registration on the views of the 
+     */
+    class RegistrationAnalysis : public PhysicalAnalysis {
+    public:
+      RegistrationAnalysis(Runtime *rt, Operation *op, unsigned index,
+                           RegionNode *node, bool on_heap,
+                           const PhysicalTraceInfo &trace_info, bool exclusive);
+      RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                           Operation *op, unsigned index, 
+                           RegionNode *node, bool on_heap, 
+                           std::vector<PhysicalManager*> &&target_insts,
+                           LegionVector<
+                              FieldMaskSet<InstanceView> > &&target_views,
+                           std::vector<IndividualView*> &&source_views,
+                           const PhysicalTraceInfo &trace_info,
+                           CollectiveMapping *collective_mapping,
+                           bool first_local, bool exclusive);
+      // Remote registration analysis with no views
+      RegistrationAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                           Operation *op, unsigned index, 
+                           RegionNode *node, bool on_heap, 
+                           const PhysicalTraceInfo &trace_info,
+                           CollectiveMapping *collective_mapping,
+                           bool first_local, bool exclusive);
+    public:
+      virtual ~RegistrationAnalysis(void);
+    public:
+      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
+          const std::vector<PhysicalManager*> *sources = NULL,
+          bool collective_rendezvous = false, unsigned analysis_index = 0);
+    public:
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
+    public:
+      RegionNode *const region;
+      const size_t context_index;
+      const PhysicalTraceInfo trace_info;
+    public:
+      // Be careful to only access these after they are ready
+      std::vector<PhysicalManager*> target_instances;
+      LegionVector<FieldMaskSet<InstanceView> > target_views;
+      std::map<InstanceView*,size_t> collective_arrivals;
+      std::vector<IndividualView*> source_views;
+    };
+
+    /**
+     * \class CollectiveAnalysis
+     * This base class provides a virtual interface for collective
+     * analyses. Collective analyses are registered with the collective
+     * views to help with performing collective copy operations since
+     * control for collective copy operations originates from just a
+     * single physical analysis. We don't want to attribute all those
+     * copies and trace recordings to a single analysis, so instead
+     * we register CollectiveAnalysis objects with collective views
+     * so that they can be used to help issue the copies.
+     */
+    class CollectiveAnalysis {
+    public:
+      virtual ~CollectiveAnalysis(void) { }
+      virtual size_t get_context_index(void) const = 0;
+      virtual unsigned get_requirement_index(void) const = 0;
+      virtual Operation* get_operation(void) const = 0;
+      virtual const PhysicalTraceInfo& get_trace_info(void) const = 0;
+      void pack_collective_analysis(Serializer &rez,
+          AddressSpaceID target, std::set<RtEvent> &applied_events) const;
+      virtual void add_analysis_reference(void) = 0;
+      virtual bool remove_analysis_reference(void) = 0;
+    };
+
+    /**
+     * \class RemoteCollectiveAnalysis
+     * This class contains the needed data structures for representing
+     * a physical analysis when registered on a remote collective view.
+     */
+    class RemoteCollectiveAnalysis : public CollectiveAnalysis,
+                                     public Collectable {
+    public:
+      RemoteCollectiveAnalysis(size_t ctx_index, unsigned req_index,
+                RemoteOp *op, Deserializer &derez, Runtime *runtime);
+      virtual ~RemoteCollectiveAnalysis(void);
+      virtual size_t get_context_index(void) const { return context_index; }
+      virtual unsigned get_requirement_index(void) const
+        { return requirement_index; }
+      virtual Operation* get_operation(void) const;
+      virtual const PhysicalTraceInfo& get_trace_info(void) const
+        { return trace_info; }
+      virtual void add_analysis_reference(void) { add_reference(); }
+      virtual bool remove_analysis_reference(void) 
+        { return remove_reference(); }
+      static RemoteCollectiveAnalysis* unpack(Deserializer &derez,
+                Runtime *runtime, std::set<RtEvent> &ready_events);
+    public:
+      const size_t context_index;
+      const unsigned requirement_index;
+      RemoteOp *const operation;
+      const PhysicalTraceInfo trace_info;
     };
 
     /**
@@ -1811,33 +2007,37 @@ namespace Legion {
      * attributed to the correct operation. After the analysis is done
      * then the analysis will unregister itself with the collecitve instance.
      */
-    class CollectiveCopyFillAnalysis : public PhysicalAnalysis {
+    class CollectiveCopyFillAnalysis : public RegistrationAnalysis,
+                                       public CollectiveAnalysis {
     public:
       CollectiveCopyFillAnalysis(Runtime *rt, Operation *op, unsigned index,
-                                 IndexSpaceExpression *expr, bool on_heap,
-                                 const InstanceSet &target_instances,
-                                 std::vector<InstanceView*> &target_views,
-                                 std::vector<InstanceView*> &source_views,
+                                 RegionNode *node, bool on_heap,
                                  const PhysicalTraceInfo &trace_info,
-                                 CollectiveMapping *mapping, bool first_local,
-                                 const DomainPoint &point, bool exclusive);
-      CollectiveCopyFillAnalysis(Runtime *rt, AddressSpaceID src, 
-                                 AddressSpaceID prev, Operation *op,
-                                 unsigned index, IndexSpaceExpression *expr,
-                                 bool on_heap, InstanceSet &target_instances,
-                                 std::vector<InstanceView*> &target_views,
-                                 std::vector<InstanceView*> &source_views,
+                                 bool exclusive);
+      CollectiveCopyFillAnalysis(Runtime *rt, 
+                                 AddressSpaceID src, AddressSpaceID prev,
+                                 Operation *op, unsigned index, 
+                                 RegionNode *node, bool on_heap, 
+                                 std::vector<PhysicalManager*> &&target_insts,
+                                 LegionVector<
+                                    FieldMaskSet<InstanceView> > &&target_views,
+                                 std::vector<IndividualView*> &&source_views,
                                  const PhysicalTraceInfo &trace_info,
                                  CollectiveMapping *collective_mapping,
-                                 bool first_local, const DomainPoint &point,
-                                 bool exclusive);
+                                 bool first_local, bool exclusive);
+      virtual ~CollectiveCopyFillAnalysis(void) { }
     public:
-      const DomainPoint collective_point;
-      const size_t context_index;
-      const InstanceSet target_instances;
-      const std::vector<InstanceView*> target_views;
-      const std::vector<InstanceView*> source_views;
-      const PhysicalTraceInfo trace_info;
+      virtual size_t get_context_index(void) const { return context_index; }
+      virtual unsigned get_requirement_index(void) const { return index; }
+      virtual Operation* get_operation(void) const { return op; }
+      virtual const PhysicalTraceInfo& get_trace_info(void) const 
+        { return trace_info; }
+      virtual void add_analysis_reference(void) { add_reference(); }
+      virtual bool remove_analysis_reference(void)
+        { return remove_reference(); } 
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
     };
 
     /**
@@ -1852,18 +2052,18 @@ namespace Legion {
       ValidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op,unsigned index,IndexSpaceExpression *expr,
                         ValidInstAnalysis *target, ReductionOpID redop);
-      ValidInstAnalysis(const ValidInstAnalysis &rhs);
+      ValidInstAnalysis(const ValidInstAnalysis &rhs) = delete;
       virtual ~ValidInstAnalysis(void);
     public:
-      ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs);
+      ValidInstAnalysis& operator=(const ValidInstAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1893,21 +2093,21 @@ namespace Legion {
                         Operation *op, unsigned index, 
                         IndexSpaceExpression *expr, InvalidInstAnalysis *target,
                         const FieldMaskSet<LogicalView> &valid_instances);
-      InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
+      InvalidInstAnalysis(const InvalidInstAnalysis &rhs) = delete;
       virtual ~InvalidInstAnalysis(void);
     public:
-      InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
+      InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs) = delete;
     public:
       inline bool has_invalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1936,21 +2136,21 @@ namespace Legion {
                       Operation *op, unsigned index, 
                       IndexSpaceExpression *expr, AntivalidInstAnalysis *target,
                       const FieldMaskSet<LogicalView> &anti_instances);
-      AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs);
+      AntivalidInstAnalysis(const AntivalidInstAnalysis &rhs) = delete;
       virtual ~AntivalidInstAnalysis(void);
     public:
-      AntivalidInstAnalysis& operator=(const AntivalidInstAnalysis &rhs);
+      AntivalidInstAnalysis& operator=(const AntivalidInstAnalysis &r) = delete;
     public:
       inline bool has_antivalid(void) const
       { return ((recorded_instances != NULL) && !recorded_instances->empty()); }
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1973,27 +2173,22 @@ namespace Legion {
                            public LegionHeapify<UpdateAnalysis> {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     const DomainPoint &point, const RegionRequirement &req,
-                     RegionNode *node, const InstanceSet &target_instances,
-                     std::vector<InstanceView*> &target_views,
-                     std::vector<InstanceView*> &source_views,
+                     const RegionRequirement &req, RegionNode *node,
                      const PhysicalTraceInfo &trace_info,
-                     CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool check_initialized, const bool record_valid,
-                     const bool skip_output, const bool first_local = false);
+                     const bool check_initialized, const bool record_valid);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, const DomainPoint &point,
+                     Operation *op, unsigned index,
                      const RegionUsage &usage, RegionNode *node, 
-                     InstanceSet &target_instances,
-                     std::vector<InstanceView*> &target_views,
-                     std::vector<InstanceView*> &source_views,
+                     std::vector<PhysicalManager*> &&target_instances,
+                     LegionVector<FieldMaskSet<InstanceView> > &&target_views,
+                     std::vector<IndividualView*> &&source_views,
                      const PhysicalTraceInfo &trace_info,
                      CollectiveMapping *collective_mapping,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
-                     const bool skip_output, const bool first_local);
+                     const bool first_local);
       UpdateAnalysis(const UpdateAnalysis &rhs) = delete;
       virtual ~UpdateAnalysis(void);
     public:
@@ -2001,21 +2196,30 @@ namespace Legion {
     public:
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
+    public:
+      void find_atomic_reservations(void);
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
       virtual RtEvent perform_updates(RtEvent precondition, 
                                       std::set<RtEvent> &applied_events,
                                       const bool already_deferred = false);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &registered_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2024,12 +2228,10 @@ namespace Legion {
                                         AddressSpaceID previous);
     public:
       const RegionUsage usage;
-      RegionNode *const node;
       const ApEvent precondition;
       const ApEvent term_event;
       const bool check_initialized;
       const bool record_valid;
-      const bool skip_output;
     public:
       // Have to lock the analysis to access these safely
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
@@ -2041,35 +2243,38 @@ namespace Legion {
       // For remote tracking
       RtEvent remote_user_registered;
       RtUserEvent user_registered;
-      std::set<ApEvent> effects_events;
+    public:
+      // Event for when target instances are ready
+      ApEvent instances_ready;
     };
 
     /**
      * \class AcquireAnalysis
      * For performing acquires on equivalence set trees
      */
-    class AcquireAnalysis : public PhysicalAnalysis,
+    class AcquireAnalysis : public RegistrationAnalysis,
                             public LegionHeapify<AcquireAnalysis> {
     public: 
       AcquireAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      IndexSpaceExpression *expr,
+                      RegionNode *node, const PhysicalTraceInfo &t_info);
+      AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                      Operation *op, unsigned index, RegionNode *node,
+                      AcquireAnalysis *target,
+                      const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
                       bool first_local);
-      AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, IndexSpaceExpression *expr,
-                      AcquireAnalysis *target);
-      AcquireAnalysis(const AcquireAnalysis &rhs);
+      AcquireAnalysis(const AcquireAnalysis &rhs) = delete;
       virtual ~AcquireAnalysis(void);
     public:
-      AcquireAnalysis& operator=(const AcquireAnalysis &rhs);
+      AcquireAnalysis& operator=(const AcquireAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2091,34 +2296,28 @@ namespace Legion {
                             public LegionHeapify<ReleaseAnalysis> {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      ApEvent precondition, IndexSpaceExpression *expr,
-                      const InstanceSet &target_instances,
-                      std::vector<InstanceView*> &target_views,
-                      std::vector<InstanceView*> &source_views,
-                      const PhysicalTraceInfo &trace_info,
-                      CollectiveMapping *collective_mapping,
-                      const bool first_local, const DomainPoint &point);
+                      ApEvent precondition, RegionNode *node,
+                      const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                      Operation *op, unsigned index, IndexSpaceExpression *expr,
+                      Operation *op, unsigned index, RegionNode *node,
                       ApEvent precondition, ReleaseAnalysis *target, 
-                      InstanceSet &target_instances,
-                      std::vector<InstanceView*> &target_views,
-                      std::vector<InstanceView*> &source_views,
+                      std::vector<PhysicalManager*> &&target_instances,
+                      LegionVector<FieldMaskSet<InstanceView> > &&target_views,
+                      std::vector<IndividualView*> &&source_views,
                       const PhysicalTraceInfo &info,
-                      CollectiveMapping *mapping, const bool first_local,
-                      const DomainPoint &point);
+                      CollectiveMapping *mapping, const bool first_local);
       ReleaseAnalysis(const ReleaseAnalysis &rhs) = delete;
       virtual ~ReleaseAnalysis(void);
     public:
       ReleaseAnalysis& operator=(const ReleaseAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2148,9 +2347,10 @@ namespace Legion {
                          const RegionRequirement &src_req,
                          const RegionRequirement &dst_req,
                          const InstanceSet &target_instances,
-                         const std::vector<InstanceView*> &target_views,
-                         const std::vector<InstanceView*> &source_views,
-                         const ApEvent precondition,
+                         const LegionVector<
+                             FieldMaskSet<InstanceView> > &target_views,
+                         const std::vector<IndividualView*> &source_views,
+                         const ApEvent precondition, const ApEvent dst_ready,
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
@@ -2162,32 +2362,34 @@ namespace Legion {
                          const RegionUsage &dst_usage,
                          const LogicalRegion src_region,
                          const LogicalRegion dst_region,
-                         const InstanceSet &target_instances,
-                         const std::vector<InstanceView*> &target_views,
-                         const std::vector<InstanceView*> &source_views,
+                         const ApEvent dst_ready,
+                         std::vector<PhysicalManager*> &&target_instances,
+                         LegionVector<
+                              FieldMaskSet<InstanceView> > &&target_views,
+                         std::vector<IndividualView*> &&source_views,
                          const ApEvent precondition,
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
                          const PhysicalTraceInfo &trace_info,
                          const bool perfect);
-      CopyAcrossAnalysis(const CopyAcrossAnalysis &rhs);
+      CopyAcrossAnalysis(const CopyAcrossAnalysis &rhs) = delete;
       virtual ~CopyAcrossAnalysis(void);
     public:
-      CopyAcrossAnalysis& operator=(const CopyAcrossAnalysis &rhs);
+      CopyAcrossAnalysis& operator=(const CopyAcrossAnalysis &rhs) = delete;
     public:
       bool has_across_updates(void) const 
         { return (across_aggregator != NULL); }
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       CopyFillAggregator* get_across_aggregator(void);
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2210,9 +2412,11 @@ namespace Legion {
       static std::vector<CopyAcrossHelper*> create_across_helpers(
                             const FieldMask &src_mask,
                             const FieldMask &dst_mask,
-                            const InstanceSet &dst_instances,
+                            const std::vector<PhysicalManager*> &dst_instances,
                             const std::vector<unsigned> &src_indexes,
                             const std::vector<unsigned> &dst_indexes);
+      static std::vector<PhysicalManager*> convert_instances(
+                                        const InstanceSet &instances);
     public:
       const FieldMask src_mask;
       const FieldMask dst_mask;
@@ -2222,9 +2426,10 @@ namespace Legion {
       const RegionUsage dst_usage;
       const LogicalRegion src_region;
       const LogicalRegion dst_region;
-      const InstanceSet target_instances;
-      const std::vector<InstanceView*> target_views;
-      const std::vector<InstanceView*> source_views;
+      const ApEvent targets_ready;
+      const std::vector<PhysicalManager*> target_instances;
+      const LegionVector<FieldMaskSet<InstanceView> > target_views;
+      const std::vector<IndividualView*> source_views;
       const ApEvent precondition;
       const PredEvent pred_guard;
       const ReductionOpID redop;
@@ -2238,7 +2443,7 @@ namespace Legion {
       FieldMask uninitialized;
       RtUserEvent uninitialized_reported;
       FieldMaskSet<IndexSpaceExpression> local_exprs;
-      std::set<ApEvent> copy_events;
+      std::vector<ApEvent> copy_events;
       std::set<RtEvent> guard_events;
     protected:
       CopyFillAggregator *across_aggregator;
@@ -2253,111 +2458,117 @@ namespace Legion {
                               public LegionHeapify<OverwriteAnalysis> {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionUsage &usage, IndexSpaceExpression *expr, 
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
                         LogicalView *view, const FieldMask &mask,
                         const PhysicalTraceInfo &trace_info,
                         CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
+                        const PredEvent true_guard = PredEvent::NO_PRED_EVENT,
+                        const PredEvent false_guard = PredEvent::NO_PRED_EVENT,
                         const bool add_restriction = false,
                         const bool first_local = true);
+      // Also local but with a full set of instances 
+      OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
+                        const RegionUsage &usage, IndexSpaceExpression *expr,
+                        const PhysicalTraceInfo &trace_info,
+                        const ApEvent precondition,
+                        const bool add_restriction = false);
       // Also local but with a full set of views
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage, IndexSpaceExpression *expr,
-                        const FieldMaskSet<LogicalView> &views,
+                        const FieldMaskSet<LogicalView> &overwrite_views,
                         const PhysicalTraceInfo &trace_info,
-                        CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
-                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
-                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
-                        const bool track_effects = false,
-                        const bool add_restriction = false,
-                        const bool first_local = true);
+                        const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index,
                         IndexSpaceExpression *expr, const RegionUsage &usage, 
                         FieldMaskSet<LogicalView> &views,
-                        FieldMaskSet<ReductionView> &reduction_views,
+                        FieldMaskSet<InstanceView> &reduction_views,
                         const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
-                        const RtEvent guard_event,
-                        const PredEvent pred_guard,
-                        const bool track_effects,
+                        const PredEvent true_guard,
+                        const PredEvent false_guard,
+                        CollectiveMapping *mapping,
+                        const bool first_local,
                         const bool add_restriction);
-      OverwriteAnalysis(const OverwriteAnalysis &rhs);
+      OverwriteAnalysis(const OverwriteAnalysis &rhs) = delete;
       virtual ~OverwriteAnalysis(void);
     public:
-      OverwriteAnalysis& operator=(const OverwriteAnalysis &rhs);
+      OverwriteAnalysis& operator=(const OverwriteAnalysis &rhs) = delete;
     public:
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
-      virtual RtEvent perform_updates(RtEvent precondition, 
-                                      std::set<RtEvent> &applied_events,
-                                      const bool already_deferred = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
     public:
+      RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
+                            unsigned analysis_index = 0);
       static void handle_remote_overwrites(Deserializer &derez, Runtime *rt,
                                            AddressSpaceID previous); 
     public:
       const RegionUsage usage;
-      FieldMaskSet<LogicalView> views;
-      FieldMaskSet<ReductionView> reduction_views;
       const PhysicalTraceInfo trace_info;
+      FieldMaskSet<LogicalView> views;
+      FieldMaskSet<InstanceView> reduction_views;
       const ApEvent precondition;
-      const RtEvent guard_event;
-      const PredEvent pred_guard;
-      const bool track_effects;
+      const PredEvent true_guard;
+      const PredEvent false_guard;
       const bool add_restriction;
     public:
       // Can only safely be accessed when analysis is locked
       CopyFillAggregator *output_aggregator;
-      std::set<ApEvent> effects_events;
+    protected:
+      LegionVector<FieldMaskSet<InstanceView> > target_views;
+      std::map<InstanceView*,size_t> *dummy_arrivals;
     };
 
     /**
      * \class FilterAnalysis
      * For performing filter traversals on equivalence set trees
      */
-    class FilterAnalysis : public PhysicalAnalysis,
+    class FilterAnalysis : public RegistrationAnalysis,
                            public LegionHeapify<FilterAnalysis> {
     public:
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     CollectiveMapping *collective_mapping,
-                     IndexSpaceExpression *expr, InstanceView *inst_view,
-                     LogicalView *registration_view,
-                     const bool remove_restriction = false,
-                     const bool first_local = false);
+                     RegionNode *node, const PhysicalTraceInfo &trace_info,
+                     const bool remove_restriction = false);
       FilterAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index, IndexSpaceExpression *expr,
-                     InstanceView *inst_view, LogicalView *registration_view,
+                     Operation *op, unsigned index, RegionNode *node,
+                     const PhysicalTraceInfo &trace_info,
+                     const FieldMaskSet<InstanceView> &filter_views,
+                     CollectiveMapping *mapping, const bool first_local,
                      const bool remove_restriction);
-      FilterAnalysis(const FilterAnalysis &rhs);
+      FilterAnalysis(const FilterAnalysis &rhs) = delete;
       virtual ~FilterAnalysis(void);
     public:
-      FilterAnalysis& operator=(const FilterAnalysis &rhs);
+      FilterAnalysis& operator=(const FilterAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual RtEvent perform_traversal(RtEvent precondition,
+                                        const VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2365,8 +2576,7 @@ namespace Legion {
       static void handle_remote_filters(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
     public:
-      InstanceView *const inst_view;
-      LogicalView *const registration_view;
+      FieldMaskSet<InstanceView> filter_views;
       const bool remove_restriction;
     };
 
@@ -2383,18 +2593,18 @@ namespace Legion {
       CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                     IndexSpaceExpression *expr, Operation *op,
                     unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
-      CloneAnalysis(const CloneAnalysis &rhs);
+      CloneAnalysis(const CloneAnalysis &rhs) = delete;
       virtual ~CloneAnalysis(void);
     public:
-      CloneAnalysis& operator=(const CloneAnalysis &rhs);
+      CloneAnalysis& operator=(const CloneAnalysis &rhs) = delete;
     public:
-      virtual bool perform_traversal(EquivalenceSet *set,
-                                     IndexSpaceExpression *expr,
-                                     const bool expr_covers,
-                                     const FieldMask &mask,
-                                     std::set<RtEvent> &deferral_events,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool already_deferred = false);
+      virtual bool perform_analysis(EquivalenceSet *set,
+                                    IndexSpaceExpression *expr,
+                                    const bool expr_covers,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const bool already_deferred = false);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2520,7 +2730,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<LogicalView> > ExprLogicalViews; 
-        typedef std::map<unsigned,std::list<std::pair<ReductionView*,
+        typedef std::map<unsigned,std::list<std::pair<InstanceView*,
           IndexSpaceExpression*> > > ExprReductionViews;
         typedef LegionMap<IndexSpaceExpression*,
                   FieldMaskSet<InstanceView> > ExprInstanceViews;
@@ -2565,6 +2775,21 @@ namespace Legion {
         std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
       };
     public:
+      struct PendingCollective {
+      public:
+        PendingCollective(InstanceView *refined, CollectiveView *refining);
+        PendingCollective(CollectiveView *refining,
+                          const std::set<IndividualView*> &excluded);
+        PendingCollective(CollectiveView *refining,
+                          const std::vector<DistributedID> &refined_instances);
+      public:
+        // The new collective view we're refining for (can be NULL)
+        InstanceView *refined;
+        // The old collective view we're refining (can be NULL)
+        CollectiveView *const refining;
+        std::vector<DistributedID> instances;
+      };
+    public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
@@ -2591,15 +2816,15 @@ namespace Legion {
                           const FieldMask &user_mask,
                           const bool restricted,
                           const InstanceSet &sources,
-            const std::vector<InstanceView*> &corresponding,
+            const std::vector<IndividualView*> &corresponding,
                           std::set<RtEvent> &applied_events);
-      void traverse_set(PhysicalAnalysis &analysis,
-                        IndexSpaceExpression *expr,
-                        const bool expr_covers, 
-                        FieldMask traversal_mask,
-                        std::set<RtEvent> &deferral_events,
-                        std::set<RtEvent> &applied_events,
-                        const bool already_deferred);
+      void analyze(PhysicalAnalysis &analysis,
+                   IndexSpaceExpression *expr,
+                   const bool expr_covers, 
+                   FieldMask traversal_mask,
+                   std::set<RtEvent> &deferral_events,
+                   std::set<RtEvent> &applied_events,
+                   const bool already_deferred);
       void find_valid_instances(ValidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
@@ -2692,11 +2917,11 @@ namespace Legion {
                                        const FieldMask &mask,
                                        RtUserEvent ready_event);
     protected:
-      void defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
-                           const FieldMask &mask,
-                           std::set<RtEvent> &deferral_events,
-                           std::set<RtEvent> &applied_events,
-                           const bool already_deferred);
+      void defer_analysis(AutoTryLock &eq, PhysicalAnalysis &analysis,
+                          const FieldMask &mask,
+                          std::set<RtEvent> &deferral_events,
+                          std::set<RtEvent> &applied_events,
+                          const bool already_deferred);
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
         RtEvent continuation_pre;
@@ -2722,12 +2947,14 @@ namespace Legion {
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                                  ReferenceMutator &mutator,
+                            const bool check_collectives = true);
       template<typename T>
       void record_unrestricted_instances(IndexSpaceExpression *expr,
                             const bool expr_covers, FieldMask record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                                  ReferenceMutator &mutator,
+                            const bool check_collectives = true);
       bool record_partial_valid_instance(LogicalView *instance,
                                          IndexSpaceExpression *expr,
                                          FieldMask valid_mask,
@@ -2749,71 +2976,116 @@ namespace Legion {
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
                                CopyFillGuard *previous_guard,
-                               Operation *op, const unsigned index,
+                               PhysicalAnalysis *analysis,
                                const RegionUsage &usage,
                                IndexSpaceExpression *expr, 
                                const bool expr_covers,
                                const FieldMask &user_mask,
-                               const FieldMaskSet<InstanceView> &target_insts,
-                               const std::vector<InstanceView*> &source_insts,
+                               const std::vector<PhysicalManager*> &targets,
+                               const LegionVector<
+                                   FieldMaskSet<InstanceView> > &target_views,
+                               const std::vector<IndividualView*> &source_views,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
-                                CopyFillGuard *previous_guard,
-                                Operation *op, const unsigned index,
-                                const bool track_events,
-                                IndexSpaceExpression *expr,
-                                const bool expr_covers,
-                                const FieldMask &update_mask,
-                                const FieldMaskSet<InstanceView> &target_insts,
-                                const std::vector<InstanceView*> &source_insts,
-                                const PhysicalTraceInfo &trace_info,
-                                std::set<RtEvent> &applied_events,
-                                const bool skip_check = false,
-                                const int dst_index = -1,
-                                const ReductionOpID redop = 0,
-                                CopyAcrossHelper *across_helper = NULL);
+                               CopyFillGuard *previous_guard,
+                               PhysicalAnalysis *analysis,
+                               const bool track_events,
+                               IndexSpaceExpression *expr,
+                               const bool expr_covers,
+                               const FieldMask &update_mask,
+                               const std::vector<PhysicalManager*> &targets,
+                               const LegionVector<
+                                   FieldMaskSet<InstanceView> > &target_views,
+                               const std::vector<IndividualView*> &source_views,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &applied_events,
+                               const bool skip_check = false,
+                               const ReductionOpID redop = 0,
+                               CopyAcrossHelper *across_helper = NULL);
       void issue_update_copies_and_fills(InstanceView *target,
-                                const std::vector<InstanceView*> &source_views,
+                                         PhysicalManager *target_manager,
+                               const std::vector<IndividualView*> &source_views,
                                          CopyFillAggregator *&aggregator,
                                          CopyFillGuard *previous_guard,
-                                         Operation *op, const unsigned index,
+                                         PhysicalAnalysis *analysis, 
                                          const bool track_events,
                                          IndexSpaceExpression *expr,
                                          const bool expr_covers,
                                          FieldMask update_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &applied_events,
-                                         const int dst_index,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
-      void apply_reductions(const FieldMaskSet<InstanceView> &reduction_targets,
+      void apply_reductions(const std::vector<PhysicalManager*> &targets,
+                            const LegionVector<
+                                    FieldMaskSet<InstanceView> > &target_views,
                             IndexSpaceExpression *expr, const bool expr_covers,
-                            const FieldMask &reduction_mask, 
+                            const FieldMask &reduction_mask,
                             CopyFillAggregator *&aggregator,
                             CopyFillGuard *previous_guard,
-                            Operation *op, const unsigned index, 
+                            PhysicalAnalysis *analysis,
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &applied_events,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
-      template<typename T>
+      void apply_restricted_reductions(
+                            const FieldMaskSet<InstanceView> &reduction_targets,
+                            IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &reduction_mask,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
+                            PhysicalAnalysis *analysis,
+                            const bool track_events,
+                            const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs);
+      void apply_reduction(InstanceView *target,PhysicalManager *target_manager,
+                            IndexSpaceExpression *expr, const bool expr_covers,
+                            const FieldMask &reduction_mask,
+                            CopyFillAggregator *&aggregator,
+                            CopyFillGuard *previous_guard,
+                            PhysicalAnalysis *analysis,
+                            const bool track_events,
+                            const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &applied_events,
+                            FieldMaskSet<IndexSpaceExpression> *applied_exprs,
+                            CopyAcrossHelper *across_helper);
       void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
                     const FieldMask &restricted_mask, 
-                    const FieldMaskSet<T> &src_views,
-                    Operation *op, const unsigned index,
+                    const std::vector<PhysicalManager*> &target_instances,
+                    const LegionVector<
+                               FieldMaskSet<InstanceView> > &target_views,
+                    PhysicalAnalysis *analysis,
                     const PhysicalTraceInfo &trace_info,
                     std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
+      template<typename T>
+      void copy_out(IndexSpaceExpression *expr, const bool expr_covers,
+                    const FieldMask &restricted_mask,
+                    const FieldMaskSet<T> &src_views,
+                    PhysicalAnalysis *analysis,
+                    const PhysicalTraceInfo &trace_info,
+                    std::set<RtEvent> &applied_events,
+                    CopyFillAggregator *&aggregator);
+      void predicate_fill_all(FillView *fill, const FieldMask &fill_mask,
+                              IndexSpaceExpression *expr,
+                              const bool expr_covers,
+                              const PredEvent true_guard,
+                              const PredEvent false_guard,
+                              PhysicalAnalysis *analysis,
+                              const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &applied_events,
+                              CopyFillAggregator *&aggregator);
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
                               const FieldMask &restrict_mask,
                               InstanceView *restricted_view,
                               ReferenceMutator &mutator);
       void update_reductions(const unsigned fidx, ReferenceMutator &mutator,
-          std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates);
+          std::list<std::pair<InstanceView*,IndexSpaceExpression*> > &updates);
       void update_released(IndexSpaceExpression *expr, const bool expr_covers,
                 FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
       void filter_initialized_data(IndexSpaceExpression *expr, 
@@ -2828,6 +3100,31 @@ namespace Legion {
           const bool covers, const FieldMask &mask, ReferenceMutator &mutator, 
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+    protected:
+      template<typename T>
+      bool refine_collective_views(const FieldMask &refine_mask,
+                                   const FieldMaskSet<T> &views,
+                                   FieldMaskSet<T> &refined_views,
+                                   std::set<RtEvent> &applied_events);
+      template<typename T>
+      bool refine_collective_views(const FieldMask &refine_mask,
+                                   const FieldMaskSet<T> &views,
+                                   FieldMaskSet<T> &refined_views,
+                                   ReferenceMutator &mutator);
+      template<typename T>
+      bool find_collective_interfering(CollectiveView *collective,
+          const std::vector<DistributedID> &instances,
+          const FieldMask &overlap, bool &dominated, bool &refined, 
+          FieldMaskSet<PendingCollective> &overlapping_refinements,
+          FieldMaskSet<PendingCollective> &independent_refinements,
+          FieldMaskSet<PendingCollective> &new_remainders,
+          FieldMaskSet<T> &overlapping_views) const;
+      void find_individual_interfering(const FieldMask &mask,
+          const std::vector<DistributedID> &instances,
+          FieldMaskSet<IndividualView> &interfering) const;
+      void invalidate_collective_views(ReferenceMutator &mutator,
+          const LegionMap<CollectiveView*,
+                          FieldMaskSet<InstanceView> > &to_invalidate);
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
@@ -2859,7 +3156,7 @@ namespace Legion {
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            std::map<unsigned,std::list<std::pair<ReductionView*,
+            std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2874,7 +3171,7 @@ namespace Legion {
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            std::map<unsigned,std::list<std::pair<ReductionView*,
+            std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2891,7 +3188,7 @@ namespace Legion {
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             const FieldMaskSet<IndexSpaceExpression> &initialized_updates,
-            const std::map<unsigned,std::list<std::pair<ReductionView*,
+            const std::map<unsigned,std::list<std::pair<InstanceView*,
                 IndexSpaceExpression*> > > &reduction_updates,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> > &restricted_updates,
@@ -2928,6 +3225,12 @@ namespace Legion {
       static void handle_capture_response(Deserializer &derez, Runtime *runtime,
                                           AddressSpaceID source);
     public:
+      // Note this context refers to the context from which the views are
+      // created in. Normally this is the same as the context in which the
+      // equivalence set is made, but it can be from an ancestor task
+      // higher up in the task tree in the presencce of virtual mappings.
+      // It's crucial to correctness that all views stored in an equivalence
+      // set come from the same context.
       InnerContext *const context;
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
@@ -2943,7 +3246,7 @@ namespace Legion {
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
       // Reductions always need to be applied in order so keep them in order
       std::map<unsigned/*fidx*/,std::list<std::pair<
-        ReductionView*,IndexSpaceExpression*> > >       reduction_instances;
+        InstanceView*,IndexSpaceExpression*> > >        reduction_instances;
       FieldMask                                         reduction_fields;
       // The list of expressions with the single instance for each
       // field that represents the restriction of that expression
@@ -2954,6 +3257,21 @@ namespace Legion {
       FieldMask                                         restricted_fields;
       // List of instances that were restricted, but have been acquired
       ExprViewMaskSets                                  released_instances;
+      // The names of any collective views we have resident
+      // The crucial invariant here is that each actual physical instance
+      // can appear in at most a single view (collective or otherwise) for
+      // each field in order to avoid aliasing and duplication which can 
+      // result in unsoundness (in the case of reductions) or imprecision
+      // Note that this data structure must be sound in that it must contain
+      // all the collective views currently referenced by the equivalence set
+      // but it can also overapproximate. Periodically we will check the
+      // set to prune out any collective views not currently in use. We do
+      // this infrequently though to ensure that we can get some reuse of
+      // collective view checks across uses. The pruning though also allows
+      // for coarsening of instances back into coarser views.
+      FieldMaskSet<CollectiveView>                      collective_instances;
+      unsigned                                          collective_timeout;
+      static constexpr unsigned COLLECTIVE_CACHE_TIMEOUT = 1024; 
     protected:
       // Tracing state for this equivalence set
       TraceViewSet                                      *tracing_preconditions;
@@ -2987,9 +3305,9 @@ namespace Legion {
       // are only used be a small number of nodes that is less than
       // the samples per migration count, if it ever exceeds this 
       // then we'll issue a warning
-      static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      static constexpr unsigned SAMPLES_PER_MIGRATION_TEST = 64;
       // How many total epochs we want to remember
-      static const unsigned MIGRATION_EPOCHS = 2;
+      static constexpr unsigned MIGRATION_EPOCHS = 2;
       std::vector<std::pair<AddressSpaceID,unsigned> > 
         user_samples[MIGRATION_EPOCHS];
       unsigned migration_index;
@@ -3023,11 +3341,11 @@ namespace Legion {
         PendingEquivalenceSet *const pending;
       };
     public:
-      PendingEquivalenceSet(RegionNode *region_node);
-      PendingEquivalenceSet(const PendingEquivalenceSet &rhs);
+      PendingEquivalenceSet(RegionNode *region_node, InnerContext *context);
+      PendingEquivalenceSet(const PendingEquivalenceSet &rhs) = delete;
       ~PendingEquivalenceSet(void);
     public:
-      PendingEquivalenceSet& operator=(const PendingEquivalenceSet &rhs);
+      PendingEquivalenceSet& operator=(const PendingEquivalenceSet&) = delete;
     public:
       void record_previous(EquivalenceSet *set, const FieldMask &mask,
                            std::set<RtEvent> &applied_events);
@@ -3035,11 +3353,12 @@ namespace Legion {
                       std::set<RtEvent> &applied_events);
     public:
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
-          InnerContext *ctx, Runtime *runtime, std::set<RtEvent> &ready_events);
+                      Runtime *runtime, std::set<RtEvent> &ready_events);
       bool finalize(void);
       static void handle_defer_finalize(const void *args);
     public:
       RegionNode *const region_node;
+      InnerContext *const context;
     protected:
       EquivalenceSet *new_set;
       RtEvent clone_event;

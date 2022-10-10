@@ -23,112 +23,104 @@ namespace Legion {
   namespace Internal {
 
     /////////////////////////////////////////////////////////////
-    // Memoizable Operation 
+    // Memoizable
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    MemoizableOp<OP>::MemoizableOp(Runtime *rt)
-      : OP(rt), Memoizable()
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::initialize_memoizable(void)
-    //--------------------------------------------------------------------------
-    {
-      tpl = NULL;
-      memo_state = NO_MEMO;
-      need_prepipeline_stage = false;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::activate_memoizable(void)
-    //--------------------------------------------------------------------------
-    {
-      tpl = NULL;
-      memo_state = NO_MEMO;
-      need_prepipeline_stage = false;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::execute_dependence_analysis(void)
+    void Memoizable<OP>::initialize_memoizable(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memo_state == NO_MEMO); // should always be no memo here
+      assert(!this->is_memoizing()); // should always be no memo here
 #endif
-      PhysicalTrace *const physical_trace = (OP::trace == NULL) ? NULL :
-          OP::trace->get_physical_trace();
+      PhysicalTrace *const physical_trace = (this->trace == NULL) ? NULL :
+          this->trace->get_physical_trace();
       // Only invoke memoization if we are doing physical tracing
       if (physical_trace != NULL)
-        invoke_memoize_operation(this->get_mappable()->map_id);
-#ifdef DEBUG_LEGION
-      assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
-#endif
-      if (memo_state == MEMO_REQ)
       {
-        tpl = physical_trace->get_current_template();
-        if (tpl == NULL)
+        this->tpl = physical_trace->get_current_template();
+        if ((this->tpl == NULL) || !this->tpl->is_replaying())
+          this->invoke_memoize_operation(this->get_mappable()->map_id);
+        else
+          this->memo_state = OP::MEMO_REQ; // replaying so memoization required
+      }
+#ifdef DEBUG_LEGION
+      assert(!this->is_memoizing() || (this->memo_state == OP::MEMO_REQ));
+#endif
+      if (this->memo_state == OP::MEMO_REQ)
+      {
+        if (this->tpl == NULL)
         {
-          OP::trace->set_state_record();
+          this->trace->set_state_record();
           TaskTreeCoordinates coordinates;
           this->compute_task_tree_coordinates(coordinates);
-          tpl = physical_trace->start_new_template(std::move(coordinates));
-          assert(tpl != NULL);
+          this->tpl =
+            physical_trace->start_new_template(std::move(coordinates));
+#ifdef DEBUG_LEGION
+          assert(this->tpl != NULL);
+#endif
         }
-
-        if (tpl->is_replaying())
+        if (this->tpl->is_replaying())
         {
 #ifdef DEBUG_LEGION
-          assert(OP::trace->is_replaying());
-          assert(tpl->is_replaying());
+          assert(this->trace->is_replaying());
+          assert(this->tpl->is_replaying());
 #endif
-          memo_state = MEMO_REPLAY;
-          OP::trace->register_physical_only(this);
-          trigger_replay();
-          return;
+          this->memo_state = OP::MEMO_REPLAY;
+          this->trigger_replay();
+        }
+        // Check that all the recorders agree on recording
+        else if (physical_trace->check_memoize_consensus(this->trace_local_id))
+        {
+#ifdef DEBUG_LEGION
+          assert(this->trace->is_recording());
+          assert(this->tpl->is_recording());
+#endif
+          this->memo_state = OP::MEMO_RECORD;
         }
         else
-        {
-#ifdef DEBUG_LEGION
-          assert(OP::trace->is_recording());
-          assert(tpl->is_recording());
-#endif
-          memo_state = MEMO_RECORD;
-        }
+          this->memo_state = OP::NO_MEMO;
       }
-      need_prepipeline_stage = true;
-      OP::execute_dependence_analysis();
-    };
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    TraceLocalID MemoizableOp<OP>::get_trace_local_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return TraceLocalID(OP::trace_local_id, DomainPoint());
+      else if (this->tpl != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(this->tpl->is_recording());
+#endif
+        this->tpl->record_no_consensus();
+      }
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    PhysicalTemplate* MemoizableOp<OP>::get_template(void) const
+    void Memoizable<OP>::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      return tpl;
+      initialize_memoizable();
+      if (!this->is_replaying())
+        OP::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    ApEvent MemoizableOp<OP>::compute_init_precondition(
-                                                    const TraceInfo &trace_info)
+    void Memoizable<OP>::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      if (this->is_recording())
+        this->tpl->record_completion_event(this->get_completion_event(),
+              this->get_operation_kind(), this->get_trace_local_id());
+      OP::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    ApEvent Memoizable<OP>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      ApEvent sync_precondition = OP::compute_sync_precondition(trace_info);
+      if (this->is_recording())
+        trace_info.record_op_sync_event(sync_precondition);
       if (sync_precondition.exists())
       {
         if (this->execution_fence_event.exists())
@@ -141,29 +133,135 @@ namespace Legion {
         return this->execution_fence_event;
     }
 
+    /////////////////////////////////////////////////////////////
+    // Speculative
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
+    void Predicated<OP>::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(OP::trace != NULL);
-      assert(!this->runtime->no_tracing);
-      assert(!this->runtime->no_physical_tracing);
+      // Register ourselves as a waiter on the predicate if we have one
+      if (this->predicate != NULL)
+      {
+        bool value;
+        if (this->predicate->register_waiter(this,this->get_generation(),value))
+        {
+          AutoLock o_lock(this->op_lock);
+          if (value)
+            this->predication_state = OP::RESOLVE_TRUE_STATE;
+          else
+            this->predication_state = OP::RESOLVE_FALSE_STATE;
+        }
+      }
+      Memoizable<OP>::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void Predicated<OP>::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the memoizable
+      this->initialize_memoizable();
+      if (!this->is_replaying())
+      {
+        // Record a mapping dependence on our predicate
+        if (this->predicate != NULL)
+        {
+          if (this->is_recording())
+            REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                "Recording of predicated operations is not yet supported")
+          this->register_dependence(this->predicate, 
+                                    this->predicate->get_generation());
+          this->predicate->get_predicate_guards(this->true_guard,
+                                                this->false_guard);
+        }
+        // Then we can do the base initialization
+        OP::trigger_dependence_analysis();
+      }
+      if (this->predicate != NULL)
+        this->predicate->remove_predicate_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void Predicated<OP>::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      bool speculate = false;
+      // We don't support speculation for legion spy validation runs
+      // as it doesn't really understand the event graphs that get
+      // generated because of the predication events
+#ifndef LEGION_SPY
+      bool perform_query = false;
+      if (this->predicate != NULL)
+      {
+        AutoLock o_lock(this->op_lock);
+        perform_query = 
+          (this->predication_state != OP::PENDING_ANALYSIS_STATE);
+      }
+      if (perform_query && this->query_speculate())
+        speculate = true;
 #endif
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.trace_id = OP::trace->get_trace_id();
-      output.memoize = false;
-      Processor mapper_proc = OP::parent_ctx->get_executing_processor();
-      MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
-      Mappable *mappable = this->get_mappable();
-#ifdef DEBUG_LEGION
-      assert(mappable != NULL);
-#endif
-      mapper->invoke_memoize_operation(mappable, &input, &output);
-      if (output.memoize)
-        memo_state = MEMO_REQ;
+      bool trigger = false;
+      bool continue_true = false;
+      bool continue_false = false;
+      {
+        AutoLock o_lock(this->op_lock);
+        switch (this->predication_state)
+        {
+          case OP::PENDING_ANALYSIS_STATE:
+            {
+              if (speculate)
+              {
+                trigger = true;
+                this->predication_state = OP::SPECULATIVE_MAPPING_STATE;
+              }
+              else
+              {
+                this->predication_state = OP::WAITING_MAPPING_STATE;
+                // Clear the predicates since they won't matter
+                this->true_guard = PredEvent::NO_PRED_EVENT;
+                this->false_guard = PredEvent::NO_PRED_EVENT;
+              }
+              break;
+            }
+          case OP::RESOLVE_TRUE_STATE:
+            {
+              trigger = true;
+              continue_true = true;
+              // Clear the predicates since they won't matter
+              this->true_guard = PredEvent::NO_PRED_EVENT;
+              this->false_guard = PredEvent::NO_PRED_EVENT;
+              break;
+            }
+          case OP::RESOLVE_FALSE_STATE:
+            {
+              // If we're recording we still need to map this like normal
+              // so that the recording can capture it even with the false
+              // predicate resolution in case the replay is not false
+              if (this->is_recording())
+                trigger = true;
+              continue_false = true;
+              break;
+            }
+          default:
+            assert(false); // should never make it here
+        }
+      }
+      if (continue_true)
+        this->resolve_true(false/*speculated*/, false/*launched*/);
+      else if (continue_false)
+      {
+        if (this->runtime->legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(this->unique_op_id);
+        this->resolve_false(false/*specualted*/,
+                            this->is_recording()/*launched*/);
+      }
+      if (trigger)
+        Memoizable<OP>::trigger_ready();
     }
 
   }; // namespace Internal

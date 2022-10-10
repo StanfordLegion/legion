@@ -24,8 +24,7 @@ namespace Legion {
 
     class MappingCallInfo {
     public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      Operation *op, bool supports_collectives); 
+      MappingCallInfo(MapperManager *man, MappingCallKind k, Operation *op); 
     public:
       MapperManager*const               manager;
       RtUserEvent                       resume;
@@ -34,10 +33,7 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
-      unsigned                          collective_count;
       bool                              reentrant_disabled;
-      const bool                        supports_collectives;
-      const bool                        operation_supports_collectives;
     };
 
     /**
@@ -297,8 +293,7 @@ namespace Legion {
       friend class Runtime;
       friend class Mapping::AutoLock;
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition, 
-          bool prioritize = false, bool supports_collectives = false) = 0;
+          Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
@@ -383,16 +378,14 @@ namespace Legion {
                                     MappingInstance &result, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag);
+                                    const LayoutConstraint **unsat);
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag);
+                                    const LayoutConstraint **unsat);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
@@ -400,8 +393,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag);
+                                    const LayoutConstraint **unsat);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
@@ -409,35 +401,27 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat,
-                                    size_t collective_tag);
+                                    const LayoutConstraint **unsat);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds,
-                                    size_t collective_tag);
+                                    bool tight_region_bounds);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds,
-                                    size_t collective_tag);
+                                    bool tight_region_bounds);
       void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds,
-                                    size_t collective_tag);
+                                    bool acquire, bool tight_region_bounds);
       void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds,
-                                    size_t collective_tag);
-      bool match_collective_instances(MappingCallInfo *ctx,
-                                    std::vector<MappingInstance> &matches,
-                                    size_t collective_tag);
+                                    bool acquire, bool tight_region_bounds);
       void set_garbage_collection_priority(MappingCallInfo *ctx, 
                                     const MappingInstance &instance, 
                                     GCPriority priority);
@@ -465,9 +449,6 @@ namespace Legion {
                                     InstanceManager *manager, bool created);
       void release_acquired_instance(MappingCallInfo *info,
                                      InstanceManager *manager);
-      void finalize_collective_point(MappingInstance &result, DistributedID did,
-                                     const DomainPoint &point, bool success,
-                                     Memory target_memory, bool acquire);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
       bool perform_acquires(MappingCallInfo *info,
@@ -614,8 +595,7 @@ namespace Legion {
       int find_local_MPI_rank(void);
     protected:
       // Both these must be called while holding the lock
-      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op,
-                                          bool supports_collectives);
+      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op);
       void free_call_info(MappingCallInfo *info);
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
@@ -673,8 +653,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition, 
-          bool prioritize = false, bool supports_collectives = false);
+          Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
@@ -732,8 +711,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-          Operation *op, RtEvent &precondition,
-          bool prioritize = false, bool supports_collectives = false);
+          Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
