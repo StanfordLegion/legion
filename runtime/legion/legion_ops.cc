@@ -1503,8 +1503,8 @@ namespace Legion {
           }
         }
         if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(unique_op_id,
-              manager->get_instance(DomainPoint()).id, index, valid_fields);
+          runtime->profiler->record_physical_instance_use(
+              manager->get_unique_event(), index, valid_fields);
       }
     }
 
@@ -18232,14 +18232,21 @@ namespace Legion {
                                          const std::vector<size_t> &sizes,
                                                LayoutConstraintSet &constraints,
                                                ApEvent &ready_event,
+                                               LgEvent &unique_event,
                                                size_t &instance_footprint)
     //--------------------------------------------------------------------------
     {
       PhysicalInstance result = PhysicalInstance::NO_INST;
       instance_footprint = footprint;
       Realm::ProfilingRequestSet requests;
-      if (runtime->profiler != NULL)
-        runtime->profiler->add_inst_request(requests, this);
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, this, unique_event);
+      }
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -18344,10 +18351,10 @@ namespace Legion {
       }
       if (runtime->profiler != NULL)
       {
-        runtime->profiler->record_physical_instance_region(unique_op_id,
-            result.id, requirement.region);
-        runtime->profiler->record_physical_instance_layout(unique_op_id,
-            result.id, requirement.region.field_space, constraints);
+        runtime->profiler->record_physical_instance_region(unique_event,
+                                                           requirement.region);
+        runtime->profiler->record_physical_instance_layout(unique_event,
+            requirement.region.field_space, constraints);
       }
       return result;
     }

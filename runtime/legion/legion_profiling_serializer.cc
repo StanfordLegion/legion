@@ -179,8 +179,7 @@ namespace Legion {
 
       ss << "PhysicalInstRegionDesc {"
          << "id:" << PHYSICAL_INST_REGION_ID                      << delim
-	 << "op_id:UniqueID:"              << sizeof(UniqueID)    << delim
-	 << "inst_id:InstID:"              << sizeof(InstID)      << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent)     << delim
 	 << "ispace_id:IDType:"            << sizeof(IDType)      << delim
 	 << "fspace_id:unsigned:"          << sizeof(unsigned)    << delim
 	 << "tree_id:unsigned:"            << sizeof(unsigned)
@@ -188,6 +187,7 @@ namespace Legion {
 
       ss << "PhysicalInstLayoutDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
          << "inst_id:InstID:"           << sizeof(InstID)     << delim
          << "field_id:unsigned:"        << sizeof(unsigned)   << delim
@@ -199,16 +199,14 @@ namespace Legion {
 
       ss << "PhysicalInstDimOrderDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_DIM_ID              << delim
-         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
-         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "dim:unsigned:"             << sizeof(unsigned)   << delim
          << "dim_kind:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "PhysicalInstanceUsage {"
          << "id:" << PHYSICAL_INST_USAGE_ID                   << delim
-         << "inst_id:InstID:"           << sizeof(InstID)     << delim
-         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "index_id:unsigned:"        << sizeof(unsigned)   << delim
          << "field_id:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
@@ -384,16 +382,14 @@ namespace Legion {
 
       ss << "InstUsageInfo {"
          << "id:" << INST_USAGE_INFO_ID                    << delim
-         << "op_id:UniqueID:"          << sizeof(UniqueID) << delim
-         << "inst_id:InstID:"          << sizeof(InstID)   << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "mem_id:MemID:"            << sizeof(MemID)    << delim
          << "size:unsigned long long:" << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "InstTimelineInfo {"
          << "id:" << INST_TIMELINE_INFO_ID                << delim
-         << "op_id:UniqueID:"      << sizeof(UniqueID)    << delim
-         << "inst_id:InstID:"      << sizeof(InstID)      << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "destroy:timestamp_t:" << sizeof(timestamp_t)
@@ -653,8 +649,7 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_REGION_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_rdesc.op_id), sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_uid.id), sizeof(LgEvent));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.ispace_id), sizeof(IDType));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.fspace_id), sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.tree_id), sizeof(unsigned));
@@ -668,10 +663,8 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_LAYOUT_DIM_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.op_id),
-                sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_id),
-                sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_uid.id),
+                sizeof(LgEvent));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.dim),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.k),
@@ -686,8 +679,8 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_LAYOUT_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.op_id),sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_id),sizeof(InstID));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_uid.id),
+                sizeof(LgEvent));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.fspace_id),
@@ -707,8 +700,7 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_USAGE_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(usage.inst_id), sizeof(InstID));
-      lp_fwrite(f, (char*)&(usage.op_id) ,sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(usage.inst_uid.id), sizeof(LgEvent));
       lp_fwrite(f, (char*)&(usage.index), sizeof(unsigned));
       lp_fwrite(f, (char*)&(usage.field), sizeof(unsigned));
     }
@@ -1010,10 +1002,8 @@ namespace Legion {
     {
       int ID = INST_USAGE_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(inst_usage_info.op_id),   
-                sizeof(inst_usage_info.op_id));
-      lp_fwrite(f, (char*)&(inst_usage_info.inst_id), 
-                sizeof(inst_usage_info.inst_id));
+      lp_fwrite(f, (char*)&(inst_usage_info.inst_uid.id),
+                sizeof(inst_usage_info.inst_uid));
       lp_fwrite(f, (char*)&(inst_usage_info.mem_id),  
                 sizeof(inst_usage_info.mem_id));
       lp_fwrite(f, (char*)&(inst_usage_info.size),    
@@ -1027,10 +1017,8 @@ namespace Legion {
     {
       int ID = INST_TIMELINE_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(inst_timeline_info.op_id),   
-                sizeof(inst_timeline_info.op_id));
-      lp_fwrite(f, (char*)&(inst_timeline_info.inst_id), 
-                sizeof(inst_timeline_info.inst_id));
+      lp_fwrite(f, (char*)&(inst_timeline_info.inst_uid.id),
+                sizeof(inst_timeline_info.inst_uid.id));
       lp_fwrite(f, (char*)&(inst_timeline_info.create),  
                 sizeof(inst_timeline_info.create));
       lp_fwrite(f, (char*)&(inst_timeline_info.ready),  
@@ -1501,9 +1489,8 @@ namespace Legion {
            const LegionProfInstance::PhysicalInstRegionDesc &phy_instance_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Region Desc " "%llu "  IDFMT " %llu %u %u",
-		     phy_instance_rdesc.op_id,
-		     phy_instance_rdesc.inst_id,
+      log_prof.print("Physical Inst Region Desc "  IDFMT " %llu %u %u",
+                     phy_instance_rdesc.inst_uid.id,
 		     phy_instance_rdesc.ispace_id,
 		     phy_instance_rdesc.fspace_id,
 		     phy_instance_rdesc.tree_id);
@@ -1515,9 +1502,8 @@ namespace Legion {
            &phy_instance_dim_order_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Dim Order Desc " "%llu " IDFMT " %u %u",
-                     phy_instance_dim_order_rdesc.op_id,
-                     phy_instance_dim_order_rdesc.inst_id,
+      log_prof.print("Physical Inst Dim Order Desc " IDFMT " %u %u",
+                     phy_instance_dim_order_rdesc.inst_uid.id,
                      phy_instance_dim_order_rdesc.dim,
                      phy_instance_dim_order_rdesc.k
                      );
@@ -1544,10 +1530,9 @@ namespace Legion {
               &phy_instance_layout_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u %u %u %u "
+      log_prof.print("Physical Inst Layout Desc " IDFMT " %u %u %u %u "
                      "%u",
-                     phy_instance_layout_rdesc.op_id,
-                     phy_instance_layout_rdesc.inst_id,
+                     phy_instance_layout_rdesc.inst_uid.id,
                      phy_instance_layout_rdesc.field_id,
                      phy_instance_layout_rdesc.fspace_id,
                      phy_instance_layout_rdesc.has_align,
@@ -1561,8 +1546,8 @@ namespace Legion {
                          const LegionProfInstance::PhysicalInstanceUsage &usage)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Usage " IDFMT " %llu %u %u",
-                      usage.inst_id, usage.op_id, usage.index, usage.field);
+      log_prof.print("Physical Inst Usage " IDFMT " %u %u",
+                      usage.inst_uid.id, usage.index, usage.field);
     }
 
     //--------------------------------------------------------------------------
@@ -1836,8 +1821,8 @@ namespace Legion {
                        const LegionProfInstance::InstUsageInfo& inst_usage_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %llu",
-                     inst_usage_info.op_id, inst_usage_info.inst_id, 
+      log_prof.print("Prof Inst Usage " IDFMT " " IDFMT " %llu",
+                     inst_usage_info.inst_uid.id, 
                      inst_usage_info.mem_id, inst_usage_info.size);
     }
 
@@ -1846,10 +1831,9 @@ namespace Legion {
                  const LegionProfInstance::InstTimelineInfo& inst_timeline_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu %llu",
-         inst_timeline_info.op_id, inst_timeline_info.inst_id,
-         inst_timeline_info.create, inst_timeline_info.ready,
-         inst_timeline_info.destroy);
+      log_prof.print("Prof Inst Timeline " IDFMT " %llu %llu %llu",
+         inst_timeline_info.inst_uid.id, inst_timeline_info.create,
+         inst_timeline_info.ready, inst_timeline_info.destroy);
     }
 
     //--------------------------------------------------------------------------

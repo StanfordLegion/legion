@@ -210,16 +210,14 @@ namespace Legion {
       };
       struct PhysicalInstRegionDesc {
       public:
-	UniqueID op_id;
-	IDType inst_id;
+        LgEvent inst_uid;
 	IDType ispace_id;
 	unsigned fspace_id;
 	unsigned tree_id;
       };
       struct PhysicalInstLayoutDesc {
       public:
-	UniqueID op_id;
-	IDType inst_id;
+        LgEvent inst_uid;
 	unsigned field_id;
 	unsigned fspace_id;
         EqualityKind eqk;
@@ -228,15 +226,13 @@ namespace Legion {
       };
       struct PhysicalInstDimOrderDesc {
       public:
-        UniqueID op_id;
-        IDType inst_id;
+        LgEvent inst_uid;
         unsigned dim;
         DimensionKind k;
       };
       struct PhysicalInstanceUsage {
       public:
-        IDType inst_id;
-        UniqueID op_id;
+        LgEvent inst_uid;
         unsigned index;
         unsigned field;
       };
@@ -299,6 +295,7 @@ namespace Legion {
       public:
         UniqueID op_id;
         InstID inst_id;
+        LgEvent inst_uid;
         timestamp_t create; // time of HLR creation request
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
@@ -306,15 +303,14 @@ namespace Legion {
       };
       struct InstUsageInfo {
       public:
-        UniqueID op_id;
+        LgEvent inst_uid;
         InstID inst_id;
         MemID mem_id;
         unsigned long long size;
       };
       struct InstTimelineInfo {
       public:
-        UniqueID op_id;
-        InstID inst_id;
+        LgEvent inst_uid;
         timestamp_t create, ready, destroy;
       };
       struct PartitionInfo {
@@ -412,20 +408,18 @@ namespace Legion {
       void register_logical_region(IDType index_space,
 				   unsigned field_space, unsigned tree_id,
 				   const char* name);
-      void register_physical_instance_region(UniqueID op_id, IDType inst_id,
+      void register_physical_instance_region(LgEvent inst_uid,
 					     LogicalRegion handle);
-      void register_physical_instance_field(UniqueID op_id, IDType inst_id, 
+      void register_physical_instance_field(LgEvent inst_uid,
                                             unsigned field_id,
                                             unsigned fspace,
                                             unsigned align,
                                             bool has_align,
                                             EqualityKind eqk);
-      void register_physical_instance_dim_order(UniqueID op_id,
-                                                IDType inst_id,
+      void register_physical_instance_dim_order(LgEvent inst_uid,
                                                 unsigned dim,
                                                 DimensionKind k);
-      void register_physical_instance_use(UniqueID op_id,
-                                          IDType inst_id,
+      void register_physical_instance_use(LgEvent inst_uid,
                                           unsigned index,
                                           const std::vector<FieldID> &fields);
       void register_index_space_size(UniqueID id,
@@ -582,11 +576,12 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            Operation *op, unsigned count = 1);
+                            Operation *op, LgEvent src_inst_uid,
+                            LgEvent dst_inst_uid, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            Operation *op);
+                            Operation *op, LgEvent inst_uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
-                            Operation *op);
+                            Operation *op, LgEvent unique_event);
       void handle_failed_instance_allocation(void);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  Operation *op, DepPartOpKind part_op);
@@ -603,11 +598,12 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            UniqueID uid, unsigned count = 1);
+                            UniqueID uid, LgEvent src_inst_uid,
+                            LgEvent dst_inst_uid, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            UniqueID uid);
+                            UniqueID uid, LgEvent inst_uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
-                            UniqueID uid);
+                            UniqueID uid, LgEvent unique_event);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  UniqueID uid, DepPartOpKind part_op);
     public:
@@ -632,13 +628,11 @@ namespace Legion {
 				 const DomainPoint &point);
       void record_logical_region(IDType index_space, unsigned field_space,
 				 unsigned tree_id, const char* name);
-      void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
+      void record_physical_instance_region(LgEvent unique_event, 
                                            LogicalRegion handle);
-      void record_physical_instance_layout(UniqueID op_id,
-                                           IDType inst_id, FieldSpace fs,
+      void record_physical_instance_layout(LgEvent unique_event, FieldSpace fs,
                                            const LayoutConstraintSet &lc);
-      void record_physical_instance_use(UniqueID op_id, IDType inst_id,
-                                        unsigned index,
+      void record_physical_instance_use(LgEvent unique_event, unsigned index,
                                         const std::vector<FieldID> &fields);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 

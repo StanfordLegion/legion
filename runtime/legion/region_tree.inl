@@ -126,7 +126,8 @@ namespace Legion {
         priority =
           trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_fill_request(requests, trace_info.op);
+        forest->runtime->profiler->add_fill_request(requests, trace_info.op,
+                                                    unique_event);
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -198,7 +199,8 @@ namespace Legion {
         priority =
           trace_info.op->add_copy_profiling_request(trace_info, requests,false);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, trace_info.op);
+        forest->runtime->profiler->add_copy_request(requests, trace_info.op,
+                                                    src_unique, dst_unique);
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -5406,8 +5408,10 @@ namespace Legion {
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
                                           false/*fill*/, total_copies);
+      // TODO: need to log unique IDs for instances here
       if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, op, total_copies);
+        runtime->profiler->add_copy_request(requests, op,
+            LgEvent::NO_LG_EVENT, LgEvent::NO_LG_EVENT, total_copies);
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations

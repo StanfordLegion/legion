@@ -14003,11 +14003,12 @@ namespace Legion {
                            mask_index_map, serdez, external_mask);
       // Now make the instance, this should always succeed
       ApEvent ready_event;
+      LgEvent unique_event;
       size_t instance_footprint;
       LayoutConstraintSet constraints;
       PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source, field_set, field_sizes, 
-                                   constraints, ready_event,instance_footprint);
+        attach_op->create_instance(node->row_source, field_set, field_sizes,
+            constraints, ready_event, unique_event, instance_footprint);
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make
       if (inst.address_space() != context->runtime->address_space)
@@ -14020,6 +14021,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(inst);
           rez.serialize(ready_event);
+          rez.serialize(unique_event);
           rez.serialize(instance_footprint);
           constraints.serialize(rez);
           rez.serialize(external_mask);
@@ -14050,7 +14052,7 @@ namespace Legion {
         return InstanceRef(create_external_manager(inst, ready_event, 
                             instance_footprint, constraints, field_set, 
                             field_sizes,  external_mask, mask_index_map, 
-                            node, serdez), external_mask);
+                            unique_event, node, serdez), external_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -14066,6 +14068,8 @@ namespace Legion {
       derez.deserialize(inst);
       ApEvent ready_event;
       derez.deserialize(ready_event);
+      LgEvent unique_event;
+      derez.deserialize(unique_event);
       size_t footprint;
       derez.deserialize(footprint);
       LayoutConstraintSet constraints;
@@ -14095,7 +14099,7 @@ namespace Legion {
 
       PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
-          mask_index_map, region_node, serdez);
+          mask_index_map, unique_event, region_node, serdez);
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14129,7 +14133,7 @@ namespace Legion {
             const std::vector<FieldID> &field_set,
             const std::vector<size_t> &field_sizes, 
             const FieldMask &external_mask,
-            const std::vector<unsigned> &mask_index_map,
+            const std::vector<unsigned> &mask_index_map, LgEvent unique_event,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez)
     //--------------------------------------------------------------------------
     {
@@ -14165,7 +14169,8 @@ namespace Legion {
                                          node->handle.get_tree_id(),
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
-                                         instance_footprint, ready_event,
+                                         instance_footprint,
+                                         ready_event, unique_event,
                                          true/*external instance*/);
 #ifdef DEBUG_LEGION
       assert(result != NULL);

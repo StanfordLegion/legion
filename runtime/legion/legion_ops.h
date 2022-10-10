@@ -3470,6 +3470,7 @@ namespace Legion {
                                        const std::vector<size_t> &field_sizes,
                                              LayoutConstraintSet &cons,
                                              ApEvent &ready_event,
+                                             LgEvent &unique_event,
                                              size_t &instance_footprint);
     protected:
       void activate_attach(void);

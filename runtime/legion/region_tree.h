@@ -3387,7 +3387,7 @@ namespace Legion {
             LayoutConstraintSet &constraints, 
             const std::vector<FieldID> &field_set,
             const std::vector<size_t> &field_sizes, const FieldMask &file_mask,
-            const std::vector<unsigned> &mask_index_map,
+            const std::vector<unsigned> &mask_index_map, LgEvent unique_event,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez);
       static void handle_external_create_request(Deserializer &derez,
                                 Runtime *runtime, AddressSpaceID source);
