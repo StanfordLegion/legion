@@ -353,7 +353,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_physical_instance_use(LgEvent inst_uid,
-                             unsigned index, const std::vector<FieldID> &fields)
+             UniqueID op_id, unsigned index, const std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       const unsigned offset = phy_inst_usage.size();
@@ -362,6 +362,7 @@ namespace Legion {
       {
         PhysicalInstanceUsage &usage = phy_inst_usage[offset+idx];
         usage.inst_uid = inst_uid;
+        usage.op_id = op_id;
         usage.index = index;
         usage.field = fields[idx];
       }
@@ -1803,13 +1804,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::record_physical_instance_use(LgEvent unique_event,
-                             unsigned index, const std::vector<FieldID> &fields)
+             UniqueID op_id, unsigned index, const std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->register_physical_instance_use(
-                                          unique_event, index, fields);
+                                    unique_event, op_id, index, fields);
     }
 
     //--------------------------------------------------------------------------

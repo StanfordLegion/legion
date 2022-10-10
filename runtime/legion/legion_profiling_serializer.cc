@@ -207,6 +207,7 @@ namespace Legion {
       ss << "PhysicalInstanceUsage {"
          << "id:" << PHYSICAL_INST_USAGE_ID                   << delim
          << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
+         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
          << "index_id:unsigned:"        << sizeof(unsigned)   << delim
          << "field_id:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
@@ -702,6 +703,7 @@ namespace Legion {
       int ID = PHYSICAL_INST_USAGE_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(usage.inst_uid.id), sizeof(usage.inst_uid.id));
+      lp_fwrite(f, (char*)&(usage.op_id), sizeof(UniqueID));
       lp_fwrite(f, (char*)&(usage.index), sizeof(unsigned));
       lp_fwrite(f, (char*)&(usage.field), sizeof(unsigned));
     }
@@ -1549,8 +1551,8 @@ namespace Legion {
                          const LegionProfInstance::PhysicalInstanceUsage &usage)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Usage " IDFMT " %u %u",
-                      usage.inst_uid.id, usage.index, usage.field);
+      log_prof.print("Physical Inst Usage " IDFMT " %llu %u %u",
+                      usage.inst_uid.id, usage.op_id, usage.index, usage.field);
     }
 
     //--------------------------------------------------------------------------

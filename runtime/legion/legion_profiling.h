@@ -233,6 +233,7 @@ namespace Legion {
       struct PhysicalInstanceUsage {
       public:
         LgEvent inst_uid;
+        UniqueID op_id;
         unsigned index;
         unsigned field;
       };
@@ -420,6 +421,7 @@ namespace Legion {
                                                 unsigned dim,
                                                 DimensionKind k);
       void register_physical_instance_use(LgEvent inst_uid,
+                                          UniqueID op_id,
                                           unsigned index,
                                           const std::vector<FieldID> &fields);
       void register_index_space_size(UniqueID id,
@@ -632,8 +634,8 @@ namespace Legion {
                                            LogicalRegion handle);
       void record_physical_instance_layout(LgEvent unique_event, FieldSpace fs,
                                            const LayoutConstraintSet &lc);
-      void record_physical_instance_use(LgEvent unique_event, unsigned index,
-                                        const std::vector<FieldID> &fields);
+      void record_physical_instance_use(LgEvent unique_event, UniqueID op_id,
+                          unsigned index, const std::vector<FieldID> &fields);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);

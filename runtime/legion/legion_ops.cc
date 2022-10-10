@@ -1504,7 +1504,7 @@ namespace Legion {
         }
         if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
           runtime->profiler->record_physical_instance_use(
-              manager->get_unique_event(), index, valid_fields);
+              manager->get_unique_event(), unique_op_id, index, valid_fields);
       }
     }
 
