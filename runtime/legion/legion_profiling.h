@@ -292,26 +292,13 @@ namespace Legion {
         LgEvent provenance;
 #endif
       };
-      struct InstCreateInfo {
-      public:
-        UniqueID op_id;
-        InstID inst_id;
-        LgEvent inst_uid;
-        timestamp_t create; // time of HLR creation request
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
-      };
-      struct InstUsageInfo {
+      struct InstTimelineInfo {
       public:
         LgEvent inst_uid;
         InstID inst_id;
         MemID mem_id;
         unsigned long long size;
-      };
-      struct InstTimelineInfo {
-      public:
-        LgEvent inst_uid;
+        UniqueID op_id; // creator op for the instance
         timestamp_t create, ready, destroy;
       };
       struct PartitionInfo {
@@ -446,13 +433,9 @@ namespace Legion {
       void process_fill(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
             const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
-      void process_inst_create(UniqueID op_id, PhysicalInstance inst,
-                               timestamp_t create);
-      void process_inst_usage(const ProfilingInfo *info,
-            const Realm::ProfilingResponse &response,
-            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage);
       void process_inst_timeline(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
+            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage,
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
@@ -503,8 +486,6 @@ namespace Legion {
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
-      std::deque<InstCreateInfo> inst_create_infos;
-      std::deque<InstUsageInfo> inst_usage_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
@@ -617,8 +598,6 @@ namespace Legion {
       // Dump all the results
       void finalize(void);
     public:
-      void record_instance_creation(PhysicalInstance inst, Memory memory,
-                                    UniqueID op_id, timestamp_t create);
       void record_empty_index_space(IDType handle);
       void record_field_space(UniqueID uid, const char* name);
       void record_field(UniqueID unique_id,

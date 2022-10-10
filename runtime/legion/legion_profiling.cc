@@ -704,46 +704,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_inst_create(UniqueID op_id,
-		  PhysicalInstance inst, unsigned long long create)
-    //--------------------------------------------------------------------------
-    {
-      inst_create_infos.emplace_back(InstCreateInfo());
-      InstCreateInfo &info = inst_create_infos.back();
-      info.op_id = op_id;
-      info.inst_id = inst.id;
-      info.create = create;
-#ifdef LEGION_PROF_PROVENANCE
-      info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
-      owner->update_footprint(sizeof(InstCreateInfo), this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::process_inst_usage(const ProfilingInfo *prof_info,
-                 const Realm::ProfilingResponse &response,
-                 const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage)
-    //--------------------------------------------------------------------------
-    {
-      inst_usage_infos.emplace_back(InstUsageInfo());
-      InstUsageInfo &info = inst_usage_infos.back();
-      info.inst_uid.id = prof_info->id;
-      info.inst_id = usage.instance.id;
-      info.mem_id = usage.memory.id;
-      info.size = usage.bytes;
-      owner->update_footprint(sizeof(InstUsageInfo), this);
-    }
-
-    //--------------------------------------------------------------------------
     void LegionProfInstance::process_inst_timeline(
                  const ProfilingInfo *prof_info,
                  const Realm::ProfilingResponse &response,
+                 const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage,
                  const Realm::ProfilingMeasurements::InstanceTimeline &timeline)
     //--------------------------------------------------------------------------
     {
       inst_timeline_infos.emplace_back(InstTimelineInfo());
       InstTimelineInfo &info = inst_timeline_infos.back();
       info.inst_uid.id = prof_info->id;
+      info.inst_id = usage.instance.id;
+      info.mem_id = usage.memory.id;
+      info.size = usage.bytes;
+      info.op_id = prof_info->op_id;
       info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.destroy = timeline.delete_time;
@@ -1073,16 +1047,6 @@ namespace Legion {
           serializer->serialize(*cit, *it);
         }
       }
-      for (std::deque<InstCreateInfo>::const_iterator it = 
-            inst_create_infos.begin(); it != inst_create_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<InstUsageInfo>::const_iterator it = 
-            inst_usage_infos.begin(); it != inst_usage_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
            it != copy_infos.end(); it++)
         {
@@ -1143,8 +1107,6 @@ namespace Legion {
       index_space_size_desc.clear();
       meta_infos.clear();
       copy_infos.clear();
-      inst_create_infos.clear();
-      inst_usage_infos.clear();
       inst_timeline_infos.clear();
       partition_infos.clear();
       mapper_call_infos.clear();
@@ -1450,16 +1412,6 @@ namespace Legion {
           serializer->serialize(*cit, front);
         diff += sizeof(front) + front.requests.size() * sizeof(FillInstInfo);
         fill_infos.pop_front();
-        const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if (t_curr >= t_stop)
-          return diff;
-      }
-      while (!inst_create_infos.empty())
-      {
-        InstCreateInfo &front = inst_create_infos.front();
-        serializer->serialize(front);
-        diff += sizeof(front);
-        inst_create_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -2052,10 +2004,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      increment_total_outstanding_requests(LEGION_PROF_INST, 
-                                           2/*different requests*/);
+      increment_total_outstanding_requests(LEGION_PROF_INST); 
 #else
-      increment_total_outstanding_requests(2/*different requests*/);
+      increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
@@ -2063,13 +2014,11 @@ namespace Legion {
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
-      Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
-      req1.add_measurement<
+      req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-      Realm::ProfilingRequest &req2 = requests.add_request(target_proc,
-                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
-      req2.add_measurement<
+      req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
 
@@ -2220,10 +2169,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      increment_total_outstanding_requests(LEGION_PROF_INST,
-                                           2/*different requests*/);
+      increment_total_outstanding_requests(LEGION_PROF_INST);
 #else
-      increment_total_outstanding_requests(2/*different requests*/);
+      increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
@@ -2231,13 +2179,11 @@ namespace Legion {
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
-      Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
-      req1.add_measurement<
+      req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-      Realm::ProfilingRequest &req2 = requests.add_request(target_proc,
-                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
-      req2.add_measurement<
+      req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }
 
@@ -2345,19 +2291,16 @@ namespace Legion {
           {
 	    // Record data based on which measurements we got back this time
             Realm::ProfilingMeasurements::InstanceTimeline timeline;
-	    if (response.get_measurement<
-                Realm::ProfilingMeasurements::InstanceTimeline>(timeline))
-	      thread_local_profiling_instance->process_inst_timeline(info, 
-                                                      response, timeline);
             Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
 	    if (response.get_measurement<
-                Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
-              {
-                thread_local_profiling_instance->process_mem_desc(
-                                                            usage.memory);
-                thread_local_profiling_instance->process_inst_usage(info,
-                                                         response, usage);
-              }
+                    Realm::ProfilingMeasurements::InstanceTimeline>(timeline) &&
+                response.get_measurement<
+                    Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
+            {
+              thread_local_profiling_instance->process_mem_desc(usage.memory);
+	      thread_local_profiling_instance->process_inst_timeline(info,
+                                                      response, usage, timeline);
+            }
             break;
           }
         case LEGION_PROF_PARTITION:
@@ -2398,16 +2341,6 @@ namespace Legion {
             instances.begin(); it != instances.end(); it++) {
         (*it)->dump_state(serializer);
       }  
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_instance_creation(PhysicalInstance inst,
-                       Memory memory, UniqueID op_id, unsigned long long create)
-    //--------------------------------------------------------------------------
-    {
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-      thread_local_profiling_instance->process_inst_create(op_id, inst, create);
     }
 
     //--------------------------------------------------------------------------

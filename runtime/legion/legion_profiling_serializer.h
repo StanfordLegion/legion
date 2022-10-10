@@ -83,8 +83,6 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
       virtual void serialize(const LegionProfInstance::FillInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::InstCreateInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::InstUsageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstTimelineInfo&) = 0;
       virtual void serialize(const LegionProfInstance::PartitionInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
@@ -147,8 +145,6 @@ namespace Legion {
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
-      void serialize(const LegionProfInstance::InstCreateInfo&);
-      void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
       void serialize(const LegionProfInstance::PartitionInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
@@ -190,8 +186,6 @@ namespace Legion {
         META_INFO_ID,
         COPY_INFO_ID,
         FILL_INFO_ID,
-        INST_CREATE_INFO_ID,
-        INST_USAGE_INFO_ID,
         INST_TIMELINE_INFO_ID,
         PARTITION_INFO_ID,
         MESSAGE_INFO_ID,
@@ -266,8 +260,6 @@ namespace Legion {
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
       void serialize(const LegionProfInstance::FillInfo&);
-      void serialize(const LegionProfInstance::InstCreateInfo&);
-      void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
       void serialize(const LegionProfInstance::PartitionInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);

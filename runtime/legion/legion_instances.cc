@@ -3899,13 +3899,6 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->handle_failed_instance_allocation();
       }
-      else if (runtime->profiler != NULL)
-      {
-        unsigned long long creation_time = 
-          Realm::Clock::current_time_in_nanoseconds();
-        runtime->profiler->record_instance_creation(instance,
-            memory_manager->memory, creator_id, creation_time);
-      }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
     }
