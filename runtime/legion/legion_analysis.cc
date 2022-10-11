@@ -9859,8 +9859,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // They shouldn't both be congruent, if they are then they are
       // the same and we should have caught that much earlier
-      assert((collective->instances.size() < overlap.size()) ||
-              (instances.size() < overlap.size()));
+      assert((overlap.size() < collective->instances.size()) ||
+              (overlap.size() < instances.size()));
 #endif
       // Yes they interfere, now figure out how
       if (overlap.size() < instances.size())
@@ -9876,10 +9876,9 @@ namespace Legion {
           std::vector<DistributedID>::const_iterator first = instances.begin();
           std::vector<DistributedID>::const_iterator second = 
             collective->instances.begin();
-          while ((first != instances.end()) && 
-                 (second != collective->instances.end()))
+          while (first != instances.end())
           {
-            if (*first < *second)
+            if ((second == collective->instances.end()) || (*first < *second))
               instance_remainder.push_back(*first++);
             else if (*second < *first)
               second++;
@@ -9911,10 +9910,9 @@ namespace Legion {
           std::vector<DistributedID>::const_iterator first = 
             collective->instances.begin();
           std::vector<DistributedID>::const_iterator second = instances.begin();
-          while ((first != collective->instances.end()) && 
-                 (second != instances.end()))
+          while (first != collective->instances.end())
           {
-            if (*first < *second)
+            if ((second == instances.end()) || (*first < *second))
               collective_remainder.push_back(*first++);
             else if (*second < *first)
               second++;

@@ -10012,15 +10012,16 @@ namespace Legion {
           trace_info : local_analyses->at(idx)->get_trace_info();
         IndividualView *local_view = local_views[idx];
         // Find the precondition for all our local copies
-        ApEvent dst_pre = local_view->find_copy_preconditions(
+        const ApEvent dst_pre = local_view->find_copy_preconditions(
             false/*reading*/, source->get_redop(), copy_mask, 
             copy_expression, op_id, index, applied_events, inst_info);
-        if (precondition.exists())
+        if (dst_pre.exists())
         {
-          if (dst_pre.exists())
-            dst_pre = Runtime::merge_events(&local_info, precondition, dst_pre);
+          if (precondition.exists())
+            precondition = 
+              Runtime::merge_events(&local_info, precondition, dst_pre);
           else
-            dst_pre = precondition;
+            precondition = dst_pre;
         }
         PhysicalManager *local_manager = local_view->get_manager();
         // Get our dst_fields

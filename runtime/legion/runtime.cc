@@ -12552,6 +12552,7 @@ namespace Legion {
           case SEND_REPL_FIND_COLLECTIVE_VIEW:
             {
               runtime->handle_control_replicate_find_collective_view(derez);
+              break;
             }
           case SEND_REPL_COLLECTIVE_RENDEZVOUS:
             {
