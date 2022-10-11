@@ -54,25 +54,23 @@ macro(_GASNet_parse_conduit_makefile _GASNet_MAKEFILE _GASNet_THREADING)
     file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}")
   else()
     get_filename_component(MFDIR "${_GASNet_MAKEFILE}" DIRECTORY)
-    file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}
-include ${MFDIR}/../gasnet_tools-${_GASNet_THREADING}.mak"
-    )
+    file(WRITE ${_TEMP_MAKEFILE} "include ${_GASNet_MAKEFILE}")
   endif()
   file(APPEND ${_TEMP_MAKEFILE} "
 gasnet-cc:
 	@echo $(GASNET_CC)
 gasnet-cflags:
-	@echo $(GASNET_CPPFLAGS) $(GASNET_CFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CFLAGS)
+	@echo $(GASNET_CPPFLAGS) $(GASNET_CFLAGS)
 gasnet-cxx:
 	@echo $(GASNET_CXX)
 gasnet-cxxflags:
-	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CXXFLAGS)
+	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS)
 gasnet-ld:
 	@echo $(GASNET_LD)
 gasnet-ldflags:
-	@echo $(GASNET_LDFLAGS) $(GASNETTOOLS_LDFLAGS)
+	@echo $(GASNET_LDFLAGS)
 gasnet-libs:
-	@echo $(GASNET_LIBS) $(GASNETTOOLS_LIBS)"
+	@echo $(GASNET_LIBS)"
   )
   find_program(GASNet_MAKE_PROGRAM NAMES gmake make smake)
   mark_as_advanced(GASNet_MAKE_PROGRAM)
