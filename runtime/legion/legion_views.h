@@ -305,6 +305,12 @@ namespace Legion {
                                         RtUserEvent::NO_RT_USER_EVENT);
       void update_field_reservations(const FieldMask &mask,
                                      const std::vector<Reservation> &rsrvs);
+    public: 
+      void register_collective_analysis(CollectiveAnalysis *analysis);
+      CollectiveAnalysis* find_collective_analysis(size_t context_index,
+                                                   unsigned region_index);
+      void unregister_collective_analysis(size_t context_index,
+                                          unsigned region_index);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,
@@ -402,6 +408,15 @@ namespace Legion {
         bool local_initialized;
       };
       std::map<RendezvousKey,UserRendezvous> rendezvous_users;
+    protected:
+      // This is actually quite important!
+      // Normally each collective analysis is associated with a specific
+      // collective view. However the copies done by that analysis might
+      // only be occurring on collective views that are a subset of the 
+      // collective view for the analysis. Therefore we register the analyses
+      // with the individual views so that they can be found by any copies
+      std::map<RendezvousKey,
+        std::pair<CollectiveAnalysis*,RtUserEvent> > collective_analyses;
     };
 
     /**
@@ -586,19 +601,9 @@ namespace Legion {
       void pack_fields(Serializer &rez,
                        const std::vector<CopySrcDstField> &fields) const;
       unsigned find_local_index(PhysicalManager *target) const;
-      RtEvent register_pending_analyses(PhysicalManager *target,
-                                        size_t op_context_index,
-                                        unsigned region_index,
-                                        size_t local_arrivals);
-      void unregister_pending_analyses(PhysicalManager *target,
-                                       size_t op_context_index,
-                                       unsigned region_index);
       void register_collective_analysis(PhysicalManager *target,
                                         CollectiveAnalysis *analysis,
-                                        size_t local_collective_arrivals,
                                         std::set<RtEvent> &applied_events);
-      RtEvent find_collective_analyses(size_t context_index, unsigned index,
-                          const std::vector<CollectiveAnalysis*> *&analyses);
     public:
       void notify_instance_deletion(RegionTreeID tid);
       virtual void notify_instance_deletion(PhysicalManager *manager);
@@ -640,7 +645,6 @@ namespace Legion {
                                     std::vector<ApUserEvent> &ready_events,
                                     std::vector<std::vector<ApEvent> > &terms,
                                     const PhysicalTraceInfo *trace_info,
-                                    std::vector<CollectiveAnalysis*> &s,
                                     const bool symbolic) const;
     public:
       static void handle_register_user_request(Runtime *runtime,
@@ -694,10 +698,6 @@ namespace Legion {
         std::vector<RtEvent> remote_registered;
         // events from remote nodes indicating they are applied
         std::vector<RtEvent> remote_applied;
-        // the local set of analyses
-        std::vector<CollectiveAnalysis*> analyses;
-        // event for when the analyses are all registered
-        RtUserEvent analyses_ready;
         // event to trigger when local registration is done
         RtUserEvent local_registered; 
         // event that marks when all registrations are done
@@ -1422,7 +1422,7 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> *analyze,
+                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 const uint64_t allreduce_tag);
@@ -1450,7 +1450,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> *analyze,
+                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);
       void perform_multi_allreduce(const uint64_t allreduce_tag,
@@ -1459,7 +1459,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> *analyze,
+                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);
       ApEvent initialize_allreduce_with_reductions(
@@ -1468,7 +1468,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
                     std::vector<std::vector<CopySrcDstField> > &local_fields,
@@ -1489,7 +1489,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -1500,7 +1500,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -1520,7 +1520,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,

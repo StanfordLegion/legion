@@ -6323,13 +6323,8 @@ namespace Legion {
           if (!it->first->is_collective_view())
             continue;
           CollectiveView *collective = it->first->as_collective_view();
-          std::map<InstanceView*,size_t>::const_iterator finder =
-            collective_arrivals.find(collective);
-#ifdef DEBUG_LEGION
-          assert(finder != collective_arrivals.end());
-#endif
           collective->register_collective_analysis(manager, this,
-                                  finder->second, applied_events);
+                                                   applied_events);
         }
       }
       return RegistrationAnalysis::perform_traversal(precondition,

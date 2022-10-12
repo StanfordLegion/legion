@@ -2672,6 +2672,121 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualView::register_collective_analysis(
+                                                   CollectiveAnalysis *analysis)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      const RendezvousKey key(analysis->get_context_index(), 
+                              analysis->get_requirement_index());
+      RtUserEvent to_trigger;
+      {
+        AutoLock v_lock(view_lock);
+        std::map<RendezvousKey,
+          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
+            collective_analyses.find(key);
+        if (finder != collective_analyses.end())
+        {
+#ifdef DEBUG_LEGION
+          assert((finder->second.first == NULL) || 
+              finder->second.second.exists());
+#endif
+          if (finder->second.first == NULL)
+          {
+            analysis->add_analysis_reference();
+            finder->second.first = analysis;
+            to_trigger = finder->second.second;
+#ifdef DEBUG_LEGION
+            finder->second.second = RtUserEvent::NO_RT_USER_EVENT;
+#endif
+          }
+        }
+        else
+        {
+          analysis->add_analysis_reference();
+          collective_analyses[key] = 
+            std::make_pair(analysis, RtUserEvent::NO_RT_USER_EVENT);
+        }
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveAnalysis* IndividualView::find_collective_analysis(
+                                    size_t context_index, unsigned region_index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      RtEvent wait_on;
+      const RendezvousKey key(context_index, region_index);
+      {
+        AutoLock v_lock(view_lock);
+        std::map<RendezvousKey,
+          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
+            collective_analyses.find(key);
+        if (finder != collective_analyses.end())
+        {
+          if (finder->second.first == NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second.second.exists());
+#endif
+            wait_on = finder->second.second;
+          }
+          else
+            return finder->second.first;
+        }
+        else
+        {
+          const RtUserEvent to_notify = Runtime::create_rt_user_event();
+          collective_analyses[key] =
+            std::pair<CollectiveAnalysis*,RtUserEvent>(NULL, to_notify);
+          wait_on = to_notify;
+        }
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock v_lock(view_lock);
+      std::map<RendezvousKey,
+        std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
+          collective_analyses.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_analyses.end());
+      assert(finder->second.first != NULL);
+#endif
+      return finder->second.first;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::unregister_collective_analysis(size_t context_index,
+                                                        unsigned region_index)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveAnalysis *removed = NULL;
+      const RendezvousKey key(context_index, region_index);
+      {
+        AutoLock v_lock(view_lock);
+        std::map<RendezvousKey,
+          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
+            collective_analyses.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != collective_analyses.end());
+        assert(finder->second.first != NULL);
+        assert(!finder->second.second.exists());
+#endif
+        removed = finder->second.first;
+        collective_analyses.erase(finder);
+      }
+      if (removed->remove_analysis_reference())
+        delete removed;
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent IndividualView::register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,
                                        IndexSpaceNode *expr,
@@ -7801,13 +7916,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CollectiveView::register_collective_analysis(PhysicalManager *target,
                                               CollectiveAnalysis *analysis,
-                                              size_t local_collective_arrivals,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(local_collective_arrivals > 0);
-#endif
       // First check to see if we are on the right node for this target
       const AddressSpaceID analysis_space = get_analysis_space(target);
       if (analysis_space != local_space)
@@ -7819,52 +7930,17 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target->did);
           analysis->pack_collective_analysis(rez,analysis_space,applied_events);
-          rez.serialize(local_collective_arrivals);
           rez.serialize(applied);
         }
         runtime->send_collective_remote_registration(analysis_space, rez);
         applied_events.insert(applied);
         return;
       }
-      const unsigned local_index = find_local_index(target);
-      const RendezvousKey key(analysis->get_context_index(), 
-                              analysis->get_requirement_index());
-      AutoLock v_lock(view_lock);
-      std::map<RendezvousKey,UserRendezvous>::iterator finder =
-        rendezvous_users.find(key);
-      if (finder == rendezvous_users.end())
+      else
       {
-        finder = rendezvous_users.insert(
-            std::make_pair(key,UserRendezvous())).first; 
-        UserRendezvous &rendezvous = finder->second;
-        // Count how many expected arrivals we have
-        rendezvous.local_initialized = false;
-        rendezvous.remaining_remote_arrivals =
-          collective_mapping->count_children(owner_space, local_space);
-        rendezvous.local_registered = Runtime::create_rt_user_event();
-        rendezvous.global_registered = Runtime::create_rt_user_event();
-        rendezvous.local_applied = Runtime::create_rt_user_event();
-        rendezvous.global_applied = Runtime::create_rt_user_event();
+        const unsigned local_index = find_local_index(target);
+        local_views[local_index]->register_collective_analysis(analysis);
       }
-      // Perform the registration
-      if (finder->second.analyses.empty())
-      {
-        finder->second.analyses.resize(local_views.size(), NULL);
-        finder->second.remaining_analyses = local_collective_arrivals;
-      }
-#ifdef DEBUG_LEGION
-      assert(local_index < finder->second.analyses.size());
-      assert(finder->second.remaining_analyses > 0);
-#endif
-      // Only need to save it if we're the first ones for this local view
-      if (finder->second.analyses[local_index] == NULL)
-      {
-        finder->second.analyses[local_index] = analysis;
-        analysis->add_analysis_reference();
-      }
-      if ((--finder->second.remaining_analyses == 0) &&
-          finder->second.analyses_ready.exists())
-        Runtime::trigger_event(finder->second.analyses_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -7885,8 +7961,6 @@ namespace Legion {
       RemoteCollectiveAnalysis *analysis = 
         RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
       analysis->add_reference();
-      size_t local_collective_arrivals;
-      derez.deserialize(local_collective_arrivals);
       RtUserEvent applied;
       derez.deserialize(applied);
 
@@ -7902,7 +7976,7 @@ namespace Legion {
           wait_on.wait();
       }
       collective_view->register_collective_analysis(manager, analysis,
-                            local_collective_arrivals, applied_events);
+                                                    applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
@@ -7911,6 +7985,7 @@ namespace Legion {
         delete analysis;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RtEvent CollectiveView::find_collective_analyses(size_t context_index,
               unsigned index, const std::vector<CollectiveAnalysis*> *&analyses)
@@ -7944,6 +8019,7 @@ namespace Legion {
         finder->second.analyses_ready = Runtime::create_rt_user_event();
       return finder->second.analyses_ready;
     }
+#endif
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveView::register_collective_user(const RegionUsage &usage,
@@ -7997,7 +8073,6 @@ namespace Legion {
       std::vector<RtEvent> remote_registered, remote_applied;
       std::vector<ApUserEvent> local_ready_events;
       std::vector<std::vector<ApEvent> > local_term_events;
-      std::vector<CollectiveAnalysis*> analyses;
       const RendezvousKey key(op_ctx_index, index);
       {
         AutoLock v_lock(view_lock);
@@ -8113,9 +8188,6 @@ namespace Legion {
             }
             else
             {
-#ifdef DEBUG_LEGION
-              assert(finder->second.remaining_analyses == 0);
-#endif
               // We're going to fall through so grab the state
               // that we need to do the finalization now
               remote_registered.swap(finder->second.remote_registered);
@@ -8126,7 +8198,6 @@ namespace Legion {
               global_applied = finder->second.global_applied;
               local_ready_events.swap(finder->second.ready_events);
               local_term_events.swap(finder->second.local_term_events);
-              analyses.swap(finder->second.analyses);
               // We can erase this from the data structure now
               rendezvous_users.erase(finder);
             }
@@ -8143,7 +8214,7 @@ namespace Legion {
       finalize_collective_user(usage, user_mask, expr, op_id, op_ctx_index, 
           index, collect_event, local_registered, global_registered,
           local_applied, global_applied, local_ready_events, 
-          local_term_events, result_info, analyses, symbolic);
+          local_term_events, result_info, symbolic);
       RtEvent all_registered = local_registered;
       if (!remote_registered.empty())
       {
@@ -8250,7 +8321,7 @@ namespace Legion {
           to_perform.global_registered, to_perform.local_applied,
           to_perform.global_applied, to_perform.ready_events, 
           to_perform.local_term_events, to_perform.trace_info,
-          to_perform.analyses, to_perform.symbolic);
+          to_perform.symbolic);
       RtEvent all_registered = to_perform.local_registered;
       if (!to_perform.remote_registered.empty())
       {
@@ -8327,7 +8398,7 @@ namespace Legion {
           to_perform.global_registered, to_perform.local_applied,
           to_perform.global_applied, to_perform.ready_events,
           to_perform.local_term_events, to_perform.trace_info,
-          to_perform.analyses, to_perform.symbolic);
+          to_perform.symbolic);
       Runtime::trigger_event(to_perform.global_registered, registered);
       Runtime::trigger_event(to_perform.global_applied, applied);
       if (to_perform.expr->remove_nested_expression_reference(did))
@@ -8376,7 +8447,6 @@ namespace Legion {
                                 std::vector<ApUserEvent> &ready_events,
                                 std::vector<std::vector<ApEvent> > &term_events,
                                 const PhysicalTraceInfo *trace_info,
-                                std::vector<CollectiveAnalysis*> &analyses,
                                 const bool symbolic) const
     //--------------------------------------------------------------------------
     {
@@ -8416,6 +8486,8 @@ namespace Legion {
             0/*no collective arrivals*/, registered_events, applied_events,
             *trace_info, runtime->address_space, symbolic);
         Runtime::trigger_event(trace_info, ready_events[idx], ready);
+        // Also unregister the collective analyses
+        local_views[idx]->unregister_collective_analysis(op_ctx_index, index);
       }
       if (!registered_events.empty())
         Runtime::trigger_event(local_registered,
@@ -8427,11 +8499,6 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(local_applied);
-      // Remove any references on the analyses
-      for (std::vector<CollectiveAnalysis*>::const_iterator it =
-            analyses.begin(); it != analyses.end(); it++)
-        if ((*it)->remove_analysis_reference())
-          delete (*it);
       delete trace_info;
     }
 
@@ -8456,37 +8523,31 @@ namespace Legion {
       assert(collective_mapping->contains(local_space));
       assert((op != NULL) || !fill_restricted);
 #endif
-      RtEvent analyses_ready;
-      const std::vector<CollectiveAnalysis*> *local_analyses = NULL;
-      if (!fill_restricted)
+      CollectiveAnalysis *first_local_analysis = NULL;
+      if (!fill_restricted && ((op == NULL) || trace_info.recording))
       {
         // If this is not a fill-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        analyses_ready =
-          find_collective_analyses(op_context_index, index, local_analyses);
+        first_local_analysis =
+          local_views.front()->find_collective_analysis(op_context_index,index);
 #ifdef DEBUG_LEGION
-        assert(local_analyses != NULL);
-#endif
-        // If we're recording then we need to wait now to get a valid
-        // trace info for capturing the trace for events we send to 
-        // remote nodes, otherwise we just need to wait before doing
-        // the fill calls
-        if ((trace_info.recording || (op == NULL)) && 
-            analyses_ready.exists() && !analyses_ready.has_triggered())
-          analyses_ready.wait();
-#ifdef DEBUG_LEGION
-        assert(local_analyses != NULL);
+        assert(first_local_analysis != NULL);
 #endif
         if (op == NULL)
-          op = local_analyses->front()->get_operation();
+        {
+          op = first_local_analysis->get_operation();
+          // Don't need the analysis anymore if we're not tracing
+          if (!trace_info.recording)
+            first_local_analysis = NULL;
+        }
       }
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
       const PhysicalTraceInfo &local_info = 
-        ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
-        local_analyses->front()->get_trace_info();
+        (first_local_analysis == NULL) ? trace_info :
+        first_local_analysis->get_trace_info();
 #ifdef DEBUG_LEGION
       assert(local_info.recording == trace_info.recording);
 #endif
@@ -8550,14 +8611,12 @@ namespace Legion {
       }
       // Now we can perform the fills for our instances
       const UniqueID op_id = op->get_unique_op_id();
-      // Do the last wait before we need our analyses for recording 
-      // and profiling requests from the mappers
-      if (analyses_ready.exists() && !analyses_ready.has_triggered())
-        analyses_ready.wait();
       for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
-        const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-          trace_info : local_analyses->at(idx)->get_trace_info();
+        const PhysicalTraceInfo &inst_info = 
+          (first_local_analysis == NULL) ? trace_info :
+          local_views[idx]->find_collective_analysis(op_context_index, 
+                                                     index)->get_trace_info();
         IndividualView *local_view = local_views[idx];
         ApEvent dst_precondition = local_view->find_copy_preconditions(
             false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
@@ -8907,34 +8966,31 @@ namespace Legion {
       assert(collective_mapping->contains(local_space));
       assert((op != NULL) || !copy_restricted);
 #endif
-      RtEvent analyses_ready;
-      const std::vector<CollectiveAnalysis*> *local_analyses = NULL;
-      if (!copy_restricted)
+      CollectiveAnalysis *first_local_analysis = NULL;
+      if (!copy_restricted && ((op == NULL) || trace_info.recording))
       {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        analyses_ready =
-          find_collective_analyses(op_ctx_index, index, local_analyses);
+        first_local_analysis = 
+          local_views.front()->find_collective_analysis(op_ctx_index, index);
 #ifdef DEBUG_LEGION
-        assert(local_analyses != NULL);
+        assert(first_local_analysis != NULL);
 #endif
-        // If we're recording then we need to wait now to get a valid
-        // trace info for capturing the trace for events we send to 
-        // remote nodes, otherwise we just need to wait before doing
-        // the fill calls
-        if ((trace_info.recording || (op == NULL)) && 
-            analyses_ready.exists() && !analyses_ready.has_triggered())
-          analyses_ready.wait();
         if (op == NULL)
-          op = local_analyses->front()->get_operation();
+        {
+          op = first_local_analysis->get_operation();
+          // Don't need the analysis anymore if we're not tracing
+          if (!trace_info.recording)
+            first_local_analysis = NULL;
+        }
       }
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
       const PhysicalTraceInfo &local_info = 
-        ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
-        local_analyses->front()->get_trace_info();
+        (first_local_analysis == NULL) ? trace_info :
+        first_local_analysis->get_trace_info();
       const UniqueID op_id = op->get_unique_op_id();
       // Do the copy to our local instance first
       IndividualView *local_view = local_views.front();
@@ -9053,18 +9109,16 @@ namespace Legion {
       // TODO: for now we just blast this out but we could at
       // some point build a local broadcast tree here for the
       // instances within this node
-      // Do the last wait before we need our analyses for recording 
-      // and profiling requests from the mappers
-      if (analyses_ready.exists() && !analyses_ready.has_triggered())
-        analyses_ready.wait();
       for (unsigned idx = 1; idx < local_views.size(); idx++)
       {
         IndividualView *dst_view = local_views[idx];
         PhysicalManager *dst_manager = dst_view->get_manager(); 
         std::vector<CopySrcDstField> dst_fields;
         dst_manager->compute_copy_offsets(copy_mask, dst_fields);
-        const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-          trace_info : local_analyses->at(idx)->get_trace_info();
+        const PhysicalTraceInfo &inst_info = 
+          (first_local_analysis == NULL) ? trace_info : 
+          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
+                                                      get_trace_info();
         ApEvent dst_pre = dst_view->find_copy_preconditions(
           false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
           op_id, index, applied_events, inst_info);
@@ -9305,34 +9359,31 @@ namespace Legion {
         recorded_events.insert(recorded);
         applied_events.insert(applied);
       }
-      RtEvent analyses_ready;
-      const std::vector<CollectiveAnalysis*> *local_analyses = NULL;
-      if (!copy_restricted)
+      CollectiveAnalysis *first_local_analysis = NULL;
+      if (!copy_restricted && ((op == NULL) || trace_info.recording))
       {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        analyses_ready = 
-          find_collective_analyses(op_ctx_index, index, local_analyses);
+        first_local_analysis = 
+          local_views.front()->find_collective_analysis(op_ctx_index, index);
 #ifdef DEBUG_LEGION
-        assert(local_analyses != NULL);
+        assert(first_local_analysis != NULL);
 #endif
-        // If we're recording then we need to wait now to get a valid
-        // trace info for capturing the trace for events we send to 
-        // remote nodes, otherwise we just need to wait before doing
-        // the fill calls
-        if ((trace_info.recording || (op == NULL)) && 
-            analyses_ready.exists() && !analyses_ready.has_triggered())
-          analyses_ready.wait();
         if (op == NULL)
-          op = local_analyses->front()->get_operation();
+        {
+          op = first_local_analysis->get_operation();
+          // Don't need the analysis anymore if we're not tracing
+          if (!trace_info.recording)
+            first_local_analysis = NULL;
+        }
       }
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
-      const PhysicalTraceInfo &local_info = 
-        ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
-        local_analyses->front()->get_trace_info();
+      const PhysicalTraceInfo &local_info =
+        (first_local_analysis == NULL) ? trace_info :
+        first_local_analysis->get_trace_info();
       const UniqueID op_id = op->get_unique_op_id();
       std::vector<ApEvent> local_done_events; 
       std::vector<CopySrcDstField> local_fields;
@@ -9340,8 +9391,10 @@ namespace Legion {
       // Issue the reductions to our local instances
       for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
-        const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-          trace_info : local_analyses->at(idx)->get_trace_info();
+        const PhysicalTraceInfo &inst_info =
+          (first_local_analysis == NULL) ? trace_info : 
+          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
+                                                      get_trace_info();
         IndividualView *dst_view = local_views[idx];
         // Compute the reducing precondition for our local instances
         ApEvent reduce_pre = dst_view->find_copy_preconditions(
@@ -9903,34 +9956,31 @@ namespace Legion {
       assert(collective_mapping->contains(local_space));
       assert((op != NULL) || !copy_restricted);
 #endif
-      RtEvent analyses_ready;
-      const std::vector<CollectiveAnalysis*> *local_analyses = NULL;
-      if (!copy_restricted)
+      CollectiveAnalysis *first_local_analysis = NULL;
+      if (!copy_restricted && ((op == NULL) || trace_info.recording))
       {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        analyses_ready =
-          find_collective_analyses(op_ctx_index, index, local_analyses);
+        first_local_analysis =
+          local_views.front()->find_collective_analysis(op_ctx_index, index);
 #ifdef DEBUG_LEGION
-        assert(local_analyses != NULL);
+        assert(first_local_analysis != NULL);
 #endif
-        // If we're recording then we need to wait now to get a valid
-        // trace info for capturing the trace for events we send to 
-        // remote nodes, otherwise we just need to wait before doing
-        // the fill calls
-        if ((trace_info.recording || (op == NULL)) && 
-            analyses_ready.exists() && !analyses_ready.has_triggered())
-          analyses_ready.wait();
         if (op == NULL)
-          op = local_analyses->front()->get_operation();
+        {
+          op = first_local_analysis->get_operation();
+          // Don't need the analysis anymore if we're not tracing
+          if (!trace_info.recording)
+            first_local_analysis = NULL;
+        }
       }
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
       const PhysicalTraceInfo &local_info = 
-        ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
-        local_analyses->front()->get_trace_info();
+        (first_local_analysis == NULL) ? trace_info : 
+        first_local_analysis->get_trace_info();
       // First distribute this off to all the child nodes
       std::vector<ApEvent> done_events;
       std::vector<AddressSpaceID> children;
@@ -9994,22 +10044,25 @@ namespace Legion {
         assert(source->is_reduction_kind());
 #endif
         AllreduceView *allreduce = source->as_allreduce_view();
-        // Wait for the analyses to be available if they aren't already
-        if (analyses_ready.exists() && !analyses_ready.has_triggered())
-          analyses_ready.wait();
+        std::vector<CollectiveAnalysis*> local_analyses;
+        // Only need the analyses if we're going to be recording
+        if (local_info.recording)
+        {
+          local_analyses.resize(local_views.size());
+          for (unsigned idx = 0; idx < local_views.size(); idx++)
+            local_analyses[idx] = 
+              local_views[idx]->find_collective_analysis(op_ctx_index, index);
+        }
         allreduce->perform_collective_allreduce(precondition,
             predicate_guard, copy_expression, op, index, copy_mask, local_info,
             local_analyses, recorded_events, applied_events, allreduce_tag);
       }
-      
-      // Wait for the analyses to be available if they aren't already
-      if (analyses_ready.exists() && !analyses_ready.has_triggered())
-        analyses_ready.wait();
-      // Now we can do our local copies
       for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
-        const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-          trace_info : local_analyses->at(idx)->get_trace_info();
+        const PhysicalTraceInfo &inst_info =
+          (first_local_analysis == NULL) ? trace_info : 
+          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
+                                                      get_trace_info();
         IndividualView *local_view = local_views[idx];
         // Find the precondition for all our local copies
         const ApEvent dst_pre = local_view->find_copy_preconditions(
@@ -10041,10 +10094,8 @@ namespace Legion {
         DistributedID local_src_inst_did = 0;
         if (!copy_restricted)
         {
-#ifdef DEBUG_LEGION
-          assert(local_analyses != NULL);
-#endif
-          CollectiveAnalysis *analysis = local_analyses->at(idx);
+          CollectiveAnalysis *analysis =
+            local_views[idx]->find_collective_analysis(op_ctx_index, index);
           // See if this is the same analysis that already had a change to
           // pick the source instance because it was the one issuing this
           // copy in the first place. If not then we give the mapper a 
@@ -10977,7 +11028,7 @@ namespace Legion {
                                           Operation *op, const unsigned index,
                                           const FieldMask &copy_mask,
                                           const PhysicalTraceInfo &trace_info,
-                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                         const std::vector<CollectiveAnalysis*> &local_analyses,
                                           std::set<RtEvent> &recorded_events,
                                           std::set<RtEvent> &applied_events,
                                           const uint64_t allreduce_tag)
@@ -11099,7 +11150,7 @@ namespace Legion {
                          IndexSpaceExpression *copy_expression,
                          const FieldMask &copy_mask,
                          const PhysicalTraceInfo &trace_info,
-                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                         const std::vector<CollectiveAnalysis*> &local_analyses,
                          std::set<RtEvent> &recorded_events,
                          std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -11391,7 +11442,7 @@ namespace Legion {
                          IndexSpaceExpression *copy_expression,
                          const FieldMask &copy_mask,
                          const PhysicalTraceInfo &trace_info,
-                         const std::vector<CollectiveAnalysis*> *local_analyses,
+                         const std::vector<CollectiveAnalysis*> &local_analyses,
                          std::set<RtEvent> &recorded_events,
                          std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -11479,16 +11530,16 @@ namespace Legion {
           for (unsigned idx = 0; idx < stage_ranks.size(); idx++)
             targets[idx] = (*collective_mapping)[stage_ranks[idx]];
           std::vector<ApEvent> src_events;
-          const PhysicalTraceInfo &src_info = (local_analyses == NULL) ?
-            trace_info : local_analyses->at(src_inst_index)->get_trace_info();
+          const PhysicalTraceInfo &src_info = (local_analyses.empty()) ?
+            trace_info : local_analyses[src_inst_index]->get_trace_info();
           send_allreduce_stage(allreduce_tag, stage, local_rank,
               instance_events[src_inst_index], predicate_guard,
               copy_expression, src_info, local_fields[src_inst_index],
               src_inst_index, &targets.front(), targets.size(), src_events);
           // Issuse the fill for the destination instance
           // Realm should ignore the redop data on these fields
-          const PhysicalTraceInfo &dst_info = (local_analyses == NULL) ?
-            trace_info : local_analyses->at(dst_inst_index)->get_trace_info();
+          const PhysicalTraceInfo &dst_info = local_analyses.empty() ?
+            trace_info : local_analyses[dst_inst_index]->get_trace_info();
           instance_events[dst_inst_index] =
             copy_expression->issue_fill(op, dst_info,
                 local_fields[dst_inst_index],
@@ -11635,7 +11686,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
                     std::vector<std::vector<CopySrcDstField> > &local_fields,
@@ -11666,8 +11717,8 @@ namespace Legion {
         const UniqueInst dst_inst(local_view);
         for (unsigned idx = 1; idx < local_views.size(); idx++)
         {
-          const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-            trace_info : local_analyses->at(idx)->get_trace_info();
+          const PhysicalTraceInfo &inst_info = local_analyses.empty() ?
+            trace_info : local_analyses[idx]->get_trace_info();
           // Find the reservations for the other instances for later
           IndividualView *src_view = local_views[idx];
           // Technically we're reading here, but we're going to be "writing" the
@@ -11748,7 +11799,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -11785,7 +11836,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -11814,8 +11865,8 @@ namespace Legion {
         {
           if (idx == final_index)
             continue;
-          const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
-            trace_info : local_analyses->at(idx)->get_trace_info();
+          const PhysicalTraceInfo &inst_info = local_analyses.empty() ?
+            trace_info : local_analyses[idx]->get_trace_info();
           // Find the reservations for the other instances for later
           IndividualView *dst_view = local_views[idx];
           // Technically we're reading here, but we're going to be "writing" the
@@ -11893,7 +11944,7 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> *local_analyses,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
