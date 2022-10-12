@@ -441,7 +441,7 @@ namespace Legion {
       RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
-      void replicate_task(void);
+      void check_future_return_bounds(FutureInstance *instance) const;
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,

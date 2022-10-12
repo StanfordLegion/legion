@@ -4512,6 +4512,32 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void SingleTask::check_future_return_bounds(FutureInstance *instance) const
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *var_impl = 
+        runtime->find_variant_impl(task_id, selected_variant);
+      if (var_impl->has_return_type_size &&
+          (var_impl->return_type_size < instance->size))
+      {
+        Provenance *provenance = get_provenance();
+        if (provenance != NULL)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+              "Task %s (UID %lld, provenance: %s) used a task "
+              "variant with a maximum return size of %zd but "
+              "returned a result of %zd bytes.",
+              get_task_name(), get_unique_id(), provenance->c_str(),
+              var_impl->return_type_size, instance->size)
+        else
+          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+              "Task %s (UID %lld) used a task variant with a maximum "
+              "return size of %zd but returned a result of %zd bytes.",
+              get_task_name(), get_unique_id(),
+              var_impl->return_type_size, instance->size)
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
@@ -6521,7 +6547,11 @@ namespace Legion {
             free(metadata);
         }
         else
+        {
+          if ((instance != NULL) && (instance->size > 0))
+            check_future_return_bounds(instance);
           result.impl->set_result(instance, metadata, metasize);
+        }
       }
     }
 
@@ -7396,6 +7426,8 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
+      if ((instance != NULL) && (instance->size > 0))
+        check_future_return_bounds(instance);
       slice_owner->handle_future(index_point, instance, metadata, metasize,
                                  functor, future_proc, own_functor); 
     }
