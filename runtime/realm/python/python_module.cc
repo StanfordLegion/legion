@@ -806,8 +806,12 @@ namespace Realm {
     // be a deadlock. See this GitHub issue for the detail:
     //   https://github.com/nv-legate/cunumeric/issues/187
     (interpreter->api->PyRun_SimpleString)(
-      "[__import__('threading').main_thread()._tstate_lock.release() "
-      "if v.major >= 3 and (v.minor > 9 or (v.minor == 9 and v.micro > 7)) else None "
+      "[main_thread._tstate_lock.release() "
+      "if v.major >= 3 and (v.minor > 9 or (v.minor == 9 and v.micro > 7)) "
+      "and main_thread != curr_thread "
+      "else None "
+      "for main_thread in (__import__('threading').main_thread(),) "
+      "for curr_thread in (__import__('threading').current_thread(),) "
       "for v in (__import__('sys').version_info,)]");
 
     delete interpreter;
