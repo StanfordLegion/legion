@@ -12,9 +12,9 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
-    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
-    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
+    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, FillInstInfo, 
+    DimKind, FSpace, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, 
+    Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -365,9 +365,21 @@ impl fmt::Display for SizePretty {
 }
 
 #[derive(Debug)]
-pub struct CopyInfoVec<'a>(pub &'a Vec<CopyInfo>);
+pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>);
 
-impl fmt::Display for CopyInfoVec<'_> {
+impl fmt::Display for CopyInstInfoVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "$req[{}]: {}", i, elt)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>);
+
+impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
             write!(f, "$req[{}]: {}", i, elt)?;
@@ -469,19 +481,30 @@ impl Chan {
         let (base, time_range) = (entry.base(), entry.time_range());
         let name = match entry {
             ChanEntryRef::Copy(_, copy) => {
-                let nreqs = copy.copy_info.len();
+                let nreqs = copy.copy_inst_infos.len();
                 if nreqs > 0 {
                     format!(
-                        "size={}, num reqs={}{}",
+                        "Copy: size={}, num reqs={}{}",
                         SizePretty(copy.size),
                         nreqs,
-                        CopyInfoVec(&copy.copy_info)
+                        CopyInstInfoVec(&copy.copy_inst_infos)
                     )
                 } else {
-                    format!("size={}, num reqs={}", SizePretty(copy.size), nreqs)
+                    format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs)
                 }
-            }
-            ChanEntryRef::Fill(_, _) => format!("Fill"),
+            },
+            ChanEntryRef::Fill(_, fill) => {
+                let nreqs = fill.fill_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "Fill: num reqs={}{}",
+                        nreqs,
+                        FillInstInfoVec(&fill.fill_inst_infos)
+                    )
+                } else {
+                    format!("Fill: num reqs={}", nreqs)
+                }
+            },
             ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
@@ -839,12 +862,12 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (_, op_id) = point.entry;
+        let inst_uid = point.entry;
         let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range) = (&inst.base, &inst.time_range);
         let name = format!("{}", InstPretty(inst, state));
 
-        let initiation = op_id;
+        let initiation = inst.op_id;
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 

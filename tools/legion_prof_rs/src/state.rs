@@ -404,7 +404,7 @@ impl Proc {
     }
 }
 
-pub type MemEntry = (InstID, OpID);
+pub type MemEntry = EventID; // this is the unique id (inst_uid) of Inst
 
 pub type MemPoint = TimePoint<MemEntry, ()>;
 
@@ -428,7 +428,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<(InstID, OpID), Inst>,
+    pub insts: BTreeMap<EventID, Inst>,
     pub time_points: Vec<MemPoint>,
     pub max_live_insts: u32,
 }
@@ -1039,7 +1039,9 @@ pub struct Dim(pub u32);
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
+    pub inst_uid: EventID,
     pub inst_id: InstID,
+    pub op_id: OpID,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
@@ -1052,10 +1054,12 @@ pub struct Inst {
 }
 
 impl Inst {
-    fn new(base: Base, inst_id: InstID) -> Self {
+    fn new(base: Base, inst_uid: EventID) -> Self {
         Inst {
             base,
-            inst_id,
+            inst_uid,
+            inst_id: InstID(0),
+            op_id: OpID(0),
             mem_id: None,
             size: None,
             time_range: TimeRange::new_empty(),
@@ -1067,6 +1071,14 @@ impl Inst {
             dim_order: BTreeMap::new(),
         }
     }
+    fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
+        self.inst_id = inst_id;
+        self
+    }
+    fn set_op_id(&mut self, op_id: OpID) -> &mut Self {
+        self.op_id = op_id;
+        self
+    }
     fn set_mem(&mut self, mem_id: MemID) -> &mut Self {
         self.mem_id = Some(mem_id);
         self
@@ -1077,13 +1089,6 @@ impl Inst {
     }
     fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
         self.time_range = TimeRange::new_full(start, ready, ready, stop);
-        self
-    }
-    fn set_start(&mut self, start: Timestamp) -> &mut Self {
-        // don't overwrite if we have already captured the (more precise) timeline info
-        if self.time_range.stop.is_none() {
-            self.time_range.start = Some(start);
-        }
         self
     }
     fn add_ispace(&mut self, ispace_id: ISpaceID) -> &mut Self {
@@ -1453,11 +1458,19 @@ impl OpKind {
 }
 
 #[derive(Debug)]
+pub struct OperationInstInfo {
+    inst_uid: EventID,
+    index_id: u32,
+    field_id: FieldID,
+}
+
+#[derive(Debug)]
 pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
+    pub operation_inst_infos: Vec<OperationInstInfo>,
     // owner: Option<OpID>,
 }
 
@@ -1468,6 +1481,7 @@ impl Operation {
             parent_id: None,
             kind: None,
             provenance: None,
+            operation_inst_infos: Vec::new()
             // owner: None,
         }
     }
@@ -1500,16 +1514,16 @@ impl From<spy::serialize::EventID> for EventID {
 }
 
 #[derive(Debug)]
-pub struct CopyInfo {
-    src_inst: InstID,
-    dst_inst: InstID,
+pub struct CopyInstInfo {
+    src_inst: EventID,
+    dst_inst: EventID,
     _fevent: EventID,
     num_fields: u32,
     request_type: u32,
     num_hops: u32,
 }
 
-impl fmt::Display for CopyInfo {
+impl fmt::Display for CopyInstInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -1537,7 +1551,7 @@ pub struct Copy {
     time_range: TimeRange,
     _fevent: EventID,
     _num_requests: u32,
-    pub copy_info: Vec<CopyInfo>,
+    pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
@@ -1549,7 +1563,7 @@ impl Copy {
         time_range: TimeRange,
         fevent: EventID,
         num_requests: u32,
-        copy_info: Vec<CopyInfo>,
+        copy_inst_infos: Vec<CopyInstInfo>,
     ) -> Self {
         Copy {
             base,
@@ -1559,7 +1573,7 @@ impl Copy {
             time_range,
             _fevent: fevent,
             _num_requests: num_requests,
-            copy_info,
+            copy_inst_infos,
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
@@ -1568,18 +1582,44 @@ impl Copy {
 }
 
 #[derive(Debug)]
+pub struct FillInstInfo {
+    dst_inst: EventID,
+    _fevent: EventID,
+    num_fields: u32,
+}
+
+impl fmt::Display for FillInstInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "dst_inst=0x{:x}, fields={}",
+            self.dst_inst.0,
+            self.num_fields
+        )
+    }
+}
+
+#[derive(Debug)]
 pub struct Fill {
     base: Base,
     _dst: MemID,
     time_range: TimeRange,
+    _fevent: EventID,
+    _num_requests: u32,
+    pub fill_inst_infos: Vec<FillInstInfo>,
 }
 
 impl Fill {
-    fn new(base: Base, dst: MemID, time_range: TimeRange) -> Self {
+    fn new(base: Base, dst: MemID, time_range: TimeRange, 
+           fevent: EventID, num_requests: u32,
+           fill_inst_infos: Vec<FillInstInfo>,) -> Self {
         Fill {
             base,
             _dst: dst,
             time_range,
+            _fevent: fevent,
+            _num_requests: num_requests,
+            fill_inst_infos,
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
@@ -1731,12 +1771,13 @@ pub struct State {
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<(InstID, OpID), MemID>,
+    pub insts: BTreeMap<EventID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     copy_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
+    fill_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
     pub has_prof_data: bool,
 }
 
@@ -1917,14 +1958,29 @@ impl State {
         Some(&mut self.find_chan_mut(chan_id).copies.get_mut(&op_id).unwrap()[copy_idx])
     }
 
-    fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
+    fn find_fill_mut(&mut self, fevent: EventID) -> Option<&mut Fill> {
+        let (chan_id, op_id, fill_idx) = *self.fill_map.get(&fevent)?;
+        Some(&mut self.find_chan_mut(chan_id).fills.get_mut(&op_id).unwrap()[fill_idx])
+    }
+
+    fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
+        self.operations.get_mut(&op_id)
+    }
+
+    fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange, fevent: EventID, num_requests: u32) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_fill_chan_mut(dst);
-        chan.fills
-            .entry(op_id)
-            .or_insert_with(|| Vec::new())
-            .push(Fill::new(base, dst, time_range));
+        let chan_id = ChanID::new_fill(dst);
+        let chan = self.find_chan_mut(chan_id);
+        
+        let fills = chan.fills.entry(op_id).or_insert_with(|| Vec::new());
+
+        let fill_id = fills.len();
+        fills.push(Fill::new(base, dst, time_range, fevent, num_requests, Vec::new()));
+
+        self.fill_map
+            .entry(fevent)
+            .or_insert_with(|| (chan_id, op_id, fill_id));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
@@ -1943,13 +1999,6 @@ impl State {
             .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_fill_chan_mut(&mut self, dst: MemID) -> &mut Chan {
-        let chan_id = ChanID::new_fill(dst);
-        self.chans
-            .entry(chan_id)
-            .or_insert_with(|| Chan::new(chan_id))
-    }
-
     fn find_deppart_chan_mut(&mut self) -> &mut Chan {
         let chan_id = ChanID::new_deppart();
         self.chans
@@ -1959,15 +2008,13 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_id: InstID,
-        op_id: OpID,
-        insts: &'a mut BTreeMap<(InstID, OpID), Inst>,
+        inst_uid: EventID,
+        insts: &'a mut BTreeMap<EventID, Inst>,
     ) -> &'a mut Inst {
-        self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         insts
-            .entry((inst_id, op_id))
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id))
+            .entry(inst_uid)
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -2521,7 +2568,7 @@ impl SpyState {
     }
 }
 
-fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
+fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<EventID, Inst>) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
@@ -2680,8 +2727,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             ispace_id,
             fspace_id,
             tree_id,
@@ -2689,14 +2735,13 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             field_id,
             fspace_id,
             has_align,
@@ -2706,13 +2751,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             dim,
             dim_kind,
         } => {
@@ -2722,8 +2766,26 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_dim_order(dim, dim_kind);
+        }
+        Record::PhysicalInstanceUsage {
+            inst_uid,
+            op_id,
+            index_id,
+            field_id,
+        } => {
+            state.create_op(*op_id);
+            let operation_inst_info = OperationInstInfo {
+                inst_uid: *inst_uid,
+                index_id: *index_id,
+                field_id: *field_id,
+            };
+            state
+                .find_op_mut(*op_id)
+                .unwrap()
+                .operation_inst_infos
+                .push(operation_inst_info);
         }
         Record::TaskKind {
             task_id,
@@ -2880,7 +2942,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             num_hops,
             ..
         } => {
-            let copy_info = CopyInfo {
+            let copy_inst_info = CopyInstInfo {
                 src_inst: *src_inst,
                 dst_inst: *dst_inst,
                 _fevent: *fevent,
@@ -2891,8 +2953,8 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             state
                 .find_copy_mut(*fevent)
                 .unwrap()
-                .copy_info
-                .push(copy_info);
+                .copy_inst_infos
+                .push(copy_inst_info);
         }
         Record::FillInfo {
             op_id,
@@ -2901,45 +2963,52 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             ready,
             start,
             stop,
+            fevent,
+            num_requests,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_fill(*op_id, *dst, time_range);
+            state.create_fill(*op_id, *dst, time_range, *fevent, *num_requests);
             state.update_last_time(*stop);
         }
-        Record::InstCreateInfo {
-            op_id,
-            inst_id,
-            create,
+        Record::FillInstInfo {
+            dst_inst,
+            fevent,
+            num_fields,
+            ..
         } => {
+            let fill_inst_info = FillInstInfo {
+                dst_inst: *dst_inst,
+                _fevent: *fevent,
+                num_fields: *num_fields,
+            };
             state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start(*create);
+                .find_fill_mut(*fevent)
+                .unwrap()
+                .fill_inst_infos
+                .push(fill_inst_info);
         }
-        Record::InstUsageInfo {
-            op_id,
+        Record::InstTimelineInfo {
+            inst_uid,
             inst_id,
             mem_id,
             size,
-        } => {
-            state
-                .insts
-                .entry((*inst_id, *op_id))
-                .or_insert_with(|| *mem_id);
-            state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_mem(*mem_id)
-                .set_size(*size);
-        }
-        Record::InstTimelineInfo {
             op_id,
-            inst_id,
             create,
             ready,
             destroy,
         } => {
+            state.create_op(*op_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start_stop(*create, *ready, *destroy);
+                .insts
+                .entry(*inst_uid)
+                .or_insert_with(|| *mem_id);
+            state
+                .create_inst(*inst_uid, insts)
+                .set_inst_id(*inst_id)
+                .set_op_id(*op_id)
+                .set_start_stop(*create, *ready, *destroy)
+                .set_mem(*mem_id)
+                .set_size(*size);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
