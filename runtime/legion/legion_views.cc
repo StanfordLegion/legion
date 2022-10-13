@@ -2194,6 +2194,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndividualView::aliases(InstanceView *other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other->is_collective_view())
+      {
+        CollectiveView *collective = other->as_collective_view();
+        return std::binary_search(collective->instances.begin(),
+            collective->instances.end(), manager->did);
+      }
+      else
+        return (this == other);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -6450,6 +6464,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return instance->owner_space;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::aliases(InstanceView *other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other->is_individual_view())
+      {
+        IndividualView *individual = other->as_individual_view();
+        return std::binary_search(instances.begin(), instances.end(),
+            individual->get_manager()->did);
+      }
+      else
+      {
+        CollectiveView *collective = other->as_collective_view();
+        if (instances.size() < collective->instances.size())
+        {
+          for (std::vector<DistributedID>::const_iterator it =
+                instances.begin(); it != instances.end(); it++)
+            if (std::binary_search(collective->instances.begin(),
+                  collective->instances.end(), *it))
+              return true;
+          return false;
+        }
+        else
+        {
+          for (std::vector<DistributedID>::const_iterator it =
+                collective->instances.begin(); it != 
+                collective->instances.end(); it++)
+            if (std::binary_search(instances.begin(), instances.end(), *it))
+              return true;
+          return false;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

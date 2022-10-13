@@ -204,6 +204,7 @@ namespace Legion {
       virtual FillView* get_redop_fill_view(void) const 
         { assert(false); return NULL; }
       virtual AddressSpaceID get_analysis_space(PhysicalManager *man) const = 0;
+      virtual bool aliases(InstanceView *other) const = 0;
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -231,6 +232,7 @@ namespace Legion {
       inline PhysicalManager* get_manager(void) const { return manager; }
     public:
       virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
+      virtual bool aliases(InstanceView *other) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -436,6 +438,7 @@ namespace Legion {
       virtual ~CollectiveView(void);
     public:
       virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
+      virtual bool aliases(InstanceView *other) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

@@ -2616,6 +2616,75 @@ namespace Legion {
     };
 
     /**
+     * \class InstanceRefinementTree
+     * This class provides a base class for performing analyses inside of
+     * an equivalence set that might have to deal with aliased names for
+     * physical instances due to collective views. It does this by 
+     * constructing a tree of set of instances that are all performing
+     * the same analysis. As new views are traversed, the analysis can
+     * fracture into subsets of instances that all have the same state.
+     */
+    template<typename T>
+    class InstanceRefinementTree {
+    public:
+      InstanceRefinementTree(CollectiveView *view);
+      InstanceRefinementTree(std::vector<DistributedID> &&inst_dids);
+      ~InstanceRefinementTree(void);
+    public:
+      const FieldMask& get_refinement_mask(void) const 
+        { return refinements.get_valid_mask(); }
+      const std::vector<DistributedID>& get_instances(void) const;
+      // Traverse the tree and perform refinements as necessary 
+      template<typename... Args>
+      void traverse(InstanceView *view, const FieldMask &mask, Args... args);
+      // Visit just the leaves of the analysis
+      template<typename... Args>
+      void visit_leaves(const FieldMask &mask, Args... args);
+      InstanceView* get_instance_view(InnerContext *context, 
+                                      RegionTreeID tid) const;
+    protected:
+      CollectiveView *const collective;
+      const std::vector<DistributedID> inst_dids;
+    private:
+      FieldMaskSet<T> refinements;
+    };
+
+    /**
+     * \class MakeCollectiveValid
+     * This class helps in the aliasing analysis when determining how
+     * to issue copies to update collective views. It builds an instance
+     * refinement tree to find the valid expressions for each group of
+     * instances and then can use that to compute the updates
+     */
+    class MakeCollectiveValid : 
+      public InstanceRefinementTree<MakeCollectiveValid> {
+    public:
+      MakeCollectiveValid(CollectiveView *view,
+          const FieldMaskSet<IndexSpaceExpression> &needed_exprs);
+      MakeCollectiveValid(std::vector<DistributedID> &&insts,
+          const FieldMaskSet<IndexSpaceExpression> &needed_exprs,
+          const FieldMaskSet<IndexSpaceExpression> &valid_expr,
+          const FieldMask &mask, InstanceView *inst_view);
+    public:
+      MakeCollectiveValid* clone(InstanceView *view, const FieldMask &mask,
+                                 std::vector<DistributedID> &&insts) const;
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   IndexSpaceExpression *expr, const bool expr_covers);
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   const FieldMaskSet<IndexSpaceExpression> &exprs);
+      void visit_leaf(const FieldMask &mask, InnerContext *context,
+         RegionTreeForest *forest, RegionTreeID tid,
+         LegionMap<InstanceView*,FieldMaskSet<IndexSpaceExpression> > &updates);
+    public:
+      InstanceView *const view;
+    protected:
+      // Expression fields that we need to make valid for all instances
+      const FieldMaskSet<IndexSpaceExpression> &needed_exprs;
+      // Expression fields that are valid for these instances
+      FieldMaskSet<IndexSpaceExpression> valid_exprs;
+    };
+
+    /**
      * \struct SubscriberInvalidations
      * A small helper class for tracking data associated with invalidating
      * subscriptions by EqSetTrackers
@@ -2774,6 +2843,7 @@ namespace Legion {
         std::map<LogicalView*,unsigned> *const view_refs_to_remove;
         std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
       };
+#if 0
     public:
       struct PendingCollective {
       public:
@@ -2789,6 +2859,7 @@ namespace Legion {
         CollectiveView *const refining;
         std::vector<DistributedID> instances;
       };
+#endif
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
@@ -2947,14 +3018,12 @@ namespace Legion {
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator,
-                            const bool check_collectives = true);
+                                  ReferenceMutator &mutator);
       template<typename T>
       void record_unrestricted_instances(IndexSpaceExpression *expr,
                             const bool expr_covers, FieldMask record_mask, 
                             const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator,
-                            const bool check_collectives = true);
+                                  ReferenceMutator &mutator);
       bool record_partial_valid_instance(LogicalView *instance,
                                          IndexSpaceExpression *expr,
                                          FieldMask valid_mask,
@@ -3100,6 +3169,12 @@ namespace Legion {
           const bool covers, const FieldMask &mask, ReferenceMutator &mutator, 
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+      bool find_fully_valid_fields(InstanceView *inst, FieldMask &inst_mask,
+          IndexSpaceExpression *expr, const bool expr_covers) const;
+      bool find_partial_valid_fields(InstanceView *inst, FieldMask &inst_mask,
+          IndexSpaceExpression *expr, const bool expr_covers,
+          FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs) const;
+#if 0
     protected:
       template<typename T>
       bool refine_collective_views(const FieldMask &refine_mask,
@@ -3125,6 +3200,7 @@ namespace Legion {
       void invalidate_collective_views(ReferenceMutator &mutator,
           const LegionMap<CollectiveView*,
                           FieldMaskSet<InstanceView> > &to_invalidate);
+#endif
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
