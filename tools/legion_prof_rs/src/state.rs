@@ -1459,7 +1459,7 @@ impl OpKind {
 
 #[derive(Debug)]
 pub struct OperationInstInfo {
-    inst_uid: EventID,
+    pub inst_uid: EventID,
     index_id: u32,
     field_id: FieldID,
 }
@@ -1481,8 +1481,7 @@ impl Operation {
             parent_id: None,
             kind: None,
             provenance: None,
-            operation_inst_infos: Vec::new()
-            // owner: None,
+            operation_inst_infos: Vec::new(), // owner: None,
         }
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
@@ -1515,8 +1514,8 @@ impl From<spy::serialize::EventID> for EventID {
 
 #[derive(Debug)]
 pub struct CopyInstInfo {
-    src_inst: EventID,
-    dst_inst: EventID,
+    pub src_inst: EventID,
+    pub dst_inst: EventID,
     _fevent: EventID,
     num_fields: u32,
     request_type: u32,
@@ -1583,7 +1582,7 @@ impl Copy {
 
 #[derive(Debug)]
 pub struct FillInstInfo {
-    dst_inst: EventID,
+    pub dst_inst: EventID,
     _fevent: EventID,
     num_fields: u32,
 }
@@ -1593,8 +1592,7 @@ impl fmt::Display for FillInstInfo {
         write!(
             f,
             "dst_inst=0x{:x}, fields={}",
-            self.dst_inst.0,
-            self.num_fields
+            self.dst_inst.0, self.num_fields
         )
     }
 }
@@ -1610,9 +1608,14 @@ pub struct Fill {
 }
 
 impl Fill {
-    fn new(base: Base, dst: MemID, time_range: TimeRange, 
-           fevent: EventID, num_requests: u32,
-           fill_inst_infos: Vec<FillInstInfo>,) -> Self {
+    fn new(
+        base: Base,
+        dst: MemID,
+        time_range: TimeRange,
+        fevent: EventID,
+        num_requests: u32,
+        fill_inst_infos: Vec<FillInstInfo>,
+    ) -> Self {
         Fill {
             base,
             _dst: dst,
@@ -1967,16 +1970,30 @@ impl State {
         self.operations.get_mut(&op_id)
     }
 
-    fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange, fevent: EventID, num_requests: u32) {
+    fn create_fill(
+        &mut self,
+        op_id: OpID,
+        dst: MemID,
+        time_range: TimeRange,
+        fevent: EventID,
+        num_requests: u32,
+    ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan_id = ChanID::new_fill(dst);
         let chan = self.find_chan_mut(chan_id);
-        
+
         let fills = chan.fills.entry(op_id).or_insert_with(|| Vec::new());
 
         let fill_id = fills.len();
-        fills.push(Fill::new(base, dst, time_range, fevent, num_requests, Vec::new()));
+        fills.push(Fill::new(
+            base,
+            dst,
+            time_range,
+            fevent,
+            num_requests,
+            Vec::new(),
+        ));
 
         self.fill_map
             .entry(fevent)
@@ -2998,10 +3015,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<Event
             destroy,
         } => {
             state.create_op(*op_id);
-            state
-                .insts
-                .entry(*inst_uid)
-                .or_insert_with(|| *mem_id);
+            state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
                 .create_inst(*inst_uid, insts)
                 .set_inst_id(*inst_id)

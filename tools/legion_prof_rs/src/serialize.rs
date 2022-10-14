@@ -966,10 +966,7 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
         ids["PhysicalInstDimOrderDesc"],
         parse_physical_inst_layout_dim_desc,
     );
-    parsers.insert(
-        ids["PhysicalInstanceUsage"],
-        parse_physical_inst_usage,
-    );
+    parsers.insert(ids["PhysicalInstanceUsage"], parse_physical_inst_usage);
     parsers.insert(ids["TaskKind"], parse_task_kind);
     parsers.insert(ids["TaskVariant"], parse_task_variant);
     parsers.insert(ids["OperationInstance"], parse_operation);

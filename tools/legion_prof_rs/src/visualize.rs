@@ -12,9 +12,10 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, FillInstInfo, 
-    DimKind, FSpace, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, 
-    Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
+    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace,
+    FillInstInfo, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID,
+    OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State,
+    TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -77,6 +78,7 @@ struct DataRecord<'a> {
     parents: &'a str,
     prof_uid: u64,
     op_id: Option<u64>,
+    instances: &'a str,
 }
 
 #[derive(Serialize, Copy, Clone)]
@@ -118,6 +120,18 @@ fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord>
         proc_id.proc_in_node(),
         prof_uid.0,
     ))
+}
+
+#[derive(Debug)]
+pub struct OperationInstInfoVecDumpInst<'a>(pub &'a Vec<OperationInstInfo>);
+
+impl fmt::Display for OperationInstInfoVecDumpInst<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "0x{:x}|", elt.inst_uid.0)?;
+        }
+        Ok(())
+    }
 }
 
 impl Proc {
@@ -230,6 +244,26 @@ impl Proc {
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
 
+        let instances = match entry.kind {
+            ProcEntryKind::Task(_, _) => {
+                let _op_id = entry.op_id.unwrap();
+                let task = &state.operations.get(&_op_id).unwrap();
+                let num_insts = task.operation_inst_infos.len();
+                if num_insts > 0 {
+                    format!(
+                        "{}",
+                        OperationInstInfoVecDumpInst(&task.operation_inst_infos)
+                    )
+                } else {
+                    format!("")
+                }
+            }
+            ProcEntryKind::MetaTask(_) => format!(""),
+            ProcEntryKind::MapperCall(_) => format!(""),
+            ProcEntryKind::RuntimeCall(_) => format!(""),
+            ProcEntryKind::ProfTask => format!(""),
+        };
+
         let default = DataRecord {
             level,
             level_ready,
@@ -246,6 +280,7 @@ impl Proc {
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: op_id,
+            instances: &instances,
         };
 
         let mut start = time_range.start.unwrap();
@@ -377,12 +412,36 @@ impl fmt::Display for CopyInstInfoVec<'_> {
 }
 
 #[derive(Debug)]
+pub struct CopyInstInfoVecDumpInst<'a>(pub &'a Vec<CopyInstInfo>);
+
+impl fmt::Display for CopyInstInfoVecDumpInst<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "0x{:x}|0x{:x}|", elt.src_inst.0, elt.dst_inst.0)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>);
 
 impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
             write!(f, "$req[{}]: {}", i, elt)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoVecDumpInst<'a>(pub &'a Vec<FillInstInfo>);
+
+impl fmt::Display for FillInstInfoVecDumpInst<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "0x{:x}|", elt.dst_inst.0)?;
         }
         Ok(())
     }
@@ -492,7 +551,7 @@ impl Chan {
                 } else {
                     format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs)
                 }
-            },
+            }
             ChanEntryRef::Fill(_, fill) => {
                 let nreqs = fill.fill_inst_infos.len();
                 if nreqs > 0 {
@@ -504,7 +563,7 @@ impl Chan {
                 } else {
                     format!("Fill: num reqs={}", nreqs)
                 }
-            },
+            }
             ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
@@ -523,6 +582,26 @@ impl Chan {
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
 
+        let instances = match entry {
+            ChanEntryRef::Copy(_, copy) => {
+                let num_insts = copy.copy_inst_infos.len();
+                if num_insts > 0 {
+                    format!("{}", CopyInstInfoVecDumpInst(&copy.copy_inst_infos))
+                } else {
+                    format!("")
+                }
+            }
+            ChanEntryRef::Fill(_, fill) => {
+                let num_insts = fill.fill_inst_infos.len();
+                if num_insts > 0 {
+                    format!("{}", FillInstInfoVecDumpInst(&fill.fill_inst_infos))
+                } else {
+                    format!("")
+                }
+            }
+            ChanEntryRef::DepPart(_, deppart) => format!(""),
+        };
+
         f.serialize(DataRecord {
             level,
             level_ready: None,
@@ -539,6 +618,7 @@ impl Chan {
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: &instances,
         })?;
 
         Ok(())
@@ -889,6 +969,7 @@ impl Mem {
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: "",
         })?;
 
         f.serialize(DataRecord {
@@ -907,6 +988,7 @@ impl Mem {
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: "",
         })?;
 
         Ok(())
