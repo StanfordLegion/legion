@@ -2449,6 +2449,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_colocation_violation(
+                const char *accessor_kind, FieldID fid, PhysicalInstance inst1,
+                PhysicalInstance inst2, const PhysicalRegion &other)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Unable to create co-location FieldAccessor<%s> from multiple "
+          "physical regions for field %d in task %s because regions have "
+          "different physical instances " IDFMT " and  " IDFMT,
+          accessor_kind, fid, context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
                                     FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------

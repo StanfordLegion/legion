@@ -764,6 +764,7 @@ namespace Legion {
         accessor =                                                            \
           Realm::GenericAccessor<FT,DIM,T>(instance, fid, is.bounds, offset); \
       }                                                                       \
+      /* with source bounds */                                                \
       FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
                     const Rect<DIM,T> source_bounds,                          \
                     size_t actual_field_size = sizeof(FT),                    \
@@ -782,7 +783,76 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor",instance,fid);\
         accessor =                                                            \
           Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               is.bounds))    \
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        accessor = Realm::GenericAccessor<FT,DIM,T>(instance, fid, offset);   \
+      }                                                                       \
+      /* colocation regions with source bounds */                             \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              PRIVILEGE, fid, actual_field_size, &is,                         \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, true/*generic accessor*/,     \
+              check_field_size);                                              \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               source_bounds))\
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
       }
+      
 
 #define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(PRIVILEGE, DIM, FIELD_CHECK) \
       FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
@@ -804,6 +874,7 @@ namespace Legion {
         accessor =                                                            \
           Realm::GenericAccessor<FT,DIM,T>(instance,fid,bounds.bounds,offset);\
       }                                                                       \
+      /* with source bounds */                                                \
       FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
                     const Rect<DIM,T> source_bounds,                          \
                     size_t actual_field_size = sizeof(FT),                    \
@@ -824,6 +895,96 @@ namespace Legion {
         accessor =                                                            \
           Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
         bounds.bounds = source_bounds.intersection(bounds.bounds);            \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               is.bounds))    \
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        accessor = Realm::GenericAccessor<FT,DIM,T>(instance, fid, offset);   \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, bounds, Realm::ProfilingRequestSet()));                   \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+      }                                                                       \
+      /* colocation regions with source bounds */                             \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid), bounds(source_bounds)                                   \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),        \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               source_bounds))\
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, bounds, Realm::ProfilingRequestSet()));                   \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Update the bounding box of the bounds with source bounds */        \
+        bounds.bounds = source_bounds.intersection(bounds.bounds);            \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
       }
 
     ////////////////////////////////////////////////////////////

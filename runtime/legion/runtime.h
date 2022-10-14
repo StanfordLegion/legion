@@ -461,6 +461,9 @@ namespace Legion {
                              PhysicalInstance instance, FieldID fid);
       void report_incompatible_multi_accessor(unsigned index, FieldID fid,
                            PhysicalInstance inst1, PhysicalInstance inst2);
+      void report_colocation_violation(const char *accessor_kind,
+                           FieldID fid, PhysicalInstance inst1,
+                           PhysicalInstance ins2, const PhysicalRegion &other);
       static void fail_bounds_check(DomainPoint p, FieldID fid, 
                                     PrivilegeMode mode, bool multi);
       static void fail_bounds_check(Domain d, FieldID fid, 
