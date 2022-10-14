@@ -2458,7 +2458,7 @@ namespace Legion {
           "Unable to create co-location FieldAccessor<%s> from multiple "
           "physical regions for field %d in task %s because regions have "
           "different physical instances " IDFMT " and  " IDFMT,
-          accessor_kind, fid, context->get_task_name())
+          accessor_kind, fid, context->get_task_name(), inst1.id, inst2.id)
     }
 
     //--------------------------------------------------------------------------
