@@ -17,8 +17,8 @@ use nom::{
 };
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID,
-    RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID, OpID,
+    ProcID, RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -98,10 +98,10 @@ pub enum Record {
     IndexPartitionDesc { parent_id: ISpaceID, unique_id: IPartID, disjoint: bool, point0: u64 },
     IndexSpaceSizeDesc { ispace_id: ISpaceID, dense_size: u64, sparse_size: u64, is_sparse: bool },
     LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID, name: String },
-    PhysicalInstRegionDesc { inst_uid: EventID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
-    PhysicalInstLayoutDesc { inst_uid: EventID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
-    PhysicalInstDimOrderDesc { inst_uid: EventID, dim: u32, dim_kind: u32 },
-    PhysicalInstanceUsage { inst_uid: EventID, op_id: OpID, index_id: u32, field_id: FieldID },
+    PhysicalInstRegionDesc { inst_uid: InstUID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
+    PhysicalInstLayoutDesc { inst_uid: InstUID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
+    PhysicalInstDimOrderDesc { inst_uid: InstUID, dim: u32, dim_kind: u32 },
+    PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
     OperationInstance { op_id: OpID, parent_id: OpID, kind: u32, provenance: String },
@@ -113,10 +113,10 @@ pub enum Record {
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     CopyInfo { op_id: OpID, src: MemID, dst: MemID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
-    CopyInstInfo { src_inst: EventID, dst_inst: EventID, fevent: EventID, num_fields: u32, request_type: u32, num_hops: u32 },
+    CopyInstInfo { src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_fields: u32, request_type: u32, num_hops: u32 },
     FillInfo { op_id: OpID, dst: MemID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
-    FillInstInfo { dst_inst: EventID, fevent: EventID, num_fields: u32 },
-    InstTimelineInfo { inst_uid: EventID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp },
+    FillInstInfo { dst_inst: InstUID, fevent: EventID, num_fields: u32 },
+    InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID },
@@ -289,8 +289,8 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
     map(le_u64, |x| EventID(x))(input)
 }
-fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], EventID> {
-    map(le_u64, |x| EventID(x))(input)
+fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], InstUID> {
+    map(le_u64, |x| InstUID(x))(input)
 }
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, |x| InstID(x))(input)

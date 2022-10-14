@@ -404,7 +404,7 @@ impl Proc {
     }
 }
 
-pub type MemEntry = EventID; // this is the unique id (inst_uid) of Inst
+pub type MemEntry = InstUID; // this is the unique id (inst_uid) of Inst
 
 pub type MemPoint = TimePoint<MemEntry, ()>;
 
@@ -428,7 +428,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<EventID, Inst>,
+    pub insts: BTreeMap<InstUID, Inst>,
     pub time_points: Vec<MemPoint>,
     pub max_live_insts: u32,
 }
@@ -1039,7 +1039,7 @@ pub struct Dim(pub u32);
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    pub inst_uid: EventID,
+    pub inst_uid: InstUID,
     pub inst_id: InstID,
     pub op_id: OpID,
     mem_id: Option<MemID>,
@@ -1054,7 +1054,7 @@ pub struct Inst {
 }
 
 impl Inst {
-    fn new(base: Base, inst_uid: EventID) -> Self {
+    fn new(base: Base, inst_uid: InstUID) -> Self {
         Inst {
             base,
             inst_uid,
@@ -1459,7 +1459,7 @@ impl OpKind {
 
 #[derive(Debug)]
 pub struct OperationInstInfo {
-    pub inst_uid: EventID,
+    pub inst_uid: InstUID,
     index_id: u32,
     field_id: FieldID,
 }
@@ -1506,6 +1506,9 @@ impl Operation {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventID(pub u64);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InstUID(pub u64);
+
 impl From<spy::serialize::EventID> for EventID {
     fn from(e: spy::serialize::EventID) -> Self {
         EventID(e.0 .0)
@@ -1514,8 +1517,8 @@ impl From<spy::serialize::EventID> for EventID {
 
 #[derive(Debug)]
 pub struct CopyInstInfo {
-    pub src_inst: EventID,
-    pub dst_inst: EventID,
+    pub src_inst: InstUID,
+    pub dst_inst: InstUID,
     _fevent: EventID,
     num_fields: u32,
     request_type: u32,
@@ -1582,7 +1585,7 @@ impl Copy {
 
 #[derive(Debug)]
 pub struct FillInstInfo {
-    pub dst_inst: EventID,
+    pub dst_inst: InstUID,
     _fevent: EventID,
     num_fields: u32,
 }
@@ -1774,7 +1777,7 @@ pub struct State {
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<EventID, MemID>,
+    pub insts: BTreeMap<InstUID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
@@ -2025,8 +2028,8 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_uid: EventID,
-        insts: &'a mut BTreeMap<EventID, Inst>,
+        inst_uid: InstUID,
+        insts: &'a mut BTreeMap<InstUID, Inst>,
     ) -> &'a mut Inst {
         let alloc = &mut self.prof_uid_allocator;
         insts
@@ -2585,7 +2588,7 @@ impl SpyState {
     }
 }
 
-fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<EventID, Inst>) {
+fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstUID, Inst>) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
