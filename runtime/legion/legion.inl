@@ -2091,6 +2091,151 @@ namespace Legion {
           region.report_incompatible_accessor("AffineAccessor",instance,fid); \
         accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
             transform.transform, transform.offset, fid, source_bounds,offset);\
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Rect<DIM,T> bounding_box;                                             \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            bounding_box))    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounding_box,offset);\
+      }                                                                       \
+      /* colocation regions ith explicit bounds */                            \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings,                             \
+                false/*generic accessor*/, check_field_size);                 \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+      }                                                                       \
+      /* colocation regions with explicit transform */                        \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+      }                                                                       \
+      /* colocation regions with explicit transform and bounds */             \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
       }
 
 #define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(PRIVILEGE, DIM, FIELD_CHECK) \
@@ -2183,6 +2328,202 @@ namespace Legion {
           region.report_incompatible_accessor("AffineAccessor",instance,fid); \
         accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
             transform.transform, transform.offset, fid, source_bounds,offset);\
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            bounding_box))    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounds, offset);     \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* colocation regions ith explicit transform */                         \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        assert(start != stop);                                                \
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
         bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
       }
 
