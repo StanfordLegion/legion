@@ -2197,6 +2197,8 @@ namespace Legion {
     bool IndividualView::aliases(InstanceView *other) const
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_collective_view())
       {
         CollectiveView *collective = other->as_collective_view();
@@ -6470,6 +6472,8 @@ namespace Legion {
     bool CollectiveView::aliases(InstanceView *other) const
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_individual_view())
       {
         IndividualView *individual = other->as_individual_view();

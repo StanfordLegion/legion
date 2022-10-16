@@ -2616,7 +2616,7 @@ namespace Legion {
     };
 
     /**
-     * \class InstanceRefinementTree
+     * \class CollectiveRefinementTree
      * This class provides a base class for performing analyses inside of
      * an equivalence set that might have to deal with aliased names for
      * physical instances due to collective views. It does this by 
@@ -2625,11 +2625,11 @@ namespace Legion {
      * fracture into subsets of instances that all have the same state.
      */
     template<typename T>
-    class InstanceRefinementTree {
+    class CollectiveRefinementTree {
     public:
-      InstanceRefinementTree(CollectiveView *view);
-      InstanceRefinementTree(std::vector<DistributedID> &&inst_dids);
-      ~InstanceRefinementTree(void);
+      CollectiveRefinementTree(CollectiveView *view);
+      CollectiveRefinementTree(std::vector<DistributedID> &&inst_dids);
+      ~CollectiveRefinementTree(void);
     public:
       const FieldMask& get_refinement_mask(void) const 
         { return refinements.get_valid_mask(); }
@@ -2642,6 +2642,13 @@ namespace Legion {
       void visit_leaves(const FieldMask &mask, Args... args);
       InstanceView* get_instance_view(InnerContext *context, 
                                       RegionTreeID tid) const;
+    public:
+      // Helper methods for traversing the total and partial valid views
+      // These should only be called on the root with collective != NULL
+      void traverse_total(const FieldMask &mask, IndexSpaceExpression *set_expr,
+                          const FieldMaskSet<LogicalView> &total_valid_views);
+      void traverse_partial(const FieldMask &mask, const LegionMap<LogicalView*,
+                     FieldMaskSet<IndexSpaceExpression> > &partial_valid_views);
     protected:
       CollectiveView *const collective;
       const std::vector<DistributedID> inst_dids;
@@ -2657,7 +2664,8 @@ namespace Legion {
      * instances and then can use that to compute the updates
      */
     class MakeCollectiveValid : 
-      public InstanceRefinementTree<MakeCollectiveValid> {
+      public CollectiveRefinementTree<MakeCollectiveValid>,
+      public LegionHeapify<MakeCollectiveValid> {
     public:
       MakeCollectiveValid(CollectiveView *view,
           const FieldMaskSet<IndexSpaceExpression> &needed_exprs);
@@ -2669,7 +2677,7 @@ namespace Legion {
       MakeCollectiveValid* clone(InstanceView *view, const FieldMask &mask,
                                  std::vector<DistributedID> &&insts) const;
       void analyze(InstanceView *view, const FieldMask &mask,
-                   IndexSpaceExpression *expr, const bool expr_covers);
+                   IndexSpaceExpression *expr);
       void analyze(InstanceView *view, const FieldMask &mask,
                    const FieldMaskSet<IndexSpaceExpression> &exprs);
       void visit_leaf(const FieldMask &mask, InnerContext *context,
@@ -2682,6 +2690,75 @@ namespace Legion {
       const FieldMaskSet<IndexSpaceExpression> &needed_exprs;
       // Expression fields that are valid for these instances
       FieldMaskSet<IndexSpaceExpression> valid_exprs;
+    };
+
+    /**
+     * \class FindCollectiveInvalid
+     * This class helps with the alias analysis when performing a check
+     * to see which collective instances are not considered valid
+     */
+    class FindCollectiveInvalid : 
+      public CollectiveRefinementTree<FindCollectiveInvalid>,
+      public LegionHeapify<FindCollectiveInvalid> {
+    public:
+      FindCollectiveInvalid(CollectiveView *view);
+      FindCollectiveInvalid(std::vector<DistributedID> &&insts,
+          const FieldMaskSet<IndexSpaceExpression> &valid_expr,
+          const FieldMask &mask);
+    public:
+      FindCollectiveInvalid* clone(InstanceView *view, const FieldMask &mask,
+                                   std::vector<DistributedID> &&insts) const;
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   IndexSpaceExpression *expr);
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   const FieldMaskSet<IndexSpaceExpression> &exprs);
+      void visit_leaf(const FieldMask &mask, FieldMask &allvalid_mask,
+          IndexSpaceExpression *expr, RegionTreeForest *forest,
+          const FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs);
+    protected:
+      // Expression fields that are valid for these instances
+      FieldMaskSet<IndexSpaceExpression> valid_exprs;
+    };
+    
+    /**
+     * \class InitializeCollectiveReduction
+     * This class helps with aliasing analysis for recording collective
+     * reduction views and figuring out where they are already valid
+     */
+    class InitializeCollectiveReduction :
+      public CollectiveRefinementTree<InitializeCollectiveReduction>,
+      public LegionHeapify<InitializeCollectiveReduction> {
+    public:
+      InitializeCollectiveReduction(AllreduceView *view,
+                                    RegionTreeForest *forest,
+                                    IndexSpaceExpression *expr);
+      InitializeCollectiveReduction(std::vector<DistributedID> &&insts,
+                                    RegionTreeForest *forest,
+                                    IndexSpaceExpression *expr,
+                                    InstanceView *view,
+                          const FieldMaskSet<IndexSpaceExpression> &remainders,
+                                    const FieldMask &covered);
+    public:
+      InitializeCollectiveReduction* clone(InstanceView *view,
+          const FieldMask &mask, std::vector<DistributedID> &&insts) const;
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   IndexSpaceExpression *expr);
+      // Check for ABA problem
+      void visit_leaf(const FieldMask &mask, IndexSpaceExpression *expr,
+                      bool &failure);
+      // Report out any fill operations that we need to perform
+      void visit_leaf(const FieldMask &mask, InnerContext *context,
+         UpdateAnalysis *analysis, CopyFillAggregator *&fill_aggregator,
+         FillView *fill_view, RegionTreeID tid, EquivalenceSet *eq_set,
+         std::set<RtEvent> &applied_events);
+    public:
+      RegionTreeForest *const forest;
+      IndexSpaceExpression *const needed_expr;
+      InstanceView *const view;
+    protected:
+      // Expressions for which we still need fill values
+      FieldMaskSet<IndexSpaceExpression> remainder_exprs;
+      FieldMask found_covered;
     };
 
     /**
@@ -2843,23 +2920,6 @@ namespace Legion {
         std::map<LogicalView*,unsigned> *const view_refs_to_remove;
         std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
       };
-#if 0
-    public:
-      struct PendingCollective {
-      public:
-        PendingCollective(InstanceView *refined, CollectiveView *refining);
-        PendingCollective(CollectiveView *refining,
-                          const std::set<IndividualView*> &excluded);
-        PendingCollective(CollectiveView *refining,
-                          const std::vector<DistributedID> &refined_instances);
-      public:
-        // The new collective view we're refining for (can be NULL)
-        InstanceView *refined;
-        // The old collective view we're refining (can be NULL)
-        CollectiveView *const refining;
-        std::vector<DistributedID> instances;
-      };
-#endif
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
@@ -3029,6 +3089,11 @@ namespace Legion {
                                          FieldMask valid_mask,
                                          ReferenceMutator &mutator,
                                          bool check_total_valid = true);
+      void filter_valid_instance(InstanceView *to_filter,
+                                 IndexSpaceExpression *expr,
+                                 const bool expr_covers,
+                                 const FieldMask &filter_mask,
+                                 ReferenceMutator &mutator);
       void filter_valid_instances(IndexSpaceExpression *expr, 
                                   const bool expr_covers, 
                                   const FieldMask &filter_mask,
@@ -3087,6 +3152,12 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
+      void record_reductions(UpdateAnalysis &analysis,
+                             IndexSpaceExpression *expr,
+                             const bool expr_covers,
+                             const FieldMask &user_mask,
+                             std::set<RtEvent> &applied_events,
+                             ReferenceMutator &mutator);
       void apply_reductions(const std::vector<PhysicalManager*> &targets,
                             const LegionVector<
                                     FieldMaskSet<InstanceView> > &target_views,
@@ -3174,33 +3245,6 @@ namespace Legion {
       bool find_partial_valid_fields(InstanceView *inst, FieldMask &inst_mask,
           IndexSpaceExpression *expr, const bool expr_covers,
           FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs) const;
-#if 0
-    protected:
-      template<typename T>
-      bool refine_collective_views(const FieldMask &refine_mask,
-                                   const FieldMaskSet<T> &views,
-                                   FieldMaskSet<T> &refined_views,
-                                   std::set<RtEvent> &applied_events);
-      template<typename T>
-      bool refine_collective_views(const FieldMask &refine_mask,
-                                   const FieldMaskSet<T> &views,
-                                   FieldMaskSet<T> &refined_views,
-                                   ReferenceMutator &mutator);
-      template<typename T>
-      bool find_collective_interfering(CollectiveView *collective,
-          const std::vector<DistributedID> &instances,
-          const FieldMask &overlap, bool &dominated, bool &refined, 
-          FieldMaskSet<PendingCollective> &overlapping_refinements,
-          FieldMaskSet<PendingCollective> &independent_refinements,
-          FieldMaskSet<PendingCollective> &new_remainders,
-          FieldMaskSet<T> &overlapping_views) const;
-      void find_individual_interfering(const FieldMask &mask,
-          const std::vector<DistributedID> &instances,
-          FieldMaskSet<IndividualView> &interfering) const;
-      void invalidate_collective_views(ReferenceMutator &mutator,
-          const LegionMap<CollectiveView*,
-                          FieldMaskSet<InstanceView> > &to_invalidate);
-#endif
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
@@ -3333,21 +3377,13 @@ namespace Legion {
       FieldMask                                         restricted_fields;
       // List of instances that were restricted, but have been acquired
       ExprViewMaskSets                                  released_instances;
-      // The names of any collective views we have resident
-      // The crucial invariant here is that each actual physical instance
-      // can appear in at most a single view (collective or otherwise) for
-      // each field in order to avoid aliasing and duplication which can 
-      // result in unsoundness (in the case of reductions) or imprecision
-      // Note that this data structure must be sound in that it must contain
-      // all the collective views currently referenced by the equivalence set
-      // but it can also overapproximate. Periodically we will check the
-      // set to prune out any collective views not currently in use. We do
-      // this infrequently though to ensure that we can get some reuse of
-      // collective view checks across uses. The pruning though also allows
-      // for coarsening of instances back into coarser views.
+      // The names of any collective views we have resident in the
+      // total or partial valid instances. This allows us to do faster
+      // checks for aliasing when we just have a bunch of individual views
+      // and no collective views (the common case). Once you start adding
+      // in collective views then some of the analyses can get more 
+      // expensive but that is the trade-off with using collective views.
       FieldMaskSet<CollectiveView>                      collective_instances;
-      unsigned                                          collective_timeout;
-      static constexpr unsigned COLLECTIVE_CACHE_TIMEOUT = 1024; 
     protected:
       // Tracing state for this equivalence set
       TraceViewSet                                      *tracing_preconditions;
