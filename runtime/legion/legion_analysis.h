@@ -2636,10 +2636,10 @@ namespace Legion {
       const std::vector<DistributedID>& get_instances(void) const;
       // Traverse the tree and perform refinements as necessary 
       template<typename... Args>
-      void traverse(InstanceView *view, const FieldMask &mask, Args... args);
+      void traverse(InstanceView *view, const FieldMask &mask, Args&&... args);
       // Visit just the leaves of the analysis
       template<typename... Args>
-      void visit_leaves(const FieldMask &mask, Args... args);
+      void visit_leaves(const FieldMask &mask, Args&&... args);
       InstanceView* get_instance_view(InnerContext *context, 
                                       RegionTreeID tid) const;
     public:
@@ -2748,7 +2748,7 @@ namespace Legion {
                       bool &failure);
       // Report out any fill operations that we need to perform
       void visit_leaf(const FieldMask &mask, InnerContext *context,
-         UpdateAnalysis *analysis, CopyFillAggregator *&fill_aggregator,
+         UpdateAnalysis &analysis, CopyFillAggregator *&fill_aggregator,
          FillView *fill_view, RegionTreeID tid, EquivalenceSet *eq_set,
          std::set<RtEvent> &applied_events);
     public:

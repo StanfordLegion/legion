@@ -9308,7 +9308,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T> template<typename... Args>
     void CollectiveRefinementTree<T>::traverse(InstanceView *view, 
-                                            const FieldMask &mask, Args... args)
+                                          const FieldMask &mask, Args&&... args)
     //--------------------------------------------------------------------------
     {
       // Check first for any instance overlap first
@@ -9418,7 +9418,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T> template<typename... Args>
     void CollectiveRefinementTree<T>::visit_leaves(const FieldMask &mask,
-                                                  Args... args)
+                                                   Args&&... args)
     //--------------------------------------------------------------------------
     {
       for (typename FieldMaskSet<T>::const_iterator it = 
@@ -9888,7 +9888,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InitializeCollectiveReduction::visit_leaf(const FieldMask &mask,
-                      InnerContext *context, UpdateAnalysis *analysis,
+                      InnerContext *context, UpdateAnalysis &analysis,
                       CopyFillAggregator *&fill_aggregator, 
                       FillView *fill_view, RegionTreeID tid,
                       EquivalenceSet *eq_set, std::set<RtEvent> &applied_events)
@@ -9904,9 +9904,9 @@ namespace Legion {
         {
           // Fill aggregators never need to wait for any other
           // aggregators since we know they won't depend on each other
-          fill_aggregator = new CopyFillAggregator(forest, analysis, 
+          fill_aggregator = new CopyFillAggregator(forest, &analysis, 
               NULL/*no previous guard*/, false/*track events*/);
-          analysis->input_aggregators[RtEvent::NO_RT_EVENT] = fill_aggregator;
+          analysis.input_aggregators[RtEvent::NO_RT_EVENT] = fill_aggregator;
         }
         // Issue fills for any remainders
         if (!remainder_exprs.empty())
@@ -9915,7 +9915,7 @@ namespace Legion {
                 remainder_exprs.begin(); it != remainder_exprs.end(); it++)
             fill_aggregator->record_fill(local_view, fill_view,
                 it->second, it->first, PredEvent::NO_PRED_EVENT,
-                analysis->trace_info.recording ? eq_set : NULL,
+                analysis.trace_info.recording ? eq_set : NULL,
                 applied_events);
           uncovered -= remainder_exprs.get_valid_mask();
         }
@@ -9923,7 +9923,7 @@ namespace Legion {
           // Issue a fill for the full needed_expr for these fields
           fill_aggregator->record_fill(local_view, fill_view,
                 uncovered, needed_expr, PredEvent::NO_PRED_EVENT,
-                analysis->trace_info.recording ? eq_set : NULL,
+                analysis.trace_info.recording ? eq_set : NULL,
                 applied_events);
       }
     }
@@ -13815,7 +13815,7 @@ namespace Legion {
               }
             }
             // Record any fill operations that need to be performed as a result
-            alias_analysis.visit_leaves(reduction_mask, context, &analysis,
+            alias_analysis.visit_leaves(reduction_mask, context, analysis,
                 fill_aggregator, fill_view, region_node->handle.get_tree_id(),
                 this, applied_events);
           }
