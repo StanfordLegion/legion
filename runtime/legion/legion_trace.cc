@@ -3546,8 +3546,6 @@ namespace Legion {
     void TraceConditionSet::dump_preconditions(void) const
     //--------------------------------------------------------------------------
     {
-      if (precondition_views == NULL)
-        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
@@ -3563,8 +3561,6 @@ namespace Legion {
     void TraceConditionSet::dump_anticonditions(void) const
     //--------------------------------------------------------------------------
     {
-      if (anticondition_views == NULL)
-        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
@@ -3580,8 +3576,6 @@ namespace Legion {
     void TraceConditionSet::dump_postconditions(void) const
     //--------------------------------------------------------------------------
     {
-      if (postcondition_views == NULL)
-        return;
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       LocalReferenceMutator mutator;
