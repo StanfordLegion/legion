@@ -2750,7 +2750,9 @@ namespace Legion {
       void visit_leaf(const FieldMask &mask, InnerContext *context,
          UpdateAnalysis &analysis, CopyFillAggregator *&fill_aggregator,
          FillView *fill_view, RegionTreeID tid, EquivalenceSet *eq_set,
-         std::set<RtEvent> &applied_events);
+         std::set<RtEvent> &applied_events, ReferenceMutator &mutator,
+         DistributedID eq_did, std::map<unsigned,std::list<std::pair<
+          InstanceView*,IndexSpaceExpression*> > > &reduction_instances);
     public:
       RegionTreeForest *const forest;
       IndexSpaceExpression *const needed_expr;

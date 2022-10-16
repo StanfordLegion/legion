@@ -2705,12 +2705,12 @@ namespace Legion {
             collective_analyses.find(key);
         if (finder != collective_analyses.end())
         {
-#ifdef DEBUG_LEGION
-          assert((finder->second.first == NULL) || 
-              finder->second.second.exists());
-#endif
+          // Note that this will deduplicate multiple registrations
           if (finder->second.first == NULL)
           {
+#ifdef DEBUG_LEGION
+            assert(finder->second.second.exists());
+#endif
             analysis->add_analysis_reference();
             finder->second.first = analysis;
             to_trigger = finder->second.second;

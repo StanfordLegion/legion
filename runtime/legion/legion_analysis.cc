@@ -9888,10 +9888,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InitializeCollectiveReduction::visit_leaf(const FieldMask &mask,
-                      InnerContext *context, UpdateAnalysis &analysis,
-                      CopyFillAggregator *&fill_aggregator, 
-                      FillView *fill_view, RegionTreeID tid,
-                      EquivalenceSet *eq_set, std::set<RtEvent> &applied_events)
+      InnerContext *context, UpdateAnalysis &analysis,
+      CopyFillAggregator *&fill_aggregator, 
+      FillView *fill_view, RegionTreeID tid,
+      EquivalenceSet *eq_set, std::set<RtEvent> &applied_events,
+      ReferenceMutator &mutator, DistributedID did, std::map<unsigned,std::list<
+        std::pair<InstanceView*,IndexSpaceExpression*> > > &reduction_instances)
     //--------------------------------------------------------------------------
     {
       FieldMask uncovered = mask - found_covered;
@@ -9913,18 +9915,42 @@ namespace Legion {
         {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 remainder_exprs.begin(); it != remainder_exprs.end(); it++)
+          {
             fill_aggregator->record_fill(local_view, fill_view,
                 it->second, it->first, PredEvent::NO_PRED_EVENT,
                 analysis.trace_info.recording ? eq_set : NULL,
                 applied_events);
+            // Record any reduction instances here as well
+            int fidx = it->second.find_first_set();
+            while (fidx >= 0)
+            {
+              local_view->add_nested_valid_ref(did, &mutator);
+              it->first->add_nested_expression_reference(did, &mutator);
+              reduction_instances[fidx].push_back(
+                  std::make_pair(local_view, it->first));
+              fidx = it->second.find_next_set(fidx+1);
+            }
+          }
           uncovered -= remainder_exprs.get_valid_mask();
         }
         if (!!uncovered)
+        {
           // Issue a fill for the full needed_expr for these fields
           fill_aggregator->record_fill(local_view, fill_view,
                 uncovered, needed_expr, PredEvent::NO_PRED_EVENT,
                 analysis.trace_info.recording ? eq_set : NULL,
                 applied_events);
+          // Record any reduction instances here as well
+          int fidx = uncovered.find_first_set();
+          while (fidx >= 0)
+          {
+            local_view->add_nested_valid_ref(did, &mutator);
+            needed_expr->add_nested_expression_reference(did, &mutator);
+            reduction_instances[fidx].push_back(
+                std::make_pair(local_view, needed_expr));
+            fidx = uncovered.find_next_set(fidx+1);
+          }
+        }
       }
     }
 
@@ -13813,11 +13839,14 @@ namespace Legion {
                 else
                   alias_analysis.analyze(it->first, reduce_mask, it->second);
               }
+              // Step to the next field
+              fidx = reduction_mask.find_next_set(fidx+1);
             }
             // Record any fill operations that need to be performed as a result
+            // and update the reduction instances with new reductions
             alias_analysis.visit_leaves(reduction_mask, context, analysis,
                 fill_aggregator, fill_view, region_node->handle.get_tree_id(),
-                this, applied_events);
+                this, applied_events, mutator, did, reduction_instances);
           }
           else
           {
