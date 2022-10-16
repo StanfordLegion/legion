@@ -20937,7 +20937,8 @@ namespace Legion {
                                       IndexSpaceNode *launch_bounds,
                                       const IndexAttachLauncher &launcher,
                                       const std::vector<unsigned> &indexes,
-                                      Provenance *provenance)
+                                      Provenance *provenance,
+                                      const bool replicated)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 1/*regions*/,
@@ -20961,7 +20962,7 @@ namespace Legion {
       {
         case LEGION_EXTERNAL_POSIX_FILE:
           {
-            if (launcher.file_fields.empty()) 
+            if (launcher.file_fields.empty() && !replicated) 
               REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
                               "FILE INDEX ATTACH OPERATION ISSUED WITH NO "
                               "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
@@ -20978,7 +20979,7 @@ namespace Legion {
                 "to HDF5 files", parent_ctx->get_task_name(),
                 parent_ctx->get_unique_id())
 #endif
-            if (launcher.field_files.empty()) 
+            if (launcher.field_files.empty() && !replicated) 
               REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
                             "HDF5 INDEX ATTACH OPERATION ISSUED WITH NO "
                             "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "

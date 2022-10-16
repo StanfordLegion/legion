@@ -7126,7 +7126,7 @@ namespace Legion {
            Point<1>(indexes.size()-1)), provenance));
       IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
       ExternalResources result = attach_op->initialize(this, node, launch_space,
-                                                 launcher, indexes, provenance);
+                            launcher, indexes, provenance, false/*replicated*/);
       const RegionRequirement &req = attach_op->get_requirement();
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
@@ -18563,7 +18563,7 @@ namespace Legion {
         runtime->get_available_repl_index_attach_op();
       IndexSpaceNode *launch_space = collective.get_launch_space(provenance);
       ExternalResources result = attach_op->initialize(this, node, launch_space,
-                                                 launcher, indexes, provenance);
+                             launcher, indexes, provenance, true/*replicated*/);
       attach_op->initialize_replication(this); 
       const RegionRequirement &req = attach_op->get_requirement();
       bool parent_conflict = false, inline_conflict = false;

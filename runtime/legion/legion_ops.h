@@ -3913,7 +3913,8 @@ namespace Legion {
                                    IndexSpaceNode *launch_bounds,
                                    const IndexAttachLauncher &launcher,
                                    const std::vector<unsigned> &indexes,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   const bool replicated);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
