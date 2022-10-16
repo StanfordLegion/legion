@@ -4481,6 +4481,9 @@ namespace Legion {
         sharding_function_ready.wait();
       IndexSpace local_space = sharding_function->find_shard_space(
           local_shard, future_map_domain, shard_domain->handle, provenance);
+      // Handle the case where there are no points for the local shard
+      if (!local_space.exists())
+        return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
       Domain domain;
       local_points->get_launch_space_domain(domain);
