@@ -123,12 +123,21 @@ fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord>
 }
 
 #[derive(Debug)]
-pub struct OperationInstInfoVecDumpInst<'a>(pub &'a Vec<OperationInstInfo>);
+pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub &'a State);
 
-impl fmt::Display for OperationInstInfoVecDumpInst<'_> {
+impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "0x{:x}|", elt.inst_uid.0)?;
+            let inst = self.1.find_inst(elt.inst_uid).unwrap();
+            write!(
+                f,
+                "0x{:x}({})",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
+            )?;
+            if i < self.0.len() - 1 {
+                write!(f, "|")?;
+            }
         }
         Ok(())
     }
@@ -244,24 +253,17 @@ impl Proc {
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
 
-        let instances = match entry.kind {
-            ProcEntryKind::Task(_, _) => {
-                let _op_id = entry.op_id.unwrap();
-                let task = &state.operations.get(&_op_id).unwrap();
-                let num_insts = task.operation_inst_infos.len();
-                if num_insts > 0 {
-                    format!(
-                        "{}",
-                        OperationInstInfoVecDumpInst(&task.operation_inst_infos)
-                    )
-                } else {
-                    format!("")
-                }
+        let instances = {
+            // ProfTask has no op_id
+            if let Some(op_id) = entry.op_id {
+                let task = state.find_op(op_id).unwrap();
+                format!(
+                    "{}",
+                    OperationInstInfoDumpInstVec(&task.operation_inst_infos, &state)
+                )
+            } else {
+                format!("")
             }
-            ProcEntryKind::MetaTask(_) => format!(""),
-            ProcEntryKind::MapperCall(_) => format!(""),
-            ProcEntryKind::RuntimeCall(_) => format!(""),
-            ProcEntryKind::ProfTask => format!(""),
         };
 
         let default = DataRecord {
@@ -400,48 +402,133 @@ impl fmt::Display for SizePretty {
 }
 
 #[derive(Debug)]
-pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>);
+pub struct CopyInstInfoDisplay<'a>(
+    pub &'a Inst, // src_inst
+    pub &'a Inst, // src_dst
+    pub u32,      // num_fields
+    pub u32,      // request_type
+    pub u32,      // num_hops
+);
+
+impl fmt::Display for CopyInstInfoDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
+            self.0.inst_id.unwrap().0,
+            self.1.inst_id.unwrap().0,
+            self.2,
+            match self.3 {
+                0 => "fill",
+                1 => "reduc",
+                2 => "copy",
+                _ => unreachable!(),
+            },
+            self.4
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 
 impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "$req[{}]: {}", i, elt)?;
+            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            write!(
+                f,
+                "$req[{}]: {}",
+                i,
+                CopyInstInfoDisplay(
+                    src_inst,
+                    dst_inst,
+                    elt.num_fields,
+                    elt.request_type,
+                    elt.num_hops
+                )
+            )?;
         }
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct CopyInstInfoVecDumpInst<'a>(pub &'a Vec<CopyInstInfo>);
+pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 
-impl fmt::Display for CopyInstInfoVecDumpInst<'_> {
+impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "0x{:x}|0x{:x}|", elt.src_inst.0, elt.dst_inst.0)?;
+            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            write!(
+                f,
+                "0x{:x}({})|0x{:x}({})",
+                src_inst.inst_id.unwrap().0,
+                src_inst.base.prof_uid.0,
+                dst_inst.inst_id.unwrap().0,
+                dst_inst.base.prof_uid.0
+            )?;
+            if i < self.0.len() - 1 {
+                write!(f, "|")?;
+            }
         }
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>);
+pub struct FillInstInfoDisplay<'a>(
+    pub &'a Inst,
+    pub u32, // num_fields
+);
+
+impl fmt::Display for FillInstInfoDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "dst_inst=0x{:x}, fields={}",
+            self.0.inst_id.unwrap().0,
+            self.1
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
 
 impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "$req[{}]: {}", i, elt)?;
+            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            write!(
+                f,
+                "$req[{}]: {}",
+                i,
+                FillInstInfoDisplay(inst, elt.num_fields)
+            )?;
         }
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoVecDumpInst<'a>(pub &'a Vec<FillInstInfo>);
+pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
 
-impl fmt::Display for FillInstInfoVecDumpInst<'_> {
+impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "0x{:x}|", elt.dst_inst.0)?;
+            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            write!(
+                f,
+                "0x{:x}({})",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
+            )?;
+            if i < self.0.len() - 1 {
+                write!(f, "|")?;
+            }
         }
         Ok(())
     }
@@ -546,7 +633,7 @@ impl Chan {
                         "Copy: size={}, num reqs={}{}",
                         SizePretty(copy.size),
                         nreqs,
-                        CopyInstInfoVec(&copy.copy_inst_infos)
+                        CopyInstInfoVec(&copy.copy_inst_infos, &state)
                     )
                 } else {
                     format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs)
@@ -558,7 +645,7 @@ impl Chan {
                     format!(
                         "Fill: num reqs={}{}",
                         nreqs,
-                        FillInstInfoVec(&fill.fill_inst_infos)
+                        FillInstInfoVec(&fill.fill_inst_infos, &state)
                     )
                 } else {
                     format!("Fill: num reqs={}", nreqs)
@@ -584,20 +671,10 @@ impl Chan {
 
         let instances = match entry {
             ChanEntryRef::Copy(_, copy) => {
-                let num_insts = copy.copy_inst_infos.len();
-                if num_insts > 0 {
-                    format!("{}", CopyInstInfoVecDumpInst(&copy.copy_inst_infos))
-                } else {
-                    format!("")
-                }
+                format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, &state))
             }
             ChanEntryRef::Fill(_, fill) => {
-                let num_insts = fill.fill_inst_infos.len();
-                if num_insts > 0 {
-                    format!("{}", FillInstInfoVecDumpInst(&fill.fill_inst_infos))
-                } else {
-                    format!("")
-                }
+                format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, &state))
             }
             ChanEntryRef::DepPart(_, deppart) => format!(""),
         };
@@ -927,7 +1004,7 @@ impl fmt::Display for InstPretty<'_> {
             f,
             "$Layout Order: {} $Inst: 0x{:x} $Size: {}",
             DimOrderPretty(inst),
-            inst.inst_id.0,
+            inst.inst_id.unwrap().0,
             SizePretty(inst.size.unwrap())
         )?;
 
@@ -942,14 +1019,13 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
-        let inst_uid = point.entry;
         let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range) = (&inst.base, &inst.time_range);
         let name = format!("{}", InstPretty(inst, state));
 
         let initiation = inst.op_id;
 
-        let color = format!("#{:06x}", state.get_op_color(initiation));
+        let color = format!("#{:06x}", state.get_op_color(initiation.unwrap()));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
 
@@ -962,7 +1038,7 @@ impl Mem {
             color: &color,
             opacity: 0.45,
             title: &format!("{} (deferred)", &name),
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",
@@ -981,7 +1057,7 @@ impl Mem {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",

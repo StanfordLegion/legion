@@ -1040,8 +1040,8 @@ pub struct Dim(pub u32);
 pub struct Inst {
     pub base: Base,
     pub inst_uid: InstUID,
-    pub inst_id: InstID,
-    pub op_id: OpID,
+    pub inst_id: Option<InstID>,
+    pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
@@ -1058,8 +1058,8 @@ impl Inst {
         Inst {
             base,
             inst_uid,
-            inst_id: InstID(0),
-            op_id: OpID(0),
+            inst_id: None,
+            op_id: None,
             mem_id: None,
             size: None,
             time_range: TimeRange::new_empty(),
@@ -1072,11 +1072,11 @@ impl Inst {
         }
     }
     fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
-        self.inst_id = inst_id;
+        self.inst_id = Some(inst_id);
         self
     }
     fn set_op_id(&mut self, op_id: OpID) -> &mut Self {
-        self.op_id = op_id;
+        self.op_id = Some(op_id);
         self
     }
     fn set_mem(&mut self, mem_id: MemID) -> &mut Self {
@@ -1460,7 +1460,7 @@ impl OpKind {
 #[derive(Debug)]
 pub struct OperationInstInfo {
     pub inst_uid: InstUID,
-    index_id: u32,
+    index: u32,
     field_id: FieldID,
 }
 
@@ -1471,7 +1471,6 @@ pub struct Operation {
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
-    // owner: Option<OpID>,
 }
 
 impl Operation {
@@ -1481,7 +1480,7 @@ impl Operation {
             parent_id: None,
             kind: None,
             provenance: None,
-            operation_inst_infos: Vec::new(), // owner: None,
+            operation_inst_infos: Vec::new(),
         }
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
@@ -1517,31 +1516,12 @@ impl From<spy::serialize::EventID> for EventID {
 
 #[derive(Debug)]
 pub struct CopyInstInfo {
-    pub src_inst: InstUID,
-    pub dst_inst: InstUID,
+    pub src_inst_uid: InstUID,
+    pub dst_inst_uid: InstUID,
     _fevent: EventID,
-    num_fields: u32,
-    request_type: u32,
-    num_hops: u32,
-}
-
-impl fmt::Display for CopyInstInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
-            self.src_inst.0,
-            self.dst_inst.0,
-            self.num_fields,
-            match self.request_type {
-                0 => "fill",
-                1 => "reduc",
-                2 => "copy",
-                _ => unreachable!(),
-            },
-            self.num_hops
-        )
-    }
+    pub num_fields: u32,
+    pub request_type: u32,
+    pub num_hops: u32,
 }
 
 #[derive(Debug)]
@@ -1585,19 +1565,9 @@ impl Copy {
 
 #[derive(Debug)]
 pub struct FillInstInfo {
-    pub dst_inst: InstUID,
+    pub dst_inst_uid: InstUID,
     _fevent: EventID,
-    num_fields: u32,
-}
-
-impl fmt::Display for FillInstInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "dst_inst=0x{:x}, fields={}",
-            self.dst_inst.0, self.num_fields
-        )
-    }
+    pub num_fields: u32,
 }
 
 #[derive(Debug)]
@@ -1799,6 +1769,10 @@ impl State {
         self.operations.get(&op_id)
     }
 
+    fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
+        self.operations.get_mut(&op_id)
+    }
+
     fn create_task(
         &mut self,
         op_id: OpID,
@@ -1969,10 +1943,6 @@ impl State {
         Some(&mut self.find_chan_mut(chan_id).fills.get_mut(&op_id).unwrap()[fill_idx])
     }
 
-    fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
-        self.operations.get_mut(&op_id)
-    }
-
     fn create_fill(
         &mut self,
         op_id: OpID,
@@ -2035,6 +2005,12 @@ impl State {
         insts
             .entry(inst_uid)
             .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
+    }
+
+    pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
+        let mem_id = self.insts.get(&inst_uid).unwrap();
+        let mem = self.mems.get(&mem_id).unwrap();
+        mem.insts.get(&inst_uid)
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -2798,7 +2774,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstU
             state.create_op(*op_id);
             let operation_inst_info = OperationInstInfo {
                 inst_uid: *inst_uid,
-                index_id: *index_id,
+                index: *index_id,
                 field_id: *field_id,
             };
             state
@@ -2963,8 +2939,8 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstU
             ..
         } => {
             let copy_inst_info = CopyInstInfo {
-                src_inst: *src_inst,
-                dst_inst: *dst_inst,
+                src_inst_uid: *src_inst,
+                dst_inst_uid: *dst_inst,
                 _fevent: *fevent,
                 num_fields: *num_fields,
                 request_type: *request_type,
@@ -2997,7 +2973,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstU
             ..
         } => {
             let fill_inst_info = FillInstInfo {
-                dst_inst: *dst_inst,
+                dst_inst_uid: *dst_inst,
                 _fevent: *fevent,
                 num_fields: *num_fields,
             };
