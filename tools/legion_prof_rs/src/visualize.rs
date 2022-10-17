@@ -82,7 +82,7 @@ struct DataRecord<'a> {
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
     op_id: u64,
-    parent_id: u64,
+    parent_id: Option<u64>,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
@@ -189,9 +189,9 @@ impl Proc {
         let initiation = match entry.kind {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
-            // And another special case, because for MapperCalls only, we skip zero (!!)
-            ProcEntryKind::MapperCall(_) => initiation_op.map(|op_id| op_id.0),
-            _ => Some(initiation_op.map_or(0, |op_id| op_id.0)),
+            // And another special case, because for MapperCalls only, we set default to 0 to match with python
+            ProcEntryKind::MapperCall(_) => Some(initiation_op.map_or(0, |op_id| op_id.0)),
+            _ => initiation_op.map(|op_id| op_id.0),
         };
 
         let op_id = match entry.kind {
@@ -1574,7 +1574,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            let parent_id = op.parent_id;
+            let parent_id = op.parent_id.map(|x| x.0);
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
@@ -1599,7 +1599,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.map_or(0, |x| x.0),
+                    parent_id: parent_id,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
@@ -1616,7 +1616,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.map_or(0, |x| x.0),
+                    parent_id: parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
@@ -1630,7 +1630,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.map_or(0, |x| x.0),
+                    parent_id: parent_id,
                     desc: &desc,
                     proc: None,
                     level: None,

@@ -304,7 +304,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::log_instance_layout(ApEvent inst_event) const
+    void LayoutDescription::log_instance_layout(LgEvent inst_event) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -318,9 +318,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                            const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                           const ApEvent inst_event,
-#endif
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -377,9 +374,6 @@ namespace Legion {
         field.inst = instance;
         // We'll start looking again at the next index after this one
         next_start = index + 1;
-#ifdef LEGION_SPY
-        field.inst_event = inst_event;
-#endif
       }
     } 
 
@@ -387,9 +381,6 @@ namespace Legion {
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
                                    const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                   const ApEvent inst_event,
-#endif
                                    std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -407,9 +398,6 @@ namespace Legion {
         // Since instances are annonymous in layout descriptions we
         // have to fill them in when we add the field info
         info.inst = instance;
-#ifdef LEGION_SPY
-        info.inst_event = inst_event;
-#endif
       }
     }
 
@@ -1085,7 +1073,7 @@ namespace Legion {
                 Processor proc, const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
-      const ApEvent inst_event = get_unique_event();
+      const LgEvent inst_event = get_unique_event();
       const LayoutConstraints *constraints = layout->constraints;
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -1150,11 +1138,7 @@ namespace Legion {
       assert(instance.exists());
 #endif
       // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_mask, instance, 
-#ifdef LEGION_SPY
-                                   unique_event,
-#endif
-                                   fields);
+      layout->compute_copy_offsets(copy_mask, instance, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -2867,11 +2851,7 @@ namespace Legion {
       assert(src_indexes.size() == dst_indexes.size());
 #endif
       std::vector<CopySrcDstField> dst_fields;
-      layout->compute_copy_offsets(dst_mask, instance, 
-#ifdef LEGION_SPY
-                                   unique_event,
-#endif
-                                   dst_fields);
+      layout->compute_copy_offsets(dst_mask, instance, dst_fields);
 #ifdef DEBUG_LEGION
       assert(dst_fields.size() == dst_indexes.size());
 #endif

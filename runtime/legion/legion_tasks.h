@@ -129,6 +129,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -326,6 +327,7 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual const char* get_task_name(void) const;
       virtual Domain get_slice_domain(void) const;
       virtual ShardID get_shard_id(void) const;
@@ -432,7 +434,7 @@ namespace Legion {
       RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
-      void replicate_task(void);
+      void check_future_return_bounds(FutureInstance *instance) const;
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,
@@ -441,7 +443,7 @@ namespace Legion {
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -570,6 +572,7 @@ namespace Legion {
       std::vector<SingleProfilingInfo>                  profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
 #ifdef DEBUG_LEGION
@@ -1204,7 +1207,7 @@ namespace Legion {
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1290,6 +1293,7 @@ namespace Legion {
       std::vector<IndexProfilingInfo>                   profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
     protected:

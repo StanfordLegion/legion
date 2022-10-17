@@ -344,7 +344,8 @@ namespace Realm {
     TransferOperation(TransferDesc& _desc,
 		      Event _precondition,
 		      GenEventImpl *_finish_event,
-		      EventImpl::gen_t _finish_gen);
+		      EventImpl::gen_t _finish_gen,
+		      int priority);
 
     ~TransferOperation();
 

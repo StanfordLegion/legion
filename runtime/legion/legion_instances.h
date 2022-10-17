@@ -54,19 +54,13 @@ namespace Legion {
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
     public:
-      void log_instance_layout(ApEvent inst_event) const;
+      void log_instance_layout(LgEvent inst_event) const;
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 const PhysicalInstance instance,  
-#ifdef LEGION_SPY
-                                const ApEvent inst_event, 
-#endif
                                 std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                const ApEvent inst_event,
-#endif
                                 std::vector<CopySrcDstField> &fields);
     public:
       void get_fields(std::set<FieldID> &fields) const;
@@ -392,7 +386,7 @@ namespace Legion {
                                  const std::vector<LogicalRegion> &regions) const;
     public: 
       ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const;
-      inline ApEvent get_unique_event(void) const { return unique_event; }
+      inline LgEvent get_unique_event(void) const { return unique_event; }
       PhysicalInstance get_instance(void) const { return instance; }
       inline Memory get_memory(void) const { return memory_manager->memory; }
       void compute_copy_offsets(const FieldMask &copy_mask,
@@ -511,7 +505,9 @@ namespace Legion {
     public:
       MemoryManager *const memory_manager;
       // Unique identifier event that is common across nodes
-      const ApEvent unique_event;
+      // Note this is just an LgEvent which suggests you shouldn't be using
+      // it for anything other than logging
+      const LgEvent unique_event;
       size_t instance_footprint;
       const ReductionOp *reduction_op;
       const ReductionOpID redop; 

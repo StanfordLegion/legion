@@ -3334,6 +3334,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
       virtual Domain get_shard_domain(void) const;
       virtual bool has_trace(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;
@@ -3422,6 +3423,7 @@ namespace Legion {
       virtual void free_region_tree_context(void);
     public:
       const Task* get_parent_task(void);
+      inline Provenance* get_provenance(void) { return provenance; }
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
@@ -3442,6 +3444,7 @@ namespace Legion {
       UniqueID parent_context_uid;
       InnerContext *parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
+      Provenance *provenance;
     protected:
       bool top_level_context;
       RemoteTask remote_task;

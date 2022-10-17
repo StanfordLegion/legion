@@ -259,7 +259,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority) = 0;
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -296,7 +298,8 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority) = 0;
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -412,7 +415,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,int priority);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -448,7 +452,8 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -662,7 +667,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                          ApEvent precondition, PredEvent pred_guard) const
+                          ApEvent precondition, PredEvent pred_guard,
+                          LgEvent src_unique, LgEvent dst_unique,
+                          int priority) const
         {
           sanity_check();
           rec->record_issue_copy(tlid, result, expr, src_fields,
@@ -670,7 +677,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  src_tree_id, dst_tree_id,
 #endif
-                                 precondition, pred_guard);
+                                 precondition, pred_guard,
+                                 src_unique, dst_unique, priority);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -681,7 +689,8 @@ namespace Legion {
                           FieldSpace handle,
                           RegionTreeID tree_id,
 #endif
-                          ApEvent precondition, PredEvent pred_guard) const
+                          ApEvent precondition, PredEvent pred_guard,
+                          LgEvent unique_event, int priority) const
         {
           sanity_check();
           rec->record_issue_fill(tlid, result, expr, fields, 
@@ -689,7 +698,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  fill_uid, handle, tree_id,
 #endif
-                                 precondition, pred_guard);
+                                 precondition, pred_guard,
+                                 unique_event, priority);
         }
       inline void record_issue_across(ApEvent &result,
                                       ApEvent collective_precondition,
@@ -2794,15 +2804,13 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter) = 0;
+      virtual void invalidate_equivalence_sets(const FieldMask &mask) = 0;
     public:
       void cancel_subscriptions(Runtime *runtime,
        const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel);
       static void finish_subscriptions(Runtime *runtime, VersionManager &source,
           LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-          const FieldMaskSet<EquivalenceSet> &to_filter,
-          std::set<RtEvent> &applied_events, bool remove_refs = false);
+          std::set<RtEvent> &applied_events);
       static void handle_cancel_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
       static void handle_finish_subscription(Deserializer &derez,
@@ -3553,8 +3561,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter);
+      virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
@@ -3606,20 +3613,16 @@ namespace Legion {
       void invalidate_refinement(InnerContext &context,
                                  const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
-                                 FieldMaskSet<EquivalenceSet> &to_untrack,
                                  LegionMap<AddressSpaceID,
                                   SubscriberInvalidations> &subscribers,
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_mapping_root=false);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-               FieldMaskSet<EquivalenceSet> &to_untrack,
                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-              FieldMaskSet<EquivalenceSet> &to_untrack,
               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void pack_manager(Serializer &rez, const bool invalidate, 
                 std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                FieldMaskSet<EquivalenceSet> &to_untrack,
                 LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
                 std::vector<DistributedCollectable*> &to_remove);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,

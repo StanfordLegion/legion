@@ -4535,13 +4535,14 @@ namespace Realm {
   TransferOperation::TransferOperation(TransferDesc& _desc,
 				       Event _precondition,
 				       GenEventImpl *_finish_event,
-				       EventImpl::gen_t _finish_gen)
+				       EventImpl::gen_t _finish_gen,
+				       int _priority)
     : Operation(_finish_event, _finish_gen, _desc.prs)
     , deferred_start(this)
     , desc(_desc)
     , precondition(_precondition)
     , ib_responses_needed(0)
-    , priority(0) // FIXME
+    , priority(_priority)
   {
     desc.add_reference();
   }
@@ -5209,7 +5210,8 @@ namespace Realm {
 			      const std::vector<CopySrcDstField>& dsts,
 			      const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
 			      const Realm::ProfilingRequestSet &requests,
-			      Event wait_on) const
+			      Event wait_on,
+			      int priority) const
   {
     // create a (one-use) transfer description
     TransferDesc *tdesc = new TransferDesc(*this,
@@ -5224,7 +5226,8 @@ namespace Realm {
     TransferOperation *op = new TransferOperation(*tdesc,
                                                   wait_on,
                                                   finish_event,
-                                                  ID(ev).event_generation());
+                                                  ID(ev).event_generation(),
+                                                  priority);
     get_runtime()->optable.add_local_operation(ev, op);
     op->start_or_defer();
 
@@ -5239,7 +5242,8 @@ namespace Realm {
 				       const std::vector<CopySrcDstField>&, \
 				       const std::vector<const CopyIndirection<N,T>::Base *>&, \
 				       const ProfilingRequestSet&,	\
-				       Event) const;			\
+				       Event,                           \
+				       int) const;			\
   template class TransferIteratorIndexSpace<N,T>; \
   template class TransferIteratorIndirect<N,T>; \
   template class TransferIteratorIndirectRange<N,T>; \

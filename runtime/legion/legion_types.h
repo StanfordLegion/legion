@@ -2207,6 +2207,7 @@ namespace Legion {
   typedef ::legion_projection_type_t HandleType;
   typedef ::legion_address_space_t AddressSpace;
   typedef ::legion_task_priority_t TaskPriority;
+  typedef ::legion_task_priority_t RealmPriority;
   typedef ::legion_garbage_collection_priority_t GCPriority;
   typedef ::legion_color_t Color;
   typedef ::legion_field_id_t FieldID;
@@ -2270,6 +2271,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::CopySrcDstField CopySrcDstField;
     typedef unsigned long long CollectiveID;
     typedef unsigned long long IndexSpaceExprID;
     struct ContextCoordinate;
@@ -3018,26 +3020,6 @@ namespace Legion {
         assert(false);
 #endif
     }
-
-#ifdef LEGION_SPY
-    // Need a custom version of these for Legion Spy to track instance events
-    class CopySrcDstField : public Realm::CopySrcDstField {
-    public:
-      CopySrcDstField(void) : Realm::CopySrcDstField() { }
-      CopySrcDstField(const CopySrcDstField &rhs)
-        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
-      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
-      { 
-        Realm::CopySrcDstField::operator = (rhs); 
-        inst_event = rhs.inst_event; 
-        return *this; 
-      }
-    public:
-      ApEvent inst_event;
-    };
-#else
-    typedef Realm::CopySrcDstField CopySrcDstField;
-#endif
 
   }; // namespace Internal 
   

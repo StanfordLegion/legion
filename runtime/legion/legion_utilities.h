@@ -996,9 +996,6 @@ namespace Legion {
         else
           serialize(field.fill_data.indirect, field.size);
       }
-#ifdef LEGION_SPY
-      serialize(field.inst_event);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1274,9 +1271,6 @@ namespace Legion {
         else
           deserialize(field.fill_data.direct, field.size);
       }
-#ifdef LEGION_SPY
-      deserialize(field.inst_event);
-#endif
     }
       
     //--------------------------------------------------------------------------

@@ -59,7 +59,7 @@ namespace Legion {
       // In the same order as the fields for the actual copy
       std::vector<PhysicalInstance> instances;
 #ifdef LEGION_SPY
-      std::vector<ApEvent> instance_events;
+      std::vector<LgEvent> instance_events;
       IndexSpace index_space;
 #endif
       Domain domain;
@@ -1065,7 +1065,7 @@ namespace Legion {
         DeferCopyAcrossArgs(CopyAcrossExecutor *e, Operation *o, 
             PredEvent guard, ApEvent copy_pre, ApEvent src_pre,
             ApEvent dst_pre, const PhysicalTraceInfo &info,
-            bool recurrent, unsigned stage);
+            bool replay, bool recurrent, unsigned stage);
       public:
         CopyAcrossExecutor *const executor;
         Operation *const op;
@@ -1076,12 +1076,14 @@ namespace Legion {
         const ApEvent dst_indirect_precondition;
         const ApUserEvent done_event;
         const unsigned stage;
+        const bool replay;
         const bool recurrent_replay;
       };
     public:
       CopyAcrossExecutor(Runtime *rt, const bool preimages,
                          const std::map<Reservation,bool> &rsrvs)
-        : runtime(rt), reservations(rsrvs), compute_preimages(preimages) { }
+        : runtime(rt), reservations(rsrvs), priority(0),
+          compute_preimages(preimages) { }
       virtual ~CopyAcrossExecutor(void) { }
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1089,6 +1091,7 @@ namespace Legion {
                               ApEvent src_indirect_precondition, 
                               ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
+                              const bool replay = false,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
@@ -1100,6 +1103,8 @@ namespace Legion {
       // across and whether they need to be acquired with exclusive
       // permissions or not
       const std::map<Reservation,bool> reservations;
+      // Priority for this copy across
+      int priority;
       // Say whether we should be computing preimages or not
       const bool compute_preimages;
     };
@@ -1120,6 +1125,7 @@ namespace Legion {
                               ApEvent src_indirect_precondition,
                               ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
+                              const bool replay = false,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
@@ -1153,8 +1159,8 @@ namespace Legion {
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
       std::vector<CopySrcDstField> src_fields, dst_fields;
+      std::vector<LgEvent> src_unique_events, dst_unique_events;
 #ifdef LEGION_SPY
-      std::vector<Realm::CopySrcDstField> realm_src_fields, realm_dst_fields;
       RegionTreeID src_tree_id, dst_tree_id;
       unsigned unique_indirections_identifier;
 #endif
@@ -1164,9 +1170,7 @@ namespace Legion {
       std::vector<IndirectRecord> src_indirections, dst_indirections;
       FieldID src_indirect_field, dst_indirect_field;
       PhysicalInstance src_indirect_instance, dst_indirect_instance;
-#ifdef LEGION_SPY
-      ApEvent src_indirect_instance_event, dst_indirect_instance_event;
-#endif
+      LgEvent src_indirect_instance_event, dst_indirect_instance_event;
       TypeTag src_indirect_type, dst_indirect_type;
     public:
       RtEvent prev_done;
@@ -1236,12 +1240,13 @@ namespace Legion {
                               ApEvent src_indirect_precondition,
                               ApEvent dst_indirect_precondition,
                               const PhysicalTraceInfo &trace_info,
+                              const bool replay = false,
                               const bool recurrent_replay = false,
                               const unsigned stage = 0); 
       virtual void record_trace_immutable_indirection(bool source);
     public:
       ApEvent issue_individual_copies(const ApEvent precondition,
-                              const Realm::ProfilingRequestSet &requests);
+                      const Realm::ProfilingRequestSet &requests);
       template<int D2, typename T2>
       ApEvent perform_compute_preimages(std::vector<DomainT<DIM,T> > &preimages,
                 Operation *op, ApEvent precondition, const bool source); 
@@ -1374,7 +1379,9 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority = 0,
+                           bool replay = false) = 0;
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1384,7 +1391,9 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority = 0, bool replay = false) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages) = 0;
@@ -1443,7 +1452,8 @@ namespace Legion {
                                FieldSpace handle,
                                RegionTreeID tree_id,
 #endif
-                               ApEvent precondition, PredEvent pred_guard);
+                               ApEvent precondition, PredEvent pred_guard,
+                               LgEvent unique_event, int priority, bool replay);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1455,7 +1465,9 @@ namespace Legion {
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
 #endif
-                               ApEvent precondition, PredEvent pred_guard);
+                               ApEvent precondition, PredEvent pred_guard,
+                               LgEvent src_unique, LgEvent dst_unique,
+                               int priority, bool replay);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1687,7 +1699,9 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority = 0,
+                           bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1697,7 +1711,9 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages);
@@ -2721,7 +2737,9 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority = 0,
+                           bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2731,7 +2749,9 @@ namespace Legion {
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
                            const bool compute_preimages);

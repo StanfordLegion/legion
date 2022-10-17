@@ -4097,6 +4097,11 @@ namespace Legion {
       for (TaskTreeCoordinates::const_iterator it =
             context_coordinates.begin(); it != context_coordinates.end(); it++)
         it->serialize(rez);
+      Provenance *provenance = owner_task->get_provenance();
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -7139,7 +7144,7 @@ namespace Legion {
            Point<1>(indexes.size()-1)), provenance));
       IndexAttachOp *attach_op = runtime->get_available_index_attach_op();
       ExternalResources result = attach_op->initialize(this, node, launch_space,
-                                                 launcher, indexes, provenance);
+                            launcher, indexes, provenance, false/*replicated*/);
       const RegionRequirement &req = attach_op->get_requirement();
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_internal(req,parent_conflict,inline_conflict);
@@ -19883,7 +19888,7 @@ namespace Legion {
         runtime->get_available_repl_index_attach_op();
       IndexSpaceNode *launch_space = collective.get_launch_space(provenance);
       ExternalResources result = attach_op->initialize(this, node, launch_space,
-                                                 launcher, indexes, provenance);
+                             launcher, indexes, provenance, true/*replicated*/);
       attach_op->initialize_replication(this); 
       const RegionRequirement &req = attach_op->get_requirement();
       bool parent_conflict = false, inline_conflict = false;
@@ -22870,6 +22875,17 @@ namespace Legion {
         parent_task = owner->get_parent_task();
       return parent_task;
     }
+
+    //--------------------------------------------------------------------------
+    const std::string& RemoteTask::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = owner->get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
     
     //--------------------------------------------------------------------------
     int RemoteTask::get_depth(void) const
@@ -22903,7 +22919,7 @@ namespace Legion {
                      remote_task.output_regions, local_parent_req_indexes,
                      local_virtual_mapped, context_uid, ApEvent::NO_AP_EVENT,
                      true/*remote*/),
-        parent_ctx(NULL), shard_manager(NULL),
+        parent_ctx(NULL), shard_manager(NULL), provenance(NULL),
         top_level_context(false), remote_task(RemoteTask(this)), repl_id(0)
     //--------------------------------------------------------------------------
     {
@@ -22948,6 +22964,8 @@ namespace Legion {
         }
         local_field_infos.clear();
       } 
+      if ((provenance != NULL) && provenance->remove_reference())
+        delete provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -23318,6 +23336,9 @@ namespace Legion {
       context_coordinates.resize(num_coordinates);
       for (unsigned idx = 0; idx < num_coordinates; idx++)
         context_coordinates[idx].deserialize(derez);
+      provenance = Provenance::deserialize(derez);
+      if (provenance != NULL)
+        provenance->add_reference();
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;

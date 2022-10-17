@@ -2662,10 +2662,8 @@ namespace Legion {
       const InstanceRef &idx_target = idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
           idx_req, idx_target, gather_is_range, possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif
       // Initialize the destination fields
       const bool exclusive_redop =
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
@@ -2813,10 +2811,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, idx_req, idx_target, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -2963,10 +2959,8 @@ namespace Legion {
       const InstanceRef &src_idx_target = src_idx_targets[0];
       across->initialize_source_indirections(this, src_records, src_req,
         src_idx_req, src_idx_target, both_are_range, possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
        src_idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2976,10 +2970,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, dst_idx_req, dst_idx_target, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
-       dst_idx_target.get_physical_manager()->get_unique_event();
-#endif 
+        dst_idx_target.get_physical_manager()->get_unique_event();
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -3464,7 +3456,7 @@ namespace Legion {
         InstanceManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
         node->get_field_set(valid_mask, context, valid_fields);
-        ApEvent inst_event; // default to virtual manager
+        LgEvent inst_event; // default to virtual manager
         if (manager->is_physical_manager())
         {
           PhysicalManager *man = manager->as_physical_manager();
@@ -6986,13 +6978,13 @@ namespace Legion {
     CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
         CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
         ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
-        bool recurrent, unsigned s)
+        bool repl, bool recurrent, unsigned s)
       : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
         executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
         copy_precondition(copy_pre), src_indirect_precondition(src_pre),
         dst_indirect_precondition(dst_pre), 
         done_event(Runtime::create_ap_user_event(trace_info)),
-        stage(s+1), recurrent_replay(recurrent)
+        stage(s+1), replay(repl), recurrent_replay(recurrent)
     //--------------------------------------------------------------------------
     {
       executor->add_reference();
@@ -7008,7 +7000,7 @@ namespace Legion {
           dargs->executor->execute(dargs->op, dargs->guard, 
             dargs->copy_precondition, dargs->src_indirect_precondition, 
             dargs->dst_indirect_precondition, *dargs->trace_info,
-            dargs->recurrent_replay, dargs->stage));
+            dargs->replay, dargs->recurrent_replay, dargs->stage));
       if (dargs->executor->remove_reference())
         delete dargs->executor;
       delete dargs->trace_info;
@@ -7031,6 +7023,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       src_fields.reserve(indexes.size());
+      src_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7047,6 +7040,8 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, src_fields);
+          src_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -7072,6 +7067,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       dst_fields.reserve(indexes.size());
+      dst_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7088,6 +7084,8 @@ namespace Legion {
           copy_mask.set_bit(*it);
           PhysicalManager *manager = ref.get_physical_manager();
           manager->compute_copy_offsets(copy_mask, dst_fields);
+          dst_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -19752,18 +19750,17 @@ namespace Legion {
       VersionManager &src_manager = get_current_version_manager(src);
       VersionManager &dst_manager = get_current_version_manager(dst);
       std::set<RegionTreeNode*> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       if (merge)
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, to_untrack, subscribers);
+        dst_manager.merge(src_manager, to_traverse, subscribers);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, to_untrack, subscribers);
+        dst_manager.swap(src_manager, to_traverse, subscribers);
       EqSetTracker::finish_subscriptions(context->runtime, src_manager, 
-                                         subscribers,to_untrack,applied_events);
+                                         subscribers, applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
@@ -20008,13 +20005,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.pack_manager(rez, invalidate, to_traverse, 
-                          to_untrack, subscribers, to_remove);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
-                      to_untrack, applied_events, true/*remove references*/);
+      manager.pack_manager(rez, invalidate, to_traverse, subscribers,to_remove);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, 
+                                         subscribers, applied_events);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -21301,12 +21296,11 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, self, to_traverse,
-        to_untrack, subscribers, to_release, nonexclusive_virtual_mapping_root);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
-          to_untrack, applied_events, true/*remove refs*/);
+                subscribers, to_release, nonexclusive_virtual_mapping_root);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, 
+                                         subscribers, applied_events);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -22892,12 +22886,10 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, true/*delete self*/,
-                              to_traverse, to_untrack, subscribers, to_release);
+                                    to_traverse, subscribers, to_release);
 #ifdef DEBUG_LEGION
-      assert(to_untrack.empty());
       assert(subscribers.empty());
 #endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 

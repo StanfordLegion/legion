@@ -509,6 +509,7 @@ namespace Legion {
                                 const FieldMask &dst_mask,
                                 const Memory location,
                                 const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
                                 const DistributedID src_inst_did,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -522,6 +523,7 @@ namespace Legion {
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -538,6 +540,7 @@ namespace Legion {
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1400,6 +1403,7 @@ namespace Legion {
                                 const FieldMask &dst_mask,
                                 const DistributedID src_inst_did,
                                 const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1415,6 +1419,7 @@ namespace Legion {
                                 const FieldMask &copy_mask,
                                 const FieldMask &dst_mask,
                                 const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
@@ -1538,7 +1543,7 @@ namespace Legion {
                                 const unsigned src_index,
                                 const AddressSpaceID *targets, size_t total,
                                 std::vector<ApEvent> &read_events);
-      void receive_allreduce_stage(const UniqueInst dst_inst,
+      void receive_allreduce_stage(const unsigned dst_index,
                                 const uint64_t allreduce_tag,
                                 const int stage, Operation *op,
                                 ApEvent dst_precondition,
@@ -1557,7 +1562,8 @@ namespace Legion {
                                 const ApEvent src_precondition,
                                 ApUserEvent src_postcondition,
                                 ApBarrier src_barrier, ShardID bar_shard,
-                                const UniqueInst &src_inst);
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event);
     public:
       static void handle_send_allreduce_view(Runtime *runtime,
                     Deserializer &derez, AddressSpaceID source);
@@ -1599,10 +1605,11 @@ namespace Legion {
         ApBarrier barrier_postcondition;
         ShardID barrier_shard;
         UniqueInst src_inst;
+        LgEvent src_unique_event;
       };
       std::map<CopyKey,AllReduceCopy> all_reduce_copies;
       struct AllReduceStage {
-        UniqueInst dst_inst;
+        unsigned dst_index;
         Operation *op;
         IndexSpaceExpression *copy_expression;
         FieldMask copy_mask;
@@ -1686,9 +1693,7 @@ namespace Legion {
                        IndexSpaceExpression *fill_expr,
                        const PhysicalTraceInfo &trace_info,
                        const std::vector<CopySrcDstField> &dst_fields,
-#ifdef LEGION_SPY
                        PhysicalManager *manager,
-#endif
                        std::set<RtEvent> &applied_events,
                        ApEvent precondition, PredEvent pred_guard);
       public:
@@ -1697,9 +1702,7 @@ namespace Legion {
         IndexSpaceExpression *const fill_expr;
         PhysicalTraceInfo *const trace_info;
         std::vector<CopySrcDstField> *const dst_fields;
-#ifdef LEGION_SPY
         PhysicalManager *const manager;
-#endif
         const ApEvent precondition;
         const PredEvent pred_guard;
         const ApUserEvent done;
@@ -1748,9 +1751,7 @@ namespace Legion {
                          const PhysicalTraceInfo &trace_info,
                          const std::vector<CopySrcDstField> &dst_fields,
                          std::set<RtEvent> &applied_events,
-#ifdef LEGION_SPY
                          PhysicalManager *manager,
-#endif
                          ApEvent precondition, PredEvent pred_guard);
       static void handle_defer_issue_fill(const void *args);
     public:

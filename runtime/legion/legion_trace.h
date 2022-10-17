@@ -678,8 +678,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter);
+      virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, const FieldMask &mask,
@@ -1015,7 +1014,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             LgEvent src_unique, LgEvent dst_unique,
+                             int priority);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1051,7 +1052,8 @@ namespace Legion {
                              FieldSpace handle, 
                              RegionTreeID tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             LgEvent unique_event, int priority);
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
                                   unsigned idx,
@@ -1359,7 +1361,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent guard_event);
+                             ApEvent precondition, PredEvent guard_event,
+                             LgEvent src_unique, LgEvent dst_unique,
+                             int priority);
       virtual void record_issue_fill(const TraceLocalID &tlid, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -1369,7 +1373,8 @@ namespace Legion {
                              FieldSpace handle,
                              RegionTreeID tree_id,
 #endif
-                             ApEvent precondition, PredEvent guard_event);
+                             ApEvent precondition, PredEvent guard_event,
+                             LgEvent unique_event, int priority);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                              ApEvent collective_precondition,
                              ApEvent copy_precondition,
@@ -1715,7 +1720,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                 UniqueID fill_uid, FieldSpace handle, RegionTreeID tree_id,
 #endif
-                unsigned precondition_idx);
+                unsigned precondition_idx, LgEvent unique_event,
+                int priority);
       virtual ~IssueFill(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1740,6 +1746,8 @@ namespace Legion {
       RegionTreeID tree_id;
 #endif
       unsigned precondition_idx;
+      LgEvent unique_event;
+      int priority;
     };
 
     /**
@@ -1761,7 +1769,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                unsigned precondition_idx);
+                unsigned precondition_idx,
+                LgEvent src_unique, LgEvent dst_unique, int priority);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1785,6 +1794,8 @@ namespace Legion {
       RegionTreeID dst_tree_id;
 #endif
       unsigned precondition_idx;
+      LgEvent src_unique, dst_unique;
+      int priority;
     };
 
     /**
